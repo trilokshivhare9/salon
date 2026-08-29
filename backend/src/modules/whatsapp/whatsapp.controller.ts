@@ -69,8 +69,17 @@ export class WhatsAppController {
 
         let salon: any = null;
 
-        // 1. Keyword/Slug Routing: Check if customer sends "BOOK <slug>" or "Hi <slug>"
-        if (normalizedText.startsWith('book ') || normalizedText.startsWith('hi ')) {
+        // 1. Direct Phone ID Routing: Resolve target salon by the WhatsApp Phone ID the customer messaged
+        if (phoneNumberId) {
+          salon = await this.prisma.salon.findFirst({
+            where: {
+              whatsappAccount: { phoneNumberId },
+            },
+          });
+        }
+
+        // 2. Keyword/Slug Routing: If customer sends "BOOK <slug>" or "Hi <slug>"
+        if (!salon && (normalizedText.startsWith('book ') || normalizedText.startsWith('hi '))) {
           const requestedSlug = normalizedText.replace(/^(book|hi)\s+/i, '').trim();
           salon = await this.prisma.salon.findFirst({
             where: {
@@ -82,7 +91,7 @@ export class WhatsAppController {
           });
         }
 
-        // 2. Check if customer has an ongoing active conversation with a specific salon
+        // 3. Ongoing Active Conversation fallback
         if (!salon) {
           const cleanFrom = fromPhone.replace(/[^\d+]/g, '');
           const existingConv = await this.prisma.conversation.findFirst({
@@ -96,15 +105,6 @@ export class WhatsAppController {
           if (existingConv && existingConv.salon?.status === 'ACTIVE') {
             salon = existingConv.salon;
           }
-        }
-
-        // 3. Fallback: Resolve target salon by linked whatsapp phone_number_id
-        if (!salon) {
-          salon = await this.prisma.salon.findFirst({
-            where: {
-              whatsappAccount: { phoneNumberId },
-            },
-          });
         }
 
         // 4. Default Fallback to pilot salon
