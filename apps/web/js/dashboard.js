@@ -711,8 +711,8 @@ export class SalonDashboard {
       ? `https://wa.me/${cleanPhone}`
       : `https://wa.me/15556749314?text=${encodeURIComponent(`BOOK ${salonSlug}`)}`;
 
-    // Reachable Web URL (using Cloudflare Tunnel for phone accessibility)
-    const webBookingUrl = `https://accepts-mate-conflicts-excuse.trycloudflare.com/#book/${salonSlug}`;
+    // Dynamic Live Web URL
+    const webBookingUrl = `${window.location.origin}/#book/${salonSlug}`;
 
     modalContainer.innerHTML = `
       <div class="modal-backdrop show">

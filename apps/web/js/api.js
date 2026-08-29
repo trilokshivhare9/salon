@@ -1,6 +1,6 @@
 const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
   ? 'http://localhost:3000/api/v1'
-  : (window.__API_BASE__ || `${window.location.origin.replace(/-\w+\.onrender\.com/, '-api.onrender.com')}/api/v1`);
+  : 'https://salon-api-tuwo.onrender.com/api/v1';
 
 export class ApiClient {
   static getToken() {
