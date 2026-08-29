@@ -50,8 +50,8 @@ async function bootstrap() {
   SwaggerModule.setup('api/docs', app, document);
 
   const port = process.env.PORT || 3000;
-  await app.listen(port);
-  logger.log(`🚀 Salon SaaS Backend running at http://localhost:${port}/api/v1`);
+  await app.listen(port, '0.0.0.0');
+  logger.log(`🚀 Salon SaaS Backend running at http://0.0.0.0:${port}/api/v1`);
   logger.log(`📖 Swagger API Documentation available at http://localhost:${port}/api/docs`);
 }
 
