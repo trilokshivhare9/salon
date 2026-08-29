@@ -1,0 +1,14 @@
+{
+  "name": "salon-saas-web",
+  "version": "1.0.0",
+  "description": "Salon SaaS Responsive Web Portal (Admin Dashboard + Public Booking)",
+  "private": true,
+  "scripts": {
+    "dev": "vite --port 8080",
+    "build": "vite build",
+    "preview": "vite preview --port 8080"
+  },
+  "devDependencies": {
+    "vite": "^5.2.11"
+  }
+}
