@@ -180,6 +180,12 @@ export class PlatformAdminPortal {
               </div>
             </div>
 
+            <div class="form-group">
+              <label>Meta WhatsApp Phone ID (Optional)</label>
+              <input type="text" class="form-control" id="new-salon-wa-id" placeholder="e.g. 109283746592837 (from Meta Developer portal)" />
+              <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">If provided, instantly connects this salon to WhatsApp Cloud API</div>
+            </div>
+
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
               <div class="form-group">
                 <label>City</label>
@@ -227,6 +233,7 @@ export class PlatformAdminPortal {
             email: document.getElementById('new-owner-email').value.trim(),
             password: document.getElementById('new-owner-password').value,
             phone: document.getElementById('new-salon-phone').value.trim(),
+            whatsappPhoneNumberId: document.getElementById('new-salon-wa-id')?.value.trim() || undefined,
             city: document.getElementById('new-salon-city').value.trim() || undefined,
             timezone: document.getElementById('new-salon-tz').value,
           }),
