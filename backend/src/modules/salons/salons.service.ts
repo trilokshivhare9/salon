@@ -467,10 +467,81 @@ export class SalonsService {
     });
   }
 
-  async deleteBlockedTime(salonId: string, blockedTimeId: string) {
-    return this.prisma.blockedTime.deleteMany({
-      where: { id: blockedTimeId, salonId },
+  async deleteSalonBySuperAdmin(salonId: string) {
+    await this.prisma.whatsAppLog.deleteMany({ where: { salonId } });
+    await this.prisma.whatsAppAccount.deleteMany({ where: { salonId } });
+    await this.prisma.conversation.deleteMany({ where: { salonId } });
+    await this.prisma.appointmentStatusHistory.deleteMany({
+      where: { appointment: { salonId } },
     });
+    await this.prisma.notification.deleteMany({ where: { salonId } });
+    await this.prisma.appointment.deleteMany({ where: { salonId } });
+    await this.prisma.blockedTime.deleteMany({ where: { salonId } });
+    await this.prisma.holiday.deleteMany({ where: { salonId } });
+    await this.prisma.staffBreak.deleteMany({
+      where: { staff: { salonId } },
+    });
+    await this.prisma.staffWorkingHours.deleteMany({
+      where: { staff: { salonId } },
+    });
+    await this.prisma.staffService.deleteMany({
+      where: { staff: { salonId } },
+    });
+    await this.prisma.service.deleteMany({ where: { salonId } });
+    await this.prisma.staff.deleteMany({ where: { salonId } });
+    await this.prisma.workingHours.deleteMany({ where: { salonId } });
+    await this.prisma.customer.deleteMany({ where: { salonId } });
+    await this.prisma.subscription.deleteMany({ where: { salonId } });
+    await this.prisma.user.deleteMany({ where: { salonId } });
+    await this.prisma.salon.delete({ where: { id: salonId } });
+
+    return { success: true, message: `Salon ${salonId} deleted completely.` };
+  }
+
+  async purgeAllOldSalonsExcept(keepSlugOrId: string) {
+    const keepSalon = await this.prisma.salon.findFirst({
+      where: {
+        OR: [{ id: keepSlugOrId }, { slug: keepSlugOrId }],
+      },
+    });
+
+    const otherSalons = await this.prisma.salon.findMany({
+      where: keepSalon ? { id: { not: keepSalon.id } } : {},
+      select: { id: true, name: true },
+    });
+
+    for (const s of otherSalons) {
+      await this.deleteSalonBySuperAdmin(s.id);
+    }
+
+    // Also clean up any orphan conversations that don't belong to keepSalon
+    if (keepSalon) {
+      await this.prisma.conversation.deleteMany({
+        where: { salonId: { not: keepSalon.id } },
+      });
+      // Link whatsapp account to keepSalon if missing
+      await this.prisma.whatsAppAccount.upsert({
+        where: { salonId: keepSalon.id },
+        update: {
+          phoneNumberId: '1266237649907696',
+          isActive: true,
+        },
+        create: {
+          salonId: keepSalon.id,
+          phoneNumberId: '1266237649907696',
+          accessTokenEncrypted: 'system_managed',
+          webhookVerifyToken: 'salon_webhook_verify_token_mvp',
+          isActive: true,
+        },
+      });
+    }
+
+    return {
+      success: true,
+      deletedCount: otherSalons.length,
+      deletedSalons: otherSalons.map((s) => s.name),
+      activeSalon: keepSalon ? keepSalon.name : 'none',
+    };
   }
 
   async resetDatabaseToZero() {

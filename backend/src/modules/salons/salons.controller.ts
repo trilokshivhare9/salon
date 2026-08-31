@@ -47,6 +47,18 @@ export class SalonsController {
   }
 
   @Roles(UserRole.PLATFORM_ADMIN)
+  @Delete('platform/:id')
+  async deleteSalon(@Param('id') salonId: string) {
+    return this.salonsService.deleteSalonBySuperAdmin(salonId);
+  }
+
+  @Roles(UserRole.PLATFORM_ADMIN)
+  @Post('platform/purge-except')
+  async purgeOldSalons(@Body() dto: { keepSlug: string }) {
+    return this.salonsService.purgeAllOldSalonsExcept(dto.keepSlug);
+  }
+
+  @Roles(UserRole.PLATFORM_ADMIN)
   @Post('platform/reset-database')
   async resetDatabase() {
     return this.salonsService.resetDatabaseToZero();
