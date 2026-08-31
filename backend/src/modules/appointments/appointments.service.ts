@@ -28,15 +28,20 @@ export class AppointmentsService {
     return phone.replace(/[^\d+]/g, '');
   }
 
-  private getLockKey(salonId: string, staffId: string, dateStr: string): number {
-    const str = `${salonId}:${staffId}:${dateStr}`;
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-      const char = str.charCodeAt(i);
-      hash = (hash << 5) - hash + char;
-      hash |= 0; // Convert to 32-bit signed integer
+  private getLockKeys(salonId: string, staffId: string, dateStr: string): [number, number] {
+    const str1 = `${salonId}:${dateStr}`;
+    const str2 = `${staffId}:${dateStr}`;
+    let hash1 = 0;
+    let hash2 = 0;
+    for (let i = 0; i < str1.length; i++) {
+      hash1 = (hash1 << 5) - hash1 + str1.charCodeAt(i);
+      hash1 |= 0;
     }
-    return Math.abs(hash);
+    for (let i = 0; i < str2.length; i++) {
+      hash2 = (hash2 << 5) - hash2 + str2.charCodeAt(i);
+      hash2 |= 0;
+    }
+    return [Math.abs(hash1), Math.abs(hash2)];
   }
 
   async createAppointment(
@@ -114,14 +119,14 @@ export class AppointmentsService {
     const endDt = startDt.plus({ minutes: service.durationMinutes });
 
     const cleanPhone = this.sanitizePhone(dto.customerPhone);
-    const lockKey = this.getLockKey(salonId, assignedStaffId, dto.date);
+    const [key1, key2] = this.getLockKeys(salonId, assignedStaffId, dto.date);
 
     // 3. Atomic Database Insertion with PostgreSQL Advisory Lock & GiST Protection
     try {
       return await this.prisma.$transaction(
         async (tx) => {
           // Acquire Transaction-Level Advisory Lock for this staff and date
-          await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(${key1}::integer, ${key2}::integer)`;
 
           // Re-verify availability inside the lock boundary
           const conflict = await tx.appointment.findFirst({

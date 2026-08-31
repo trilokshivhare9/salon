@@ -132,6 +132,7 @@ export class WhatsAppService {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(bodyData),
+        signal: AbortSignal.timeout(5000),
       });
 
       const data = await res.json();

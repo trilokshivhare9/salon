@@ -103,7 +103,7 @@ export class AvailabilityService {
     const holiday = await this.prisma.holiday.findFirst({
       where: {
         salonId,
-        date: requestedDate.toJSDate(),
+        date: new Date(dateStr),
       },
     });
 
@@ -186,7 +186,7 @@ export class AvailabilityService {
     const existingAppointments = await this.prisma.appointment.findMany({
       where: {
         salonId,
-        date: requestedDate.toJSDate(),
+        date: new Date(dateStr),
         status: {
           notIn: ['CANCELLED', 'NO_SHOW', 'RESCHEDULED'],
         },
