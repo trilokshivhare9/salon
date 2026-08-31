@@ -46,6 +46,12 @@ export class SalonsController {
     return this.salonsService.toggleSalonStatus(salonId);
   }
 
+  @Roles(UserRole.PLATFORM_ADMIN)
+  @Post('platform/reset-database')
+  async resetDatabase() {
+    return this.salonsService.resetDatabaseToZero();
+  }
+
   @Roles(UserRole.PLATFORM_ADMIN, UserRole.SALON_ADMIN)
   @Post(':id/whatsapp-config')
   async updateWhatsAppConfig(

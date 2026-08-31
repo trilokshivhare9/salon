@@ -472,4 +472,59 @@ export class SalonsService {
       where: { id: blockedTimeId, salonId },
     });
   }
+
+  async resetDatabaseToZero() {
+    // 1. Delete all transactional, catalog, and tenant records
+    await this.prisma.whatsAppLog.deleteMany();
+    await this.prisma.whatsAppAccount.deleteMany();
+    await this.prisma.appointmentStatusHistory.deleteMany();
+    await this.prisma.notification.deleteMany();
+    await this.prisma.appointment.deleteMany();
+    await this.prisma.blockedTime.deleteMany();
+    await this.prisma.holiday.deleteMany();
+    await this.prisma.staffBreak.deleteMany();
+    await this.prisma.staffWorkingHours.deleteMany();
+    await this.prisma.staffService.deleteMany();
+    await this.prisma.service.deleteMany();
+    await this.prisma.staff.deleteMany();
+    await this.prisma.workingHours.deleteMany();
+    await this.prisma.customer.deleteMany();
+    await this.prisma.subscription.deleteMany();
+    // Delete non-platform-admin users
+    await this.prisma.user.deleteMany({
+      where: { role: { not: 'PLATFORM_ADMIN' } },
+    });
+    await this.prisma.salon.deleteMany();
+
+    // 2. Ensure Plans exist
+    const planCount = await this.prisma.plan.count();
+    if (planCount === 0) {
+      await this.prisma.plan.create({
+        data: {
+          name: 'Trial',
+          priceMonthly: 0,
+          priceYearly: 0,
+          maxStaff: 10,
+          maxServices: 50,
+          allowWhatsApp: true,
+        },
+      });
+      await this.prisma.plan.create({
+        data: {
+          name: 'Pro',
+          priceMonthly: 1999,
+          priceYearly: 19999,
+          maxStaff: 50,
+          maxServices: 200,
+          allowWhatsApp: true,
+        },
+      });
+    }
+
+    return {
+      success: true,
+      message: 'Database reset to clean zero state successfully.',
+      remainingSalons: 0,
+    };
+  }
 }
