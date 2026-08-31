@@ -98,6 +98,7 @@ export class WhatsAppController {
         if (phoneNumberId) {
           salon = await this.prisma.salon.findFirst({
             where: {
+              status: 'ACTIVE',
               whatsappAccount: { phoneNumberId },
             },
           });
@@ -117,7 +118,7 @@ export class WhatsAppController {
         }
 
         // 3. Ongoing Active Conversation fallback
-        if (!salon) {
+        if (!salon || salon.status !== 'ACTIVE') {
           const cleanFrom = fromPhone.replace(/[^\d+]/g, '');
           const existingConv = await this.prisma.conversation.findFirst({
             where: {
@@ -132,8 +133,8 @@ export class WhatsAppController {
           }
         }
 
-        // 4. Default Fallback to pilot salon
-        if (!salon) {
+        // 4. Default Fallback to active salon
+        if (!salon || salon.status !== 'ACTIVE') {
           salon = await this.prisma.salon.findFirst({ where: { status: 'ACTIVE' } });
         }
 
