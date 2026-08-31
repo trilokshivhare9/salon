@@ -467,6 +467,12 @@ export class SalonsService {
     });
   }
 
+  async deleteBlockedTime(salonId: string, blockedTimeId: string) {
+    return this.prisma.blockedTime.deleteMany({
+      where: { id: blockedTimeId, salonId },
+    });
+  }
+
   async deleteSalonBySuperAdmin(salonId: string) {
     await this.prisma.whatsAppLog.deleteMany({ where: { salonId } });
     await this.prisma.whatsAppAccount.deleteMany({ where: { salonId } });

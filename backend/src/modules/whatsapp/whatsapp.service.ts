@@ -298,6 +298,148 @@ export class WhatsAppService {
     };
   }
 
+  // Helper: Prompt Date Selection (3 Quick Date Buttons)
+  private async promptDateSelection(
+    conversationId: string,
+    cleanNumber: string,
+    salon: any,
+    selectedService: any,
+    selectedStaffName: string,
+    phoneNumberId?: string,
+  ) {
+    await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: { state: ConversationState.SELECT_DATE },
+    });
+
+    const tz = salon.timezone || 'Asia/Kolkata';
+    const today = DateTime.now().setZone(tz);
+    const tomorrow = today.plus({ days: 1 });
+    const dayAfter = today.plus({ days: 2 });
+
+    const reply = `✅ Service: *${selectedService.name}* (₹${selectedService.price})\n👤 Specialist: *${selectedStaffName}*\n\n📅 *Select Date for your appointment:*`;
+    await this.sendMetaMessage(
+      cleanNumber,
+      {
+        bodyText: reply,
+        interactiveType: 'button',
+        buttons: [
+          { id: 'date_1', title: `Today (${today.toFormat('dd LLL')})` },
+          { id: 'date_2', title: `Tmrw (${tomorrow.toFormat('dd LLL')})` },
+          { id: 'date_3', title: dayAfter.toFormat('EEE dd LLL') },
+        ],
+      },
+      phoneNumberId,
+    );
+
+    return { replyMessage: reply, state: ConversationState.SELECT_DATE };
+  }
+
+  // Helper: Prompt Specialist / Staff Selection
+  private async promptStaffSelection(
+    conversationId: string,
+    cleanNumber: string,
+    salon: any,
+    selectedService: any,
+    qualifiedStaff: any[],
+    phoneNumberId?: string,
+  ) {
+    await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: {
+        selectedServiceId: selectedService.id,
+        state: ConversationState.SELECT_STAFF,
+      },
+    });
+
+    if (qualifiedStaff.length <= 2) {
+      const buttons: InteractiveButton[] = [
+        { id: 'staff_any', title: '✨ Any Specialist' },
+        ...qualifiedStaff.map((st) => ({ id: `staff_${st.id}`, title: st.name })),
+      ];
+
+      const reply = `✅ Selected: *${selectedService.name}* (₹${selectedService.price})\n\nWho would you like as your specialist?`;
+      await this.sendMetaMessage(
+        cleanNumber,
+        {
+          bodyText: reply,
+          interactiveType: 'button',
+          buttons: buttons.slice(0, 3),
+        },
+        phoneNumberId,
+      );
+      return { replyMessage: reply, state: ConversationState.SELECT_STAFF, metadata: { qualifiedStaff } };
+    } else {
+      const listRows: InteractiveListRow[] = [
+        { id: 'staff_any', title: '✨ Any Specialist', description: 'Fastest available slot' },
+        ...qualifiedStaff.map((st) => ({
+          id: `staff_${st.id}`,
+          title: st.name,
+          description: 'Specialist Stylist',
+        })),
+      ];
+
+      const reply = `✅ Selected: *${selectedService.name}* (₹${selectedService.price})\n\nChoose your preferred specialist:`;
+      await this.sendMetaMessage(
+        cleanNumber,
+        {
+          headerText: `${salon.name} Specialists`,
+          bodyText: reply,
+          footerText: 'Tap below to select',
+          buttonText: '👤 Select Specialist',
+          interactiveType: 'list',
+          listRows,
+        },
+        phoneNumberId,
+      );
+      return { replyMessage: reply, state: ConversationState.SELECT_STAFF, metadata: { qualifiedStaff } };
+    }
+  }
+
+  // Helper: Fast-track Service Chosen logic (Auto-bypasses staff if single staff)
+  private async handleServiceChosen(
+    conversationId: string,
+    cleanNumber: string,
+    salon: any,
+    selectedService: any,
+    phoneNumberId?: string,
+  ) {
+    const qualifiedStaff = salon.staff.filter((st: any) =>
+      st.services.some((svc: any) => svc.serviceId === selectedService.id),
+    );
+
+    // Auto-bypass: If only 1 or 0 qualified staff -> auto-assign and advance directly to Date selection!
+    if (qualifiedStaff.length <= 1) {
+      const autoStaff = qualifiedStaff[0] || null;
+      await this.prisma.conversation.update({
+        where: { id: conversationId },
+        data: {
+          selectedServiceId: selectedService.id,
+          selectedStaffId: autoStaff ? autoStaff.id : null,
+          state: ConversationState.SELECT_DATE,
+        },
+      });
+      return this.promptDateSelection(
+        conversationId,
+        cleanNumber,
+        salon,
+        selectedService,
+        autoStaff ? autoStaff.name : 'Specialist',
+        phoneNumberId,
+      );
+    }
+
+    // Multiple qualified staff -> prompt staff selection
+    return this.promptStaffSelection(
+      conversationId,
+      cleanNumber,
+      salon,
+      selectedService,
+      qualifiedStaff,
+      phoneNumberId,
+    );
+  }
+
   // Core Conversation Handler for both Meta Webhook and Web Simulator
   async handleIncomingMessage(
     salonId: string,
@@ -379,18 +521,32 @@ export class WhatsAppService {
       return { replyMessage: reply, state: ConversationState.START };
     }
 
+    // Direct Service Trigger (from Menu buttons or list selections from any state)
+    if (input.startsWith('svc_')) {
+      const svcId = input.replace('svc_', '');
+      const svc = salon.services.find((s) => s.id === svcId);
+      if (svc) {
+        return this.handleServiceChosen(conversation.id, cleanNumber, salon, svc, phoneNumberId);
+      }
+    }
+
     // -------------------------------------------------------------
     // STATE MACHINE
     // -------------------------------------------------------------
     switch (conversation.state) {
       case ConversationState.START: {
         if (input === '1' || input === 'btn_book' || normalized.includes('book')) {
+          // If only 1 service in the salon -> auto select and advance!
+          if (salon.services.length === 1) {
+            return this.handleServiceChosen(conversation.id, cleanNumber, salon, salon.services[0], phoneNumberId);
+          }
+
+          // Multiple services -> show list picker
           await this.prisma.conversation.update({
             where: { id: conversation.id },
             data: { state: ConversationState.SELECT_SERVICE },
           });
 
-          // NATIVE RADIO LIST PICKER FOR SERVICES!
           const listRows: InteractiveListRow[] = salon.services.map((s) => ({
             id: `svc_${s.id}`,
             title: s.name,
@@ -412,23 +568,43 @@ export class WhatsAppService {
           );
 
           return { replyMessage: reply, state: ConversationState.SELECT_SERVICE, metadata: { services: salon.services } };
-        } else if (input === '2' || input === 'btn_services' || normalized.includes('service')) {
-          const serviceList = salon.services
-            .map((s) => `• *${s.name}*: ₹${s.price} (${s.durationMinutes} mins)`)
-            .join('\n');
-          const reply = `✨ *Services Menu:*\n\n${serviceList}`;
-          await this.sendMetaMessage(
-            cleanNumber,
-            {
-              bodyText: reply,
-              interactiveType: 'button',
-              buttons: [{ id: 'btn_book', title: '📅 Book Now' }],
-            },
-            phoneNumberId,
-          );
-          return { replyMessage: reply, state: ConversationState.START };
+        } else if (input === '2' || input === 'btn_services' || normalized.includes('service') || normalized.includes('menu')) {
+          if (salon.services.length === 1) {
+            const singleSvc = salon.services[0];
+            const reply = `✨ *Services Menu:*\n\n• *${singleSvc.name}*: ₹${singleSvc.price} (${singleSvc.durationMinutes} mins)${singleSvc.description ? `\n  _${singleSvc.description}_` : ''}`;
+            await this.sendMetaMessage(
+              cleanNumber,
+              {
+                bodyText: reply,
+                interactiveType: 'button',
+                buttons: [{ id: `svc_${singleSvc.id}`, title: `📅 Book (₹${singleSvc.price})` }],
+              },
+              phoneNumberId,
+            );
+            return { replyMessage: reply, state: ConversationState.START };
+          } else {
+            const listRows: InteractiveListRow[] = salon.services.map((s) => ({
+              id: `svc_${s.id}`,
+              title: s.name,
+              description: `₹${s.price} • ${s.durationMinutes} mins`,
+            }));
+            const reply = `✨ *${salon.name} Services Menu*\n\nSelect a service below to book directly:`;
+            await this.sendMetaMessage(
+              cleanNumber,
+              {
+                headerText: 'Services Menu',
+                bodyText: reply,
+                footerText: 'Tap below to book',
+                buttonText: '✂️ Choose Service to Book',
+                interactiveType: 'list',
+                listRows,
+              },
+              phoneNumberId,
+            );
+            return { replyMessage: reply, state: ConversationState.SELECT_SERVICE, metadata: { services: salon.services } };
+          }
         } else if (input === '3' || input === 'btn_info' || normalized.includes('info')) {
-          const reply = `📍 *${salon.name}*\n\nAddress: ${salon.address || 'India'}, ${salon.city || ''}\nPhone: ${salon.phone}\nTimings: 10:00 AM – 08:00 PM`;
+          const reply = `📍 *${salon.name}*\n\nAddress: ${salon.address || 'India'}, ${salon.city || ''}\nPhone: ${salon.phone}\nTimings: 09:00 AM – 09:00 PM`;
           await this.sendMetaMessage(
             cleanNumber,
             {
@@ -486,59 +662,7 @@ export class WhatsAppService {
           return { replyMessage: 'Please select a service', state: ConversationState.SELECT_SERVICE };
         }
 
-        await this.prisma.conversation.update({
-          where: { id: conversation.id },
-          data: {
-            selectedServiceId: selectedService.id,
-            state: ConversationState.SELECT_STAFF,
-          },
-        });
-
-        const qualifiedStaff = salon.staff.filter((st) =>
-          st.services.some((svc) => svc.serviceId === selectedService.id),
-        );
-
-        // NATIVE BUTTON / LIST PICKER FOR SPECIALIST
-        if (qualifiedStaff.length <= 2) {
-          const buttons: InteractiveButton[] = [
-            { id: 'staff_any', title: '✨ Any Specialist' },
-            ...qualifiedStaff.map((st) => ({ id: `staff_${st.id}`, title: st.name })),
-          ];
-
-          const reply = `✅ Selected: *${selectedService.name}* (₹${selectedService.price})\n\nWho would you like as your specialist?`;
-          await this.sendMetaMessage(
-            cleanNumber,
-            {
-              bodyText: reply,
-              interactiveType: 'button',
-              buttons: buttons.slice(0, 3),
-            },
-            phoneNumberId,
-          );
-          return { replyMessage: reply, state: ConversationState.SELECT_STAFF, metadata: { qualifiedStaff } };
-        } else {
-          const listRows: InteractiveListRow[] = [
-            { id: 'staff_any', title: '✨ Any Specialist', description: 'Fastest available slot' },
-            ...qualifiedStaff.map((st) => ({
-              id: `staff_${st.id}`,
-              title: st.name,
-              description: 'Specialist Stylist',
-            })),
-          ];
-
-          const reply = `✅ Selected: *${selectedService.name}* (₹${selectedService.price})\n\nChoose your preferred stylist:`;
-          await this.sendMetaMessage(
-            cleanNumber,
-            {
-              bodyText: reply,
-              buttonText: '👤 Select Specialist',
-              interactiveType: 'list',
-              listRows,
-            },
-            phoneNumberId,
-          );
-          return { replyMessage: reply, state: ConversationState.SELECT_STAFF, metadata: { qualifiedStaff } };
-        }
+        return this.handleServiceChosen(conversation.id, cleanNumber, salon, selectedService, phoneNumberId);
       }
 
       case ConversationState.SELECT_STAFF: {
@@ -546,6 +670,7 @@ export class WhatsAppService {
         const qualifiedStaff = salon.staff.filter((st) =>
           st.services.some((svc) => svc.serviceId === selectedServiceId),
         );
+        const selectedService = salon.services.find((s) => s.id === selectedServiceId) || { name: 'Service', price: 0 };
 
         let selectedStaffId: string | null = null;
         let staffName = 'Any Specialist';
@@ -575,28 +700,14 @@ export class WhatsAppService {
           },
         });
 
-        // 3 QUICK DATE BUTTONS (Today, Tomorrow, Day After)
-        const tz = salon.timezone || 'Asia/Kolkata';
-        const today = DateTime.now().setZone(tz);
-        const tomorrow = today.plus({ days: 1 });
-        const dayAfter = today.plus({ days: 2 });
-
-        const reply = `👤 Specialist: *${staffName}*\n\n📅 *Select Date:*`;
-        await this.sendMetaMessage(
+        return this.promptDateSelection(
+          conversation.id,
           cleanNumber,
-          {
-            bodyText: reply,
-            interactiveType: 'button',
-            buttons: [
-              { id: 'date_1', title: `Today (${today.toFormat('dd LLL')})` },
-              { id: 'date_2', title: `Tmrw (${tomorrow.toFormat('dd LLL')})` },
-              { id: 'date_3', title: dayAfter.toFormat('EEE dd LLL') },
-            ],
-          },
+          salon,
+          selectedService,
+          staffName,
           phoneNumberId,
         );
-
-        return { replyMessage: reply, state: ConversationState.SELECT_DATE };
       }
 
       case ConversationState.SELECT_DATE: {
