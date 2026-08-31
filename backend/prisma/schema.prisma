@@ -86,6 +86,11 @@ enum ConversationState {
   COMPLETED
 }
 
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
 enum SubscriptionStatus {
   TRIAL
   ACTIVE
@@ -160,6 +165,7 @@ model Salon {
   subscription         Subscription?
   auditLogs            AuditLog[]
   conversations        Conversation[]
+  whatsappLogs         WhatsAppLog[]
 
   @@index([slug])
   @@index([status])
@@ -436,6 +442,29 @@ model Conversation {
   @@unique([salonId, customerPhone])
   @@index([customerPhone])
   @@map("conversations")
+}
+
+model WhatsAppLog {
+  id              String           @id @default(uuid())
+  salonId         String?          @map("salon_id")
+  phone           String
+  direction       MessageDirection @default(INBOUND)
+  messageText     String?          @map("message_text")
+  interactiveId   String?          @map("interactive_id")
+  state           String?
+  status          String           @default("RECEIVED") // RECEIVED, SENT, FAILED, DELIVERED, READ
+  metaMessageId   String?          @map("meta_message_id")
+  errorCode       Int?             @map("error_code")
+  errorMessage    String?          @map("error_message")
+  rawPayload      Json?            @map("raw_payload")
+  createdAt       DateTime         @default(now()) @map("created_at")
+
+  salon           Salon?           @relation(fields: [salonId], references: [id], onDelete: Cascade)
+
+  @@index([phone])
+  @@index([salonId, createdAt])
+  @@index([status])
+  @@map("whatsapp_logs")
 }
 
 // -----------------------------------------------------------------------------

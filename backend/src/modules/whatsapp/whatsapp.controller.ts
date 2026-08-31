@@ -58,14 +58,39 @@ export class WhatsAppController {
       const entry = payload?.entry?.[0];
       const changes = entry?.changes?.[0]?.value;
       const message = changes?.messages?.[0];
+      const statuses = changes?.statuses?.[0];
 
+      // 1. Log Delivery Status Callbacks (sent, delivered, read, failed)
+      if (statuses) {
+        const recipient = statuses.recipient_id;
+        const status = statuses.status;
+        if (status === 'failed') {
+          this.logger.error(
+            `[Meta Webhook] ❌ WhatsApp Delivery FAILED to ${recipient}: ${JSON.stringify(statuses.errors || statuses)}`,
+          );
+        } else {
+          this.logger.log(`[Meta Webhook] ℹ️ WhatsApp Delivery Status for ${recipient}: ${status}`);
+        }
+        await this.whatsappService.recordStatusLog(statuses);
+      }
+
+      // 2. Process Incoming Messages
       if (message) {
         const fromPhone = message.from;
         const phoneNumberId = changes.metadata?.phone_number_id;
 
-        const text = message.text?.body || message.interactive?.button_reply?.title || message.interactive?.list_reply?.title || '';
-        const interactiveId = message.interactive?.button_reply?.id || message.interactive?.list_reply?.id;
+        const text =
+          message.text?.body ||
+          message.interactive?.button_reply?.title ||
+          message.interactive?.list_reply?.title ||
+          '';
+        const interactiveId =
+          message.interactive?.button_reply?.id || message.interactive?.list_reply?.id;
         const normalizedText = text.trim().toLowerCase();
+
+        this.logger.log(
+          `[Meta Webhook] 📩 Incoming message from ${fromPhone} [PhoneId: ${phoneNumberId}]: "${text}" (interactiveId: ${interactiveId || 'none'})`,
+        );
 
         let salon: any = null;
 
@@ -112,7 +137,17 @@ export class WhatsAppController {
           salon = await this.prisma.salon.findFirst({ where: { status: 'ACTIVE' } });
         }
 
+        // Persist Inbound Log to database
+        await this.whatsappService.recordInboundLog(
+          salon?.id || null,
+          fromPhone,
+          text,
+          interactiveId,
+          payload,
+        );
+
         if (salon) {
+          this.logger.log(`[Meta Webhook] 🏢 Routed message to salon: "${salon.name}" (${salon.id})`);
           await this.whatsappService.handleIncomingMessage(
             salon.id,
             fromPhone,
@@ -120,12 +155,14 @@ export class WhatsAppController {
             interactiveId,
             phoneNumberId,
           );
+        } else {
+          this.logger.warn(`[Meta Webhook] ⚠️ No active salon found to process incoming message from ${fromPhone}`);
         }
       }
 
       return res.status(HttpStatus.OK).send('EVENT_RECEIVED');
     } catch (err) {
-      this.logger.error('Error processing Meta Webhook:', err);
+      this.logger.error('[Meta Webhook] Error processing Meta Webhook payload:', err);
       return res.status(HttpStatus.OK).send('EVENT_RECEIVED');
     }
   }
@@ -158,6 +195,22 @@ export class WhatsAppController {
       body.messageText || 'Hi',
       body.interactiveId,
     );
+  }
+
+  // -------------------------------------------------------------
+  // DATABASE AUDIT LOGS ENDPOINT (Check any phone number from DB!)
+  // -------------------------------------------------------------
+  @Get('logs')
+  async getLogs(
+    @Query('phone') phone?: string,
+    @Query('salonId') salonId?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.whatsappService.getLogs({
+      phone,
+      salonId,
+      limit: limit ? parseInt(limit, 10) : 50,
+    });
   }
 
   // -------------------------------------------------------------

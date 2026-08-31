@@ -8,7 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../database/prisma.service';
 import { AvailabilityService } from '../availability/availability.service';
 import { AppointmentsService } from '../appointments/appointments.service';
-import { ConversationState, BookingSource } from '@prisma/client';
+import { ConversationState, BookingSource, MessageDirection } from '@prisma/client';
 import { DateTime } from 'luxon';
 
 export interface InteractiveButton {
@@ -60,6 +60,7 @@ export class WhatsAppService {
       listRows?: InteractiveListRow[];
     },
     phoneNumberId?: string,
+    salonId?: string,
   ) {
     const accessToken =
       this.configService.get<string>('whatsapp.accessToken') ||
@@ -70,8 +71,25 @@ export class WhatsAppService {
       process.env.WHATSAPP_PHONE_NUMBER_ID ||
       '1266237649907696';
 
+    const cleanTo = this.cleanPhone(toPhone);
+
     if (!accessToken) {
-      this.logger.warn('No WHATSAPP_ACCESS_TOKEN configured; skipping outbound Meta API call.');
+      this.logger.warn(
+        `[WhatsAppService] ⚠️ Cannot send outbound WhatsApp message to ${toPhone}: WHATSAPP_ACCESS_TOKEN is missing or not configured in environment variables.`,
+      );
+      await this.prisma.whatsAppLog
+        .create({
+          data: {
+            salonId: salonId || null,
+            phone: cleanTo,
+            direction: MessageDirection.OUTBOUND,
+            messageText: payload.bodyText || payload.textBody || '',
+            interactiveId: payload.interactiveType || null,
+            status: 'FAILED',
+            errorMessage: 'WHATSAPP_ACCESS_TOKEN is missing or not configured.',
+          },
+        })
+        .catch(() => {});
       return;
     }
 
@@ -125,6 +143,10 @@ export class WhatsAppService {
         bodyData.text = { preview_url: false, body: payload.textBody || payload.bodyText || '' };
       }
 
+      this.logger.log(
+        `[WhatsAppService] 🚀 Dispatching to Meta Cloud API (phoneId=${phoneId}, to=${toPhone}, type=${bodyData.type})`,
+      );
+
       const res = await fetch(url, {
         method: 'POST',
         headers: {
@@ -136,14 +158,144 @@ export class WhatsAppService {
       });
 
       const data = await res.json();
+      const errObj = data?.error || {};
+
+      // Persist Outbound Log directly into PostgreSQL database
+      await this.prisma.whatsAppLog
+        .create({
+          data: {
+            salonId: salonId || null,
+            phone: cleanTo,
+            direction: MessageDirection.OUTBOUND,
+            messageText: payload.bodyText || payload.textBody || '',
+            interactiveId: payload.interactiveType || null,
+            status: res.ok ? 'SENT' : 'FAILED',
+            metaMessageId: data?.messages?.[0]?.id || null,
+            errorCode: errObj.code || null,
+            errorMessage: errObj.message || null,
+            rawPayload: data,
+          },
+        })
+        .catch((dbErr) => this.logger.error('Failed to persist outbound WhatsApp log:', dbErr));
+
       if (!res.ok) {
-        this.logger.error('Meta Send Error:', JSON.stringify(data));
+        this.logger.error(
+          `[WhatsAppService] ❌ Meta Cloud API Error (HTTP ${res.status}): ${JSON.stringify(data)}`,
+        );
+
+        // Provide clear diagnostic hints in logs for common Meta Cloud API issues
+        if (errObj.code === 190) {
+          this.logger.error(
+            `[WhatsAppService] 🔑 DIAGNOSTIC HINT: WHATSAPP_ACCESS_TOKEN is invalid or has expired. Generate a Permanent System User Token in Meta Business Manager.`,
+          );
+        } else if (errObj.code === 131030) {
+          this.logger.error(
+            `[WhatsAppService] 📱 DIAGNOSTIC HINT: Recipient ${toPhone} is not in your allowed test numbers list. Add ${toPhone} under "To" numbers in Meta Developers WhatsApp Dashboard (Sandbox mode).`,
+          );
+        } else if (errObj.code === 131047 || errObj.code === 131026) {
+          this.logger.error(
+            `[WhatsAppService] ⏳ DIAGNOSTIC HINT: Re-engagement window expired. More than 24 hours have passed since the customer messaged.`,
+          );
+        }
+
+        // Fallback to plain text if interactive message was rejected
+        if (bodyData.type === 'interactive') {
+          this.logger.warn(`[WhatsAppService] 🔄 Retrying outbound message as plain text fallback to ${toPhone}...`);
+          const fallbackText = payload.textBody || payload.bodyText || 'Please reply to choose an option.';
+          await fetch(url, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              messaging_product: 'whatsapp',
+              recipient_type: 'individual',
+              to: toPhone.replace('+', ''),
+              type: 'text',
+              text: { preview_url: false, body: fallbackText },
+            }),
+            signal: AbortSignal.timeout(5000),
+          }).catch((fallbackErr) => {
+            this.logger.error('[WhatsAppService] Fallback text message also failed:', fallbackErr);
+          });
+        }
       } else {
-        this.logger.log(`Outbound WhatsApp sent to ${toPhone}: messageId=${data?.messages?.[0]?.id}`);
+        this.logger.log(
+          `[WhatsAppService] ✅ Outbound WhatsApp successfully sent to ${toPhone} | Message ID: ${data?.messages?.[0]?.id}`,
+        );
       }
     } catch (err) {
-      this.logger.error('Failed to send Meta Cloud API message:', err);
+      this.logger.error('[WhatsAppService] Network exception sending Meta Cloud API message:', err);
     }
+  }
+
+  // Database Logging Helpers
+  async recordInboundLog(
+    salonId: string | null,
+    fromPhone: string,
+    messageText: string,
+    interactiveId?: string,
+    rawPayload?: any,
+  ) {
+    const cleanPhone = this.cleanPhone(fromPhone);
+    return this.prisma.whatsAppLog
+      .create({
+        data: {
+          salonId: salonId || null,
+          phone: cleanPhone,
+          direction: MessageDirection.INBOUND,
+          messageText,
+          interactiveId: interactiveId || null,
+          status: 'RECEIVED',
+          rawPayload: rawPayload || null,
+        },
+      })
+      .catch((e) => this.logger.error('Failed to persist inbound WhatsApp log:', e));
+  }
+
+  async recordStatusLog(statusObj: any) {
+    const recipient = this.cleanPhone(statusObj.recipient_id || '');
+    const metaMessageId = statusObj.id || null;
+    const status = (statusObj.status || 'UNKNOWN').toUpperCase();
+    const error = statusObj.errors?.[0];
+
+    return this.prisma.whatsAppLog
+      .create({
+        data: {
+          phone: recipient,
+          direction: MessageDirection.OUTBOUND,
+          status,
+          metaMessageId,
+          errorCode: error?.code || null,
+          errorMessage: error?.title || error?.message || null,
+          rawPayload: statusObj,
+        },
+      })
+      .catch((e) => this.logger.error('Failed to persist status WhatsApp log:', e));
+  }
+
+  async getLogs(filter: { phone?: string; salonId?: string; limit?: number }) {
+    const where: any = {};
+    if (filter.phone) {
+      const clean = this.cleanPhone(filter.phone);
+      where.phone = { contains: clean.replace('+', '') };
+    }
+    if (filter.salonId) {
+      where.salonId = filter.salonId;
+    }
+
+    const logs = await this.prisma.whatsAppLog.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: filter.limit || 50,
+      include: { salon: { select: { id: true, name: true, slug: true } } },
+    });
+
+    return {
+      total: logs.length,
+      logs,
+    };
   }
 
   // Core Conversation Handler for both Meta Webhook and Web Simulator
@@ -191,6 +343,10 @@ export class WhatsAppService {
 
     const input = (interactiveId || messageText).trim();
     const normalized = input.toLowerCase();
+
+    this.logger.log(
+      `[WhatsAppService] 💬 Processing message for ${cleanNumber} (Salon: "${salon.name}") | State: ${conversation.state} | Input: "${input}"`,
+    );
 
     // Reset / Menu commands
     if (['hi', 'hello', 'hey', 'start', 'menu', 'reset', 'cancel', 'btn_start', 'btn_menu'].includes(normalized)) {
