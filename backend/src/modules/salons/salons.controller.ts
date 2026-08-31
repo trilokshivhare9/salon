@@ -9,7 +9,8 @@ import {
   Param,
   UseGuards,
 } from '@nestjs/common';
-import { SalonsService, CreateSalonByAdminDto } from './salons.service';
+import { SalonsService } from './salons.service';
+import { CreateSalonPlatformDto } from './dto/create-salon-platform.dto';
 import { UpdateSalonDto } from './dto/update-salon.dto';
 import { UpdateWorkingHoursDto } from './dto/working-hours.dto';
 import { CreateHolidayDto, CreateBlockedTimeDto } from './dto/holiday.dto';
@@ -35,7 +36,7 @@ export class SalonsController {
 
   @Roles(UserRole.PLATFORM_ADMIN)
   @Post('platform/create')
-  async createSalonBySuperAdmin(@Body() dto: CreateSalonByAdminDto) {
+  async createSalonBySuperAdmin(@Body() dto: CreateSalonPlatformDto) {
     return this.salonsService.createSalonBySuperAdmin(dto);
   }
 

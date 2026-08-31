@@ -40,7 +40,7 @@ export class ServicesService {
   }
 
   async createService(salonId: string, dto: CreateServiceDto) {
-    return this.prisma.service.create({
+    const service = await this.prisma.service.create({
       data: {
         salonId,
         name: dto.name,
@@ -50,6 +50,21 @@ export class ServicesService {
         category: dto.category,
       },
     });
+
+    // Auto-evaluate Salon Activation
+    const [activeStaffCount, activeServicesCount] = await Promise.all([
+      this.prisma.staff.count({ where: { salonId, status: 'ACTIVE' } }),
+      this.prisma.service.count({ where: { salonId, status: 'ACTIVE' } }),
+    ]);
+
+    if (activeStaffCount > 0 && activeServicesCount > 0) {
+      await this.prisma.salon.update({
+        where: { id: salonId },
+        data: { status: 'ACTIVE' },
+      });
+    }
+
+    return service;
   }
 
   async updateService(salonId: string, serviceId: string, dto: UpdateServiceDto) {
@@ -65,17 +80,45 @@ export class ServicesService {
     const service = await this.getServiceById(salonId, serviceId);
     const newStatus = service.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
 
-    return this.prisma.service.update({
+    const updated = await this.prisma.service.update({
       where: { id: serviceId },
       data: { status: newStatus },
     });
+
+    // Auto-evaluate Salon Activation
+    const [activeStaffCount, activeServicesCount] = await Promise.all([
+      this.prisma.staff.count({ where: { salonId, status: 'ACTIVE' } }),
+      this.prisma.service.count({ where: { salonId, status: 'ACTIVE' } }),
+    ]);
+
+    const salonStatus = activeStaffCount > 0 && activeServicesCount > 0 ? 'ACTIVE' : 'DEACTIVATED';
+    await this.prisma.salon.update({
+      where: { id: salonId },
+      data: { status: salonStatus as any },
+    });
+
+    return updated;
   }
 
   async deleteService(salonId: string, serviceId: string) {
     await this.getServiceById(salonId, serviceId);
 
-    return this.prisma.service.delete({
+    const deleted = await this.prisma.service.delete({
       where: { id: serviceId },
     });
+
+    // Auto-evaluate Salon Activation
+    const [activeStaffCount, activeServicesCount] = await Promise.all([
+      this.prisma.staff.count({ where: { salonId, status: 'ACTIVE' } }),
+      this.prisma.service.count({ where: { salonId, status: 'ACTIVE' } }),
+    ]);
+
+    const salonStatus = activeStaffCount > 0 && activeServicesCount > 0 ? 'ACTIVE' : 'DEACTIVATED';
+    await this.prisma.salon.update({
+      where: { id: salonId },
+      data: { status: salonStatus as any },
+    });
+
+    return deleted;
   }
 }

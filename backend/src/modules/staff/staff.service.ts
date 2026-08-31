@@ -91,13 +91,28 @@ export class StaffService {
         });
       }
 
-      return tx.staff.findUnique({
+      const created = await tx.staff.findUnique({
         where: { id: staff.id },
         include: {
           services: { include: { service: true } },
           workingHours: true,
         },
       });
+
+      // Auto-evaluate Salon Activation
+      const [activeStaffCount, activeServicesCount] = await Promise.all([
+        tx.staff.count({ where: { salonId, status: 'ACTIVE' } }),
+        tx.service.count({ where: { salonId, status: 'ACTIVE' } }),
+      ]);
+
+      if (activeStaffCount > 0 && activeServicesCount > 0) {
+        await tx.salon.update({
+          where: { id: salonId },
+          data: { status: 'ACTIVE' },
+        });
+      }
+
+      return created;
     });
   }
 
@@ -114,10 +129,24 @@ export class StaffService {
     const staff = await this.getStaffById(salonId, staffId);
     const newStatus = staff.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
 
-    return this.prisma.staff.update({
+    const updated = await this.prisma.staff.update({
       where: { id: staffId },
       data: { status: newStatus },
     });
+
+    // Auto-evaluate Salon Activation
+    const [activeStaffCount, activeServicesCount] = await Promise.all([
+      this.prisma.staff.count({ where: { salonId, status: 'ACTIVE' } }),
+      this.prisma.service.count({ where: { salonId, status: 'ACTIVE' } }),
+    ]);
+
+    const salonStatus = activeStaffCount > 0 && activeServicesCount > 0 ? 'ACTIVE' : 'DEACTIVATED';
+    await this.prisma.salon.update({
+      where: { id: salonId },
+      data: { status: salonStatus as any },
+    });
+
+    return updated;
   }
 
   async assignServices(salonId: string, staffId: string, dto: AssignStaffServicesDto) {
@@ -197,6 +226,34 @@ export class StaffService {
 
     return this.prisma.staffBreak.deleteMany({
       where: { id: breakId, staffId },
+    });
+  }
+
+  async deleteStaff(salonId: string, staffId: string) {
+    await this.getStaffById(salonId, staffId);
+
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Delete associated breaks, working hours, and service capabilities
+      await tx.staffBreak.deleteMany({ where: { staffId } });
+      await tx.staffWorkingHours.deleteMany({ where: { staffId } });
+      await tx.staffService.deleteMany({ where: { staffId } });
+
+      // 2. Delete staff member
+      const deleted = await tx.staff.delete({ where: { id: staffId } });
+
+      // 3. Auto-evaluate salon activation status
+      const [activeStaffCount, activeServicesCount] = await Promise.all([
+        tx.staff.count({ where: { salonId, status: 'ACTIVE' } }),
+        tx.service.count({ where: { salonId, status: 'ACTIVE' } }),
+      ]);
+
+      const newStatus = activeStaffCount > 0 && activeServicesCount > 0 ? 'ACTIVE' : 'DEACTIVATED';
+      await tx.salon.update({
+        where: { id: salonId },
+        data: { status: newStatus as any },
+      });
+
+      return deleted;
     });
   }
 }

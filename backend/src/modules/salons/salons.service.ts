@@ -1,24 +1,16 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
+import { CreateSalonPlatformDto } from './dto/create-salon-platform.dto';
 import { UpdateSalonDto } from './dto/update-salon.dto';
 import { UpdateWorkingHoursDto } from './dto/working-hours.dto';
 import { CreateHolidayDto, CreateBlockedTimeDto } from './dto/holiday.dto';
 import * as bcrypt from 'bcrypt';
 import { UserRole } from '@prisma/client';
-
-export interface CreateSalonByAdminDto {
-  name: string;
-  slug?: string;
-  phone: string;
-  email: string;
-  ownerName: string;
-  password?: string;
-  address?: string;
-  city?: string;
-  timezone?: string;
-  planId?: string;
-  whatsappPhoneNumberId?: string;
-}
 
 @Injectable()
 export class SalonsService {
@@ -30,18 +22,20 @@ export class SalonsService {
   async getAllSalonsForPlatformAdmin() {
     const salons = await this.prisma.salon.findMany({
       include: {
-        subscription: { include: { plan: true } },
+        users: {
+          where: { role: UserRole.SALON_ADMIN },
+          select: { id: true, name: true, email: true, phone: true },
+        },
+        subscription: {
+          include: { plan: true },
+        },
         _count: {
           select: {
             staff: true,
             services: true,
-            customers: true,
             appointments: true,
+            customers: true,
           },
-        },
-        users: {
-          where: { role: UserRole.SALON_ADMIN },
-          select: { id: true, name: true, email: true, phone: true },
         },
       },
       orderBy: { createdAt: 'desc' },
@@ -61,7 +55,95 @@ export class SalonsService {
     };
   }
 
-  async createSalonBySuperAdmin(dto: CreateSalonByAdminDto) {
+  private normalizePhoneNumber(input: string): string {
+    if (!input) throw new BadRequestException('Phone number is required.');
+
+    // Strip spaces, hyphens, and brackets
+    const cleaned = input.trim().replace(/[^\d+]/g, '');
+
+    // Case 1: +91XXXXXXXXXX (13 chars)
+    if (cleaned.startsWith('+91')) {
+      const digits = cleaned.slice(3);
+      if (digits.length !== 10 || !/^[6-9]\d{9}$/.test(digits)) {
+        throw new BadRequestException(
+          'Please enter a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9.',
+        );
+      }
+      return cleaned;
+    }
+
+    // Case 2: 91XXXXXXXXXX (12 digits)
+    if (cleaned.startsWith('91') && cleaned.length === 12) {
+      const digits = cleaned.slice(2);
+      if (!/^[6-9]\d{9}$/.test(digits)) {
+        throw new BadRequestException(
+          'Please enter a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9.',
+        );
+      }
+      return `+91${digits}`;
+    }
+
+    // Case 3: 0XXXXXXXXXX (11 digits starting with 0)
+    if (cleaned.startsWith('0') && cleaned.length === 11) {
+      const digits = cleaned.slice(1);
+      if (!/^[6-9]\d{9}$/.test(digits)) {
+        throw new BadRequestException(
+          'Please enter a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9.',
+        );
+      }
+      return `+91${digits}`;
+    }
+
+    // Case 4: Standard 10-digit Indian number (e.g. 7999817743)
+    if (/^[6-9]\d{9}$/.test(cleaned)) {
+      return `+91${cleaned}`;
+    }
+
+    // Case 5: Other international E.164 number (e.g. +14155552671)
+    if (cleaned.startsWith('+') && /^\+[1-9]\d{7,14}$/.test(cleaned)) {
+      return cleaned;
+    }
+
+    throw new BadRequestException(
+      'Please enter a valid 10-digit mobile number (e.g. 7999817743 or +91 7999817743).',
+    );
+  }
+
+  async createSalonBySuperAdmin(dto: CreateSalonPlatformDto) {
+    const email = dto.email.toLowerCase().trim();
+    const phone = this.normalizePhoneNumber(dto.phone);
+
+    // 1. Uniqueness check: Owner Email across User database
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email },
+    });
+    if (existingUser) {
+      throw new ConflictException(
+        `An account with email '${email}' already exists. Please use a unique owner email.`,
+      );
+    }
+
+    // 2. Uniqueness check: WhatsApp Phone ID if provided
+    if (dto.whatsappPhoneNumberId) {
+      const waId = dto.whatsappPhoneNumberId.trim();
+      const existingWa = await this.prisma.whatsAppAccount.findUnique({
+        where: { phoneNumberId: waId },
+      });
+      if (existingWa) {
+        throw new ConflictException(
+          `Meta WhatsApp Phone Number ID '${waId}' is already linked to another salon.`,
+        );
+      }
+    }
+
+    // 3. Operating hours validation
+    const openTime = dto.openTime || '09:00';
+    const closeTime = dto.closeTime || '21:00';
+    if (openTime >= closeTime) {
+      throw new BadRequestException('Closing time must be later than opening time.');
+    }
+
+    // 4. Resolve slug collisions cleanly
     let baseSlug = (dto.slug || dto.name)
       .toLowerCase()
       .trim()
@@ -76,9 +158,10 @@ export class SalonsService {
     }
 
     const salt = await bcrypt.genSalt(10);
-    const passwordHash = await bcrypt.hash(dto.password || 'Password123!', salt);
+    const passwordHash = await bcrypt.hash(dto.password, salt);
 
     return this.prisma.$transaction(async (tx) => {
+      // Find requested plan or default Trial plan
       let plan = null;
       if (dto.planId) {
         plan = await tx.plan.findUnique({ where: { id: dto.planId } });
@@ -87,20 +170,23 @@ export class SalonsService {
         plan = await tx.plan.findFirst({ where: { name: 'Trial' } });
       }
 
+      // Create Salon Shard (Initialized as DEACTIVATED until staff & service are added)
       const salon = await tx.salon.create({
         data: {
-          name: dto.name,
+          name: dto.name.trim(),
           slug,
-          phone: dto.phone,
-          email: dto.email.toLowerCase(),
-          address: dto.address,
-          city: dto.city,
+          phone,
+          email,
+          address: dto.address?.trim(),
+          city: dto.city.trim(),
           timezone: dto.timezone || 'Asia/Kolkata',
+          status: 'DEACTIVATED',
         },
       });
 
+      // 14-Day Free Trial Subscription
       const trialEnd = new Date();
-      trialEnd.setDate(trialEnd.getDate() + 30);
+      trialEnd.setDate(trialEnd.getDate() + 14);
       await tx.subscription.create({
         data: {
           salonId: salon.id,
@@ -111,18 +197,19 @@ export class SalonsService {
         },
       });
 
-      await tx.user.create({
+      // Create SALON_ADMIN Owner User (Store Credentials)
+      const ownerUser = await tx.user.create({
         data: {
           salonId: salon.id,
-          name: dto.ownerName,
-          email: dto.email.toLowerCase(),
-          phone: dto.phone,
+          name: dto.ownerName.trim(),
+          email,
+          phone,
           passwordHash,
           role: UserRole.SALON_ADMIN,
         },
       });
 
-      // Default Mon - Sun working hours (10:00 - 20:00)
+      // 7-Day Business Working Hours (Mon - Sun)
       const days = [
         'MONDAY',
         'TUESDAY',
@@ -139,87 +226,18 @@ export class SalonsService {
             salonId: salon.id,
             dayOfWeek: day,
             isOpen: true,
-            openTime: '10:00',
-            closeTime: '20:00',
+            openTime,
+            closeTime,
           },
         });
       }
 
-      // 1. Create Default Services
-      const s1 = await tx.service.create({
-        data: {
-          salonId: salon.id,
-          name: 'Classic Haircut & Styling',
-          description: 'Precision cut, wash, and blowdry style.',
-          price: 500.0,
-          durationMinutes: 30,
-          category: 'Hair',
-          status: 'ACTIVE',
-        },
-      });
-
-      const s2 = await tx.service.create({
-        data: {
-          salonId: salon.id,
-          name: 'Deep Hair Spa & Conditioning',
-          description: 'Intense hydration therapy with scalp massage.',
-          price: 1200.0,
-          durationMinutes: 60,
-          category: 'Hair',
-          status: 'ACTIVE',
-        },
-      });
-
-      const s3 = await tx.service.create({
-        data: {
-          salonId: salon.id,
-          name: 'Glow Facial & Skin Care',
-          description: 'Deep cleansing, exfoliation, and radiance mask.',
-          price: 1500.0,
-          durationMinutes: 45,
-          category: 'Skin',
-          status: 'ACTIVE',
-        },
-      });
-
-      // 2. Create Default Staff (Owner Stylist)
-      const defaultStaff = await tx.staff.create({
-        data: {
-          salonId: salon.id,
-          name: dto.ownerName,
-          phone: dto.phone,
-          email: dto.email.toLowerCase(),
-          status: 'ACTIVE',
-        },
-      });
-
-      // Bind staff to all starter services
-      await tx.staffService.createMany({
-        data: [
-          { staffId: defaultStaff.id, serviceId: s1.id },
-          { staffId: defaultStaff.id, serviceId: s2.id },
-          { staffId: defaultStaff.id, serviceId: s3.id },
-        ],
-      });
-
-      // Default staff working hours
-      for (const day of days) {
-        await tx.staffWorkingHours.create({
-          data: {
-            staffId: defaultStaff.id,
-            dayOfWeek: day,
-            isWorking: true,
-            startTime: '10:00',
-            endTime: '20:00',
-          },
-        });
-      }
-
+      // Configure WhatsApp Meta Account if credentials provided
       if (dto.whatsappPhoneNumberId) {
         await tx.whatsAppAccount.create({
           data: {
             salonId: salon.id,
-            phoneNumberId: dto.whatsappPhoneNumberId,
+            phoneNumberId: dto.whatsappPhoneNumberId.trim(),
             accessTokenEncrypted: 'system_managed',
             webhookVerifyToken: 'salon_webhook_verify_token_mvp',
             isActive: true,
@@ -227,7 +245,71 @@ export class SalonsService {
         });
       }
 
-      return salon;
+      return {
+        id: salon.id,
+        name: salon.name,
+        slug: salon.slug,
+        ownerName: dto.ownerName,
+        email,
+        phone,
+        city: salon.city,
+        timezone: salon.timezone,
+        openTime,
+        closeTime,
+        status: 'DEACTIVATED',
+        bookingUrl: `/#book/${salon.slug}`,
+        staffCount: 0,
+        servicesCount: 0,
+      };
+    });
+  }
+
+  async recalculateSalonActivationStatus(salonId: string): Promise<string> {
+    const [activeStaffCount, activeServicesCount] = await Promise.all([
+      this.prisma.staff.count({
+        where: { salonId, status: 'ACTIVE' },
+      }),
+      this.prisma.service.count({
+        where: { salonId, status: 'ACTIVE' },
+      }),
+    ]);
+
+    const newStatus = activeStaffCount > 0 && activeServicesCount > 0
+      ? 'ACTIVE'
+      : 'DEACTIVATED';
+
+    await this.prisma.salon.update({
+      where: { id: salonId },
+      data: { status: newStatus as any },
+    });
+
+    return newStatus;
+  }
+
+  async toggleSalonStatus(salonId: string) {
+    const salon = await this.prisma.salon.findUnique({ where: { id: salonId } });
+    if (!salon) throw new NotFoundException('Salon not found.');
+
+    let newStatus: string;
+    if (salon.status === 'ACTIVE') {
+      newStatus = 'DEACTIVATED';
+    } else {
+      // Must have at least 1 active staff and 1 active service to activate
+      const [staffCount, svcCount] = await Promise.all([
+        this.prisma.staff.count({ where: { salonId, status: 'ACTIVE' } }),
+        this.prisma.service.count({ where: { salonId, status: 'ACTIVE' } }),
+      ]);
+      if (staffCount === 0 || svcCount === 0) {
+        throw new BadRequestException(
+          'Cannot activate salon: Salon must have at least 1 active staff member and 1 active service.',
+        );
+      }
+      newStatus = 'ACTIVE';
+    }
+
+    return this.prisma.salon.update({
+      where: { id: salonId },
+      data: { status: newStatus as any },
     });
   }
 
@@ -258,16 +340,7 @@ export class SalonsService {
     });
   }
 
-  async toggleSalonStatus(salonId: string) {
-    const salon = await this.prisma.salon.findUnique({ where: { id: salonId } });
-    if (!salon) throw new NotFoundException('Salon not found.');
 
-    const newStatus = salon.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE';
-    return this.prisma.salon.update({
-      where: { id: salonId },
-      data: { status: newStatus },
-    });
-  }
 
   // -------------------------------------------------------------
   // SALON ADMIN METHODS

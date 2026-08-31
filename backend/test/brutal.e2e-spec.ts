@@ -1088,9 +1088,11 @@ describe('🔥 BRUTAL E2E: Full System Production Readiness', () => {
         .set('Authorization', `Bearer ${platformAdminToken}`)
         .send({
           name: 'E2E Platform Test Salon',
-          phone: '+911234567890',
+          phone: '+919876543210',
           email: `platform-test-${Date.now()}@test.com`,
           ownerName: 'Platform Test Owner',
+          password: 'Password123!',
+          city: 'Indore',
         })
         .expect(201);
 

@@ -108,4 +108,13 @@ export class StaffController {
   ) {
     return this.staffService.deleteBreak(salonId, staffId, breakId);
   }
+
+  @Roles(UserRole.SALON_ADMIN)
+  @Delete(':id')
+  async deleteStaff(
+    @CurrentSalonId() salonId: string,
+    @Param('id') staffId: string,
+  ) {
+    return this.staffService.deleteStaff(salonId, staffId);
+  }
 }
