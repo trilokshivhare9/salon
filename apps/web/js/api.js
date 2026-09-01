@@ -1,13 +1,7 @@
-const isLocalNetwork = (
-  window.location.hostname === 'localhost' ||
-  window.location.hostname === '127.0.0.1' ||
-  window.location.hostname.startsWith('192.168.') ||
-  window.location.hostname.startsWith('10.') ||
-  window.location.hostname.startsWith('172.')
-);
+const useLocal = new URLSearchParams(window.location.search).get('local') === '1' || localStorage.getItem('use_local_backend') === 'true';
 
-export const API_BASE = isLocalNetwork
-  ? `http://${window.location.hostname}:3000/api/v1`
+export const API_BASE = useLocal
+  ? `http://${window.location.hostname || 'localhost'}:3000/api/v1`
   : 'https://salon-api-tuwo.onrender.com/api/v1';
 
 export class ApiClient {
