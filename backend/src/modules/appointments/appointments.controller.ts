@@ -28,7 +28,7 @@ import { map } from 'rxjs/operators';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('appointments')
 export class AppointmentsController {
-  constructor(private readonly appointmentsService: AppointmentsService) {}
+  constructor(private readonly appointmentsService: AppointmentsService) { }
 
   @Public()
   @Sse('stream/:salonId')

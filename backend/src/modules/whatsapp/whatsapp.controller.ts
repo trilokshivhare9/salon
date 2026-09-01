@@ -138,27 +138,33 @@ export class WhatsAppController {
           salon = await this.prisma.salon.findFirst({ where: { status: 'ACTIVE' } });
         }
 
-        // Persist Inbound Log to database
-        await this.whatsappService.recordInboundLog(
-          salon?.id || null,
-          fromPhone,
-          text,
-          interactiveId,
-          payload,
-        );
+        // Process asynchronously so Meta Webhook receives immediate 200 OK (<20ms)
+        (async () => {
+          try {
+            await this.whatsappService.recordInboundLog(
+              salon?.id || null,
+              fromPhone,
+              text,
+              interactiveId,
+              payload,
+            );
 
-        if (salon) {
-          this.logger.log(`[Meta Webhook] 🏢 Routed message to salon: "${salon.name}" (${salon.id})`);
-          await this.whatsappService.handleIncomingMessage(
-            salon.id,
-            fromPhone,
-            text,
-            interactiveId,
-            phoneNumberId,
-          );
-        } else {
-          this.logger.warn(`[Meta Webhook] ⚠️ No active salon found to process incoming message from ${fromPhone}`);
-        }
+            if (salon) {
+              this.logger.log(`[Meta Webhook] 🏢 Routed message to salon: "${salon.name}" (${salon.id})`);
+              await this.whatsappService.handleIncomingMessage(
+                salon.id,
+                fromPhone,
+                text,
+                interactiveId,
+                phoneNumberId,
+              );
+            } else {
+              this.logger.warn(`[Meta Webhook] ⚠️ No active salon found to process incoming message from ${fromPhone}`);
+            }
+          } catch (asyncErr) {
+            this.logger.error('[Meta Webhook] Async error processing incoming message:', asyncErr);
+          }
+        })();
       }
 
       return res.status(HttpStatus.OK).send('EVENT_RECEIVED');

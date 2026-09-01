@@ -67,29 +67,62 @@ describe('💈 BRUTAL Barber Availability & Busy-Time Suite', () => {
     // Login as Salon Admin
     const loginRes = await request(app.getHttpServer())
       .post('/api/v1/auth/login')
-      .send({ email: 'owner@glamourstudio.com', password: 'Password123!' })
+      .send({ email: 'trilok@gmail.com', password: 'Password123!' })
       .expect(200);
 
     salonAdminToken = loginRes.body.data.accessToken;
     salonId = loginRes.body.data.user.salonId;
     salonSlug = loginRes.body.data.user.salon.slug;
 
-    // Fetch 30-min and 60-min services
-    const s30 = await prisma.service.findFirst({
+    // Fetch or create 30-min and 60-min services
+    let s30 = await prisma.service.findFirst({
       where: { salonId, durationMinutes: 30, status: 'ACTIVE' },
     });
-    const s60 = await prisma.service.findFirst({
+    if (!s30) {
+      s30 = await prisma.service.create({
+        data: {
+          salonId,
+          name: 'Classic Haircut 30m',
+          durationMinutes: 30,
+          price: 150,
+          category: 'Hair',
+        },
+      });
+    }
+
+    let s60 = await prisma.service.findFirst({
       where: { salonId, durationMinutes: 60, status: 'ACTIVE' },
     });
+    if (!s60) {
+      s60 = await prisma.service.create({
+        data: {
+          salonId,
+          name: 'Deluxe Spa 60m',
+          durationMinutes: 60,
+          price: 300,
+          category: 'Spa',
+        },
+      });
+    }
 
-    service30MinId = s30!.id;
-    service60MinId = s60!.id;
+    service30MinId = s30.id;
+    service60MinId = s60.id;
 
-    // Fetch active staff (Barber A & Barber B)
-    const staffList = await prisma.staff.findMany({
+    // Fetch or create active staff (Barber A & Barber B)
+    let staffList = await prisma.staff.findMany({
       where: { salonId, status: 'ACTIVE' },
       take: 2,
     });
+
+    if (staffList.length < 2) {
+      const barber1 = await prisma.staff.create({
+        data: { salonId, name: 'Barber Alpha', status: 'ACTIVE' },
+      });
+      const barber2 = await prisma.staff.create({
+        data: { salonId, name: 'Barber Beta', status: 'ACTIVE' },
+      });
+      staffList = [barber1, barber2];
+    }
 
     barberAId = staffList[0].id;
     barberBId = staffList[1].id;
@@ -109,12 +142,17 @@ describe('💈 BRUTAL Barber Availability & Busy-Time Suite', () => {
     await prisma.staffService.deleteMany({
       where: { serviceId: service60MinId },
     });
-    await prisma.staffService.createMany({
-      data: [
-        { staffId: barberAId, serviceId: service60MinId },
-        { staffId: barberBId, serviceId: service60MinId },
-      ],
-    });
+    // Ensure working hours exist for all days for both barbers
+    const days = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'] as const;
+    for (const barberId of [barberAId, barberBId]) {
+      for (const day of days) {
+        await prisma.staffWorkingHours.upsert({
+          where: { staffId_dayOfWeek: { staffId: barberId, dayOfWeek: day } },
+          create: { staffId: barberId, dayOfWeek: day, isWorking: true, startTime: '09:00', endTime: '21:00' },
+          update: { isWorking: true, startTime: '09:00', endTime: '21:00' },
+        });
+      }
+    }
 
     // Clean any pre-existing appointments, breaks, or blocked times for testDate
     await cleanTestData();
@@ -122,6 +160,12 @@ describe('💈 BRUTAL Barber Availability & Busy-Time Suite', () => {
 
   afterAll(async () => {
     await cleanTestData();
+    await prisma.staffService.deleteMany({
+      where: { service: { salonId, name: { in: ['Classic Haircut 30m', 'Deluxe Spa 60m'] } } },
+    });
+    await prisma.service.deleteMany({
+      where: { salonId, name: { in: ['Classic Haircut 30m', 'Deluxe Spa 60m'] } },
+    });
     await app.close();
   }, 10000);
 

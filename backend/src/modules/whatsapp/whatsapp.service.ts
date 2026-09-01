@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../database/prisma.service';
-import { AvailabilityService } from '../availability/availability.service';
+import { AvailabilityService, AvailableSlotResponse } from '../availability/availability.service';
 import { AppointmentsService } from '../appointments/appointments.service';
 import { ConversationState, BookingSource, MessageDirection, AppointmentStatus } from '@prisma/client';
 import { DateTime } from 'luxon';
@@ -503,6 +503,56 @@ export class WhatsAppService {
     );
   }
 
+  /**
+   * Universal Time Slot Parser: Handles list taps, clean times, 12h AM/PM, and list indices
+   */
+  public parseTimeSlot(
+    input: string,
+    availableSlots: AvailableSlotResponse[],
+  ): AvailableSlotResponse | null {
+    if (!availableSlots || availableSlots.length === 0) return null;
+
+    const raw = input.trim();
+    // 1. Direct interactive IDs: slot_10:00, rslot_10:00
+    const cleanId = raw.replace(/^r?slot_/, '').trim();
+    const exactMatch = availableSlots.find((s) => s.startTime === cleanId);
+    if (exactMatch) return exactMatch;
+
+    // 2. Numeric index: "1", "2", "3"
+    const indexNum = parseInt(raw, 10);
+    if (!isNaN(indexNum) && indexNum >= 1 && indexNum <= availableSlots.length) {
+      return availableSlots[indexNum - 1];
+    }
+
+    // 3. Regex parser: matches "09:30", "9:30", "9:30 am", "9:30pm", "9pm", "14:30"
+    const timeRegex = /(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i;
+    const match = raw.match(timeRegex);
+    if (match) {
+      let hours = parseInt(match[1], 10);
+      const minutes = match[2] ? match[2] : '00';
+      const meridian = match[3]?.toLowerCase();
+
+      if (meridian === 'pm' && hours < 12) hours += 12;
+      if (meridian === 'am' && hours === 12) hours = 0;
+
+      const formatted24 = `${hours.toString().padStart(2, '0')}:${minutes.padStart(2, '0')}`;
+      const found24 = availableSlots.find((s) => s.startTime === formatted24);
+      if (found24) return found24;
+
+      const foundFuzzy = availableSlots.find((s) => {
+        const [sh, sm] = s.startTime.split(':').map((v) => parseInt(v, 10));
+        return sh === hours && sm === parseInt(minutes, 10);
+      });
+      if (foundFuzzy) return foundFuzzy;
+    }
+
+    // 4. Substring contains: e.g. "⏰ 10:00"
+    const subMatch = availableSlots.find((s) => raw.includes(s.startTime));
+    if (subMatch) return subMatch;
+
+    return null;
+  }
+
   // Core Conversation Handler for both Meta Webhook and Web Simulator
   async handleIncomingMessage(
     salonId: string,
@@ -542,6 +592,31 @@ export class WhatsAppService {
           salonId,
           customerPhone: cleanNumber,
           state: ConversationState.START,
+        },
+      });
+    }
+
+    // Stale Conversation Recovery (Auto-reset if idle for > 2 hours in an unfinished booking step)
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    const isStale =
+      conversation.updatedAt < twoHoursAgo &&
+      ![ConversationState.START as string, ConversationState.ACTIVE_HUB as string].includes(conversation.state);
+
+    if (isStale) {
+      this.logger.log(`[WhatsAppService] ⏳ Session for ${cleanNumber} expired (idle > 2h). Resetting to fresh state.`);
+      const activeAppts = await this.findActiveUpcomingAppointments(salonId, cleanNumber);
+      if (activeAppts.length > 0) {
+        return this.showActiveBookingHub(conversation.id, cleanNumber, salon, activeAppts[0], phoneNumberId);
+      }
+      conversation = await this.prisma.conversation.update({
+        where: { id: conversation.id },
+        data: {
+          state: ConversationState.START,
+          selectedServiceId: null,
+          selectedStaffId: null,
+          selectedDate: null,
+          selectedStartTime: null,
+          activeAppointmentId: null,
         },
       });
     }
@@ -860,7 +935,7 @@ export class WhatsAppService {
         await this.prisma.conversation.update({
           where: { id: conversation.id },
           data: {
-            selectedDate: targetDate.toJSDate(),
+            selectedDate: new Date(`${dateStr}T00:00:00Z`),
             state: ConversationState.SELECT_RESCHEDULE_TIME,
           },
         });
@@ -889,14 +964,45 @@ export class WhatsAppService {
       }
 
       case ConversationState.SELECT_RESCHEDULE_TIME: {
-        const slotTime = input.replace('rslot_', '').replace('slot_', '');
         const tz = salon.timezone || 'Asia/Kolkata';
-        const dateStr = DateTime.fromJSDate(conversation.selectedDate!, { zone: tz }).toISODate()!;
+        const dateStr = conversation.selectedDate
+          ? DateTime.fromJSDate(conversation.selectedDate).toUTC().toISODate()!
+          : DateTime.now().setZone(tz).toISODate()!;
 
         if (!conversation.activeAppointmentId) {
           const reply = `Session expired. Type Hi to start again.`;
           await this.sendMetaMessage(cleanNumber, { textBody: reply }, phoneNumberId);
           return { replyMessage: reply, state: ConversationState.START };
+        }
+
+        const availability = await this.availabilityService.getAvailableSlots(
+          salonId,
+          conversation.selectedServiceId || salon.services[0].id,
+          dateStr,
+          conversation.selectedStaffId || undefined,
+        );
+
+        const selectedSlot = this.parseTimeSlot(input, availability.availableSlots);
+        if (!selectedSlot) {
+          const slotsToShow = availability.availableSlots.slice(0, 10);
+          const listRows: InteractiveListRow[] = slotsToShow.map((s) => ({
+            id: `rslot_${s.startTime}`,
+            title: `⏰ ${s.startTime}`,
+            description: `Available slot`,
+          }));
+          const reply = `❌ Please select a new time slot from the list:`;
+          await this.sendMetaMessage(
+            cleanNumber,
+            {
+              headerText: 'Reschedule Slot',
+              bodyText: reply,
+              buttonText: '⏰ Choose New Time',
+              interactiveType: 'list',
+              listRows,
+            },
+            phoneNumberId,
+          );
+          return { replyMessage: reply, state: ConversationState.SELECT_RESCHEDULE_TIME };
         }
 
         try {
@@ -905,7 +1011,7 @@ export class WhatsAppService {
             conversation.activeAppointmentId,
             {
               newDate: dateStr,
-              newStartTime: slotTime,
+              newStartTime: selectedSlot.startTime,
               staffId: conversation.selectedStaffId || undefined,
             },
           );
@@ -1221,7 +1327,7 @@ export class WhatsAppService {
         await this.prisma.conversation.update({
           where: { id: conversation.id },
           data: {
-            selectedDate: targetDate.toJSDate(),
+            selectedDate: new Date(`${dateStr}T00:00:00Z`),
             state: ConversationState.SELECT_TIME,
           },
         });
@@ -1252,7 +1358,9 @@ export class WhatsAppService {
 
       case ConversationState.SELECT_TIME: {
         const tz = salon.timezone || 'Asia/Kolkata';
-        const targetDate = DateTime.fromJSDate(conversation.selectedDate!, { zone: tz }).toISODate()!;
+        const targetDate = conversation.selectedDate
+          ? DateTime.fromJSDate(conversation.selectedDate).toUTC().toISODate()!
+          : DateTime.now().setZone(tz).toISODate()!;
 
         const availability = await this.availabilityService.getAvailableSlots(
           salonId,
@@ -1261,24 +1369,31 @@ export class WhatsAppService {
           conversation.selectedStaffId || undefined,
         );
 
-        let selectedSlot = null;
-        if (input.startsWith('slot_')) {
-          const slotTime = input.replace('slot_', '');
-          selectedSlot = availability.availableSlots.find((s) => s.startTime === slotTime);
-        } else {
-          const num = parseInt(input, 10);
-          if (!isNaN(num) && num >= 1 && num <= availability.availableSlots.length) {
-            selectedSlot = availability.availableSlots[num - 1];
-          } else {
-            selectedSlot = availability.availableSlots.find((s) => s.startTime === input);
-          }
-        }
+        const selectedSlot = this.parseTimeSlot(input, availability.availableSlots);
 
         if (!selectedSlot) {
+          if (availability.availableSlots.length === 0) {
+            const reply = `⚠️ Sorry, no slots are currently available on *${targetDate}*. Please choose another date:`;
+            await this.sendMetaMessage(
+              cleanNumber,
+              {
+                bodyText: reply,
+                interactiveType: 'button',
+                buttons: [
+                  { id: 'date_1', title: 'Today' },
+                  { id: 'date_2', title: 'Tomorrow' },
+                ],
+              },
+              phoneNumberId,
+            );
+            return { replyMessage: reply, state: ConversationState.SELECT_DATE };
+          }
+
           const slotsToShow = availability.availableSlots.slice(0, 10);
           const listRows = slotsToShow.map((s) => ({
             id: `slot_${s.startTime}`,
             title: `⏰ ${s.startTime}`,
+            description: `Available with ${s.availableStaffCount} stylist(s)`,
           }));
           await this.sendMetaMessage(
             cleanNumber,
@@ -1361,7 +1476,9 @@ export class WhatsAppService {
         });
 
         const tz = salon.timezone || 'Asia/Kolkata';
-        const dateStr = DateTime.fromJSDate(conversation.selectedDate!, { zone: tz }).toISODate()!;
+        const dateStr = conversation.selectedDate
+          ? DateTime.fromJSDate(conversation.selectedDate).toUTC().toISODate()!
+          : DateTime.now().setZone(tz).toISODate()!;
         const timeStr = DateTime.fromJSDate(conversation.selectedStartTime!, { zone: tz }).toFormat('hh:mm a');
         const selectedService = salon.services.find((s) => s.id === conversation.selectedServiceId);
         const selectedStaff = salon.staff.find((st) => st.id === conversation.selectedStaffId);
@@ -1391,7 +1508,9 @@ export class WhatsAppService {
           normalized === 'ok'
         ) {
           const tz = salon.timezone || 'Asia/Kolkata';
-          const dateStr = DateTime.fromJSDate(conversation.selectedDate!, { zone: tz }).toISODate()!;
+          const dateStr = conversation.selectedDate
+            ? DateTime.fromJSDate(conversation.selectedDate).toUTC().toISODate()!
+            : DateTime.now().setZone(tz).toISODate()!;
           const timeSlotStr = DateTime.fromJSDate(conversation.selectedStartTime!, { zone: tz }).toFormat('HH:mm');
 
           try {

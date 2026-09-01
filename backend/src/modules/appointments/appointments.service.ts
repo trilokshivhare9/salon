@@ -37,7 +37,7 @@ export class AppointmentsService {
     private availabilityService: AvailabilityService,
     @Inject(forwardRef(() => WhatsAppService))
     private whatsappService: WhatsAppService,
-  ) {}
+  ) { }
 
   // Observable stream for SSE filtered by salonId
   getSalonEvents(salonId: string): Observable<SalonRealtimeEvent> {
