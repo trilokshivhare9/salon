@@ -15,13 +15,29 @@ export class ReportsService {
       ? DateTime.fromISO(dateStr, { zone: timezone })
       : DateTime.now().setZone(timezone);
 
-    const dateJs = targetDate.startOf('day').toJSDate();
+    const targetDateIso = targetDate.toISODate()!;
+    const dayStart = targetDate.startOf('day').toJSDate();
+    const dayEnd = targetDate.endOf('day').toJSDate();
+    const dateUtcMidnight = new Date(`${targetDateIso}T00:00:00.000Z`);
 
-    // 1. Appointments on target date
+    // 1. Appointments on target date (matches by startTime range OR date field)
     const todayAppointments = await this.prisma.appointment.findMany({
       where: {
         salonId,
-        date: dateJs,
+        OR: [
+          {
+            startTime: {
+              gte: dayStart,
+              lte: dayEnd,
+            },
+          },
+          {
+            date: dateUtcMidnight,
+          },
+          {
+            date: dayStart,
+          },
+        ],
       },
       include: {
         customer: true,
