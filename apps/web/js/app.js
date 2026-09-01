@@ -108,7 +108,7 @@ class App {
             <form id="salon-login-form">
               <div class="form-group">
                 <label>Store Email Address</label>
-                <input type="email" class="form-control" id="salon-email" value="trilok@gmail.com" placeholder="owner@salon.com" required />
+                <input type="email" class="form-control" id="salon-email" placeholder="owner@salon.com" autocomplete="email" required />
               </div>
 
               <div class="form-group">
@@ -116,7 +116,7 @@ class App {
                   <label style="margin-bottom: 0;">Password</label>
                   <a href="#" id="toggle-salon-pass" style="font-size: 0.75rem; color: var(--accent); font-weight: 600;">👁️ Show Password</a>
                 </div>
-                <input type="password" class="form-control" id="salon-password" value="Password123!" placeholder="••••••••" required />
+                <input type="password" class="form-control" id="salon-password" placeholder="••••••••" autocomplete="current-password" required />
               </div>
 
               <div id="salon-login-error" style="color: var(--danger); font-size: 0.85rem; margin-bottom: 14px; display: none;"></div>
@@ -194,7 +194,7 @@ class App {
             <form id="superadmin-login-form">
               <div class="form-group">
                 <label>Super Admin Email</label>
-                <input type="email" class="form-control" id="super-email" value="admin@salonsaas.com" placeholder="admin@salonsaas.com" required />
+                <input type="email" class="form-control" id="super-email" placeholder="admin@salonsaas.com" autocomplete="email" required />
               </div>
 
               <div class="form-group">
@@ -202,7 +202,7 @@ class App {
                   <label style="margin-bottom: 0;">Master Password</label>
                   <a href="#" id="toggle-super-pass" style="font-size: 0.75rem; color: var(--accent); font-weight: 600;">👁️ Show Password</a>
                 </div>
-                <input type="password" class="form-control" id="super-password" value="Password123!" placeholder="••••••••" required />
+                <input type="password" class="form-control" id="super-password" placeholder="••••••••" autocomplete="current-password" required />
               </div>
 
               <div id="super-login-error" style="color: var(--danger); font-size: 0.85rem; margin-bottom: 14px; display: none;"></div>
