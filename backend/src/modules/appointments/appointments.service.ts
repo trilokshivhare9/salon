@@ -432,4 +432,76 @@ export class AppointmentsService {
 
     return newAppointment;
   }
+
+  async addServiceToAppointment(
+    salonId: string,
+    appointmentId: string,
+    extraServiceId: string,
+  ): Promise<{ success: boolean; conflict?: boolean; conflictBooking?: any; updatedAppointment?: any; extraService?: any; message?: string }> {
+    const appointment = await this.getAppointmentById(salonId, appointmentId);
+
+    if (appointment.status !== AppointmentStatus.CONFIRMED && appointment.status !== AppointmentStatus.CHECKED_IN) {
+      return { success: false, message: 'Only active confirmed appointments can be updated.' };
+    }
+
+    const extraService = await this.prisma.service.findFirst({
+      where: { id: extraServiceId, salonId, status: 'ACTIVE' },
+    });
+
+    if (!extraService) {
+      return { success: false, message: 'Extra service not found or inactive.' };
+    }
+
+    const currentEndTime = new Date(appointment.endTime);
+    const newEndTime = new Date(currentEndTime.getTime() + extraService.durationMinutes * 60 * 1000);
+
+    // Check if the stylist has an overlapping appointment between currentEndTime and newEndTime
+    const conflict = await this.prisma.appointment.findFirst({
+      where: {
+        salonId,
+        staffId: appointment.staffId,
+        id: { not: appointment.id },
+        status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN, AppointmentStatus.IN_SERVICE] },
+        startTime: { lt: newEndTime },
+        endTime: { gt: currentEndTime },
+      },
+      include: { customer: true },
+    });
+
+    if (conflict) {
+      return {
+        success: false,
+        conflict: true,
+        conflictBooking: conflict,
+        extraService,
+        message: `Specialist ${appointment.staff.name} is booked right after at ${DateTime.fromJSDate(conflict.startTime).toFormat('hh:mm a')}.`,
+      };
+    }
+
+    // Update appointment with extra duration and price
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const appt = await tx.appointment.update({
+        where: { id: appointment.id },
+        data: {
+          endTime: newEndTime,
+          price: { increment: extraService.price },
+          notes: `${appointment.notes || ''} | + ${extraService.name} (₹${extraService.price})`.trim(),
+        },
+        include: { customer: true, staff: true, service: true },
+      });
+
+      await tx.appointmentStatusHistory.create({
+        data: {
+          appointmentId: appointment.id,
+          previousStatus: appointment.status,
+          newStatus: appointment.status,
+          reason: `Added extra service: ${extraService.name} (₹${extraService.price}, +${extraService.durationMinutes}m).`,
+        },
+      });
+
+      return appt;
+    });
+
+    return { success: true, updatedAppointment: updated, extraService };
+  }
 }

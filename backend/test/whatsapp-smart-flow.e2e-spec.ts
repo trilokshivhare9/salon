@@ -25,8 +25,12 @@ describe('WhatsApp Smart Frictionless Flow (E2E Tests)', () => {
     prisma = app.get(PrismaService);
     whatsappService = app.get(WhatsAppService);
 
-    // Clean up test phone conversation
-    await prisma.conversation.deleteMany({ where: { customerPhone: testCustomerPhone.replace('+', '') } });
+    // Clean up test phone conversation & appointments
+    await prisma.conversation.deleteMany({ where: { customerPhone: testCustomerPhone } });
+    await prisma.appointmentStatusHistory.deleteMany({
+      where: { appointment: { customer: { phone: testCustomerPhone } } },
+    });
+    await prisma.appointment.deleteMany({ where: { customer: { phone: testCustomerPhone } } });
     await prisma.customer.deleteMany({ where: { phone: testCustomerPhone } });
 
     // Setup or get active test salon with 1 staff and 1 service
@@ -44,6 +48,24 @@ describe('WhatsApp Smart Frictionless Flow (E2E Tests)', () => {
           phone: '+917999817743',
           status: 'ACTIVE',
         },
+        include: { services: true, staff: { include: { services: true } } },
+      });
+    }
+
+    // Keep only 1 active service for testSalon to test single-service fast track
+    if (testSalon.services.length > 1) {
+      const extraServices = testSalon.services.slice(1);
+      await prisma.staffService.deleteMany({
+        where: { serviceId: { in: extraServices.map((s) => s.id) } },
+      });
+      await prisma.appointment.deleteMany({
+        where: { serviceId: { in: extraServices.map((s) => s.id) } },
+      });
+      await prisma.service.deleteMany({
+        where: { id: { in: extraServices.map((s) => s.id) } },
+      });
+      testSalon = await prisma.salon.findFirst({
+        where: { id: testSalon.id },
         include: { services: true, staff: { include: { services: true } } },
       });
     }
@@ -131,15 +153,171 @@ describe('WhatsApp Smart Frictionless Flow (E2E Tests)', () => {
     expect(res.replyMessage).toContain('Select Date');
   });
 
-  it('5. Selecting Date "date_1" (Today) should present available Time Slots', async () => {
+  it('5. Selecting Date "date_2" (Tomorrow) should present available Time Slots', async () => {
     const res = await whatsappService.handleIncomingMessage(
       testSalon.id,
       testCustomerPhone,
-      'date_1',
-      'date_1',
+      'date_2',
+      'date_2',
     );
 
     expect(res.state).toBe(ConversationState.SELECT_TIME);
     expect(res.replyMessage).toContain('Choose an appointment time slot');
+  });
+
+  it('6. Full Booking Confirmation creates appointment in DB', async () => {
+    // Pick the first time slot
+    const slotsRes = await whatsappService.handleIncomingMessage(
+      testSalon.id,
+      testCustomerPhone,
+      'slot_10:00',
+      'slot_10:00',
+    );
+
+    // If prompts for name
+    if (slotsRes.state === ConversationState.COLLECT_NAME) {
+      await whatsappService.handleIncomingMessage(
+        testSalon.id,
+        testCustomerPhone,
+        'Trilok Tester',
+      );
+    }
+
+    // Confirm booking
+    const confirmRes = await whatsappService.handleIncomingMessage(
+      testSalon.id,
+      testCustomerPhone,
+      'btn_confirm_yes',
+      'btn_confirm_yes',
+    );
+
+    expect(confirmRes.state).toBe(ConversationState.COMPLETED);
+    expect(confirmRes.replyMessage).toContain('APPOINTMENT CONFIRMED');
+
+    // Verify appointment in DB
+    const appt = await prisma.appointment.findFirst({
+      where: {
+        salonId: testSalon.id,
+        customer: { phone: testCustomerPhone },
+        status: 'CONFIRMED',
+      },
+    });
+    expect(appt).toBeDefined();
+  });
+
+  it('7. Active Booking Hub: Greeting "Hi" when user has active booking displays Active Hub with 3 actions', async () => {
+    const res = await whatsappService.handleIncomingMessage(
+      testSalon.id,
+      testCustomerPhone,
+      'Hi',
+    );
+
+    expect(res.state).toBe(ConversationState.ACTIVE_HUB);
+    expect(res.replyMessage).toContain('Your Upcoming Appointment');
+    expect(res.replyMessage).toContain(testService.name);
+  });
+
+  it('8. Add-on Flow: Clicking "btn_add_service" shows extra services and adds to appointment', async () => {
+    // Create a 2nd service in the salon for add-on testing
+    const extraService = await prisma.service.create({
+      data: {
+        salonId: testSalon.id,
+        name: 'Head Massage',
+        price: 150,
+        durationMinutes: 20,
+        category: 'Hair Care & Styling',
+        status: 'ACTIVE',
+      },
+    });
+
+    const addonPrompt = await whatsappService.handleIncomingMessage(
+      testSalon.id,
+      testCustomerPhone,
+      'btn_add_service',
+      'btn_add_service',
+    );
+
+    expect(addonPrompt.state).toBe(ConversationState.SELECT_ADDON);
+
+    // Select the addon
+    const addonConfirm = await whatsappService.handleIncomingMessage(
+      testSalon.id,
+      testCustomerPhone,
+      `addon_${extraService.id}`,
+      `addon_${extraService.id}`,
+    );
+
+    expect(addonConfirm.replyMessage).toContain('Added to Your Visit');
+    expect(addonConfirm.replyMessage).toContain(extraService.name);
+
+    // Verify appointment updated in DB
+    const appt = await prisma.appointment.findFirst({
+      where: {
+        salonId: testSalon.id,
+        customer: { phone: testCustomerPhone },
+        status: 'CONFIRMED',
+      },
+    });
+    expect(appt?.notes).toContain(extraService.name);
+
+    // Cleanup extra service
+    await prisma.service.delete({ where: { id: extraService.id } });
+  });
+
+  it('9. Reschedule Flow: Selecting "btn_reschedule" updates date and time cleanly', async () => {
+    // Re-trigger active hub
+    await whatsappService.handleIncomingMessage(testSalon.id, testCustomerPhone, 'Hi');
+
+    const resDatePrompt = await whatsappService.handleIncomingMessage(
+      testSalon.id,
+      testCustomerPhone,
+      'btn_reschedule',
+      'btn_reschedule',
+    );
+
+    expect(resDatePrompt.state).toBe(ConversationState.SELECT_RESCHEDULE_DATE);
+
+    // Pick Day After Tomorrow
+    const resSlotPrompt = await whatsappService.handleIncomingMessage(
+      testSalon.id,
+      testCustomerPhone,
+      'rdate_3',
+      'rdate_3',
+    );
+
+    expect(resSlotPrompt.state).toBe(ConversationState.SELECT_RESCHEDULE_TIME);
+  });
+
+  it('10. Cancellation Flow: Selecting "btn_cancel_appt" frees up the slot and logs cancellation', async () => {
+    // Re-trigger active hub
+    await whatsappService.handleIncomingMessage(testSalon.id, testCustomerPhone, 'Hi');
+
+    const cancelPrompt = await whatsappService.handleIncomingMessage(
+      testSalon.id,
+      testCustomerPhone,
+      'btn_cancel_appt',
+      'btn_cancel_appt',
+    );
+
+    expect(cancelPrompt.state).toBe(ConversationState.CONFIRM_CANCEL);
+
+    const cancelConfirm = await whatsappService.handleIncomingMessage(
+      testSalon.id,
+      testCustomerPhone,
+      'btn_cancel_yes',
+      'btn_cancel_yes',
+    );
+
+    expect(cancelConfirm.state).toBe(ConversationState.START);
+    expect(cancelConfirm.replyMessage).toContain('Appointment Cancelled');
+
+    // Verify next "Hi" returns standard booking menu (no trapped state)
+    const nextHi = await whatsappService.handleIncomingMessage(
+      testSalon.id,
+      testCustomerPhone,
+      'Hi',
+    );
+    expect(nextHi.state).toBe(ConversationState.START);
+    expect(nextHi.replyMessage).toContain('Welcome to royal');
   });
 });

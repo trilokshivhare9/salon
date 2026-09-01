@@ -78,6 +78,12 @@ enum NotificationStatus {
 
 enum ConversationState {
   START
+  ACTIVE_HUB
+  SELECT_ADDON
+  SELECT_RESCHEDULE_DATE
+  SELECT_RESCHEDULE_TIME
+  CONFIRM_CANCEL
+  SELECT_APPOINTMENT
   SELECT_SERVICE
   SELECT_STAFF
   SELECT_DATE
@@ -436,6 +442,7 @@ model Conversation {
   selectedDate         DateTime?            @map("selected_date") @db.Date
   selectedStartTime    DateTime?            @map("selected_start_time") @db.Timestamptz
   customerName         String?              @map("customer_name")
+  activeAppointmentId  String?              @map("active_appointment_id")
   updatedAt            DateTime             @updatedAt @map("updated_at")
 
   salon                Salon                @relation(fields: [salonId], references: [id], onDelete: Cascade)
