@@ -3,6 +3,8 @@ import {
   Logger,
   NotFoundException,
   BadRequestException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../database/prisma.service';
@@ -30,6 +32,7 @@ export class WhatsAppService {
     private prisma: PrismaService,
     private configService: ConfigService,
     private availabilityService: AvailabilityService,
+    @Inject(forwardRef(() => AppointmentsService))
     private appointmentsService: AppointmentsService,
   ) {}
 
@@ -1420,6 +1423,7 @@ export class WhatsAppService {
             );
             return { replyMessage: reply, state: ConversationState.COMPLETED, metadata: { appointment } };
           } catch (err) {
+            this.logger.error('WhatsApp booking confirmation error:', err);
             const reply = `⚠️ ${err.message || 'Sorry, this slot was just taken.'}`;
             await this.sendMetaMessage(
               cleanNumber,

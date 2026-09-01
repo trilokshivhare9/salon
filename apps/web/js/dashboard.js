@@ -1,4 +1,5 @@
 import { ApiClient } from './api.js';
+import { RealtimeNotifier } from './realtime.js';
 
 export const SERVICE_CATALOG_PRESETS = [
   {
@@ -70,8 +71,9 @@ export class SalonDashboard {
   constructor(containerId, currentUser = null) {
     this.container = document.getElementById(containerId);
     this.currentUser = currentUser;
-    this.activeTab = 'queue';
+    this.activeTab = 'dashboard';
     this.selectedDate = new Date().toISOString().split('T')[0];
+    this.queueFilter = 'ALL';
     this.summaryData = null;
     this.staffList = [];
     this.servicesList = [];
@@ -84,6 +86,14 @@ export class SalonDashboard {
     try {
       await this.loadData();
       this.render();
+
+      // Connect to Real-time Event Stream for live sync & audio chimes
+      if (this.salonProfile?.id) {
+        this.realtime = new RealtimeNotifier(this.salonProfile.id, async () => {
+          await this.loadData();
+          this.render();
+        });
+      }
     } catch (err) {
       console.error(err);
       this.container.innerHTML = `
@@ -134,36 +144,20 @@ export class SalonDashboard {
     const isDeactivated = this.salonProfile?.status === 'DEACTIVATED' || this.staffList.length === 0 || this.servicesList.length === 0;
 
     this.container.innerHTML = `
-      <!-- Dedicated Salon Header Bar -->
+      <!-- Dedicated Salon Header Bar (Clean & Purpose-Driven) -->
       <header class="portal-header">
         <div class="portal-header-content">
-          <div style="display: flex; align-items: center; gap: 14px;">
+          <div style="display: flex; align-items: center; gap: 12px;">
             <div class="brand-icon-box">✂️</div>
             <div>
               <div style="display: flex; align-items: center; gap: 8px;">
                 <span style="font-family: var(--font-heading); font-size: 1.15rem; font-weight: 800; color: #fff;">${salonName}</span>
                 <span class="badge ${isDeactivated ? 'badge-cancelled' : 'badge-completed'}" style="font-size: 0.65rem;">
-                  ${isDeactivated ? 'DEACTIVATED (SETUP REQ)' : '● LIVE & ACTIVE'}
+                  ${isDeactivated ? 'DEACTIVATED' : '● LIVE'}
                 </span>
               </div>
               <div style="font-size: 0.75rem; color: var(--text-muted);">${this.salonProfile?.city || 'India'} • ${this.summaryData.timezone}</div>
             </div>
-          </div>
-
-          <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-            <button class="btn btn-secondary btn-sm" id="btn-copy-invite" title="Copy public booking link" ${isDeactivated ? 'disabled' : ''}>
-              🔗 Copy Booking Link
-            </button>
-            <button class="btn btn-secondary btn-sm" id="btn-open-qr" style="border-color: rgba(37,211,102,0.4); color: #25D366;">
-              📱 QR & WhatsApp Link
-            </button>
-            <button class="btn btn-primary btn-sm" id="btn-fast-walkin">
-              ⚡ + Walk-In Booking
-            </button>
-            <div style="height: 24px; width: 1px; background: var(--border-subtle); margin: 0 4px;"></div>
-            <button class="btn btn-secondary btn-sm" id="btn-logout" style="color: var(--text-muted);">
-              🚪 Logout
-            </button>
           </div>
         </div>
       </header>
@@ -190,13 +184,13 @@ export class SalonDashboard {
           </div>
         ` : ''}
         
-        <!-- Tab Switcher -->
+        <!-- Tab Switcher (Desktop) -->
         <div class="tab-switcher">
+          <button class="nav-tab ${this.activeTab === 'dashboard' ? 'active' : ''}" data-tab="dashboard">🏠 Dashboard</button>
+          <button class="nav-tab ${this.activeTab === 'staff' ? 'active' : ''}" data-tab="staff">👥 Stylists (${this.staffList.length})</button>
           <button class="nav-tab ${this.activeTab === 'queue' ? 'active' : ''}" data-tab="queue">⚡ Live Chair Queue</button>
-          <button class="nav-tab ${this.activeTab === 'staff' ? 'active' : ''}" data-tab="staff">👥 Stylists & Capacity (${this.staffList.length})</button>
           <button class="nav-tab ${this.activeTab === 'services' ? 'active' : ''}" data-tab="services">✂️ Service Menu (${this.servicesList.length})</button>
-          <button class="nav-tab ${this.activeTab === 'customers' ? 'active' : ''}" data-tab="customers">👤 VIP Client CRM</button>
-          <button class="nav-tab ${this.activeTab === 'whatsapp-logs' ? 'active' : ''}" data-tab="whatsapp-logs">💬 WhatsApp Database Logs</button>
+          <button class="nav-tab ${this.activeTab === 'profile' ? 'active' : ''}" data-tab="profile">⚙️ Profile & Features</button>
         </div>
 
         <!-- Dynamic Tab Body -->
@@ -204,6 +198,42 @@ export class SalonDashboard {
           ${this.getTabHtml()}
         </div>
       </main>
+
+      <!-- Mobile Bottom Navigation Bar (App-First Design with Center Hero Queue) -->
+      <nav class="mobile-bottom-nav">
+        <!-- 1. Left: Dashboard -->
+        <button class="bottom-nav-item ${this.activeTab === 'dashboard' ? 'active' : ''}" data-tab="dashboard">
+          <span class="nav-icon">🏠</span>
+          <span>Home</span>
+        </button>
+
+        <!-- 2. Stylists -->
+        <button class="bottom-nav-item ${this.activeTab === 'staff' ? 'active' : ''}" data-tab="staff">
+          <span class="nav-icon">👥</span>
+          <span>Stylists</span>
+        </button>
+
+        <!-- 3. CENTER HERO: Queue -->
+        <button class="bottom-nav-item center-hero ${this.activeTab === 'queue' ? 'active' : ''}" data-tab="queue">
+          <div class="hero-icon-wrapper">
+            ⚡
+            ${this.summaryData?.statusCounts?.total > 0 ? `<span class="bottom-nav-badge">${this.summaryData.statusCounts.total}</span>` : ''}
+          </div>
+          <span>Queue</span>
+        </button>
+
+        <!-- 4. Services -->
+        <button class="bottom-nav-item ${this.activeTab === 'services' ? 'active' : ''}" data-tab="services">
+          <span class="nav-icon">✂️</span>
+          <span>Services</span>
+        </button>
+
+        <!-- 5. Right: Profile & Features Hub -->
+        <button class="bottom-nav-item ${this.activeTab === 'profile' ? 'active' : ''}" data-tab="profile">
+          <span class="nav-icon">⚙️</span>
+          <span>Profile</span>
+        </button>
+      </nav>
 
       <!-- Modals Container -->
       <div id="modal-container"></div>
@@ -214,26 +244,31 @@ export class SalonDashboard {
 
   getTabHtml() {
     switch (this.activeTab) {
-      case 'queue':
-        return this.renderQueueTab();
+      case 'dashboard':
+        return this.renderDashboardTab();
       case 'staff':
         return this.renderStaffTab();
+      case 'queue':
+        return this.renderQueueTab();
       case 'services':
         return this.renderServicesTab();
+      case 'profile':
+        return this.renderProfileTab();
       case 'customers':
         return this.renderCustomersTab();
       case 'whatsapp-logs':
         return this.renderWhatsAppLogsTab();
       default:
-        return '';
+        return this.renderDashboardTab();
     }
   }
 
   // =========================================================================
-  // TAB 1: LIVE QUEUE & SCHEDULE
+  // TAB 1: EXECUTIVE DASHBOARD OVERVIEW
   // =========================================================================
-  renderQueueTab() {
+  renderDashboardTab() {
     const { statusCounts, todayRevenue, todayAppointments } = this.summaryData;
+    const profile = this.salonProfile || {};
 
     return `
       <!-- KPI Stats Grid -->
@@ -244,12 +279,12 @@ export class SalonDashboard {
           <div class="stat-sub">Confirmed: ${statusCounts.confirmed} • Checked-in: ${statusCounts.checkedIn}</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">IN CHAIR / IN SERVICE</div>
+          <div class="stat-label">IN CHAIR / ACTIVE</div>
           <div class="stat-value" style="color: #c084fc;">${statusCounts.inService}</div>
           <div class="stat-sub">Active stations occupied</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">COMPLETED SERVICES</div>
+          <div class="stat-label">COMPLETED VISITS</div>
           <div class="stat-value" style="color: var(--success);">${statusCounts.completed}</div>
           <div class="stat-sub">Freed up stylist capacity</div>
         </div>
@@ -260,93 +295,290 @@ export class SalonDashboard {
         </div>
       </div>
 
-      <!-- Live Queue Panel -->
-      <div class="glass-panel">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
-          <div style="display: flex; align-items: center; gap: 12px;">
-            <h3 style="font-size: 1.25rem;">Live Appointment Stream</h3>
-            <input type="date" class="form-control" id="dashboard-date-picker" value="${this.selectedDate}" style="width: auto; padding: 6px 12px; font-weight: 600;" />
+      <!-- Quick Action Command Launchpad -->
+      <div class="glass-panel" style="margin-bottom: 24px;">
+        <h3 style="font-size: 1.15rem; margin-bottom: 16px; display: flex; align-items: center; gap: 8px;">
+          <span>⚡</span> Fast Store Actions
+        </h3>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px;">
+          <div class="staff-card" id="card-action-walkin" style="cursor: pointer; padding: 18px; border: 1px solid rgba(99, 102, 241, 0.3); background: rgba(99, 102, 241, 0.08); transition: transform 0.2s ease;">
+            <div style="font-size: 2rem; margin-bottom: 8px;">⚡</div>
+            <div style="font-weight: 700; color: #fff; font-size: 1.05rem;">Fast Walk-In</div>
+            <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px;">Instantly register client & assign chair</div>
           </div>
-          <div style="display: flex; gap: 8px; align-items: center;">
-            <button class="btn btn-secondary btn-sm" id="btn-refresh-queue">🔄 Refresh Queue</button>
+          <div class="staff-card" id="card-action-qr" style="cursor: pointer; padding: 18px; border: 1px solid rgba(236, 72, 153, 0.3); background: rgba(236, 72, 153, 0.08); transition: transform 0.2s ease;">
+            <div style="font-size: 2rem; margin-bottom: 8px;">📸</div>
+            <div style="font-weight: 700; color: #fff; font-size: 1.05rem;">QR Booking Link</div>
+            <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px;">Display QR poster for clients</div>
+          </div>
+          <div class="staff-card" id="card-action-queue" style="cursor: pointer; padding: 18px; border: 1px solid rgba(16, 185, 129, 0.3); background: rgba(16, 185, 129, 0.08); transition: transform 0.2s ease;">
+            <div style="font-size: 2rem; margin-bottom: 8px;">💺</div>
+            <div style="font-weight: 700; color: #fff; font-size: 1.05rem;">Chair Queue (${todayAppointments.length})</div>
+            <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px;">Manage active seats & check-ins</div>
+          </div>
+          <div class="staff-card" id="card-action-copy" style="cursor: pointer; padding: 18px; border: 1px solid rgba(14, 165, 233, 0.3); background: rgba(14, 165, 233, 0.08); transition: transform 0.2s ease;">
+            <div style="font-size: 2rem; margin-bottom: 8px;">🔗</div>
+            <div style="font-weight: 700; color: #fff; font-size: 1.05rem;">Copy Store Link</div>
+            <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px;">Share on Instagram / WhatsApp</div>
           </div>
         </div>
+      </div>
 
-        <div class="appointments-list">
-          ${todayAppointments.length === 0 ? `
-            <div style="text-align: center; padding: 60px 20px; color: var(--text-muted);">
-              <div style="font-size: 2.8rem; margin-bottom: 10px;">🛋️</div>
-              <div style="font-size: 1.1rem; font-weight: 700; color: #fff;">No appointments scheduled for this date</div>
-              <p style="font-size: 0.85rem; margin-top: 4px; color: var(--text-secondary);">Click <strong>"+ Walk-In Booking"</strong> above to register an incoming client.</p>
-            </div>
-          ` : todayAppointments.map((appt) => {
-            const timeStr = new Date(appt.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            const endTimeStr = new Date(appt.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
+      <!-- Stylists & Live Station Overview -->
+      <div class="glass-panel">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
+          <div>
+            <h3 style="font-size: 1.15rem;">Stylist Floor Status (${this.staffList.length} Active)</h3>
+            <p style="font-size: 0.82rem; color: var(--text-secondary);">Current station occupancy and working specialists.</p>
+          </div>
+          <button class="btn btn-secondary btn-sm" id="btn-goto-staff">Manage Specialists →</button>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px;">
+          ${this.staffList.map((st) => {
+            const activeBookings = todayAppointments.filter((a) => a.staffId === st.id && (a.status === 'IN_PROGRESS' || a.status === 'CHECKED_IN'));
+            const isBusy = activeBookings.length > 0;
             return `
-              <div class="appointment-card" style="border-left: 4px solid ${this.getStatusColor(appt.status)};">
-                <div style="text-align: center;">
-                  <div style="font-size: 1.15rem; font-weight: 800; font-family: var(--font-heading); color: #fff;">${timeStr}</div>
-                  <div style="font-size: 0.72rem; color: var(--text-muted);">${endTimeStr}</div>
+              <div class="staff-card" style="display: flex; align-items: center; gap: 14px; padding: 14px;">
+                <div class="staff-avatar" style="width: 44px; height: 44px; font-size: 1.2rem; border-color: ${isBusy ? '#ec4899' : '#10b981'};">
+                  ${st.profileImageUrl ? `<img src="${st.profileImageUrl}" alt="${st.name}" style="width: 100%; height: 100%; object-fit: cover;" />` : st.name.charAt(0).toUpperCase()}
                 </div>
-
-                <div>
-                  <h4 style="font-size: 1.05rem; font-weight: 700; color: #fff;">${appt.customer.name}</h4>
-                  <div style="font-size: 0.82rem; color: var(--text-secondary);">📞 ${appt.customer.phone}</div>
-                  <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 2px;">Ref: #${appt.appointmentNumber}</div>
-                </div>
-
-                <div>
-                  <div style="font-weight: 700; color: #fff;">${appt.service.name}</div>
-                  <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 2px;">
-                    ₹${appt.price} • ${appt.service.durationMinutes} mins • <span class="badge" style="font-size: 0.65rem;">${appt.source}</span>
+                <div style="flex: 1;">
+                  <div style="font-weight: 700; color: #fff; font-size: 0.95rem;">${st.name}</div>
+                  <div style="font-size: 0.78rem; color: ${isBusy ? '#ec4899' : '#10b981'}; font-weight: 600;">
+                    ${isBusy ? '⚡ Serving Client in Chair' : '🟢 Ready for Next Client'}
                   </div>
-                </div>
-
-                <div>
-                  <div style="display: flex; align-items: center; gap: 8px;">
-                    <img src="${appt.staff.profileImageUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'}" style="width: 34px; height: 34px; border-radius: 50%; object-fit: cover;" />
-                    <div>
-                      <div style="font-size: 0.88rem; font-weight: 700;">${appt.staff.name}</div>
-                      <div style="font-size: 0.72rem; color: var(--text-muted);">Specialist</div>
-                    </div>
-                  </div>
-                </div>
-
-                <div style="display: flex; gap: 6px; align-items: center; justify-content: flex-end; flex-wrap: wrap;">
-                  <span class="badge badge-${appt.status.toLowerCase()}">${appt.status.replace('_', ' ')}</span>
-                  
-                  ${appt.status === 'CONFIRMED' ? `
-                    <button class="btn btn-secondary btn-sm btn-status" data-id="${appt.id}" data-status="CHECKED_IN" title="Client arrived">
-                      🟢 Check In
-                    </button>
-                    <button class="btn btn-secondary btn-sm btn-open-reschedule" data-id="${appt.id}" data-service="${appt.service.id}" data-staff="${appt.staff.id}" data-name="${appt.customer.name}">
-                      🔄 Reschedule
-                    </button>
-                  ` : ''}
-
-                  ${appt.status === 'CHECKED_IN' ? `
-                    <button class="btn btn-primary btn-sm btn-status" data-id="${appt.id}" data-status="IN_SERVICE" title="Seat client in chair">
-                      ⚡ Start Service
-                    </button>
-                  ` : ''}
-
-                  ${appt.status === 'IN_SERVICE' ? `
-                    <button class="btn btn-success btn-sm btn-status" data-id="${appt.id}" data-status="COMPLETED" title="Mark complete & instantly free up stylist capacity">
-                      ✅ Mark Finish
-                    </button>
-                  ` : ''}
-
-                  ${['CONFIRMED', 'CHECKED_IN'].includes(appt.status) ? `
-                    <button class="btn btn-danger-outline btn-sm btn-open-cancel" data-id="${appt.id}" data-name="${appt.customer.name}">
-                      ✕ Cancel
-                    </button>
-                  ` : ''}
                 </div>
               </div>
             `;
           }).join('')}
         </div>
+      </div>
+    `;
+  }
+
+  // =========================================================================
+  // TAB 3: PURPOSE-DRIVEN OPERATOR CHAIR QUEUE (COMPACT & SORTED)
+  // =========================================================================
+  renderQueueTab() {
+    const { statusCounts, todayAppointments } = this.summaryData;
+
+    // Smart Operator Queue Sorting:
+    // 1. IN_SERVICE (In Chair right now) -> TOP Priority
+    // 2. CHECKED_IN (Waiting in salon) -> 2nd
+    // 3. CONFIRMED (Upcoming today) -> Earliest startTime first
+    // 4. COMPLETED (Finished) -> Sinks to bottom, most recent first
+    // 5. CANCELLED / NO_SHOW -> Bottom
+    const getStatusPriority = (status) => {
+      switch (status) {
+        case 'IN_SERVICE': return 1;
+        case 'CHECKED_IN': return 2;
+        case 'CONFIRMED': return 3;
+        case 'COMPLETED': return 4;
+        case 'CANCELLED': return 5;
+        case 'NO_SHOW': return 6;
+        default: return 7;
+      }
+    };
+
+    const sortedAppointments = [...todayAppointments].sort((a, b) => {
+      const pA = getStatusPriority(a.status);
+      const pB = getStatusPriority(b.status);
+      if (pA !== pB) return pA - pB;
+      if (pA <= 3) {
+        return new Date(a.startTime) - new Date(b.startTime);
+      } else {
+        return new Date(b.startTime) - new Date(a.startTime);
+      }
+    });
+
+    // Filter appointments based on operator selection
+    let filteredAppointments = sortedAppointments;
+    if (this.queueFilter === 'WAITING') {
+      filteredAppointments = sortedAppointments.filter((a) => ['CONFIRMED', 'CHECKED_IN'].includes(a.status));
+    } else if (this.queueFilter === 'IN_CHAIR') {
+      filteredAppointments = sortedAppointments.filter((a) => a.status === 'IN_SERVICE');
+    } else if (this.queueFilter === 'COMPLETED') {
+      filteredAppointments = sortedAppointments.filter((a) => a.status === 'COMPLETED');
+    } else if (this.queueFilter === 'CANCELLED') {
+      filteredAppointments = sortedAppointments.filter((a) => ['CANCELLED', 'NO_SHOW'].includes(a.status));
+    }
+
+    const waitingCount = statusCounts.confirmed + statusCounts.checkedIn;
+    const inChairCount = statusCounts.inService;
+    const completedCount = statusCounts.completed;
+    const cancelledCount = (statusCounts.cancelled || 0) + (statusCounts.noShow || 0);
+
+    const todayISO = new Date().toISOString().split('T')[0];
+    const selDate = new Date(this.selectedDate + 'T00:00:00');
+    const todayDate = new Date(todayISO + 'T00:00:00');
+    const diffDays = Math.round((selDate - todayDate) / (1000 * 60 * 60 * 24));
+    
+    let datePrefix = '';
+    if (diffDays === 0) datePrefix = 'Today, ';
+    else if (diffDays === 1) datePrefix = 'Tomorrow, ';
+    else if (diffDays === -1) datePrefix = 'Yesterday, ';
+
+    const formattedDateLabel = datePrefix + selDate.toLocaleDateString('en-US', { day: '2-digit', month: 'short' });
+
+    // Avatar color rotation
+    const avatarColors = ['blue', 'purple', 'teal', 'amber', 'rose'];
+    const getAvatarColor = (name) => {
+      const idx = (name || '').charCodeAt(0) % avatarColors.length;
+      return avatarColors[idx];
+    };
+    const getInitials = (name) => {
+      if (!name) return '?';
+      const parts = name.trim().split(/\s+/);
+      return parts.length >= 2
+        ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+        : parts[0].substring(0, 2).toUpperCase();
+    };
+
+    // Format phone for display
+    const formatPhone = (phone) => {
+      if (!phone) return 'No Phone';
+      const clean = phone.replace(/[^0-9+]/g, '');
+      if (clean.startsWith('+91') && clean.length >= 12) {
+        return `+91 ${clean.slice(3,8)} ${clean.slice(8)}`;
+      }
+      return clean;
+    };
+
+    return `
+      <!-- Date Bar -->
+      <div class="q-date-bar">
+        <div class="q-date-nav">
+          <button class="q-date-arrow" id="btn-date-prev" title="Previous Day">◀</button>
+          <div class="q-date-badge" title="Tap to select date">
+            <span class="q-date-icon">📅</span>
+            <span class="q-date-text" id="date-label-display">${formattedDateLabel}</span>
+            <input type="date" class="q-date-hidden" id="dashboard-date-picker" value="${this.selectedDate}" />
+          </div>
+          <button class="q-date-arrow" id="btn-date-next" title="Next Day">▶</button>
+          ${diffDays !== 0 ? `<button class="q-today-btn" id="btn-date-today">Today</button>` : ''}
+        </div>
+
+        <div class="q-live-sync">
+          <div class="q-live-pill">
+            <span class="q-live-dot"></span>
+            <span class="q-live-label">Live</span>
+          </div>
+          <button class="q-sync-btn" id="btn-refresh-queue" title="Sync Queue">🔄</button>
+        </div>
+      </div>
+
+      <!-- Filter Chips -->
+      <div class="q-filters">
+        <button class="q-chip ${this.queueFilter === 'ALL' ? 'active' : ''}" data-filter="ALL">
+          All <span class="q-chip-count">${todayAppointments.length}</span>
+        </button>
+        <button class="q-chip ${this.queueFilter === 'WAITING' ? 'active' : ''}" data-filter="WAITING">
+          Waiting <span class="q-chip-count">${waitingCount}</span>
+        </button>
+        <button class="q-chip ${this.queueFilter === 'IN_CHAIR' ? 'active' : ''}" data-filter="IN_CHAIR">
+          In Chair <span class="q-chip-count">${inChairCount}</span>
+        </button>
+        <button class="q-chip ${this.queueFilter === 'COMPLETED' ? 'active' : ''}" data-filter="COMPLETED">
+          Done <span class="q-chip-count">${completedCount}</span>
+        </button>
+        <button class="q-chip ${this.queueFilter === 'CANCELLED' ? 'active' : ''}" data-filter="CANCELLED">
+          Cancelled <span class="q-chip-count">${cancelledCount}</span>
+        </button>
+      </div>
+
+      <!-- Queue Cards Stream -->
+      <div class="q-stream">
+        ${filteredAppointments.length === 0 ? `
+          <div class="q-empty">
+            <div class="q-empty-icon">🛋️</div>
+            <div class="q-empty-title">No ${this.queueFilter === 'ALL' ? '' : this.queueFilter.toLowerCase() + ' '}appointments</div>
+            <div class="q-empty-sub">Bookings from WhatsApp & Web appear here in real-time.</div>
+          </div>
+        ` : filteredAppointments.map((appt) => {
+          const timeStr = new Date(appt.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          const cleanPhone = (appt.customer.phone || '').replace(/[^0-9+]/g, '');
+          const rawPhoneForWa = cleanPhone.replace('+', '');
+          const initials = getInitials(appt.customer.name);
+          const avatarCls = getAvatarColor(appt.customer.name);
+          const isDone = appt.status === 'COMPLETED';
+          const isCancelled = ['CANCELLED', 'NO_SHOW'].includes(appt.status);
+          const statusKey = appt.status.toLowerCase();
+
+          return `
+            <div class="qc ${isDone ? 'qc--done' : ''}">
+              <div class="qc__accent" style="background: ${this.getStatusColor(appt.status)};"></div>
+
+              <div class="qc__body">
+                <!-- Row 1: Time / Meta / Status -->
+                <div class="qc__row1">
+                  <div class="qc__time-block">
+                    <span class="qc__time">${timeStr}</span>
+                    <span class="qc__meta">${appt.service.durationMinutes}m · <span class="qc__price">₹${appt.price}</span></span>
+                  </div>
+                  <span class="qc__status qc__status--${statusKey}">${appt.status.replace('_', ' ')}</span>
+                </div>
+
+                <!-- Row 2: Client Name, Phone, Assigned Barber + Quick Contact -->
+                <div class="qc__row2">
+                  <div class="qc__client-info">
+                    <div class="qc__client-text">
+                      <div class="qc__name">${appt.customer.name}</div>
+                      <div class="qc__phone">${formatPhone(cleanPhone)}</div>
+                      <div class="qc__barber">Barber: <strong>${appt.staff.name}</strong></div>
+                    </div>
+                  </div>
+                  <div class="qc__contacts">
+                    <a href="tel:${cleanPhone}" class="qc__contact-btn qc__contact-btn--call" title="Call">📞</a>
+                    <a href="https://wa.me/${rawPhoneForWa}" target="_blank" class="qc__contact-btn qc__contact-btn--wa" title="WhatsApp">💬</a>
+                  </div>
+                </div>
+
+                <!-- Row 3: Service Tag -->
+                <div class="qc__row3">
+                  <span class="qc__tag qc__tag--service">✂️ ${appt.service.name}</span>
+                </div>
+
+                <!-- Row 4: Action Bar -->
+                <div class="qc__row4">
+                  ${appt.status === 'CONFIRMED' ? `
+                    <div class="qc__cta-wrap">
+                      <button class="qc__cta qc__cta--checkin btn-status" data-id="${appt.id}" data-status="CHECKED_IN">
+                        🟢 Check In
+                      </button>
+                    </div>
+                    <div class="qc__sec-actions">
+                      <button class="qc__sec-btn btn-open-reschedule" data-id="${appt.id}" data-service="${appt.service.id}" data-staff="${appt.staff.id}" data-name="${appt.customer.name}" title="Reschedule">🔄</button>
+                      <button class="qc__sec-btn qc__sec-btn--danger btn-open-cancel" data-id="${appt.id}" data-name="${appt.customer.name}" title="Cancel">✕</button>
+                    </div>
+                  ` : ''}
+
+                  ${appt.status === 'CHECKED_IN' ? `
+                    <div class="qc__cta-wrap">
+                      <button class="qc__cta qc__cta--seat btn-status" data-id="${appt.id}" data-status="IN_SERVICE">
+                        ⚡ Start Service
+                      </button>
+                    </div>
+                    <div class="qc__sec-actions">
+                      <button class="qc__sec-btn btn-open-reschedule" data-id="${appt.id}" data-service="${appt.service.id}" data-staff="${appt.staff.id}" data-name="${appt.customer.name}" title="Reschedule">🔄</button>
+                      <button class="qc__sec-btn qc__sec-btn--danger btn-open-cancel" data-id="${appt.id}" data-name="${appt.customer.name}" title="Cancel">✕</button>
+                    </div>
+                  ` : ''}
+
+                  ${appt.status === 'IN_SERVICE' ? `
+                    <div class="qc__cta-wrap">
+                      <button class="qc__cta qc__cta--finish btn-status" data-id="${appt.id}" data-status="COMPLETED">
+                        ✅ Complete & Free Chair
+                      </button>
+                    </div>
+                  ` : ''}
+
+                  ${isDone ? `<div class="qc__terminal qc__terminal--done">✓ Service Completed</div>` : ''}
+                  ${isCancelled ? `<div class="qc__terminal qc__terminal--cancel">✕ Booking Cancelled</div>` : ''}
+                </div>
+              </div>
+            </div>
+          `;
+        }).join('')}
       </div>
     `;
   }
@@ -602,6 +834,90 @@ export class SalonDashboard {
   }
 
   // =========================================================================
+  // TAB 5: PROFILE & SALON HUB
+  // =========================================================================
+  renderProfileTab() {
+    const profile = this.salonProfile || {};
+
+    return `
+      <!-- Salon Profile Card -->
+      <div class="glass-panel" style="margin-bottom: 24px;">
+        <div style="display: flex; align-items: center; gap: 18px; flex-wrap: wrap;">
+          <div style="width: 72px; height: 72px; border-radius: 20px; background: linear-gradient(135deg, #6366f1 0%, #ec4899 100%); display: flex; align-items: center; justify-content: center; font-size: 2.2rem; box-shadow: 0 8px 25px rgba(99,102,241,0.4); border: 2px solid rgba(255,255,255,0.2);">
+            ✂️
+          </div>
+          <div style="flex: 1;">
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+              <h2 style="font-size: 1.4rem; color: #fff;">${profile.name || 'Salon'}</h2>
+              <span class="badge ${profile.status === 'ACTIVE' ? 'badge-in-progress' : 'badge-cancelled'}">
+                ${profile.status || 'ACTIVE'}
+              </span>
+            </div>
+            <div style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 4px;">
+              📍 ${profile.address || 'India'} • 📞 ${profile.phone || '+91'} • 🔗 /#book/${profile.slug}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Feature Launchpad & Settings Hub -->
+      <div class="glass-panel">
+        <h3 style="font-size: 1.15rem; margin-bottom: 18px;">Salon Features & Intelligence Hub</h3>
+        
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;">
+          <!-- 1. VIP Client CRM -->
+          <div class="staff-card" id="card-feature-crm" style="cursor: pointer; display: flex; align-items: center; gap: 16px; padding: 18px; transition: transform 0.2s ease;">
+            <div style="font-size: 2.2rem; background: rgba(99,102,241,0.15); width: 54px; height: 54px; border-radius: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+              👤
+            </div>
+            <div style="flex: 1;">
+              <div style="font-weight: 700; color: #fff; font-size: 1.05rem;">VIP Client CRM</div>
+              <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 2px;">Client visit frequency, phone numbers & lifetime revenue.</div>
+            </div>
+            <span style="font-size: 1.2rem; color: var(--text-muted);">→</span>
+          </div>
+
+          <!-- 2. WhatsApp Logs & Bot -->
+          <div class="staff-card" id="card-feature-whatsapp" style="cursor: pointer; display: flex; align-items: center; gap: 16px; padding: 18px; transition: transform 0.2s ease;">
+            <div style="font-size: 2.2rem; background: rgba(16,185,129,0.15); width: 54px; height: 54px; border-radius: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+              💬
+            </div>
+            <div style="flex: 1;">
+              <div style="font-weight: 700; color: #fff; font-size: 1.05rem;">WhatsApp Bot Logs</div>
+              <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 2px;">Real-time WhatsApp messages & live booking triggers.</div>
+            </div>
+            <span style="font-size: 1.2rem; color: var(--text-muted);">→</span>
+          </div>
+
+          <!-- 3. QR Booking Poster -->
+          <div class="staff-card" id="card-feature-qr" style="cursor: pointer; display: flex; align-items: center; gap: 16px; padding: 18px; transition: transform 0.2s ease;">
+            <div style="font-size: 2.2rem; background: rgba(236,72,153,0.15); width: 54px; height: 54px; border-radius: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+              📸
+            </div>
+            <div style="flex: 1;">
+              <div style="font-weight: 700; color: #fff; font-size: 1.05rem;">QR Code & Poster</div>
+              <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 2px;">Generate printed QR posters for counter & salon mirror.</div>
+            </div>
+            <span style="font-size: 1.2rem; color: var(--text-muted);">→</span>
+          </div>
+
+          <!-- 4. Logout / Session -->
+          <div class="staff-card" id="card-feature-logout" style="cursor: pointer; display: flex; align-items: center; gap: 16px; padding: 18px; border-color: rgba(244,63,94,0.3); background: rgba(244,63,94,0.06); transition: transform 0.2s ease;">
+            <div style="font-size: 2.2rem; background: rgba(244,63,94,0.15); width: 54px; height: 54px; border-radius: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+              🚪
+            </div>
+            <div style="flex: 1;">
+              <div style="font-weight: 700; color: var(--danger); font-size: 1.05rem;">Sign Out</div>
+              <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 2px;">End store manager session on this device.</div>
+            </div>
+            <span style="font-size: 1.2rem; color: var(--danger);">→</span>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  // =========================================================================
   // TAB 5: WHATSAPP DATABASE LOGS
   // =========================================================================
   renderWhatsAppLogsTab() {
@@ -681,21 +997,113 @@ export class SalonDashboard {
   // =========================================================================
   attachEventListeners() {
     // Logout
-    document.getElementById('btn-logout')?.addEventListener('click', () => {
+    const handleLogout = () => {
       ApiClient.removeToken();
       window.location.hash = '#login';
       window.location.reload();
+    };
+    document.getElementById('btn-logout')?.addEventListener('click', handleLogout);
+    document.getElementById('card-feature-logout')?.addEventListener('click', handleLogout);
+
+    // Dashboard Quick Action Cards
+    document.getElementById('card-action-walkin')?.addEventListener('click', () => {
+      this.showWalkInModal();
+    });
+    document.getElementById('card-action-qr')?.addEventListener('click', () => {
+      this.showQRCodeModal();
+    });
+    document.getElementById('card-action-queue')?.addEventListener('click', () => {
+      this.activeTab = 'queue';
+      this.render();
+    });
+    document.getElementById('card-action-copy')?.addEventListener('click', () => {
+      const slug = this.salonProfile?.slug || 'glamour-studio';
+      const url = `${window.location.origin}/#book/${slug}`;
+      navigator.clipboard.writeText(url);
+      alert(`Booking link copied to clipboard:\n${url}`);
+    });
+    document.getElementById('btn-goto-staff')?.addEventListener('click', () => {
+      this.activeTab = 'staff';
+      this.render();
     });
 
-    // Navigation Tabs
-    this.container.querySelectorAll('.nav-tab').forEach((tab) => {
-      tab.addEventListener('click', (e) => {
-        const targetTab = e.currentTarget.getAttribute('data-tab');
-        this.activeTab = targetTab;
-        this.render();
-        if (targetTab === 'customers') this.loadCustomersTable();
-        if (targetTab === 'whatsapp-logs') this.loadWhatsAppLogs();
+    // Profile Feature Hub Cards
+    document.getElementById('card-feature-crm')?.addEventListener('click', () => {
+      this.activeTab = 'customers';
+      this.render();
+      this.loadCustomersTable();
+    });
+    document.getElementById('card-feature-whatsapp')?.addEventListener('click', () => {
+      this.activeTab = 'whatsapp-logs';
+      this.render();
+      this.loadWhatsAppLogs();
+    });
+    document.getElementById('card-feature-qr')?.addEventListener('click', () => {
+      this.showQRCodeModal();
+    });
+
+    // Navigation Tabs (Desktop & Mobile Bottom Nav)
+    this.container.querySelectorAll('.nav-tab, .bottom-nav-item').forEach((tab) => {
+      const handleTabClick = (e) => {
+        e.preventDefault();
+        const targetBtn = e.target.closest('[data-tab]');
+        const targetTab = targetBtn ? targetBtn.getAttribute('data-tab') : null;
+        if (targetTab && targetTab !== this.activeTab) {
+          this.activeTab = targetTab;
+          this.render();
+          if (targetTab === 'customers') this.loadCustomersTable();
+          if (targetTab === 'whatsapp-logs') this.loadWhatsAppLogs();
+        }
+      };
+
+      tab.addEventListener('click', handleTabClick);
+      tab.addEventListener('touchend', handleTabClick);
+    });
+
+    // Mobile Walk-In FAB
+    const handleFabClick = (e) => {
+      e.preventDefault();
+      this.showWalkInModal();
+    };
+    const fabBtn = document.getElementById('mobile-btn-walkin');
+    fabBtn?.addEventListener('click', handleFabClick);
+    fabBtn?.addEventListener('touchend', handleFabClick);
+
+    // Queue Filter Pills
+    this.container.querySelectorAll('.q-chip').forEach((pill) => {
+      pill.addEventListener('click', (e) => {
+        const filter = e.currentTarget.getAttribute('data-filter');
+        if (filter) {
+          this.queueFilter = filter;
+          this.render();
+        }
       });
+    });
+
+    // Date Navigation Controls (Prev, Next, Today)
+    document.getElementById('btn-date-prev')?.addEventListener('click', async () => {
+      const current = new Date(this.selectedDate + 'T00:00:00');
+      current.setDate(current.getDate() - 1);
+      this.selectedDate = current.toISOString().split('T')[0];
+      this.renderLoading();
+      await this.loadData();
+      this.render();
+    });
+
+    document.getElementById('btn-date-next')?.addEventListener('click', async () => {
+      const current = new Date(this.selectedDate + 'T00:00:00');
+      current.setDate(current.getDate() + 1);
+      this.selectedDate = current.toISOString().split('T')[0];
+      this.renderLoading();
+      await this.loadData();
+      this.render();
+    });
+
+    document.getElementById('btn-date-today')?.addEventListener('click', async () => {
+      this.selectedDate = new Date().toISOString().split('T')[0];
+      this.renderLoading();
+      await this.loadData();
+      this.render();
     });
 
     // Date Picker

@@ -7,6 +7,8 @@ import {
   Param,
   Query,
   UseGuards,
+  Sse,
+  MessageEvent,
 } from '@nestjs/common';
 import { AppointmentsService } from './appointments.service';
 import {
@@ -18,12 +20,25 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CurrentSalonId } from '../../common/decorators/tenant.decorator';
 import { CurrentUser, AuthenticatedUser } from '../../common/decorators/current-user.decorator';
+import { Public } from '../../common/decorators/public.decorator';
 import { AppointmentStatus } from '@prisma/client';
+import { Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('appointments')
 export class AppointmentsController {
   constructor(private readonly appointmentsService: AppointmentsService) {}
+
+  @Public()
+  @Sse('stream/:salonId')
+  streamAppointments(@Param('salonId') salonId: string): Observable<MessageEvent> {
+    return this.appointmentsService.getSalonEvents(salonId).pipe(
+      map((event) => ({
+        data: JSON.stringify(event),
+      } as MessageEvent)),
+    );
+  }
 
   @Get()
   async getAppointments(

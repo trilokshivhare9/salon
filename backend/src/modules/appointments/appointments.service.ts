@@ -4,9 +4,12 @@ import {
   ConflictException,
   BadRequestException,
   Logger,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 import { AvailabilityService } from '../availability/availability.service';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import {
   CreateAppointmentDto,
   UpdateAppointmentStatusDto,
@@ -14,15 +17,44 @@ import {
 } from './dto/create-appointment.dto';
 import { DateTime } from 'luxon';
 import { AppointmentStatus, BookingSource } from '@prisma/client';
+import { Subject, Observable } from 'rxjs';
+import { filter } from 'rxjs/operators';
+
+export interface SalonRealtimeEvent {
+  salonId: string;
+  type: 'NEW_BOOKING' | 'STATUS_UPDATED' | 'RESCHEDULED' | 'CANCELLED';
+  data: any;
+  timestamp: string;
+}
 
 @Injectable()
 export class AppointmentsService {
   private readonly logger = new Logger(AppointmentsService.name);
+  private readonly events$ = new Subject<SalonRealtimeEvent>();
 
   constructor(
     private prisma: PrismaService,
     private availabilityService: AvailabilityService,
+    @Inject(forwardRef(() => WhatsAppService))
+    private whatsappService: WhatsAppService,
   ) {}
+
+  // Observable stream for SSE filtered by salonId
+  getSalonEvents(salonId: string): Observable<SalonRealtimeEvent> {
+    return this.events$.asObservable().pipe(
+      filter((event) => event.salonId === salonId),
+    );
+  }
+
+  // Broadcast event to connected salon PWA instances
+  emitSalonEvent(salonId: string, type: SalonRealtimeEvent['type'], data: any) {
+    this.events$.next({
+      salonId,
+      type,
+      data,
+      timestamp: new Date().toISOString(),
+    });
+  }
 
   private sanitizePhone(phone: string): string {
     return phone.replace(/[^\d+]/g, '');
@@ -101,12 +133,13 @@ export class AppointmentsService {
       assignedStaffId = sortedStaff[0];
     }
 
+    // 3. Fetch Details for Timing & Pricing
     const service = await this.prisma.service.findUnique({
       where: { id: dto.serviceId },
     });
 
-    if (!service) {
-      throw new NotFoundException('Service not found.');
+    if (!service || service.status !== 'ACTIVE') {
+      throw new NotFoundException('Selected service not found or inactive.');
     }
 
     const [startH, startM] = dto.startTime.split(':').map((v) => parseInt(v, 10));
@@ -119,50 +152,23 @@ export class AppointmentsService {
     const endDt = startDt.plus({ minutes: service.durationMinutes });
 
     const cleanPhone = this.sanitizePhone(dto.customerPhone);
+
+    // 4. PostgreSQL Advisory Locking & Atomic Transaction
     const [key1, key2] = this.getLockKeys(salonId, assignedStaffId, dto.date);
 
-    // 3. Atomic Database Insertion with PostgreSQL Advisory Lock & GiST Protection
     try {
-      return await this.prisma.$transaction(
+      const createdAppt = await this.prisma.$transaction(
         async (tx) => {
-          // Acquire Transaction-Level Advisory Lock for this staff and date
-          await tx.$executeRaw`SELECT pg_advisory_xact_lock(${key1}::integer, ${key2}::integer)`;
+          // Acquire transaction-scoped advisory lock for the specialist on this date
+          await tx.$executeRawUnsafe(
+            `SELECT pg_advisory_xact_lock(${key1}, ${key2})`,
+          );
 
-          // Re-verify availability inside the lock boundary
-          const conflict = await tx.appointment.findFirst({
+          // Find or create Customer record for Salon
+          let customer = await tx.customer.findFirst({
             where: {
-              staffId: assignedStaffId,
-              status: { notIn: ['CANCELLED', 'NO_SHOW', 'RESCHEDULED'] },
-              OR: [
-                {
-                  startTime: { lte: startDt.toUTC().toJSDate() },
-                  endTime: { gt: startDt.toUTC().toJSDate() },
-                },
-                {
-                  startTime: { lt: endDt.toUTC().toJSDate() },
-                  endTime: { gte: endDt.toUTC().toJSDate() },
-                },
-                {
-                  startTime: { gte: startDt.toUTC().toJSDate() },
-                  endTime: { lte: endDt.toUTC().toJSDate() },
-                },
-              ],
-            },
-          });
-
-          if (conflict) {
-            throw new ConflictException(
-              'This slot was just booked by another customer. Please select another time.',
-            );
-          }
-
-          // Upsert Customer
-          let customer = await tx.customer.findUnique({
-            where: {
-              salonId_phone: {
-                salonId,
-                phone: cleanPhone,
-              },
+              salonId,
+              phone: cleanPhone,
             },
           });
 
@@ -170,33 +176,49 @@ export class AppointmentsService {
             customer = await tx.customer.create({
               data: {
                 salonId,
-                name: dto.customerName,
                 phone: cleanPhone,
+                name: dto.customerName,
                 email: dto.customerEmail,
               },
             });
           } else {
-            customer = await tx.customer.update({
-              where: { id: customer.id },
-              data: {
-                name: dto.customerName,
-                email: dto.customerEmail || customer.email,
-              },
-            });
+            // Update name/email if provided
+            if (dto.customerName && customer.name !== dto.customerName) {
+              customer = await tx.customer.update({
+                where: { id: customer.id },
+                data: {
+                  name: dto.customerName,
+                  email: dto.customerEmail || customer.email,
+                },
+              });
+            }
           }
 
-          // Sequence number
-          const count = await tx.appointment.count({ where: { salonId } });
-          const appointmentNumber = `SAL-${1000 + count + 1}`;
+          // Generate next appointment number
+          const lastAppointment = await tx.appointment.findFirst({
+            where: { salonId },
+            orderBy: { createdAt: 'desc' },
+            select: { appointmentNumber: true },
+          });
+
+          let nextNum = 1001;
+          if (lastAppointment?.appointmentNumber) {
+            const parsed = parseInt(
+              lastAppointment.appointmentNumber.replace('SAL-', ''),
+              10,
+            );
+            if (!isNaN(parsed)) nextNum = parsed + 1;
+          }
+          const appointmentNumber = `SAL-${nextNum}`;
 
           // Create Appointment
           const appointment = await tx.appointment.create({
             data: {
-              appointmentNumber,
               salonId,
               customerId: customer.id,
               staffId: assignedStaffId,
-              serviceId: service.id,
+              serviceId: dto.serviceId,
+              appointmentNumber,
               date: new Date(dto.date),
               startTime: startDt.toUTC().toJSDate(),
               endTime: endDt.toUTC().toJSDate(),
@@ -204,21 +226,12 @@ export class AppointmentsService {
               status: AppointmentStatus.CONFIRMED,
               source: dto.source || BookingSource.WEB,
               notes: dto.notes,
-              createdByUserId,
             },
             include: {
               customer: true,
               staff: true,
               service: true,
-              salon: {
-                select: {
-                  id: true,
-                  name: true,
-                  phone: true,
-                  address: true,
-                  timezone: true,
-                },
-              },
+              salon: true,
             },
           });
 
@@ -238,6 +251,11 @@ export class AppointmentsService {
           timeout: 10000,
         },
       );
+
+      // Emit real-time event to Salon PWA instances
+      this.emitSalonEvent(salonId, 'NEW_BOOKING', createdAppt);
+
+      return createdAppt;
     } catch (error) {
       if (
         error instanceof ConflictException ||
@@ -348,8 +366,8 @@ export class AppointmentsService {
       );
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.appointment.update({
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const res = await tx.appointment.update({
         where: { id: appointmentId },
         data: { status: dto.status },
         include: { customer: true, staff: true, service: true },
@@ -386,8 +404,60 @@ export class AppointmentsService {
         });
       }
 
-      return updated;
+      return res;
     });
+
+    // 1. Broadcast real-time update to dashboard PWA
+    this.emitSalonEvent(salonId, 'STATUS_UPDATED', updated);
+
+    // 2. Outbound WhatsApp: If CANCELLED, alert the customer immediately
+    if (dto.status === AppointmentStatus.CANCELLED && appointment.customer?.phone) {
+      try {
+        const salon = await this.prisma.salon.findUnique({ where: { id: salonId } });
+        const dateStr = DateTime.fromJSDate(appointment.startTime, { zone: salon?.timezone || 'Asia/Kolkata' }).toFormat('dd LLL yyyy');
+        const timeStr = DateTime.fromJSDate(appointment.startTime, { zone: salon?.timezone || 'Asia/Kolkata' }).toFormat('hh:mm a');
+        const cancelMsg = `❌ *APPOINTMENT CANCELLED*\n\nHello *${appointment.customer.name}*, your appointment for *${appointment.service?.name || 'Service'}* at *${salon?.name || 'our salon'}* on *${dateStr}* at *${timeStr}* has been cancelled by the salon.\n\nIf you would like to book a new appointment, simply reply *'Hi'* to this message.`;
+        await this.whatsappService.sendMetaMessage(appointment.customer.phone, { bodyText: cancelMsg });
+        this.logger.log(`Outbound WhatsApp cancellation alert dispatched to ${appointment.customer.phone}`);
+      } catch (err) {
+        this.logger.warn(`Could not send cancellation WhatsApp message: ${err.message}`);
+      }
+    }
+
+    // 3. Outbound WhatsApp: If COMPLETED, trigger automated Next-In-Line "Chair Ready" call-up!
+    if (dto.status === AppointmentStatus.COMPLETED) {
+      this.triggerNextClientCallup(salonId, appointment.staffId).catch((err) => {
+        this.logger.warn(`Could not trigger next client call-up: ${err.message}`);
+      });
+    }
+
+    return updated;
+  }
+
+  // Helper: Find next waiting client and send "Your chair is ready" call-up
+  async triggerNextClientCallup(salonId: string, staffId: string) {
+    const nowMinus15 = new Date(Date.now() - 15 * 60 * 1000);
+    const nowPlus45 = new Date(Date.now() + 45 * 60 * 1000);
+
+    const nextAppt = await this.prisma.appointment.findFirst({
+      where: {
+        salonId,
+        staffId,
+        status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN] },
+        startTime: {
+          gte: nowMinus15,
+          lte: nowPlus45,
+        },
+      },
+      orderBy: { startTime: 'asc' },
+      include: { customer: true, service: true, staff: true, salon: true },
+    });
+
+    if (nextAppt && nextAppt.customer?.phone) {
+      const callupMsg = `👋 *YOUR CHAIR IS READY!*\n\nHello *${nextAppt.customer.name}*, *${nextAppt.staff.name}* has just finished their previous appointment and your chair is ready at *${nextAppt.salon.name}*!\n\n• *Service:* *${nextAppt.service.name}*\n• *Specialist:* *${nextAppt.staff.name}*\n\nPlease proceed to the chair. We look forward to seeing you! ✂️`;
+      await this.whatsappService.sendMetaMessage(nextAppt.customer.phone, { bodyText: callupMsg });
+      this.logger.log(`Automated 'Chair Ready' WhatsApp call-up dispatched to ${nextAppt.customer.phone} for specialist ${nextAppt.staff.name}`);
+    }
   }
 
   async rescheduleAppointment(
@@ -429,6 +499,23 @@ export class AppointmentsService {
       },
       userId,
     );
+
+    // Broadcast reschedule event
+    this.emitSalonEvent(salonId, 'RESCHEDULED', newAppointment);
+
+    // Outbound WhatsApp: Send reschedule confirmation to customer
+    if (newAppointment.customer?.phone) {
+      try {
+        const salon = await this.prisma.salon.findUnique({ where: { id: salonId } });
+        const newDateStr = DateTime.fromJSDate(newAppointment.startTime, { zone: salon?.timezone || 'Asia/Kolkata' }).toFormat('dd LLL yyyy');
+        const newTimeStr = DateTime.fromJSDate(newAppointment.startTime, { zone: salon?.timezone || 'Asia/Kolkata' }).toFormat('hh:mm a');
+        const reschedMsg = `🔄 *APPOINTMENT RESCHEDULED*\n\nHello *${newAppointment.customer.name}*, your appointment at *${salon?.name || 'our salon'}* has been rescheduled.\n\n• *Service:* *${newAppointment.service?.name || 'Service'}*\n• *Specialist:* *${newAppointment.staff?.name || 'Specialist'}*\n• *New Date:* *${newDateStr}*\n• *New Time:* *${newTimeStr}*\n\n📍 *${salon?.name || 'Salon'}*\n${salon?.address || ''}\n\nReply *'Hi'* if you need any adjustments.`;
+        await this.whatsappService.sendMetaMessage(newAppointment.customer.phone, { bodyText: reschedMsg });
+        this.logger.log(`Outbound WhatsApp reschedule alert dispatched to ${newAppointment.customer.phone}`);
+      } catch (err) {
+        this.logger.warn(`Could not send reschedule WhatsApp message: ${err.message}`);
+      }
+    }
 
     return newAppointment;
   }

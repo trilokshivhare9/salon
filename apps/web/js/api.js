@@ -1,5 +1,13 @@
-const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-  ? 'http://localhost:3000/api/v1'
+const isLocalNetwork = (
+  window.location.hostname === 'localhost' ||
+  window.location.hostname === '127.0.0.1' ||
+  window.location.hostname.startsWith('192.168.') ||
+  window.location.hostname.startsWith('10.') ||
+  window.location.hostname.startsWith('172.')
+);
+
+export const API_BASE = isLocalNetwork
+  ? `http://${window.location.hostname}:3000/api/v1`
   : 'https://salon-api-tuwo.onrender.com/api/v1';
 
 export class ApiClient {

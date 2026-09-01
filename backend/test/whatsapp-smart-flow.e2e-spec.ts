@@ -26,12 +26,12 @@ describe('WhatsApp Smart Frictionless Flow (E2E Tests)', () => {
     whatsappService = app.get(WhatsAppService);
 
     // Clean up test phone conversation & appointments
-    await prisma.conversation.deleteMany({ where: { customerPhone: testCustomerPhone } });
+    await prisma.conversation.deleteMany({ where: { salon: { slug: 'royal' } } });
     await prisma.appointmentStatusHistory.deleteMany({
-      where: { appointment: { customer: { phone: testCustomerPhone } } },
+      where: { appointment: { salon: { slug: 'royal' } } },
     });
-    await prisma.appointment.deleteMany({ where: { customer: { phone: testCustomerPhone } } });
-    await prisma.customer.deleteMany({ where: { phone: testCustomerPhone } });
+    await prisma.appointment.deleteMany({ where: { salon: { slug: 'royal' } } });
+    await prisma.customer.deleteMany({ where: { salon: { slug: 'royal' } } });
 
     // Setup or get active test salon with 1 staff and 1 service
     testSalon = await prisma.salon.findFirst({

@@ -2,6 +2,7 @@ import { ApiClient } from './api.js';
 import { BookingWizard } from './booking.js';
 import { SalonDashboard } from './dashboard.js';
 import { PlatformAdminPortal } from './platform-admin.js';
+import { PwaManager } from './pwa.js';
 
 class App {
   constructor() {
@@ -10,6 +11,7 @@ class App {
   }
 
   async init() {
+    PwaManager.init();
     window.addEventListener('hashchange', () => this.handleRoute());
 
     // Check existing session
