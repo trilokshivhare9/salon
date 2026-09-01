@@ -14,15 +14,32 @@ class App {
     PwaManager.init();
     window.addEventListener('hashchange', () => this.handleRoute());
 
-    // Check existing session
+    // Restore cached session instantly (prevents accidental logout on phone sleep)
     if (ApiClient.getToken()) {
-      try {
-        this.currentUser = await ApiClient.getMe();
-      } catch (err) {
-        ApiClient.removeToken();
-        this.currentUser = null;
-      }
+      this.currentUser = ApiClient.getUser();
+      // Validate in background without logging out on temporary network drops
+      ApiClient.getMe().then((freshUser) => {
+        if (freshUser) {
+          this.currentUser = freshUser;
+          ApiClient.setUser(freshUser);
+        }
+      }).catch((err) => {
+        if (err?.message?.includes('expired') || err?.message?.includes('unauthorized')) {
+          ApiClient.clearSession();
+          this.currentUser = null;
+          this.handleRoute();
+        }
+      });
     }
+
+    // Handle mobile wake-up from screen lock gracefully
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && ApiClient.getToken()) {
+        ApiClient.getMe().then((user) => {
+          if (user) this.currentUser = user;
+        }).catch(() => {});
+      }
+    });
 
     if (!window.location.hash) {
       window.location.hash = '#admin';

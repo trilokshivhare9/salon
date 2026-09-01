@@ -72,13 +72,28 @@ export class SalonDashboard {
     this.container = document.getElementById(containerId);
     this.currentUser = currentUser;
     this.activeTab = 'dashboard';
-    this.selectedDate = new Date().toISOString().split('T')[0];
+    this.selectedDate = this.getLocalDateString();
     this.queueFilter = 'ALL';
     this.summaryData = null;
     this.staffList = [];
     this.servicesList = [];
     this.salonProfile = null;
     this.searchQuery = '';
+  }
+
+  // Safe local date formatting (YYYY-MM-DD) avoiding UTC shifts
+  getLocalDateString(dateObj = new Date()) {
+    const year = dateObj.getFullYear();
+    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const day = String(dateObj.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  addDaysToDateString(dateStr, days) {
+    const [y, m, d] = (dateStr || this.getLocalDateString()).split('-').map(Number);
+    const dt = new Date(y, m - 1, d);
+    dt.setDate(dt.getDate() + days);
+    return this.getLocalDateString(dt);
   }
 
   async init() {
@@ -270,11 +285,26 @@ export class SalonDashboard {
     const { statusCounts, todayRevenue, todayAppointments } = this.summaryData;
     const profile = this.salonProfile || {};
 
+    const todayISO = this.getLocalDateString();
+    const [sy, sm, sd] = (this.selectedDate || todayISO).split('-').map(Number);
+    const selDate = new Date(sy, sm - 1, sd);
+    const [ty, tm, td] = todayISO.split('-').map(Number);
+    const todayDate = new Date(ty, tm - 1, td);
+    const diffDays = Math.round((selDate - todayDate) / (1000 * 60 * 60 * 24));
+
+    let labelPrefix = "TODAY'S";
+    if (diffDays === 1) labelPrefix = "TOMORROW'S";
+    else if (diffDays === -1) labelPrefix = "YESTERDAY'S";
+    else if (diffDays !== 0) {
+      const formatted = selDate.toLocaleDateString('en-US', { day: '2-digit', month: 'short' }).toUpperCase();
+      labelPrefix = `${formatted}`;
+    }
+
     return `
       <!-- KPI Stats Grid -->
       <div class="stats-grid">
         <div class="stat-card">
-          <div class="stat-label">TODAY'S APPOINTMENTS</div>
+          <div class="stat-label">${labelPrefix} APPOINTMENTS</div>
           <div class="stat-value" style="color: #818cf8;">${statusCounts.total}</div>
           <div class="stat-sub">Confirmed: ${statusCounts.confirmed} • Checked-in: ${statusCounts.checkedIn}</div>
         </div>
@@ -289,7 +319,7 @@ export class SalonDashboard {
           <div class="stat-sub">Freed up stylist capacity</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">TODAY'S REVENUE</div>
+          <div class="stat-label">${labelPrefix} REVENUE</div>
           <div class="stat-value" style="color: #10b981;">₹${todayRevenue.toLocaleString()}</div>
           <div class="stat-sub">From completed appointments</div>
         </div>
@@ -306,10 +336,10 @@ export class SalonDashboard {
             <div style="font-weight: 700; color: #fff; font-size: 1.05rem;">Fast Walk-In</div>
             <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px;">Instantly register client & assign chair</div>
           </div>
-          <div class="staff-card" id="card-action-qr" style="cursor: pointer; padding: 18px; border: 1px solid rgba(236, 72, 153, 0.3); background: rgba(236, 72, 153, 0.08); transition: transform 0.2s ease;">
-            <div style="font-size: 2rem; margin-bottom: 8px;">📸</div>
-            <div style="font-weight: 700; color: #fff; font-size: 1.05rem;">QR Booking Link</div>
-            <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px;">Display QR poster for clients</div>
+          <div class="staff-card" id="card-action-qr" style="cursor: pointer; padding: 18px; border: 1px solid rgba(37, 211, 102, 0.3); background: rgba(37, 211, 102, 0.08); transition: transform 0.2s ease;">
+            <div style="font-size: 2rem; margin-bottom: 8px;">💬</div>
+            <div style="font-weight: 700; color: #fff; font-size: 1.05rem;">WhatsApp Booking QR</div>
+            <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px;">Display WhatsApp QR poster for clients</div>
           </div>
           <div class="staff-card" id="card-action-queue" style="cursor: pointer; padding: 18px; border: 1px solid rgba(16, 185, 129, 0.3); background: rgba(16, 185, 129, 0.08); transition: transform 0.2s ease;">
             <div style="font-size: 2rem; margin-bottom: 8px;">💺</div>
@@ -408,15 +438,17 @@ export class SalonDashboard {
     const completedCount = statusCounts.completed;
     const cancelledCount = (statusCounts.cancelled || 0) + (statusCounts.noShow || 0);
 
-    const todayISO = new Date().toISOString().split('T')[0];
-    const selDate = new Date(this.selectedDate + 'T00:00:00');
-    const todayDate = new Date(todayISO + 'T00:00:00');
+    const todayISO = this.getLocalDateString();
+    const [sy, sm, sd] = (this.selectedDate || todayISO).split('-').map(Number);
+    const selDate = new Date(sy, sm - 1, sd);
+    const [ty, tm, td] = todayISO.split('-').map(Number);
+    const todayDate = new Date(ty, tm - 1, td);
     const diffDays = Math.round((selDate - todayDate) / (1000 * 60 * 60 * 24));
     
     let datePrefix = '';
     if (diffDays === 0) datePrefix = 'Today, ';
-    else if (diffDays === 1) datePrefix = 'Tomorrow, ';
-    else if (diffDays === -1) datePrefix = 'Yesterday, ';
+    else if (diffDays === 1) datePrefix = 'Tom, ';
+    else if (diffDays === -1) datePrefix = 'Yest, ';
 
     const formattedDateLabel = datePrefix + selDate.toLocaleDateString('en-US', { day: '2-digit', month: 'short' });
 
@@ -445,6 +477,14 @@ export class SalonDashboard {
     };
 
     return `
+      <!-- Pull-to-Refresh Indicator -->
+      <div class="ptr-wrapper" id="ptr-wrapper">
+        <div class="ptr-capsule" id="ptr-capsule">
+          <span class="ptr-icon" id="ptr-icon">↓</span>
+          <span id="ptr-text">Pull to refresh</span>
+        </div>
+      </div>
+
       <!-- Date Bar -->
       <div class="q-date-bar">
         <div class="q-date-nav">
@@ -1080,47 +1120,105 @@ export class SalonDashboard {
       });
     });
 
-    // Date Navigation Controls (Prev, Next, Today)
-    document.getElementById('btn-date-prev')?.addEventListener('click', async () => {
-      const current = new Date(this.selectedDate + 'T00:00:00');
-      current.setDate(current.getDate() - 1);
-      this.selectedDate = current.toISOString().split('T')[0];
-      this.renderLoading();
-      await this.loadData();
-      this.render();
+    // Date Navigation Controls (Prev, Next, Today) with Smooth State Management
+    const handleDateChange = async (newDate) => {
+      if (!newDate || this.selectedDate === newDate) return;
+      this.selectedDate = newDate;
+      const syncBtn = document.getElementById('btn-refresh-queue');
+      syncBtn?.classList.add('syncing');
+      try {
+        await this.loadData();
+      } finally {
+        this.render();
+      }
+    };
+
+    document.getElementById('btn-date-prev')?.addEventListener('click', () => {
+      const prevDate = this.addDaysToDateString(this.selectedDate, -1);
+      handleDateChange(prevDate);
     });
 
-    document.getElementById('btn-date-next')?.addEventListener('click', async () => {
-      const current = new Date(this.selectedDate + 'T00:00:00');
-      current.setDate(current.getDate() + 1);
-      this.selectedDate = current.toISOString().split('T')[0];
-      this.renderLoading();
-      await this.loadData();
-      this.render();
+    document.getElementById('btn-date-next')?.addEventListener('click', () => {
+      const nextDate = this.addDaysToDateString(this.selectedDate, 1);
+      handleDateChange(nextDate);
     });
 
-    document.getElementById('btn-date-today')?.addEventListener('click', async () => {
-      this.selectedDate = new Date().toISOString().split('T')[0];
-      this.renderLoading();
-      await this.loadData();
-      this.render();
+    document.getElementById('btn-date-today')?.addEventListener('click', () => {
+      handleDateChange(this.getLocalDateString());
     });
 
     // Date Picker
     const datePicker = document.getElementById('dashboard-date-picker');
-    datePicker?.addEventListener('change', async (e) => {
-      this.selectedDate = e.target.value;
-      this.renderLoading();
-      await this.loadData();
-      this.render();
+    datePicker?.addEventListener('change', (e) => {
+      if (e.target.value) {
+        handleDateChange(e.target.value);
+      }
     });
 
     // Refresh queue
     document.getElementById('btn-refresh-queue')?.addEventListener('click', async () => {
-      this.renderLoading();
-      await this.loadData();
-      this.render();
+      const syncBtn = document.getElementById('btn-refresh-queue');
+      syncBtn?.classList.add('syncing');
+      try {
+        await this.loadData();
+      } finally {
+        this.render();
+      }
     });
+
+    // Mobile Pull-to-Refresh Gestures
+    const ptrWrapper = document.getElementById('ptr-wrapper');
+    const ptrIcon = document.getElementById('ptr-icon');
+    const ptrText = document.getElementById('ptr-text');
+    let startTouchY = 0;
+    let currentPullDist = 0;
+    let isPulling = false;
+
+    window.addEventListener('touchstart', (e) => {
+      if (window.scrollY <= 5 && e.touches.length === 1 && ptrWrapper) {
+        startTouchY = e.touches[0].screenY;
+        isPulling = true;
+      }
+    }, { passive: true });
+
+    window.addEventListener('touchmove', (e) => {
+      if (!isPulling || !ptrWrapper || window.scrollY > 5) return;
+      const touchY = e.touches[0].screenY;
+      const diff = touchY - startTouchY;
+      if (diff > 0) {
+        currentPullDist = Math.min(65, diff * 0.42);
+        ptrWrapper.classList.add('ptr-pulling');
+        ptrWrapper.style.height = `${currentPullDist}px`;
+        if (currentPullDist > 45) {
+          if (ptrIcon) ptrIcon.style.transform = 'rotate(180deg)';
+          if (ptrText) ptrText.textContent = 'Release to sync...';
+        } else {
+          if (ptrIcon) ptrIcon.style.transform = 'rotate(0deg)';
+          if (ptrText) ptrText.textContent = 'Pull to refresh';
+        }
+      }
+    }, { passive: true });
+
+    window.addEventListener('touchend', async () => {
+      if (!isPulling || !ptrWrapper) return;
+      isPulling = false;
+      if (currentPullDist > 45) {
+        ptrWrapper.classList.add('ptr-spinning');
+        if (ptrIcon) ptrIcon.textContent = '🔄';
+        if (ptrText) ptrText.textContent = 'Syncing live queue...';
+        try {
+          await this.loadData();
+        } finally {
+          ptrWrapper.style.height = '0px';
+          ptrWrapper.classList.remove('ptr-pulling', 'ptr-spinning');
+          this.render();
+        }
+      } else {
+        ptrWrapper.style.height = '0px';
+        ptrWrapper.classList.remove('ptr-pulling');
+      }
+      currentPullDist = 0;
+    }, { passive: true });
 
     // Copy Invite Link
     document.getElementById('btn-copy-invite')?.addEventListener('click', () => {
@@ -2294,37 +2392,35 @@ export class SalonDashboard {
   showQRCodeModal() {
     const modalContainer = document.getElementById('modal-container');
     const slug = this.salonProfile?.slug || 'glamour-studio';
-    const webUrl = `${window.location.origin}/#book/${slug}`;
     const salonPhone = this.salonProfile?.phone?.replace(/[^\d]/g, '') || '917999817743';
-    const whatsappUrl = `https://wa.me/${salonPhone}?text=Hi%20${slug}`;
+    const whatsappUrl = `https://wa.me/${salonPhone}?text=Hi`;
 
     modalContainer.innerHTML = `
       <div class="modal-backdrop show">
-        <div class="modal-content" style="text-align: center;">
+        <div class="modal-content" style="text-align: center; max-width: 420px;">
           <div class="modal-header">
-            <h3>📱 Client Booking QR & Direct Links</h3>
+            <h3 style="display: flex; align-items: center; gap: 8px;">
+              <span style="color: #25D366;">💬</span> WhatsApp Booking QR
+            </h3>
             <button class="close-btn" id="btn-close-modal">&times;</button>
           </div>
 
-          <div style="background: #fff; padding: 18px; border-radius: var(--radius-md); display: inline-block; margin-bottom: 20px; box-shadow: 0 8px 24px rgba(0,0,0,0.5);">
-            <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(webUrl)}" alt="Salon Booking QR Code" style="display: block;" />
+          <p style="font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 16px;">
+            Scan this QR code to immediately launch the automated <strong>WhatsApp Booking Bot</strong>.
+          </p>
+
+          <div style="background: #fff; padding: 16px; border-radius: var(--radius-md); display: inline-block; margin-bottom: 18px; box-shadow: 0 8px 30px rgba(37,211,102,0.25); border: 2px solid #25D366;">
+            <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(whatsappUrl)}" alt="WhatsApp Booking QR Code" style="display: block; width: 200px; height: 200px;" />
           </div>
 
-          <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; text-align: left;">
-            <div style="background: var(--bg-input); padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);">
-              <div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 700;">ONLINE WEB BOOKING URL</div>
-              <div style="font-size: 0.85rem; font-family: monospace; color: #818cf8; word-break: break-all; margin-top: 2px;">${webUrl}</div>
-            </div>
-
-            <div style="background: var(--bg-input); padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);">
-              <div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 700;">DIRECT WHATSAPP CHAT LINK</div>
-              <div style="font-size: 0.85rem; font-family: monospace; color: #25D366; word-break: break-all; margin-top: 2px;">${whatsappUrl}</div>
-            </div>
+          <div style="background: rgba(37,211,102,0.08); padding: 12px; border-radius: var(--radius-sm); border: 1px solid rgba(37,211,102,0.25); margin-bottom: 20px; text-align: left;">
+            <div style="font-size: 0.72rem; color: #25D366; font-weight: 800; letter-spacing: 0.04em;">DIRECT WHATSAPP CHAT LINK</div>
+            <div style="font-size: 0.85rem; font-family: monospace; color: #e2e8f0; word-break: break-all; margin-top: 4px;">${whatsappUrl}</div>
           </div>
 
           <div style="display: flex; gap: 10px;">
-            <button class="btn btn-secondary" style="flex: 1;" id="btn-copy-web-link">Copy Web Link</button>
-            <a href="${whatsappUrl}" target="_blank" class="btn btn-primary" style="flex: 1; background: #25D366; border-color: #25D366; color: #fff;">Open WhatsApp 💬</a>
+            <button class="btn btn-secondary" style="flex: 1;" id="btn-copy-wa-link">📋 Copy Link</button>
+            <a href="${whatsappUrl}" target="_blank" class="btn btn-primary" style="flex: 1; background: #25D366; border-color: #25D366; color: #fff; font-weight: 700;">Open WhatsApp 💬</a>
           </div>
         </div>
       </div>
@@ -2332,9 +2428,9 @@ export class SalonDashboard {
 
     document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
 
-    document.getElementById('btn-copy-web-link')?.addEventListener('click', () => {
-      navigator.clipboard.writeText(webUrl);
-      alert('Copied online booking link to clipboard!');
+    document.getElementById('btn-copy-wa-link')?.addEventListener('click', () => {
+      navigator.clipboard.writeText(whatsappUrl);
+      alert('Copied WhatsApp booking link to clipboard!\n' + whatsappUrl);
     });
   }
 

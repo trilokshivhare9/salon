@@ -10,11 +10,33 @@ export class ApiClient {
   }
 
   static setToken(token) {
-    localStorage.setItem('salon_saas_token', token);
+    if (token) localStorage.setItem('salon_saas_token', token);
   }
 
   static removeToken() {
     localStorage.removeItem('salon_saas_token');
+  }
+
+  static getUser() {
+    try {
+      const raw = localStorage.getItem('salon_user_data');
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  static setUser(user) {
+    if (user) localStorage.setItem('salon_user_data', JSON.stringify(user));
+  }
+
+  static removeUser() {
+    localStorage.removeItem('salon_user_data');
+  }
+
+  static clearSession() {
+    this.removeToken();
+    this.removeUser();
   }
 
   static async request(endpoint, options = {}) {
@@ -38,7 +60,7 @@ export class ApiClient {
 
       if (!response.ok) {
         if (response.status === 401 && !endpoint.includes('/auth/login')) {
-          this.removeToken();
+          this.clearSession();
           throw new Error('Session expired or unauthorized. Please log in again.');
         }
         throw new Error(data.message || 'An error occurred during request.');
@@ -60,11 +82,18 @@ export class ApiClient {
     if (data.accessToken) {
       this.setToken(data.accessToken);
     }
+    if (data.user) {
+      this.setUser(data.user);
+    }
     return data;
   }
 
   static async getMe() {
-    return this.request('/auth/me');
+    const user = await this.request('/auth/me');
+    if (user) {
+      this.setUser(user);
+    }
+    return user;
   }
 
   // Public Booking
