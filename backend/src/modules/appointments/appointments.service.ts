@@ -256,10 +256,13 @@ export class AppointmentsService {
       this.emitSalonEvent(salonId, 'NEW_BOOKING', createdAppt);
 
       return createdAppt;
-    } catch (error) {
+    } catch (error: any) {
       if (
         error instanceof ConflictException ||
         error.message?.includes('slot was just booked') ||
+        error.message?.includes('23P01') ||
+        error.message?.includes('no_overlapping_staff_appointments') ||
+        error.message?.includes('exclusion constraint') ||
         error.code === '23P01' || // PostgreSQL Exclusion Constraint Violation
         error.code === '40P01'    // PostgreSQL Deadlock
       ) {

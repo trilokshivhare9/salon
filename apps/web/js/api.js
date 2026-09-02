@@ -1,8 +1,12 @@
-const useLocal = new URLSearchParams(window.location.search).get('local') === '1' || localStorage.getItem('use_local_backend') === 'true';
+const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+const forceCloud = new URLSearchParams(window.location.search).get('cloud') === '1' || localStorage.getItem('use_cloud_backend') === 'true';
+const useLocal = (isLocalhost && !forceCloud) || new URLSearchParams(window.location.search).get('local') === '1' || localStorage.getItem('use_local_backend') === 'true';
 
 export const API_BASE = useLocal
   ? `http://${window.location.hostname || 'localhost'}:3000/api/v1`
   : 'https://salon-api-tuwo.onrender.com/api/v1';
+
+const memoryCache = new Map();
 
 export class ApiClient {
   static getToken() {
@@ -37,9 +41,33 @@ export class ApiClient {
   static clearSession() {
     this.removeToken();
     this.removeUser();
+    this.invalidateCache();
   }
 
-  static async request(endpoint, options = {}) {
+  static invalidateCache(pattern = '') {
+    if (!pattern) {
+      memoryCache.clear();
+      return;
+    }
+    for (const key of memoryCache.keys()) {
+      if (key.includes(pattern)) {
+        memoryCache.delete(key);
+      }
+    }
+  }
+
+  static async request(endpoint, options = {}, ttlMs = 0) {
+    const isGet = !options.method || options.method === 'GET';
+    const cacheKey = `${endpoint}`;
+
+    // Cache hit
+    if (isGet && ttlMs > 0) {
+      const cached = memoryCache.get(cacheKey);
+      if (cached && Date.now() - cached.timestamp < ttlMs) {
+        return cached.data;
+      }
+    }
+
     const token = this.getToken();
     const headers = {
       'Content-Type': 'application/json',
@@ -66,7 +94,14 @@ export class ApiClient {
         throw new Error(data.message || 'An error occurred during request.');
       }
 
-      return data.data !== undefined ? data.data : data;
+      const result = data.data !== undefined ? data.data : data;
+
+      // Save to cache if TTL specified
+      if (isGet && ttlMs > 0) {
+        memoryCache.set(cacheKey, { data: result, timestamp: Date.now() });
+      }
+
+      return result;
     } catch (err) {
       console.error(`API Error on ${endpoint}:`, err);
       throw err;
@@ -85,11 +120,12 @@ export class ApiClient {
     if (data.user) {
       this.setUser(data.user);
     }
+    this.invalidateCache();
     return data;
   }
 
   static async getMe() {
-    const user = await this.request('/auth/me');
+    const user = await this.request('/auth/me', {}, 60000); // 1-min cache
     if (user) {
       this.setUser(user);
     }
@@ -98,7 +134,7 @@ export class ApiClient {
 
   // Public Booking
   static async getPublicSalon(slug) {
-    return this.request(`/booking/${slug}`);
+    return this.request(`/booking/${slug}`, {}, 120000); // 2-min cache
   }
 
   static async getPublicAvailability(slug, serviceId, date, staffId = null) {
@@ -106,10 +142,12 @@ export class ApiClient {
     if (staffId) {
       url += `&staffId=${staffId}`;
     }
-    return this.request(url);
+    return this.request(url, {}, 10000); // 10-sec cache
   }
 
   static async createPublicAppointment(slug, payload) {
+    this.invalidateCache('/booking');
+    this.invalidateCache('/reports');
     return this.request(`/booking/${slug}/appointments`, {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -117,14 +155,14 @@ export class ApiClient {
   }
 
   // Salon Dashboard & Appointments
-  static async getDashboardSummary(dateStr) {
+  static async getDashboardSummary(dateStr, bypassCache = false) {
     const endpoint = dateStr ? `/reports/dashboard?date=${dateStr}` : '/reports/dashboard';
-    return this.request(endpoint);
+    return this.request(endpoint, {}, bypassCache ? 0 : 20000); // 20-sec cache for superfast date flipping
   }
 
   static async getAppointments(filters = {}) {
     const query = new URLSearchParams(filters).toString();
-    return this.request(`/appointments?${query}`);
+    return this.request(`/appointments?${query}`, {}, 15000);
   }
 
   static async getAppointmentById(id) {
@@ -132,6 +170,8 @@ export class ApiClient {
   }
 
   static async createAppointment(payload) {
+    this.invalidateCache('/reports');
+    this.invalidateCache('/appointments');
     return this.request('/appointments', {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -139,6 +179,8 @@ export class ApiClient {
   }
 
   static async updateAppointmentStatus(id, status, reason = '') {
+    this.invalidateCache('/reports');
+    this.invalidateCache('/appointments');
     return this.request(`/appointments/${id}/status`, {
       method: 'PATCH',
       body: JSON.stringify({ status, reason }),
@@ -146,25 +188,30 @@ export class ApiClient {
   }
 
   static async rescheduleAppointment(id, payload) {
+    this.invalidateCache('/reports');
+    this.invalidateCache('/appointments');
     return this.request(`/appointments/${id}/reschedule`, {
       method: 'POST',
       body: JSON.stringify(payload),
     });
   }
 
-  // Staff Management
-  static async getStaff() {
-    return this.request('/staff');
+  // Staff Management (Cached for 3 mins)
+  static async getStaff(bypassCache = false) {
+    return this.request('/staff', {}, bypassCache ? 0 : 180000);
   }
 
   static async createStaff(payload) {
+    this.invalidateCache('/staff');
+    this.invalidateCache('/reports');
     return this.request('/staff', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
   }
-
   static async updateStaff(id, payload) {
+    this.invalidateCache('/staff');
+    this.invalidateCache('/reports');
     return this.request(`/staff/${id}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
@@ -172,12 +219,17 @@ export class ApiClient {
   }
 
   static async toggleStaffStatus(id) {
+    this.invalidateCache('/staff');
+    this.invalidateCache('/reports');
     return this.request(`/staff/${id}/toggle-status`, {
       method: 'PATCH',
     });
   }
 
   static async assignStaffServices(staffId, serviceIds) {
+    this.invalidateCache('/staff');
+    this.invalidateCache('/services');
+    this.invalidateCache('/reports');
     return this.request(`/staff/${staffId}/services`, {
       method: 'PUT',
       body: JSON.stringify({ serviceIds }),
@@ -185,12 +237,15 @@ export class ApiClient {
   }
 
   static async deleteStaff(id) {
+    this.invalidateCache('/staff');
+    this.invalidateCache('/reports');
     return this.request(`/staff/${id}`, {
       method: 'DELETE',
     });
   }
 
   static async updateStaffWorkingHours(staffId, hours) {
+    this.invalidateCache('/staff');
     return this.request(`/staff/${staffId}/working-hours`, {
       method: 'PUT',
       body: JSON.stringify({ hours }),
@@ -198,6 +253,7 @@ export class ApiClient {
   }
 
   static async createStaffBreak(staffId, payload) {
+    this.invalidateCache('/staff');
     return this.request(`/staff/${staffId}/breaks`, {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -205,17 +261,20 @@ export class ApiClient {
   }
 
   static async deleteStaffBreak(staffId, breakId) {
+    this.invalidateCache('/staff');
     return this.request(`/staff/${staffId}/breaks/${breakId}`, {
       method: 'DELETE',
     });
   }
 
-  // Service Management
-  static async getServices() {
-    return this.request('/services');
+  // Service Management (Cached for 3 mins)
+  static async getServices(bypassCache = false) {
+    return this.request('/services', {}, bypassCache ? 0 : 180000);
   }
 
   static async createService(payload) {
+    this.invalidateCache('/services');
+    this.invalidateCache('/reports');
     return this.request('/services', {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -223,6 +282,8 @@ export class ApiClient {
   }
 
   static async updateService(id, payload) {
+    this.invalidateCache('/services');
+    this.invalidateCache('/reports');
     return this.request(`/services/${id}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
@@ -230,23 +291,29 @@ export class ApiClient {
   }
 
   static async toggleServiceStatus(id) {
+    this.invalidateCache('/services');
+    this.invalidateCache('/reports');
     return this.request(`/services/${id}/toggle-status`, {
       method: 'PATCH',
     });
   }
 
   static async deleteService(id) {
+    this.invalidateCache('/services');
+    this.invalidateCache('/reports');
     return this.request(`/services/${id}`, {
       method: 'DELETE',
     });
   }
 
-  // Salon Configuration & Blocked Times
-  static async getSalonProfile() {
-    return this.request('/salons/profile');
+  // Salon Configuration & Blocked Times (Cached for 5 mins)
+  static async getSalonProfile(bypassCache = false) {
+    return this.request('/salons/profile', {}, bypassCache ? 0 : 300000);
   }
 
   static async updateSalonProfile(payload) {
+    this.invalidateCache('/salons');
+    this.invalidateCache('/reports');
     return this.request('/salons/profile', {
       method: 'PUT',
       body: JSON.stringify(payload),
@@ -254,10 +321,12 @@ export class ApiClient {
   }
 
   static async getBlockedTimes() {
-    return this.request('/salons/blocked-times');
+    return this.request('/salons/blocked-times', {}, 60000);
   }
 
   static async addBlockedTime(payload) {
+    this.invalidateCache('/salons/blocked-times');
+    this.invalidateCache('/reports');
     return this.request('/salons/blocked-times', {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -265,16 +334,19 @@ export class ApiClient {
   }
 
   static async deleteBlockedTime(id) {
+    this.invalidateCache('/salons/blocked-times');
+    this.invalidateCache('/reports');
     return this.request(`/salons/blocked-times/${id}`, {
       method: 'DELETE',
     });
   }
 
   static async getHolidays() {
-    return this.request('/salons/holidays');
+    return this.request('/salons/holidays', {}, 120000);
   }
 
   static async addHoliday(payload) {
+    this.invalidateCache('/salons/holidays');
     return this.request('/salons/holidays', {
       method: 'POST',
       body: JSON.stringify(payload),

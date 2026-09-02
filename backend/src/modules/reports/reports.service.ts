@@ -8,7 +8,10 @@ export class ReportsService {
   constructor(private prisma: PrismaService) {}
 
   async getDashboardSummary(salonId: string, dateStr?: string) {
-    const salon = await this.prisma.salon.findUnique({ where: { id: salonId } });
+    const salon = await this.prisma.salon.findUnique({
+      where: { id: salonId },
+      include: { whatsappAccount: true },
+    });
     const timezone = salon?.timezone || 'Asia/Kolkata';
 
     const targetDate = dateStr
@@ -68,12 +71,57 @@ export class ReportsService {
       return acc;
     }, {} as Record<string, number>);
 
-    // Total Salon Stats
-    const [totalCustomers, totalStaff, totalServices] = await Promise.all([
+    // Monthly WhatsApp Quota Tracking (Live Meta Cloud API + Local Session Tracking)
+    const startOfMonth = targetDate.startOf('month');
+    const startUnix = Math.floor(startOfMonth.toSeconds());
+    const endUnix = Math.floor(DateTime.now().setZone(timezone).toSeconds());
+    const nextResetDate = startOfMonth.plus({ months: 1 }).toFormat('dd LLL');
+
+    const [totalCustomers, totalStaff, totalServices, distinctWhatsAppUsers] = await Promise.all([
       this.prisma.customer.count({ where: { salonId } }),
       this.prisma.staff.count({ where: { salonId, status: 'ACTIVE' } }),
       this.prisma.service.count({ where: { salonId, status: 'ACTIVE' } }),
+      this.prisma.whatsAppLog.findMany({
+        where: {
+          createdAt: { gte: startOfMonth.toJSDate() },
+          OR: [
+            { salonId },
+            { salonId: null },
+          ],
+        },
+        distinct: ['phone'],
+        select: { phone: true },
+      }),
     ]);
+
+    const localConversationCount = distinctWhatsAppUsers.length;
+    let metaLiveCount = 0;
+    let liveSource = 'REAL_TIME_TRACKING';
+
+    const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+    const wabaId = salon?.whatsappAccount?.wabaId || process.env.WHATSAPP_WABA_ID;
+
+    if (wabaId && accessToken) {
+      try {
+        const metaUrl = `https://graph.facebook.com/v20.0/${wabaId}?fields=conversation_analytics.start(${startUnix}).end(${endUnix}).granularity(MONTHLY).metric_types(FREE_TIER,REGULAR,FREE_ENTRY_POINT)&access_token=${accessToken}`;
+        const metaRes = await fetch(metaUrl);
+        if (metaRes.ok) {
+          const metaJson: any = await metaRes.json();
+          const dataPoints = metaJson.conversation_analytics?.data?.[0]?.data_points || [];
+          if (dataPoints.length > 0) {
+            metaLiveCount = dataPoints.reduce((sum: number, pt: any) => sum + (pt.conversation || 0), 0);
+            liveSource = 'META_GRAPH_API';
+          }
+        }
+      } catch (err) {
+        // Fallback to real-time session tracking
+      }
+    }
+
+    const usedConversations = Math.max(metaLiveCount, localConversationCount);
+    const quotaLimit = 1000;
+    const quotaRemaining = Math.max(0, quotaLimit - usedConversations);
+    const quotaPercent = Math.min(100, Math.round((usedConversations / quotaLimit) * 100));
 
     return {
       date: targetDate.toISODate(),
@@ -85,6 +133,14 @@ export class ReportsService {
         totalCustomers,
         totalActiveStaff: totalStaff,
         totalActiveServices: totalServices,
+      },
+      whatsappQuota: {
+        limit: quotaLimit,
+        used: usedConversations,
+        remaining: quotaRemaining,
+        percentUsed: quotaPercent,
+        resetsOn: nextResetDate,
+        source: liveSource,
       },
       salon: {
         id: salon?.id,

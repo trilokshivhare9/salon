@@ -41,11 +41,25 @@ class App {
       }
     });
 
+    // Start background keepalive heartbeat to prevent cloud backend sleep
+    this.startKeepAlive();
+
     if (!window.location.hash) {
       window.location.hash = '#admin';
     } else {
       this.handleRoute();
     }
+  }
+
+  startKeepAlive() {
+    // Ping backend every 3.5 minutes to keep cloud server warm while tab/PWA is active
+    setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        if (ApiClient.getToken()) {
+          ApiClient.getMe().catch(() => {});
+        }
+      }
+    }, 210000);
   }
 
   async handleRoute() {

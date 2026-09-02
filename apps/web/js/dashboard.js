@@ -128,18 +128,23 @@ export class SalonDashboard {
     }
   }
 
-  async loadData() {
-    const [summary, staff, services, profile] = await Promise.all([
-      ApiClient.getDashboardSummary(this.selectedDate),
-      ApiClient.getStaff(),
-      ApiClient.getServices(),
-      ApiClient.getSalonProfile().catch(() => null),
-    ]);
+  async loadData(fullReload = false) {
+    if (fullReload || !this.staffList || !this.servicesList || !this.salonProfile) {
+      const [summary, staff, services, profile] = await Promise.all([
+        ApiClient.getDashboardSummary(this.selectedDate, fullReload),
+        ApiClient.getStaff(fullReload),
+        ApiClient.getServices(fullReload),
+        ApiClient.getSalonProfile(fullReload).catch(() => null),
+      ]);
 
-    this.summaryData = summary;
-    this.staffList = staff;
-    this.servicesList = services;
-    this.salonProfile = profile;
+      this.summaryData = summary;
+      this.staffList = staff || [];
+      this.servicesList = services || [];
+      this.salonProfile = profile;
+    } else {
+      // High-speed lightweight date-only switch
+      this.summaryData = await ApiClient.getDashboardSummary(this.selectedDate);
+    }
   }
 
   renderLoading() {
@@ -322,6 +327,32 @@ export class SalonDashboard {
           <div class="stat-label">${labelPrefix} REVENUE</div>
           <div class="stat-value" style="color: #10b981;">₹${todayRevenue.toLocaleString()}</div>
           <div class="stat-sub">From completed appointments</div>
+        </div>
+      </div>
+
+      <!-- WhatsApp Monthly Free Quota Tracker -->
+      <div class="glass-panel" style="margin-bottom: 24px; padding: 18px 22px; border: 1px solid rgba(37, 211, 102, 0.25); background: linear-gradient(135deg, rgba(37, 211, 102, 0.04), rgba(99, 102, 241, 0.04)); border-radius: 16px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 12px;">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="width: 40px; height: 40px; border-radius: 12px; background: rgba(37, 211, 102, 0.15); display: flex; align-items: center; justify-content: center; font-size: 1.3rem;">💬</div>
+            <div>
+              <div style="font-weight: 800; font-size: 1.05rem; color: #fff;">WhatsApp Monthly Free Quota</div>
+              <div style="font-size: 0.78rem; color: var(--text-muted);">1,000 free customer booking sessions included every month by Meta</div>
+            </div>
+          </div>
+          <span class="badge ${this.summaryData.whatsappQuota?.percentUsed >= 90 ? 'badge-cancelled' : this.summaryData.whatsappQuota?.percentUsed >= 75 ? 'badge-in-progress' : 'badge-completed'}" style="font-size: 0.8rem; padding: 6px 14px; font-weight: 700;">
+            ${(this.summaryData.whatsappQuota?.remaining !== undefined ? this.summaryData.whatsappQuota.remaining : 1000)} Free Chats Left
+          </span>
+        </div>
+
+        <!-- Progress Bar -->
+        <div style="width: 100%; height: 8px; background: rgba(255, 255, 255, 0.08); border-radius: 8px; overflow: hidden; margin-bottom: 8px;">
+          <div style="width: ${Math.max(2, this.summaryData.whatsappQuota?.percentUsed || 0)}%; height: 100%; background: ${this.summaryData.whatsappQuota?.percentUsed >= 90 ? 'linear-gradient(90deg, #f43f5e, #fb7185)' : this.summaryData.whatsappQuota?.percentUsed >= 75 ? 'linear-gradient(90deg, #f59e0b, #fbbf24)' : 'linear-gradient(90deg, #10b981, #34d399)'}; border-radius: 8px; transition: width 0.4s ease;"></div>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.78rem; color: var(--text-secondary); flex-wrap: wrap; gap: 8px;">
+          <div><strong style="color: #fff;">${this.summaryData.whatsappQuota?.used || 0}</strong> / ${this.summaryData.whatsappQuota?.limit || 1000} chats used this month (${this.summaryData.whatsappQuota?.percentUsed || 0}%)</div>
+          <div>🔄 Free quota resets on: <strong style="color: #818cf8;">${this.summaryData.whatsappQuota?.resetsOn || '1st of next month'}</strong></div>
         </div>
       </div>
 
@@ -1160,7 +1191,7 @@ export class SalonDashboard {
       const syncBtn = document.getElementById('btn-refresh-queue');
       syncBtn?.classList.add('syncing');
       try {
-        await this.loadData();
+        await this.loadData(true);
       } finally {
         this.render();
       }
