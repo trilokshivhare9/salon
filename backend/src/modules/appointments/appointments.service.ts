@@ -22,7 +22,7 @@ import { filter } from 'rxjs/operators';
 
 export interface SalonRealtimeEvent {
   salonId: string;
-  type: 'NEW_BOOKING' | 'STATUS_UPDATED' | 'RESCHEDULED' | 'CANCELLED';
+  type: 'NEW_BOOKING' | 'STATUS_UPDATED' | 'RESCHEDULED' | 'CANCELLED' | 'APPOINTMENT_UPDATED';
   data: any;
   timestamp: string;
 }
@@ -593,5 +593,15 @@ export class AppointmentsService {
     });
 
     return { success: true, updatedAppointment: updated, extraService };
+  }
+
+  async updateEtaStatus(salonId: string, appointmentId: string, etaStatus: string) {
+    const updated = await this.prisma.appointment.update({
+      where: { id: appointmentId },
+      data: { clientEtaStatus: etaStatus },
+      include: { customer: true, staff: true, service: true },
+    });
+    this.emitSalonEvent(salonId, 'APPOINTMENT_UPDATED', updated);
+    return updated;
   }
 }

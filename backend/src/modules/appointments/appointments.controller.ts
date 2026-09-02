@@ -24,11 +24,30 @@ import { Public } from '../../common/decorators/public.decorator';
 import { AppointmentStatus } from '@prisma/client';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
+import { RemindersService } from './reminders.service';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('appointments')
 export class AppointmentsController {
-  constructor(private readonly appointmentsService: AppointmentsService) { }
+  constructor(
+    private readonly appointmentsService: AppointmentsService,
+    private readonly remindersService: RemindersService,
+  ) { }
+
+  @Public()
+  @Post('trigger-reminders')
+  async triggerReminders() {
+    return this.remindersService.processReminders();
+  }
+
+  @Patch(':id/eta-status')
+  async updateEtaStatus(
+    @CurrentSalonId() salonId: string,
+    @Param('id') appointmentId: string,
+    @Body('etaStatus') etaStatus: string,
+  ) {
+    return this.appointmentsService.updateEtaStatus(salonId, appointmentId, etaStatus);
+  }
 
   @Public()
   @Sse('stream/:salonId')

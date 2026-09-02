@@ -360,6 +360,13 @@ model Appointment {
   notes                String?
   
   createdByUserId      String?                    @map("created_by_user_id")
+  
+  // Smart Automated Reminder Tracking & Late Arrival Flags
+  reminder2hSentAt     DateTime?                  @map("reminder_2h_sent_at")
+  reminder10mSentAt    DateTime?                  @map("reminder_10m_sent_at")
+  lateFollowUpSentAt   DateTime?                  @map("late_follow_up_sent_at")
+  clientEtaStatus      String?                    @map("client_eta_status") // e.g. "ON_WAY_10M", "ON_WAY_20M", "CANCEL_REQUESTED"
+
   createdAt            DateTime                   @default(now()) @map("created_at")
   updatedAt            DateTime                   @updatedAt @map("updated_at")
 

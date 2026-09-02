@@ -1,5 +1,6 @@
 import { ApiClient } from './api.js';
 import { RealtimeNotifier } from './realtime.js';
+import { SoundManager } from './sound.js';
 
 export const SERVICE_CATALOG_PRESETS = [
   {
@@ -178,6 +179,12 @@ export class SalonDashboard {
               </div>
               <div style="font-size: 0.75rem; color: var(--text-muted);">${this.salonProfile?.city || 'India'} • ${this.summaryData.timezone}</div>
             </div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <button class="btn btn-secondary btn-sm" id="btn-toggle-sound" style="display: flex; align-items: center; gap: 6px; font-size: 0.8rem; padding: 6px 12px; border-radius: 20px;">
+              <span>${SoundManager.isMuted() ? '🔇' : '🔊'}</span>
+              <span>${SoundManager.isMuted() ? 'Muted' : 'Sound ON'}</span>
+            </button>
           </div>
         </div>
       </header>
@@ -604,9 +611,14 @@ export class SalonDashboard {
                   </div>
                 </div>
 
-                <!-- Row 3: Service Tag -->
-                <div class="qc__row3">
+                <!-- Row 3: Service Tag + ETA Delay Tag -->
+                <div class="qc__row3" style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
                   <span class="qc__tag qc__tag--service">✂️ ${appt.service.name}</span>
+                  ${appt.clientEtaStatus === 'ON_WAY_10M' ? `
+                    <span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); font-size: 0.75rem; padding: 4px 8px; border-radius: 6px; font-weight: 700;">
+                      🚗 Arriving in ~10m
+                    </span>
+                  ` : ''}
                 </div>
 
                 <!-- Row 4: Action Bar -->
@@ -1139,6 +1151,15 @@ export class SalonDashboard {
     const fabBtn = document.getElementById('mobile-btn-walkin');
     fabBtn?.addEventListener('click', handleFabClick);
     fabBtn?.addEventListener('touchend', handleFabClick);
+
+    // Sound Mute / Unmute Toggle
+    document.getElementById('btn-toggle-sound')?.addEventListener('click', () => {
+      const isMuted = SoundManager.toggleMute();
+      const btn = document.getElementById('btn-toggle-sound');
+      if (btn) {
+        btn.innerHTML = `<span>${isMuted ? '🔇' : '🔊'}</span> <span>${isMuted ? 'Muted' : 'Sound ON'}</span>`;
+      }
+    });
 
     // Queue Filter Pills
     this.container.querySelectorAll('.q-chip').forEach((pill) => {

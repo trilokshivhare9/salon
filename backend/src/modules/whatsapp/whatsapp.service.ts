@@ -666,6 +666,120 @@ export class WhatsAppService {
       return { replyMessage: reply, state: ConversationState.START };
     }
 
+    // -------------------------------------------------------------------------
+    // REMINDER & LATE-ARRIVAL RESPONSES
+    // -------------------------------------------------------------------------
+    if (input === 'remind_confirm') {
+      const reply = `🎉 *Thank you for confirming!*\n\nWe have your seat reserved and look forward to welcoming you at *${salon.name}*!`;
+      await this.sendMetaMessage(
+        cleanNumber,
+        {
+          bodyText: reply,
+          interactiveType: 'button',
+          buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
+        },
+        phoneNumberId,
+        salonId,
+      );
+      return { replyMessage: reply, state: ConversationState.START };
+    }
+
+    if (input.startsWith('late_on_way')) {
+      const apptId = input.replace('late_on_way_', '');
+      if (apptId && apptId !== 'late_on_way') {
+        await this.prisma.appointment.update({
+          where: { id: apptId },
+          data: { clientEtaStatus: 'ON_WAY_10M' },
+        }).catch(() => {});
+      } else {
+        const activeAppts = await this.findActiveUpcomingAppointments(salonId, cleanNumber);
+        if (activeAppts.length > 0) {
+          await this.prisma.appointment.update({
+            where: { id: activeAppts[0].id },
+            data: { clientEtaStatus: 'ON_WAY_10M' },
+          }).catch(() => {});
+        }
+      }
+
+      const reply = `🚗 *Thanks for letting us know!*\n\nWe have held your specialist's chair for the next 10 minutes. Please drive safely and see you shortly!`;
+      await this.sendMetaMessage(
+        cleanNumber,
+        {
+          bodyText: reply,
+          interactiveType: 'button',
+          buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
+        },
+        phoneNumberId,
+        salonId,
+      );
+      return { replyMessage: reply, state: ConversationState.START };
+    }
+
+    if (input.startsWith('late_cancel') || input === 'remind_cancel') {
+      const apptId = input.startsWith('late_cancel_') ? input.replace('late_cancel_', '') : null;
+      let targetApptId = apptId;
+      if (!targetApptId) {
+        const activeAppts = await this.findActiveUpcomingAppointments(salonId, cleanNumber);
+        if (activeAppts.length > 0) targetApptId = activeAppts[0].id;
+      }
+
+      if (targetApptId) {
+        await this.appointmentsService.updateStatus(salonId, targetApptId, {
+          status: AppointmentStatus.CANCELLED,
+          reason: 'Cancelled by client via WhatsApp reminder/late follow-up.',
+        }).catch(() => {});
+      }
+
+      const reply = `✅ *Your chair has been released.*\n\nThank you for informing us in advance so another client could be accommodated. Reply *'Hi'* anytime to book a new slot!`;
+      await this.sendMetaMessage(
+        cleanNumber,
+        {
+          bodyText: reply,
+          interactiveType: 'button',
+          buttons: [{ id: 'btn_start', title: '📅 Book New Slot' }],
+        },
+        phoneNumberId,
+        salonId,
+      );
+      return { replyMessage: reply, state: ConversationState.START };
+    }
+
+    if (input === 'remind_reschedule') {
+      const activeAppts = await this.findActiveUpcomingAppointments(salonId, cleanNumber);
+      if (activeAppts.length > 0) {
+        await this.prisma.conversation.update({
+          where: { id: conversation.id },
+          data: {
+            state: ConversationState.SELECT_RESCHEDULE_DATE,
+            activeAppointmentId: activeAppts[0].id,
+          },
+        });
+
+        const tz = salon.timezone || 'Asia/Kolkata';
+        const today = DateTime.now().setZone(tz);
+        const tomorrow = today.plus({ days: 1 });
+        const dayAfter = today.plus({ days: 2 });
+
+        const reply = `📅 *Select a new Date to Reschedule:*`;
+        await this.sendMetaMessage(
+          cleanNumber,
+          {
+            bodyText: reply,
+            interactiveType: 'button',
+            buttons: [
+              { id: 'rdate_1', title: `Today (${today.toFormat('dd LLL')})` },
+              { id: 'rdate_2', title: `Tmrw (${tomorrow.toFormat('dd LLL')})` },
+              { id: 'rdate_3', title: dayAfter.toFormat('EEE dd LLL') },
+            ],
+          },
+          phoneNumberId,
+          salonId,
+        );
+
+        return { replyMessage: reply, state: ConversationState.SELECT_RESCHEDULE_DATE };
+      }
+    }
+
     // Direct Service Trigger (from Menu buttons or list selections from any state)
     if (input.startsWith('svc_')) {
       const svcId = input.replace('svc_', '');
