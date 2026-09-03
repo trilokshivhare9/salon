@@ -60,7 +60,7 @@ export class ApiClient {
     const isGet = !options.method || options.method === 'GET';
     const cacheKey = `${endpoint}`;
 
-    // Cache hit
+    // Cache hit — return immediately (SWR: caller gets instant data)
     if (isGet && ttlMs > 0) {
       const cached = memoryCache.get(cacheKey);
       if (cached && Date.now() - cached.timestamp < ttlMs) {
@@ -103,9 +103,45 @@ export class ApiClient {
 
       return result;
     } catch (err) {
+      // SWR Fallback: if network fails but we have stale cache, return it
+      if (isGet && ttlMs > 0) {
+        const stale = memoryCache.get(cacheKey);
+        if (stale) {
+          console.warn(`[SWR] Serving stale cache for ${endpoint} due to network error`);
+          return stale.data;
+        }
+      }
       console.error(`API Error on ${endpoint}:`, err);
       throw err;
     }
+  }
+
+  /**
+   * Stale-While-Revalidate: returns cached data instantly + refreshes in background.
+   * @param {string} endpoint
+   * @param {number} ttlMs - Cache TTL
+   * @param {Function} onFreshData - Called with fresh data after background fetch completes
+   * @returns {Promise<{data: any, isStale: boolean}>}
+   */
+  static async requestSWR(endpoint, ttlMs, onFreshData) {
+    const cacheKey = `${endpoint}`;
+    const cached = memoryCache.get(cacheKey);
+
+    if (cached) {
+      // Return stale data instantly, fetch fresh in background
+      this.request(endpoint, {}, 0).then((freshData) => {
+        memoryCache.set(cacheKey, { data: freshData, timestamp: Date.now() });
+        if (onFreshData && JSON.stringify(freshData) !== JSON.stringify(cached.data)) {
+          onFreshData(freshData);
+        }
+      }).catch(() => {}); // Silently fail background refresh
+
+      return { data: cached.data, isStale: Date.now() - cached.timestamp > ttlMs };
+    }
+
+    // No cache — must fetch
+    const freshData = await this.request(endpoint, {}, ttlMs);
+    return { data: freshData, isStale: false };
   }
 
   // Auth

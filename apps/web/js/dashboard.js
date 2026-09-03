@@ -106,8 +106,9 @@ export class SalonDashboard {
       // Connect to Real-time Event Stream for live sync & audio chimes
       if (this.salonProfile?.id) {
         this.realtime = new RealtimeNotifier(this.salonProfile.id, async () => {
+          // OPTIMIZED: Targeted tab-only re-render (no full DOM teardown)
           await this.loadData();
-          this.render();
+          this.refreshActiveTab();
         });
       }
     } catch (err) {
@@ -128,6 +129,58 @@ export class SalonDashboard {
       });
     }
   }
+
+  /**
+   * PERFORMANCE: Only re-render the active tab content + header badges.
+   * Avoids destroying the entire DOM tree (header, nav, modals, event listeners).
+   */
+  refreshActiveTab() {
+    const tabContent = document.getElementById('tab-content');
+    if (tabContent && this.summaryData) {
+      tabContent.innerHTML = this.getTabHtml();
+      // Re-attach only tab-specific event listeners (not header/nav)
+      this.attachTabEventListeners();
+
+      // Update header badge count (queue badge in bottom nav)
+      const queueBadge = this.container.querySelector('.bottom-nav-badge');
+      if (queueBadge && this.summaryData?.statusCounts) {
+        queueBadge.textContent = this.summaryData.statusCounts.total;
+      }
+    } else {
+      // Fallback to full re-render if tab-content not found
+      this.render();
+    }
+  }
+
+  /**
+   * PERFORMANCE: Flicker-free instant tab switching.
+   * Swaps only #tab-content and updates nav active state without destroying the DOM tree.
+   */
+  switchTab(targetTab) {
+    if (!targetTab || targetTab === this.activeTab) return;
+    this.activeTab = targetTab;
+
+    // Update active state on desktop tab buttons
+    this.container.querySelectorAll('.nav-tab').forEach((el) => {
+      el.classList.toggle('active', el.getAttribute('data-tab') === targetTab);
+    });
+
+    // Update active state on mobile bottom nav buttons
+    this.container.querySelectorAll('.bottom-nav-item').forEach((el) => {
+      el.classList.toggle('active', el.getAttribute('data-tab') === targetTab);
+    });
+
+    const tabContent = document.getElementById('tab-content');
+    if (tabContent) {
+      tabContent.innerHTML = this.getTabHtml();
+      this.attachTabEventListeners();
+      if (targetTab === 'customers') this.loadCustomersTable();
+      if (targetTab === 'whatsapp-logs') this.loadWhatsAppLogs();
+    } else {
+      this.render();
+    }
+  }
+
 
   async loadData(fullReload = false) {
     if (fullReload || !this.staffList || !this.servicesList || !this.salonProfile) {
@@ -150,13 +203,65 @@ export class SalonDashboard {
 
   renderLoading() {
     this.container.innerHTML = `
-      <div style="min-height: 80vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 40px;">
-        <div class="brand-icon-box" style="width: 52px; height: 52px; font-size: 1.6rem; margin-bottom: 16px;">✂️</div>
-        <div style="font-size: 1.3rem; font-family: var(--font-heading); color: #818cf8; font-weight: 700;">Synchronizing Store Schedule...</div>
-        <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 4px;">Loading real-time chair capacity, bookings & staff roster</p>
-      </div>
+      <!-- Skeleton Header -->
+      <header class="portal-header">
+        <div class="portal-header-content">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <div class="skeleton-pulse" style="width: 42px; height: 42px; border-radius: 12px;"></div>
+            <div>
+              <div class="skeleton-pulse" style="width: 160px; height: 16px; border-radius: 6px; margin-bottom: 6px;"></div>
+              <div class="skeleton-pulse" style="width: 100px; height: 10px; border-radius: 4px;"></div>
+            </div>
+          </div>
+        </div>
+      </header>
+      <main style="max-width: 1300px; margin: 0 auto; padding: 24px 16px;">
+        <!-- Skeleton Tab Bar -->
+        <div style="display: flex; gap: 8px; margin-bottom: 24px; overflow-x: auto;">
+          ${[120, 100, 130, 110, 105].map(w => `<div class="skeleton-pulse" style="width: ${w}px; height: 36px; border-radius: 20px; flex-shrink: 0;"></div>`).join('')}
+        </div>
+        <!-- Skeleton KPI Grid -->
+        <div class="stats-grid">
+          ${[1, 2, 3, 4].map(() => `
+            <div class="stat-card">
+              <div class="skeleton-pulse" style="width: 80%; height: 12px; border-radius: 4px; margin-bottom: 12px;"></div>
+              <div class="skeleton-pulse" style="width: 50%; height: 28px; border-radius: 6px; margin-bottom: 8px;"></div>
+              <div class="skeleton-pulse" style="width: 70%; height: 10px; border-radius: 4px;"></div>
+            </div>
+          `).join('')}
+        </div>
+        <!-- Skeleton Action Cards -->
+        <div class="glass-panel" style="margin-bottom: 24px;">
+          <div class="skeleton-pulse" style="width: 180px; height: 18px; border-radius: 6px; margin-bottom: 16px;"></div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px;">
+            ${[1, 2, 3, 4].map(() => `
+              <div class="staff-card" style="padding: 18px;">
+                <div class="skeleton-pulse" style="width: 40px; height: 40px; border-radius: 10px; margin-bottom: 10px;"></div>
+                <div class="skeleton-pulse" style="width: 75%; height: 14px; border-radius: 4px; margin-bottom: 8px;"></div>
+                <div class="skeleton-pulse" style="width: 90%; height: 10px; border-radius: 4px;"></div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+        <!-- Skeleton Staff Grid -->
+        <div class="glass-panel">
+          <div class="skeleton-pulse" style="width: 220px; height: 18px; border-radius: 6px; margin-bottom: 16px;"></div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px;">
+            ${[1, 2, 3].map(() => `
+              <div class="staff-card" style="display: flex; align-items: center; gap: 14px; padding: 14px;">
+                <div class="skeleton-pulse" style="width: 44px; height: 44px; border-radius: 50%;"></div>
+                <div style="flex: 1;">
+                  <div class="skeleton-pulse" style="width: 70%; height: 14px; border-radius: 4px; margin-bottom: 8px;"></div>
+                  <div class="skeleton-pulse" style="width: 50%; height: 10px; border-radius: 4px;"></div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </main>
     `;
   }
+
 
   render() {
     const salonName = this.salonProfile?.name || 'Salon Operations';
@@ -1096,8 +1201,7 @@ export class SalonDashboard {
       this.showQRCodeModal();
     });
     document.getElementById('card-action-queue')?.addEventListener('click', () => {
-      this.activeTab = 'queue';
-      this.render();
+      this.switchTab('queue');
     });
     document.getElementById('card-action-copy')?.addEventListener('click', () => {
       const slug = this.salonProfile?.slug || 'glamour-studio';
@@ -1106,20 +1210,15 @@ export class SalonDashboard {
       alert(`Booking link copied to clipboard:\n${url}`);
     });
     document.getElementById('btn-goto-staff')?.addEventListener('click', () => {
-      this.activeTab = 'staff';
-      this.render();
+      this.switchTab('staff');
     });
 
     // Profile Feature Hub Cards
     document.getElementById('card-feature-crm')?.addEventListener('click', () => {
-      this.activeTab = 'customers';
-      this.render();
-      this.loadCustomersTable();
+      this.switchTab('customers');
     });
     document.getElementById('card-feature-whatsapp')?.addEventListener('click', () => {
-      this.activeTab = 'whatsapp-logs';
-      this.render();
-      this.loadWhatsAppLogs();
+      this.switchTab('whatsapp-logs');
     });
     document.getElementById('card-feature-qr')?.addEventListener('click', () => {
       this.showQRCodeModal();
@@ -1132,16 +1231,14 @@ export class SalonDashboard {
         const targetBtn = e.target.closest('[data-tab]');
         const targetTab = targetBtn ? targetBtn.getAttribute('data-tab') : null;
         if (targetTab && targetTab !== this.activeTab) {
-          this.activeTab = targetTab;
-          this.render();
-          if (targetTab === 'customers') this.loadCustomersTable();
-          if (targetTab === 'whatsapp-logs') this.loadWhatsAppLogs();
+          this.switchTab(targetTab);
         }
       };
 
       tab.addEventListener('click', handleTabClick);
       tab.addEventListener('touchend', handleTabClick);
     });
+
 
     // Mobile Walk-In FAB
     const handleFabClick = (e) => {
@@ -1470,6 +1567,210 @@ export class SalonDashboard {
     });
 
     // Load table on initial tab switch
+    if (this.activeTab === 'customers') this.loadCustomersTable();
+    if (this.activeTab === 'whatsapp-logs') this.loadWhatsAppLogs();
+  }
+
+  /**
+   * PERFORMANCE: Re-attach only event listeners inside #tab-content.
+   * Called during targeted SSE re-renders to avoid re-binding global header/nav listeners.
+   */
+  attachTabEventListeners() {
+    const tabContent = document.getElementById('tab-content');
+    if (!tabContent) return;
+
+    // Dashboard Quick Action Cards
+    document.getElementById('card-action-walkin')?.addEventListener('click', () => this.showWalkInModal());
+    document.getElementById('card-action-qr')?.addEventListener('click', () => this.showQRCodeModal());
+    document.getElementById('card-action-queue')?.addEventListener('click', () => {
+      this.switchTab('queue');
+    });
+    document.getElementById('card-action-copy')?.addEventListener('click', () => {
+      const slug = this.salonProfile?.slug || 'glamour-studio';
+      const url = `${window.location.origin}/#book/${slug}`;
+      navigator.clipboard.writeText(url);
+      alert(`Booking link copied to clipboard:\n${url}`);
+    });
+    document.getElementById('btn-goto-staff')?.addEventListener('click', () => {
+      this.switchTab('staff');
+    });
+
+
+    // Queue Filter Pills
+    tabContent.querySelectorAll('.q-chip').forEach((pill) => {
+      pill.addEventListener('click', (e) => {
+        const filter = e.currentTarget.getAttribute('data-filter');
+        if (filter) {
+          this.queueFilter = filter;
+          this.render();
+        }
+      });
+    });
+
+    // Date Navigation Controls
+    const handleDateChange = async (newDate) => {
+      if (!newDate || this.selectedDate === newDate) return;
+      this.selectedDate = newDate;
+      try { await this.loadData(); } finally { this.render(); }
+    };
+    document.getElementById('btn-date-prev')?.addEventListener('click', () => handleDateChange(this.addDaysToDateString(this.selectedDate, -1)));
+    document.getElementById('btn-date-next')?.addEventListener('click', () => handleDateChange(this.addDaysToDateString(this.selectedDate, 1)));
+    document.getElementById('btn-date-today')?.addEventListener('click', () => handleDateChange(this.getLocalDateString()));
+    document.getElementById('dashboard-date-picker')?.addEventListener('change', (e) => {
+      if (e.target.value) handleDateChange(e.target.value);
+    });
+
+    // Refresh queue
+    document.getElementById('btn-refresh-queue')?.addEventListener('click', async () => {
+      const syncBtn = document.getElementById('btn-refresh-queue');
+      syncBtn?.classList.add('syncing');
+      try { await this.loadData(true); } finally { this.render(); }
+    });
+
+    // Status Updates
+    tabContent.querySelectorAll('.btn-status').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const status = e.currentTarget.getAttribute('data-status');
+        e.currentTarget.textContent = 'Updating...';
+        try {
+          await ApiClient.updateAppointmentStatus(id, status);
+          await this.loadData();
+          this.render();
+        } catch (err) {
+          alert(`Could not update status: ${err.message}`);
+        }
+      });
+    });
+
+    // Reschedule Button
+    tabContent.querySelectorAll('.btn-open-reschedule').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const serviceId = e.currentTarget.getAttribute('data-service');
+        const staffId = e.currentTarget.getAttribute('data-staff');
+        const clientName = e.currentTarget.getAttribute('data-name');
+        this.showRescheduleModal(id, serviceId, staffId, clientName);
+      });
+    });
+
+    // Cancel Button
+    tabContent.querySelectorAll('.btn-open-cancel').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const clientName = e.currentTarget.getAttribute('data-name');
+        this.showCancelModal(id, clientName);
+      });
+    });
+
+    // Quick Onboarding Action Buttons
+    document.getElementById('btn-quick-add-staff')?.addEventListener('click', () => this.showAddStaffModal());
+    document.getElementById('btn-empty-add-staff')?.addEventListener('click', () => this.showAddStaffModal());
+    document.getElementById('btn-quick-add-service')?.addEventListener('click', () => this.showAddServiceModal());
+    document.getElementById('btn-empty-add-service')?.addEventListener('click', () => this.showAddServiceModal());
+
+    // Staff Tab Buttons
+    document.getElementById('btn-add-staff')?.addEventListener('click', () => this.showAddStaffModal());
+    tabContent.querySelectorAll('.btn-edit-staff').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        this.showEditStaffModal({
+          id: e.currentTarget.getAttribute('data-id'),
+          name: e.currentTarget.getAttribute('data-name'),
+          phone: e.currentTarget.getAttribute('data-phone'),
+          email: e.currentTarget.getAttribute('data-email'),
+          profileImageUrl: e.currentTarget.getAttribute('data-img'),
+        });
+      });
+    });
+    tabContent.querySelectorAll('.btn-delete-staff').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        this.showDeleteStaffModal(e.currentTarget.getAttribute('data-id'), e.currentTarget.getAttribute('data-name'));
+      });
+    });
+    tabContent.querySelectorAll('.btn-edit-hours').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        this.showEditStaffHoursModal(e.currentTarget.getAttribute('data-id'), e.currentTarget.getAttribute('data-name'));
+      });
+    });
+    tabContent.querySelectorAll('.btn-toggle-staff').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        try { await ApiClient.toggleStaffStatus(id); await this.loadData(); this.render(); } catch (err) { alert(err.message); }
+      });
+    });
+    tabContent.querySelectorAll('.btn-assign-services').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        this.showAssignServicesModal(e.currentTarget.getAttribute('data-id'), e.currentTarget.getAttribute('data-name'));
+      });
+    });
+    tabContent.querySelectorAll('.btn-add-break').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        this.showAddBreakModal(e.currentTarget.getAttribute('data-id'), e.currentTarget.getAttribute('data-name'));
+      });
+    });
+
+    // Services Tab Buttons
+    document.getElementById('btn-add-service')?.addEventListener('click', () => this.showAddServiceModal());
+    tabContent.querySelectorAll('.btn-edit-service').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        this.showEditServiceModal({
+          id: e.currentTarget.getAttribute('data-id'),
+          name: e.currentTarget.getAttribute('data-name'),
+          price: e.currentTarget.getAttribute('data-price'),
+          durationMinutes: e.currentTarget.getAttribute('data-duration'),
+          category: e.currentTarget.getAttribute('data-category'),
+          description: e.currentTarget.getAttribute('data-desc'),
+        });
+      });
+    });
+    tabContent.querySelectorAll('.btn-delete-service').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        this.showDeleteServiceModal(e.currentTarget.getAttribute('data-id'), e.currentTarget.getAttribute('data-name'));
+      });
+    });
+
+    // Profile Tab
+    document.getElementById('btn-copy-invite')?.addEventListener('click', () => {
+      const slug = this.salonProfile?.slug || 'glamour-studio';
+      const url = `${window.location.origin}/#book/${slug}`;
+      navigator.clipboard.writeText(url);
+      alert(`Booking link copied to clipboard:\n${url}`);
+    });
+    document.getElementById('btn-open-qr')?.addEventListener('click', () => this.showQRCodeModal());
+    document.getElementById('btn-fast-walkin')?.addEventListener('click', () => this.showWalkInModal());
+    document.getElementById('btn-block-time')?.addEventListener('click', () => this.showBlockTimeModal());
+
+    // Profile Feature Hub Cards
+    document.getElementById('card-feature-crm')?.addEventListener('click', () => {
+      this.switchTab('customers');
+    });
+    document.getElementById('card-feature-whatsapp')?.addEventListener('click', () => {
+      this.switchTab('whatsapp-logs');
+    });
+    document.getElementById('card-feature-qr')?.addEventListener('click', () => this.showQRCodeModal());
+
+
+    // CRM Search
+    const searchInput = document.getElementById('customer-search-input');
+    let debounceTimer;
+    searchInput?.addEventListener('input', (e) => {
+      this.searchQuery = e.target.value;
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => this.loadCustomersTable(this.searchQuery), 300);
+    });
+    tabContent.querySelectorAll('.btn-view-customer-history').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        this.showCustomerHistoryModal(e.currentTarget.getAttribute('data-id'), e.currentTarget.getAttribute('data-name'));
+      });
+    });
+
+    // WhatsApp Log Filter
+    document.getElementById('btn-fetch-wa-logs')?.addEventListener('click', () => {
+      const phone = document.getElementById('whatsapp-log-phone-filter')?.value || '';
+      this.loadWhatsAppLogs(phone);
+    });
+
+    // Load table on tab switch
     if (this.activeTab === 'customers') this.loadCustomersTable();
     if (this.activeTab === 'whatsapp-logs') this.loadWhatsAppLogs();
   }

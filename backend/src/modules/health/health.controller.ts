@@ -7,6 +7,13 @@ import { Public } from '../../common/decorators/public.decorator';
 export class HealthController {
   constructor(private prisma: PrismaService) {}
 
+  // Ultra-lightweight keep-alive ping (no DB, no auth — responds in < 1ms)
+  // UptimeRobot should target: GET /api/v1/health/ping
+  @Get('ping')
+  ping() {
+    return { status: 'ok', uptime: Math.floor(process.uptime()) };
+  }
+
   @Get()
   async checkHealth() {
     try {
@@ -27,3 +34,4 @@ export class HealthController {
     }
   }
 }
+
