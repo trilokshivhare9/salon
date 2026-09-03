@@ -75,6 +75,7 @@ export class AvailabilityService {
     serviceId: string,
     dateStr: string, // YYYY-MM-DD
     preferredStaffId?: string,
+    excludeAppointmentId?: string,
   ): Promise<AvailabilityResult> {
     // 1. Load Salon (cached — rarely changes)
     const salon = await this.getCachedSalon(salonId);
@@ -166,13 +167,18 @@ export class AvailabilityService {
     const dayStartUtc = requestedDate.toUTC().toJSDate();
     const dayEndUtc = requestedDate.endOf('day').toUTC().toJSDate();
 
+    const apptWhere: any = {
+      salonId,
+      date: new Date(dateStr),
+      status: { notIn: ['CANCELLED', 'NO_SHOW', 'RESCHEDULED'] },
+    };
+    if (excludeAppointmentId) {
+      apptWhere.id = { not: excludeAppointmentId };
+    }
+
     const [existingAppointments, blockedTimes] = await Promise.all([
       this.prisma.appointment.findMany({
-        where: {
-          salonId,
-          date: new Date(dateStr),
-          status: { notIn: ['CANCELLED', 'NO_SHOW', 'RESCHEDULED'] },
-        },
+        where: apptWhere,
         select: { staffId: true, startTime: true, endTime: true },
       }),
       this.prisma.blockedTime.findMany({
@@ -183,6 +189,7 @@ export class AvailabilityService {
         },
       }),
     ]);
+
 
     // 4. Calculate Available Slots per Staff Member (pure in-memory computation)
     const slotsMap = new Map<string, { startTime: string; endTime: string; eligibleStaffIds: Set<string> }>();

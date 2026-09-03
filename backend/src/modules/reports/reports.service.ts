@@ -185,7 +185,12 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
           customer: true,
           staff: true,
           service: true,
+          statusHistory: {
+            orderBy: { createdAt: 'desc' },
+            take: 2,
+          },
         },
+
         orderBy: { startTime: 'asc' },
       }),
 

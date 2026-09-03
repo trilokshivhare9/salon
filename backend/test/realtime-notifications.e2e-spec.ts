@@ -213,8 +213,16 @@ describe('Real-Time Notifications & WhatsApp Outbound Alerts (E2E Tests)', () =>
   it('4. Should trigger automated "Chair Ready" WhatsApp call-up to next client when previous service completes', async () => {
     const today = DateTime.now().toISODate();
 
+    await prisma.appointment.deleteMany({
+      where: {
+        staffId: testStaff.id,
+      },
+    });
+
+
     // 1st Appointment: Currently IN_SERVICE (Started 40 mins ago, finishes now)
     const appt1 = await prisma.appointment.create({
+
       data: {
         salonId: testSalon.id,
         customerId: (await prisma.customer.findFirst({ where: { phone: client1Phone } }))!.id,

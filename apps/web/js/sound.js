@@ -115,6 +115,38 @@ class SoundManager {
       osc.stop(now + offset + 0.25);
     });
   }
+
+  /**
+   * 4. Luxury Cancellation Alert Chime (Gentle Descending Eb5 -> C5 -> Ab4)
+   * Clear, resonant notification alerting the salon floor that a chair is now open.
+   */
+  static playCancelAlert() {
+    if (this.muted) return;
+    const ctx = this.getContext();
+    if (!ctx) return;
+
+    const notes = [622.25, 523.25, 415.30]; // Eb5, C5, Ab4
+    const now = ctx.currentTime;
+
+    notes.forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now + idx * 0.14);
+
+      gain.gain.setValueAtTime(0.001, now + idx * 0.14);
+      gain.gain.exponentialRampToValueAtTime(0.22, now + idx * 0.14 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + idx * 0.14 + 0.45);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(now + idx * 0.14);
+      osc.stop(now + idx * 0.14 + 0.5);
+    });
+  }
 }
 
 export { SoundManager };
+

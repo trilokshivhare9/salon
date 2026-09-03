@@ -1,4 +1,4 @@
-import { ApiClient } from './api.js';
+import { ApiClient, formatTime12h } from './api.js';
 
 export class BookingWizard {
   constructor(containerId, salonSlug) {
@@ -287,7 +287,7 @@ export class BookingWizard {
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
             <div>
               <div style="font-size: 0.85rem; color: var(--text-muted);">Date & Time</div>
-              <div style="font-weight: 600; color: #818cf8;">${appt.date.split('T')[0]} at ${new Date(appt.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+              <div style="font-weight: 600; color: #818cf8;">${appt.date.split('T')[0]} at ${formatTime12h(appt.startTime)}</div>
             </div>
             <div>
               <div style="font-size: 0.85rem; color: var(--text-muted);">Specialist</div>
@@ -341,7 +341,7 @@ export class BookingWizard {
         <div class="slots-grid">
           ${this.state.availableSlots.map(s => `
             <button class="slot-btn ${this.state.selectedTime === s.startTime ? 'selected' : ''}" data-time="${s.startTime}">
-              ${s.startTime}
+              ${formatTime12h(s.startTime)}
             </button>
           `).join('')}
         </div>

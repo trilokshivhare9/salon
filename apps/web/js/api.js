@@ -438,3 +438,36 @@ export class ApiClient {
     });
   }
 }
+
+/**
+ * Global 12-Hour Time Formatter (hh:mm A)
+ * Guarantees clean, human-friendly 12-hour format across the entire application.
+ * Accepts Date objects, ISO strings, timestamps, or "HH:mm" strings.
+ * Examples:
+ *   "00:24" -> "12:24 AM"
+ *   "14:00" -> "2:00 PM"
+ *   "09:30" -> "9:30 AM"
+ *   Date(2026-09-04T00:24:00) -> "12:24 AM"
+ */
+export function formatTime12h(val) {
+  if (!val) return '';
+  // 1. Handle "HH:mm" or "HH:mm:ss" strings directly
+  if (typeof val === 'string' && /^\d{1,2}:\d{2}(:\d{2})?$/.test(val.trim())) {
+    const parts = val.trim().split(':');
+    let h = parseInt(parts[0], 10);
+    const m = parts[1];
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12;
+    if (h === 0) h = 12;
+    return `${h}:${m} ${ampm}`;
+  }
+  // 2. Handle Date objects, timestamps, ISO strings
+  const dt = typeof val === 'string' || typeof val === 'number' ? new Date(val) : val;
+  if (isNaN(dt.getTime())) return '';
+  return dt.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+}
+

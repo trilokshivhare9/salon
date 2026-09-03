@@ -504,6 +504,20 @@ export class WhatsAppService {
   }
 
   /**
+   * Helper to format "HH:mm" time strings to 12-hour AM/PM format (e.g. "14:00" -> "2:00 PM")
+   */
+  public formatTime12h(timeStr: string): string {
+    if (!timeStr) return '';
+    const parts = timeStr.trim().split(':');
+    let h = parseInt(parts[0], 10);
+    const m = parts[1] || '00';
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12;
+    if (h === 0) h = 12;
+    return `${h}:${m} ${ampm}`;
+  }
+
+  /**
    * Universal Time Slot Parser: Handles list taps, clean times, 12h AM/PM, and list indices
    */
   public parseTimeSlot(
@@ -546,8 +560,12 @@ export class WhatsAppService {
       if (foundFuzzy) return foundFuzzy;
     }
 
-    // 4. Substring contains: e.g. "⏰ 10:00"
-    const subMatch = availableSlots.find((s) => raw.includes(s.startTime));
+    // 4. Substring contains: e.g. "⏰ 10:00" or "⏰ 2:00 PM"
+    const subMatch = availableSlots.find((s) => {
+      const s12 = this.formatTime12h(s.startTime).toLowerCase();
+      const rawLower = raw.toLowerCase();
+      return raw.includes(s.startTime) || rawLower.includes(s12);
+    });
     if (subMatch) return subMatch;
 
     return null;
@@ -887,12 +905,45 @@ export class WhatsAppService {
 
           return { replyMessage: reply, state: ConversationState.SELECT_ADDON };
         } else if (input === 'btn_reschedule' || normalized.includes('reschedule')) {
+          const tz = salon.timezone || 'Asia/Kolkata';
+          const now = DateTime.now().setZone(tz);
+
+          if (conversation.activeAppointmentId) {
+            const activeAppt = await this.prisma.appointment.findUnique({
+              where: { id: conversation.activeAppointmentId },
+              include: { staff: true, service: true },
+            });
+
+            if (activeAppt) {
+              const apptStart = DateTime.fromJSDate(activeAppt.startTime, { zone: tz });
+              const hoursUntilAppt = apptStart.diff(now, 'hours').hours;
+              const cancelWindowHours = salon.cancelWindowHours ?? 2;
+
+              if (hoursUntilAppt < cancelWindowHours && hoursUntilAppt > -1) {
+                // Critical Window (< 2 hours): Protect salon chair from last-minute abandonment
+                const reply = `⚠️ *Appointment is in less than ${cancelWindowHours} hours!*\n\nSpecialist *${activeAppt.staff?.name || 'Your specialist'}* has already reserved your chair for *${activeAppt.service?.name}*.\n\n• If you are delayed in traffic, tap *'Running 15m Late'* to hold your station.\n• To change your slot today, call our front desk directly at *${salon.phone || 'our desk'}*.`;
+                await this.sendMetaMessage(
+                  cleanNumber,
+                  {
+                    bodyText: reply,
+                    interactiveType: 'button',
+                    buttons: [
+                      { id: 'btn_eta_late_15', title: '🚗 Running 15m Late' },
+                      { id: 'btn_menu', title: '📋 Main Menu' },
+                    ],
+                  },
+                  phoneNumberId,
+                );
+                return { replyMessage: reply, state: ConversationState.START };
+              }
+            }
+          }
+
           await this.prisma.conversation.update({
             where: { id: conversation.id },
             data: { state: ConversationState.SELECT_RESCHEDULE_DATE },
           });
 
-          const tz = salon.timezone || 'Asia/Kolkata';
           const today = DateTime.now().setZone(tz);
           const tomorrow = today.plus({ days: 1 });
           const dayAfter = today.plus({ days: 2 });
@@ -913,6 +964,7 @@ export class WhatsAppService {
           );
 
           return { replyMessage: reply, state: ConversationState.SELECT_RESCHEDULE_DATE };
+
         } else if (input === 'btn_cancel_appt' || normalized.includes('cancel')) {
           await this.prisma.conversation.update({
             where: { id: conversation.id },
@@ -1027,7 +1079,9 @@ export class WhatsAppService {
           conversation.selectedServiceId || salon.services[0].id,
           dateStr,
           conversation.selectedStaffId || undefined,
+          conversation.activeAppointmentId || undefined,
         );
+
 
         if (availability.availableSlots.length === 0) {
           const reply = `⚠️ No available slots on *${targetDate.toFormat('dd LLL, EEEE')}*. Please choose another date:`;
@@ -1057,7 +1111,7 @@ export class WhatsAppService {
         const slotsToShow = availability.availableSlots.slice(0, 10);
         const listRows: InteractiveListRow[] = slotsToShow.map((s) => ({
           id: `rslot_${s.startTime}`,
-          title: `⏰ ${s.startTime}`,
+          title: `⏰ ${this.formatTime12h(s.startTime)}`,
           description: `Available slot`,
         }));
 
@@ -1094,7 +1148,9 @@ export class WhatsAppService {
           conversation.selectedServiceId || salon.services[0].id,
           dateStr,
           conversation.selectedStaffId || undefined,
+          conversation.activeAppointmentId || undefined,
         );
+
 
         const selectedSlot = this.parseTimeSlot(input, availability.availableSlots);
         if (!selectedSlot) {
@@ -1450,7 +1506,7 @@ export class WhatsAppService {
         const slotsToShow = availability.availableSlots.slice(0, 10);
         const listRows: InteractiveListRow[] = slotsToShow.map((s) => ({
           id: `slot_${s.startTime}`,
-          title: `⏰ ${s.startTime}`,
+          title: `⏰ ${this.formatTime12h(s.startTime)}`,
           description: `Available with ${s.availableStaffCount} stylist(s)`,
         }));
 
@@ -1506,7 +1562,7 @@ export class WhatsAppService {
           const slotsToShow = availability.availableSlots.slice(0, 10);
           const listRows = slotsToShow.map((s) => ({
             id: `slot_${s.startTime}`,
-            title: `⏰ ${s.startTime}`,
+            title: `⏰ ${this.formatTime12h(s.startTime)}`,
             description: `Available with ${s.availableStaffCount} stylist(s)`,
           }));
           await this.sendMetaMessage(
@@ -1544,7 +1600,7 @@ export class WhatsAppService {
             },
           });
 
-          const reply = `📋 *Booking Summary:*\n\n• Salon: *${salon.name}*\n• Service: *${selectedService?.name}* (₹${selectedService?.price})\n• Specialist: *${selectedStaff ? selectedStaff.name : 'Any Specialist'}*\n• Date: *${targetDate}*\n• Time: *${selectedSlot.startTime}*\n• Client: *${existingCustomer.name}*`;
+          const reply = `📋 *Booking Summary:*\n\n• Salon: *${salon.name}*\n• Service: *${selectedService?.name}* (₹${selectedService?.price})\n• Specialist: *${selectedStaff ? selectedStaff.name : 'Any Specialist'}*\n• Date: *${targetDate}*\n• Time: *${this.formatTime12h(selectedSlot.startTime)}*\n• Client: *${existingCustomer.name}*`;
           await this.sendMetaMessage(
             cleanNumber,
             {
@@ -1567,7 +1623,7 @@ export class WhatsAppService {
             },
           });
 
-          const reply = `⏰ Selected Time: *${selectedSlot.startTime}*\n\nPlease reply with your *Full Name* to complete the reservation:`;
+          const reply = `⏰ Selected Time: *${this.formatTime12h(selectedSlot.startTime)}*\n\nPlease reply with your *Full Name* to complete the reservation:`;
           await this.sendMetaMessage(cleanNumber, { textBody: reply }, phoneNumberId);
           return { replyMessage: reply, state: ConversationState.COLLECT_NAME };
         }
@@ -1626,6 +1682,7 @@ export class WhatsAppService {
             ? DateTime.fromJSDate(conversation.selectedDate).toUTC().toISODate()!
             : DateTime.now().setZone(tz).toISODate()!;
           const timeSlotStr = DateTime.fromJSDate(conversation.selectedStartTime!, { zone: tz }).toFormat('HH:mm');
+          const time12hStr = this.formatTime12h(timeSlotStr);
 
           try {
             const appointment = await this.appointmentsService.createAppointment(salonId, {
@@ -1641,10 +1698,10 @@ export class WhatsAppService {
 
             await this.prisma.conversation.update({
               where: { id: conversation.id },
-              data: { state: ConversationState.START },
+              data: { state: ConversationState.COMPLETED, activeAppointmentId: appointment.id },
             });
 
-            const reply = `🎉 *APPOINTMENT CONFIRMED!*\n\n• Booking ID: *${appointment.appointmentNumber}*\n• Service: *${appointment.service.name}*\n• Specialist: *${appointment.staff.name}*\n• Date: *${dateStr}*\n• Time: *${timeSlotStr}*\n• Amount: *₹${appointment.price}*\n\n📍 *${salon.name}*\n${salon.address || ''}\n\nWe look forward to seeing you!`;
+            const reply = `🎉 *APPOINTMENT CONFIRMED!*\n\n• Booking ID: *${appointment.appointmentNumber}*\n• Service: *${appointment.service.name}*\n• Specialist: *${appointment.staff.name}*\n• Date: *${dateStr}*\n• Time: *${time12hStr}*\n• Amount: *₹${appointment.price}*\n\n📍 *${salon.name}*\n${salon.address || ''}\n\nWe look forward to seeing you!`;
             await this.sendMetaMessage(
               cleanNumber,
               {

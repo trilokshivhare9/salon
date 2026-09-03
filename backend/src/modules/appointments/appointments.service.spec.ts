@@ -5,6 +5,8 @@ import { AvailabilityService } from '../availability/availability.service';
 import { BadRequestException } from '@nestjs/common';
 import { AppointmentStatus } from '@prisma/client';
 
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
+
 describe('AppointmentsService (Unit Tests)', () => {
   let service: AppointmentsService;
   let prisma: PrismaService;
@@ -33,8 +35,15 @@ describe('AppointmentsService (Unit Tests)', () => {
             getAvailableSlots: jest.fn(),
           },
         },
+        {
+          provide: WhatsAppService,
+          useValue: {
+            sendMetaMessage: jest.fn().mockResolvedValue({ success: true }),
+          },
+        },
       ],
     }).compile();
+
 
     service = module.get<AppointmentsService>(AppointmentsService);
     prisma = module.get<PrismaService>(PrismaService);

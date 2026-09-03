@@ -3,7 +3,11 @@
 export class PwaManager {
   static init() {
     this.registerServiceWorker();
-    this.setupInstallPrompt();
+    // Intrusive install banners removed per user directive
+    const existingBanner = document.getElementById('pwa-install-banner');
+    if (existingBanner) existingBanner.remove();
+    const existingIos = document.getElementById('pwa-ios-banner');
+    if (existingIos) existingIos.remove();
   }
 
   static registerServiceWorker() {
@@ -22,37 +26,9 @@ export class PwaManager {
   }
 
   static setupInstallPrompt() {
-    let deferredPrompt = null;
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
-
-    // Do not show banner if already installed and running standalone
-    if (isStandalone) {
-      console.log('[PWA] Running in native standalone mode');
-      return;
-    }
-
-    // Android / Chromium / Desktop Install Event
-    window.addEventListener('beforeinstallprompt', (e) => {
-      e.preventDefault();
-      deferredPrompt = e;
-      this.showInstallBanner(async () => {
-        if (deferredPrompt) {
-          deferredPrompt.prompt();
-          const { outcome } = await deferredPrompt.userChoice;
-          console.log('[PWA] User choice:', outcome);
-          deferredPrompt = null;
-        }
-      });
-    });
-
-    // iOS Safari Guide (if not dismissed before)
-    if (isIOS && !localStorage.getItem('pwa_ios_dismissed')) {
-      setTimeout(() => {
-        this.showIOSPrompt();
-      }, 3000);
-    }
+    // Disabled: users install via browser menu if desired
   }
+
 
   static showInstallBanner(onInstallClick) {
     if (document.getElementById('pwa-install-banner') || localStorage.getItem('pwa_prompt_dismissed')) {

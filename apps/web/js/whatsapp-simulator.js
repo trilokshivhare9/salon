@@ -1,4 +1,4 @@
-import { ApiClient } from './api.js';
+import { ApiClient, formatTime12h } from './api.js';
 
 export class WhatsAppSimulator {
   constructor(containerId) {
@@ -108,7 +108,7 @@ export class WhatsAppSimulator {
     this.messages.push({
       sender: 'user',
       text: msgText,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      time: formatTime12h(new Date()),
     });
     this.render();
 
@@ -128,14 +128,14 @@ export class WhatsAppSimulator {
       this.messages.push({
         sender: 'bot',
         text: res.replyMessage || 'No response from salon bot.',
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        time: formatTime12h(new Date()),
       });
       this.render();
     } catch (err) {
       this.messages.push({
         sender: 'bot',
         text: `⚠️ Error: ${err.message}`,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        time: formatTime12h(new Date()),
       });
       this.render();
     }

@@ -22,10 +22,11 @@ import { filter } from 'rxjs/operators';
 
 export interface SalonRealtimeEvent {
   salonId: string;
-  type: 'NEW_BOOKING' | 'STATUS_UPDATED' | 'RESCHEDULED' | 'CANCELLED' | 'APPOINTMENT_UPDATED';
+  type: 'NEW_BOOKING' | 'STATUS_UPDATED' | 'RESCHEDULED' | 'CANCELLED' | 'BOOKING_CANCELLED' | 'APPOINTMENT_UPDATED';
   data: any;
   timestamp: string;
 }
+
 
 @Injectable()
 export class AppointmentsService {
@@ -314,7 +315,9 @@ export class AppointmentsService {
         customer: true,
         staff: { select: { id: true, name: true, profileImageUrl: true } },
         service: { select: { id: true, name: true, durationMinutes: true, price: true, category: true } },
+        statusHistory: { orderBy: { createdAt: 'desc' }, take: 1 },
       },
+
       orderBy: { startTime: 'asc' },
     });
   }
@@ -413,6 +416,15 @@ export class AppointmentsService {
     // 1. Broadcast real-time update to dashboard PWA
     this.emitSalonEvent(salonId, 'STATUS_UPDATED', updated);
 
+    if (dto.status === AppointmentStatus.CANCELLED) {
+      this.emitSalonEvent(salonId, 'BOOKING_CANCELLED', {
+        ...updated,
+        cancelledAt: new Date().toISOString(),
+        cancellationReason: dto.reason || 'Cancelled by customer or salon operator',
+      });
+    }
+
+
     // 2. Outbound WhatsApp: If CANCELLED, alert the customer immediately
     if (dto.status === AppointmentStatus.CANCELLED && appointment.customer?.phone) {
       try {
@@ -478,41 +490,168 @@ export class AppointmentsService {
       throw new BadRequestException('Cannot reschedule completed or cancelled appointment.');
     }
 
-    const newAppointment = await this.createAppointment(
-      salonId,
-      {
-        serviceId: existing.serviceId,
-        staffId: dto.staffId || existing.staffId,
-        date: dto.newDate,
-        startTime: dto.newStartTime,
-        customerName: existing.customer.name,
-        customerPhone: existing.customer.phone,
-        customerEmail: existing.customer.email || undefined,
-        notes: `Rescheduled from ${existing.appointmentNumber}. ${existing.notes || ''}`,
+    const salon = await this.prisma.salon.findUnique({
+      where: { id: salonId },
+    });
+
+    if (!salon || salon.status !== 'ACTIVE') {
+      throw new NotFoundException('Salon is inactive or not found.');
+    }
+
+    const timezone = salon.timezone || 'Asia/Kolkata';
+    const nowInSalonZone = DateTime.now().setZone(timezone);
+    const existingStart = DateTime.fromJSDate(existing.startTime, { zone: timezone });
+
+    // Business Rule 1: Cutoff window for customer self-service (userId is undefined for customer requests)
+    if (!userId) {
+      const hoursUntilAppt = existingStart.diff(nowInSalonZone, 'hours').hours;
+      const cancelWindowHours = salon.cancelWindowHours ?? 2;
+
+      if (hoursUntilAppt < cancelWindowHours) {
+        throw new BadRequestException(
+          `Appointments starting within ${cancelWindowHours} hours cannot be rescheduled online because your specialist has reserved this chair. Please call the salon at ${salon.phone || 'our desk'} so our concierge can assist you directly.`,
+        );
+      }
+
+      // Business Rule 2: Anti-hoarding limit — maximum 1 self-service reschedule per booking
+      const previousReschedules = await this.prisma.appointmentStatusHistory.count({
+        where: {
+          appointmentId,
+          newStatus: AppointmentStatus.RESCHEDULED,
+        },
+      });
+
+      if (previousReschedules >= 1) {
+        throw new BadRequestException(
+          'This appointment has already been rescheduled once. To avoid chair scheduling conflicts, please contact the salon directly for further adjustments.',
+        );
+      }
+    }
+
+    const targetStaffId = dto.staffId || existing.staffId;
+
+    // Parse target date and start time in salon local timezone
+    const newStartDt = DateTime.fromISO(`${dto.newDate}T${dto.newStartTime}:00`, {
+      zone: timezone,
+    });
+
+    if (!newStartDt.isValid) {
+      throw new BadRequestException('Invalid reschedule date or start time format.');
+    }
+
+    const service = await this.prisma.service.findUnique({
+      where: { id: existing.serviceId },
+    });
+
+    if (!service) {
+      throw new NotFoundException('Service not found.');
+    }
+
+    const newEndDt = newStartDt.plus({ minutes: service.durationMinutes });
+
+    // Atomic transaction for reschedule:
+    // 1. Acquire advisory lock on target staff & date
+    // 2. Mark old appointment as RESCHEDULED inside tx (so PostgreSQL exclusion constraint ignores it!)
+    // 3. Pre-commit check for other conflicting appointments
+    // 4. Create new appointment inside the same tx
+    const [key1, key2] = this.getLockKeys(salonId, targetStaffId, dto.newDate);
+
+    const newAppointment = await this.prisma.$transaction(
+      async (tx) => {
+        // Advisory lock
+        await tx.$executeRawUnsafe(
+          `SELECT pg_advisory_xact_lock(${key1}, ${key2})`,
+        );
+
+        // Mark existing appointment as RESCHEDULED first
+        await tx.appointment.update({
+          where: { id: appointmentId },
+          data: { status: AppointmentStatus.RESCHEDULED },
+        });
+
+        await tx.appointmentStatusHistory.create({
+          data: {
+            appointmentId,
+            previousStatus: existing.status,
+            newStatus: AppointmentStatus.RESCHEDULED,
+            changedByUserId: userId,
+            reason: `Rescheduled to ${dto.newDate} at ${dto.newStartTime}`,
+          },
+        });
+
+        // Check if there is an overlapping appointment (excluding the current one)
+        const conflict = await tx.appointment.findFirst({
+          where: {
+            salonId,
+            staffId: targetStaffId,
+            id: { not: appointmentId },
+            status: { notIn: [AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW, AppointmentStatus.RESCHEDULED] },
+            startTime: { lt: newEndDt.toUTC().toJSDate() },
+            endTime: { gt: newStartDt.toUTC().toJSDate() },
+          },
+        });
+
+        if (conflict) {
+          throw new ConflictException(
+            'The selected reschedule time slot is no longer available. Please select another time.',
+          );
+        }
+
+        // Generate next appointment number
+        const lastAppointment = await tx.appointment.findFirst({
+          where: { salonId },
+          orderBy: { createdAt: 'desc' },
+          select: { appointmentNumber: true },
+        });
+
+        let nextNum = 1001;
+        if (lastAppointment?.appointmentNumber) {
+          const parsed = parseInt(
+            lastAppointment.appointmentNumber.replace('SAL-', ''),
+            10,
+          );
+          if (!isNaN(parsed)) nextNum = parsed + 1;
+        }
+        const appointmentNumber = `SAL-${nextNum}`;
+
+        // Create new appointment
+        const created = await tx.appointment.create({
+          data: {
+            salonId,
+            customerId: existing.customerId,
+            staffId: targetStaffId,
+            serviceId: existing.serviceId,
+            appointmentNumber,
+            date: new Date(dto.newDate),
+            startTime: newStartDt.toUTC().toJSDate(),
+            endTime: newEndDt.toUTC().toJSDate(),
+            price: existing.price,
+            status: AppointmentStatus.CONFIRMED,
+            source: existing.source,
+            notes: `Rescheduled from ${existing.appointmentNumber}. ${existing.notes || ''}`,
+          },
+          include: {
+            customer: true,
+            staff: { select: { id: true, name: true, profileImageUrl: true } },
+            service: { select: { id: true, name: true, durationMinutes: true, price: true, category: true } },
+            salon: true,
+          },
+        });
+
+        return created;
       },
-      userId,
+      { timeout: 10000 },
     );
 
-    await this.updateStatus(
-      salonId,
-      appointmentId,
-      {
-        status: AppointmentStatus.RESCHEDULED,
-        reason: `Rescheduled to new appointment ${newAppointment.appointmentNumber}.`,
-      },
-      userId,
-    );
-
-    // Broadcast reschedule event
+    // Broadcast reschedule event to dashboard
     this.emitSalonEvent(salonId, 'RESCHEDULED', newAppointment);
 
-    // Outbound WhatsApp: Send reschedule confirmation to customer
+    // Outbound WhatsApp notification (if customer phone available)
     if (newAppointment.customer?.phone) {
       try {
-        const salon = await this.prisma.salon.findUnique({ where: { id: salonId } });
-        const newDateStr = DateTime.fromJSDate(newAppointment.startTime, { zone: salon?.timezone || 'Asia/Kolkata' }).toFormat('dd LLL yyyy');
-        const newTimeStr = DateTime.fromJSDate(newAppointment.startTime, { zone: salon?.timezone || 'Asia/Kolkata' }).toFormat('hh:mm a');
-        const reschedMsg = `🔄 *APPOINTMENT RESCHEDULED*\n\nHello *${newAppointment.customer.name}*, your appointment at *${salon?.name || 'our salon'}* has been rescheduled.\n\n• *Service:* *${newAppointment.service?.name || 'Service'}*\n• *Specialist:* *${newAppointment.staff?.name || 'Specialist'}*\n• *New Date:* *${newDateStr}*\n• *New Time:* *${newTimeStr}*\n\n📍 *${salon?.name || 'Salon'}*\n${salon?.address || ''}\n\nReply *'Hi'* if you need any adjustments.`;
+        const newDateStr = DateTime.fromJSDate(newAppointment.startTime, { zone: timezone }).toFormat('dd LLL yyyy');
+        const newTimeStr = DateTime.fromJSDate(newAppointment.startTime, { zone: timezone }).toFormat('hh:mm a');
+        const reschedMsg = `🔄 *APPOINTMENT RESCHEDULED*\n\nHello *${newAppointment.customer.name}*, your appointment at *${salon.name || 'our salon'}* has been rescheduled.\n\n• *Service:* *${newAppointment.service?.name || 'Service'}*\n• *Specialist:* *${newAppointment.staff?.name || 'Specialist'}*\n• *New Date:* *${newDateStr}*\n• *New Time:* *${newTimeStr}*\n\n📍 *${salon.name || 'Salon'}*\n${salon.address || ''}\n\nReply *'Hi'* if you need any adjustments.`;
         await this.whatsappService.sendMetaMessage(newAppointment.customer.phone, { bodyText: reschedMsg });
         this.logger.log(`Outbound WhatsApp reschedule alert dispatched to ${newAppointment.customer.phone}`);
       } catch (err) {
@@ -522,6 +661,7 @@ export class AppointmentsService {
 
     return newAppointment;
   }
+
 
   async addServiceToAppointment(
     salonId: string,

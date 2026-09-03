@@ -36,12 +36,42 @@ describe('Concurrency & Double-Booking Prevention E2E Suite', () => {
   });
 
   it('Concurrent requests for the EXACT same slot must result in 1 booking and 409 Conflicts for the rest', async () => {
-    const service = await prisma.service.findFirst({
-      where: { name: 'Haircut & Styling' },
+    let salon: any = await prisma.salon.findFirst({
+      where: { status: 'ACTIVE' },
+      include: { services: true, staff: true },
     });
-    const staff = await prisma.staff.findFirst({
-      where: { name: 'Rahul Mehta' },
-    });
+
+    if (!salon || salon.services.length === 0 || salon.staff.length === 0) {
+      salon = await prisma.salon.create({
+        data: {
+          name: 'Glamour Studio',
+          slug: `glamour-studio-${Date.now()}`,
+          phone: '+919999000011',
+          email: `glamour-${Date.now()}@test.com`,
+          timezone: 'Asia/Kolkata',
+          services: {
+            create: { name: 'Haircut & Styling', durationMinutes: 30, price: 250 },
+          },
+          staff: {
+            create: { name: 'Rahul Mehta' },
+          },
+          workingHours: {
+            create: { dayOfWeek: 'TUESDAY', isOpen: true, openTime: '09:00', closeTime: '19:00' },
+          },
+        },
+        include: { services: true, staff: true },
+      });
+      await prisma.staffService.create({
+        data: { staffId: salon.staff[0].id, serviceId: salon.services[0].id },
+      });
+      await prisma.staffWorkingHours.create({
+        data: { staffId: salon.staff[0].id, dayOfWeek: 'TUESDAY', isWorking: true, startTime: '09:00', endTime: '19:00' },
+      });
+    }
+
+
+    const service = salon.services[0];
+    const staff = salon.staff[0];
 
     expect(service).toBeDefined();
     expect(staff).toBeDefined();
@@ -51,7 +81,7 @@ describe('Concurrency & Double-Booking Prevention E2E Suite', () => {
 
     await prisma.appointment.deleteMany({
       where: {
-        staffId: staff!.id,
+        staffId: staff.id,
         date: new Date(targetDate),
       },
     });
@@ -59,16 +89,17 @@ describe('Concurrency & Double-Booking Prevention E2E Suite', () => {
     const concurrentCount = 6;
     const requests = Array.from({ length: concurrentCount }).map((_, index) =>
       request(app.getHttpServer())
-        .post('/api/v1/booking/glamour-studio/appointments')
+        .post(`/api/v1/booking/${salon!.slug}/appointments`)
         .send({
-          serviceId: service!.id,
-          staffId: staff!.id,
+          serviceId: service.id,
+          staffId: staff.id,
           date: targetDate,
           startTime: targetTime,
           customerName: `Concurrent Client ${index + 1}`,
           customerPhone: `+91999990000${index + 1}`,
         }),
     );
+
 
     const responses = await Promise.all(requests);
 
