@@ -1108,27 +1108,54 @@ export class WhatsAppService {
           },
         });
 
-        const slotsToShow = availability.availableSlots.slice(0, 10);
-        const listRows: InteractiveListRow[] = slotsToShow.map((s) => ({
-          id: `rslot_${s.startTime}`,
-          title: `⏰ ${this.formatTime12h(s.startTime)}`,
-          description: `Available slot`,
-        }));
+        const allSlots = availability.availableSlots;
+        const morningSlots = allSlots.filter((s) => parseInt(s.startTime.split(':')[0], 10) < 12);
+        const afternoonSlots = allSlots.filter((s) => {
+          const h = parseInt(s.startTime.split(':')[0], 10);
+          return h >= 12 && h < 16;
+        });
+        const eveningSlots = allSlots.filter((s) => parseInt(s.startTime.split(':')[0], 10) >= 16);
 
-        const reply = `📅 Date: *${targetDate.toFormat('dd LLL, EEEE')}*\n\nChoose your new appointment time:`;
-        await this.sendMetaMessage(
-          cleanNumber,
-          {
-            headerText: 'Reschedule Slot',
-            bodyText: reply,
-            buttonText: '⏰ Choose New Time',
-            interactiveType: 'list',
-            listRows,
-          },
-          phoneNumberId,
-        );
+        if (allSlots.length <= 10) {
+          const listRows: InteractiveListRow[] = allSlots.map((s) => ({
+            id: `rslot_${s.startTime}`,
+            title: `⏰ ${this.formatTime12h(s.startTime)}`,
+            description: `Available slot`,
+          }));
 
-        return { replyMessage: reply, state: ConversationState.SELECT_RESCHEDULE_TIME };
+          const reply = `📅 Date: *${targetDate.toFormat('dd LLL, EEEE')}*\n\nChoose your new appointment time:`;
+          await this.sendMetaMessage(
+            cleanNumber,
+            {
+              headerText: 'Reschedule Slot',
+              bodyText: reply,
+              buttonText: '⏰ Choose New Time',
+              interactiveType: 'list',
+              listRows,
+            },
+            phoneNumberId,
+          );
+
+          return { replyMessage: reply, state: ConversationState.SELECT_RESCHEDULE_TIME };
+        } else {
+          const periodButtons = [];
+          if (morningSlots.length > 0) periodButtons.push({ id: 'rperiod_morning', title: `🌅 Morning (${morningSlots.length})` });
+          if (afternoonSlots.length > 0) periodButtons.push({ id: 'rperiod_afternoon', title: `☀️ Afternoon (${afternoonSlots.length})` });
+          if (eveningSlots.length > 0) periodButtons.push({ id: 'rperiod_evening', title: `🌙 Evening (${eveningSlots.length})` });
+
+          const reply = `📅 Date: *${targetDate.toFormat('dd LLL, EEEE')}*\n⏰ Salon Hours: *${this.formatTime12h(allSlots[0].startTime)} – ${this.formatTime12h(allSlots[allSlots.length - 1].endTime)}* (${allSlots.length} slots all day)\n\nChoose your new appointment time period below, or type any time directly (e.g. *5:30 PM*):`;
+          await this.sendMetaMessage(
+            cleanNumber,
+            {
+              bodyText: reply,
+              interactiveType: 'button',
+              buttons: periodButtons.slice(0, 3),
+            },
+            phoneNumberId,
+          );
+
+          return { replyMessage: reply, state: ConversationState.SELECT_RESCHEDULE_TIME };
+        }
       }
 
       case ConversationState.SELECT_RESCHEDULE_TIME: {
@@ -1151,28 +1178,91 @@ export class WhatsAppService {
           conversation.activeAppointmentId || undefined,
         );
 
+        const cleanInput = input.trim().toLowerCase();
+        const allSlots = availability.availableSlots;
+        const morningSlots = allSlots.filter((s) => parseInt(s.startTime.split(':')[0], 10) < 12);
+        const afternoonSlots = allSlots.filter((s) => {
+          const h = parseInt(s.startTime.split(':')[0], 10);
+          return h >= 12 && h < 16;
+        });
+        const eveningSlots = allSlots.filter((s) => parseInt(s.startTime.split(':')[0], 10) >= 16);
 
-        const selectedSlot = this.parseTimeSlot(input, availability.availableSlots);
-        if (!selectedSlot) {
-          const slotsToShow = availability.availableSlots.slice(0, 10);
-          const listRows: InteractiveListRow[] = slotsToShow.map((s) => ({
+        // Period switcher in reschedule flow
+        if (cleanInput.startsWith('rperiod_') || cleanInput.startsWith('period_') || ['morning', 'afternoon', 'evening'].includes(cleanInput)) {
+          let chosenPeriod: 'morning' | 'afternoon' | 'evening' = 'morning';
+          if (cleanInput.includes('afternoon')) chosenPeriod = 'afternoon';
+          else if (cleanInput.includes('evening')) chosenPeriod = 'evening';
+
+          let slotsForPeriod = chosenPeriod === 'morning' ? morningSlots : chosenPeriod === 'afternoon' ? afternoonSlots : eveningSlots;
+          if (slotsForPeriod.length === 0) slotsForPeriod = allSlots.slice(0, 10);
+
+          const periodTitle = chosenPeriod === 'morning' ? '🌅 Morning' : chosenPeriod === 'afternoon' ? '☀️ Afternoon' : '🌙 Evening';
+          const listRows: InteractiveListRow[] = slotsForPeriod.slice(0, 9).map((s) => ({
             id: `rslot_${s.startTime}`,
-            title: `⏰ ${s.startTime}`,
+            title: `⏰ ${this.formatTime12h(s.startTime)}`,
             description: `Available slot`,
           }));
-          const reply = `❌ Please select a new time slot from the list:`;
+
+          if (chosenPeriod === 'morning' && afternoonSlots.length > 0) {
+            listRows.push({ id: 'rperiod_afternoon', title: '☀️ View Afternoon Slots →', description: '12:00 PM – 4:00 PM' });
+          } else if (chosenPeriod === 'afternoon' && eveningSlots.length > 0) {
+            listRows.push({ id: 'rperiod_evening', title: '🌙 View Evening Slots →', description: '4:00 PM – Close' });
+          } else if (chosenPeriod === 'evening' && morningSlots.length > 0) {
+            listRows.push({ id: 'rperiod_morning', title: '🌅 View Morning Slots →', description: '9:00 AM – 12:00 PM' });
+          }
+
+          const periodReply = `📅 *${DateTime.fromISO(dateStr).toFormat('dd LLL, EEEE')}* — ${periodTitle} Slots:\n\nSelect your new time slot below (or reply with any time, e.g. *5:30 PM*):`;
           await this.sendMetaMessage(
             cleanNumber,
             {
-              headerText: 'Reschedule Slot',
-              bodyText: reply,
-              buttonText: '⏰ Choose New Time',
+              headerText: `${periodTitle} Slots`,
+              bodyText: periodReply,
+              buttonText: `⏰ Choose ${chosenPeriod.charAt(0).toUpperCase() + chosenPeriod.slice(1)} Time`,
               interactiveType: 'list',
               listRows,
             },
             phoneNumberId,
           );
-          return { replyMessage: reply, state: ConversationState.SELECT_RESCHEDULE_TIME };
+          return { replyMessage: periodReply, state: ConversationState.SELECT_RESCHEDULE_TIME };
+        }
+
+        const selectedSlot = this.parseTimeSlot(input, availability.availableSlots);
+        if (!selectedSlot) {
+          if (allSlots.length <= 10) {
+            const listRows: InteractiveListRow[] = allSlots.map((s) => ({
+              id: `rslot_${s.startTime}`,
+              title: `⏰ ${this.formatTime12h(s.startTime)}`,
+              description: `Available slot`,
+            }));
+            const reply = `❌ Please select a new time slot from the list:`;
+            await this.sendMetaMessage(
+              cleanNumber,
+              {
+                headerText: 'Reschedule Slot',
+                bodyText: reply,
+                buttonText: '⏰ Choose New Time',
+                interactiveType: 'list',
+                listRows,
+              },
+              phoneNumberId,
+            );
+          } else {
+            const periodButtons = [];
+            if (morningSlots.length > 0) periodButtons.push({ id: 'rperiod_morning', title: `🌅 Morning (${morningSlots.length})` });
+            if (afternoonSlots.length > 0) periodButtons.push({ id: 'rperiod_afternoon', title: `☀️ Afternoon (${afternoonSlots.length})` });
+            if (eveningSlots.length > 0) periodButtons.push({ id: 'rperiod_evening', title: `🌙 Evening (${eveningSlots.length})` });
+
+            await this.sendMetaMessage(
+              cleanNumber,
+              {
+                bodyText: `❌ That time is not available. Please choose a time window below, or type an exact time (e.g. *2:30 PM* or *6 PM*):`,
+                interactiveType: 'button',
+                buttons: periodButtons.slice(0, 3),
+              },
+              phoneNumberId,
+            );
+          }
+          return { replyMessage: 'Please select an available time slot', state: ConversationState.SELECT_RESCHEDULE_TIME };
         }
 
         try {
@@ -1502,28 +1592,55 @@ export class WhatsAppService {
           },
         });
 
-        // NATIVE TIME SLOT RADIO PICKER (Up to 10 real slots)
-        const slotsToShow = availability.availableSlots.slice(0, 10);
-        const listRows: InteractiveListRow[] = slotsToShow.map((s) => ({
-          id: `slot_${s.startTime}`,
-          title: `⏰ ${this.formatTime12h(s.startTime)}`,
-          description: `Available with ${s.availableStaffCount} stylist(s)`,
-        }));
+        // NATIVE TIME SLOT RADIO PICKER (Whole Day Support)
+        const allSlots = availability.availableSlots;
+        const morningSlots = allSlots.filter((s) => parseInt(s.startTime.split(':')[0], 10) < 12);
+        const afternoonSlots = allSlots.filter((s) => {
+          const h = parseInt(s.startTime.split(':')[0], 10);
+          return h >= 12 && h < 16;
+        });
+        const eveningSlots = allSlots.filter((s) => parseInt(s.startTime.split(':')[0], 10) >= 16);
 
-        const reply = `📅 Date: *${targetDate.toFormat('dd LLL, EEEE')}*\n\nChoose an appointment time slot:`;
-        await this.sendMetaMessage(
-          cleanNumber,
-          {
-            headerText: 'Available Times',
-            bodyText: reply,
-            buttonText: '⏰ Choose Time Slot',
-            interactiveType: 'list',
-            listRows,
-          },
-          phoneNumberId,
-        );
+        if (allSlots.length <= 10) {
+          const listRows: InteractiveListRow[] = allSlots.map((s) => ({
+            id: `slot_${s.startTime}`,
+            title: `⏰ ${this.formatTime12h(s.startTime)}`,
+            description: `Available with ${s.availableStaffCount} stylist(s)`,
+          }));
 
-        return { replyMessage: reply, state: ConversationState.SELECT_TIME, metadata: { slots: slotsToShow } };
+          const reply = `📅 Date: *${targetDate.toFormat('dd LLL, EEEE')}*\n\nChoose an appointment time slot:`;
+          await this.sendMetaMessage(
+            cleanNumber,
+            {
+              headerText: 'Available Times',
+              bodyText: reply,
+              buttonText: '⏰ Choose Time Slot',
+              interactiveType: 'list',
+              listRows,
+            },
+            phoneNumberId,
+          );
+
+          return { replyMessage: reply, state: ConversationState.SELECT_TIME, metadata: { slots: allSlots } };
+        } else {
+          const periodButtons = [];
+          if (morningSlots.length > 0) periodButtons.push({ id: 'period_morning', title: `🌅 Morning (${morningSlots.length})` });
+          if (afternoonSlots.length > 0) periodButtons.push({ id: 'period_afternoon', title: `☀️ Afternoon (${afternoonSlots.length})` });
+          if (eveningSlots.length > 0) periodButtons.push({ id: 'period_evening', title: `🌙 Evening (${eveningSlots.length})` });
+
+          const reply = `📅 Date: *${targetDate.toFormat('dd LLL, EEEE')}*\n⏰ Salon Hours: *${this.formatTime12h(allSlots[0].startTime)} – ${this.formatTime12h(allSlots[allSlots.length - 1].endTime)}* (${allSlots.length} slots all day)\n\nChoose an appointment time slot period below, or type any time directly (e.g. *2:30 PM* or *6 PM*):`;
+          await this.sendMetaMessage(
+            cleanNumber,
+            {
+              bodyText: reply,
+              interactiveType: 'button',
+              buttons: periodButtons.slice(0, 3),
+            },
+            phoneNumberId,
+          );
+
+          return { replyMessage: reply, state: ConversationState.SELECT_TIME, metadata: { slots: allSlots } };
+        }
       }
 
       case ConversationState.SELECT_TIME: {
@@ -1539,43 +1656,108 @@ export class WhatsAppService {
           conversation.selectedStaffId || undefined,
         );
 
-        const selectedSlot = this.parseTimeSlot(input, availability.availableSlots);
+        if (availability.availableSlots.length === 0) {
+          const reply = `⚠️ Sorry, no slots are currently available on *${targetDate}*. Please choose another date:`;
+          await this.sendMetaMessage(
+            cleanNumber,
+            {
+              bodyText: reply,
+              interactiveType: 'button',
+              buttons: [
+                { id: 'date_1', title: 'Today' },
+                { id: 'date_2', title: 'Tomorrow' },
+              ],
+            },
+            phoneNumberId,
+          );
+          return { replyMessage: reply, state: ConversationState.SELECT_DATE };
+        }
 
-        if (!selectedSlot) {
-          if (availability.availableSlots.length === 0) {
-            const reply = `⚠️ Sorry, no slots are currently available on *${targetDate}*. Please choose another date:`;
-            await this.sendMetaMessage(
-              cleanNumber,
-              {
-                bodyText: reply,
-                interactiveType: 'button',
-                buttons: [
-                  { id: 'date_1', title: 'Today' },
-                  { id: 'date_2', title: 'Tomorrow' },
-                ],
-              },
-              phoneNumberId,
-            );
-            return { replyMessage: reply, state: ConversationState.SELECT_DATE };
-          }
+        const cleanInput = input.trim().toLowerCase();
+        const allSlots = availability.availableSlots;
+        const morningSlots = allSlots.filter((s) => parseInt(s.startTime.split(':')[0], 10) < 12);
+        const afternoonSlots = allSlots.filter((s) => {
+          const h = parseInt(s.startTime.split(':')[0], 10);
+          return h >= 12 && h < 16;
+        });
+        const eveningSlots = allSlots.filter((s) => parseInt(s.startTime.split(':')[0], 10) >= 16);
 
-          const slotsToShow = availability.availableSlots.slice(0, 10);
-          const listRows = slotsToShow.map((s) => ({
+        // Check if user clicked or typed a period filter
+        if (cleanInput.startsWith('period_') || ['morning', 'afternoon', 'evening'].includes(cleanInput)) {
+          let chosenPeriod: 'morning' | 'afternoon' | 'evening' = 'morning';
+          if (cleanInput.includes('afternoon')) chosenPeriod = 'afternoon';
+          else if (cleanInput.includes('evening')) chosenPeriod = 'evening';
+
+          let slotsForPeriod = chosenPeriod === 'morning' ? morningSlots : chosenPeriod === 'afternoon' ? afternoonSlots : eveningSlots;
+          if (slotsForPeriod.length === 0) slotsForPeriod = allSlots.slice(0, 10);
+
+          const periodTitle = chosenPeriod === 'morning' ? '🌅 Morning' : chosenPeriod === 'afternoon' ? '☀️ Afternoon' : '🌙 Evening';
+          const listRows: InteractiveListRow[] = slotsForPeriod.slice(0, 9).map((s) => ({
             id: `slot_${s.startTime}`,
             title: `⏰ ${this.formatTime12h(s.startTime)}`,
             description: `Available with ${s.availableStaffCount} stylist(s)`,
           }));
+
+          // Add quick-switch row if other periods exist
+          if (chosenPeriod === 'morning' && afternoonSlots.length > 0) {
+            listRows.push({ id: 'period_afternoon', title: '☀️ View Afternoon Slots →', description: '12:00 PM – 4:00 PM' });
+          } else if (chosenPeriod === 'afternoon' && eveningSlots.length > 0) {
+            listRows.push({ id: 'period_evening', title: '🌙 View Evening Slots →', description: '4:00 PM – Close' });
+          } else if (chosenPeriod === 'evening' && morningSlots.length > 0) {
+            listRows.push({ id: 'period_morning', title: '🌅 View Morning Slots →', description: '9:00 AM – 12:00 PM' });
+          }
+
+          const periodReply = `📅 *${DateTime.fromISO(targetDate).toFormat('dd LLL, EEEE')}* — ${periodTitle} Slots:\n\nSelect your preferred time slot below (or reply with any time, e.g. *5:30 PM*):`;
           await this.sendMetaMessage(
             cleanNumber,
             {
-              bodyText: '❌ Please select a time slot from the list:',
-              buttonText: '⏰ Select Slot',
+              headerText: `${periodTitle} Slots`,
+              bodyText: periodReply,
+              buttonText: `⏰ Choose ${chosenPeriod.charAt(0).toUpperCase() + chosenPeriod.slice(1)} Time`,
               interactiveType: 'list',
               listRows,
             },
             phoneNumberId,
           );
-          return { replyMessage: 'Please select time slot', state: ConversationState.SELECT_TIME };
+          return { replyMessage: periodReply, state: ConversationState.SELECT_TIME, metadata: { slots: slotsForPeriod } };
+        }
+
+        const selectedSlot = this.parseTimeSlot(input, availability.availableSlots);
+
+        if (!selectedSlot) {
+          if (allSlots.length <= 10) {
+            const listRows = allSlots.map((s) => ({
+              id: `slot_${s.startTime}`,
+              title: `⏰ ${this.formatTime12h(s.startTime)}`,
+              description: `Available with ${s.availableStaffCount} stylist(s)`,
+            }));
+            await this.sendMetaMessage(
+              cleanNumber,
+              {
+                bodyText: '❌ Please select an available time slot from the list:',
+                buttonText: '⏰ Select Slot',
+                interactiveType: 'list',
+                listRows,
+              },
+              phoneNumberId,
+            );
+          } else {
+            const periodButtons = [];
+            if (morningSlots.length > 0) periodButtons.push({ id: 'period_morning', title: `🌅 Morning (${morningSlots.length})` });
+            if (afternoonSlots.length > 0) periodButtons.push({ id: 'period_afternoon', title: `☀️ Afternoon (${afternoonSlots.length})` });
+            if (eveningSlots.length > 0) periodButtons.push({ id: 'period_evening', title: `🌙 Evening (${eveningSlots.length})` });
+
+            await this.sendMetaMessage(
+              cleanNumber,
+              {
+                bodyText: `❌ That time is not available. Please choose a time window below, or type an exact time (e.g. *2:30 PM* or *6 PM*):`,
+                interactiveType: 'button',
+                buttons: periodButtons.slice(0, 3),
+              },
+              phoneNumberId,
+            );
+          }
+          return { replyMessage: 'Please select an available time slot', state: ConversationState.SELECT_TIME };
         }
 
         const existingCustomer = await this.prisma.customer.findUnique({

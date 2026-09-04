@@ -189,12 +189,19 @@ class App {
       submitBtn.setAttribute('disabled', 'true');
       errorDiv.style.display = 'none';
 
+      // Inform user if cloud server is spinning up from cold sleep (>2.5s)
+      const wakeUpTimer = setTimeout(() => {
+        submitBtn.innerHTML = `<span>Waking up cloud server (~30s)...</span>`;
+      }, 2500);
+
       try {
         const res = await ApiClient.login(email, password);
+        clearTimeout(wakeUpTimer);
         this.currentUser = res.user;
         window.location.hash = '#admin';
         this.handleRoute();
       } catch (err) {
+        clearTimeout(wakeUpTimer);
         errorDiv.textContent = err.message || 'Login failed. Please check store credentials.';
         errorDiv.style.display = 'block';
         submitBtn.innerHTML = `<span>Access Operations Hub</span> ${Icons.arrowRight({ size: 16 })}`;
@@ -284,8 +291,13 @@ class App {
       submitBtn.setAttribute('disabled', 'true');
       errorDiv.style.display = 'none';
 
+      const wakeUpTimer = setTimeout(() => {
+        submitBtn.innerHTML = `<span>Waking up cloud server (~30s)...</span>`;
+      }, 2500);
+
       try {
         const res = await ApiClient.login(email, password);
+        clearTimeout(wakeUpTimer);
         this.currentUser = res.user;
         if (res.user.role !== 'PLATFORM_ADMIN') {
           throw new Error('Access Denied: Account is not a Platform Super Admin.');
@@ -293,6 +305,7 @@ class App {
         window.location.hash = '#super-admin';
         this.handleRoute();
       } catch (err) {
+        clearTimeout(wakeUpTimer);
         errorDiv.textContent = err.message || 'Authentication failed.';
         errorDiv.style.display = 'block';
         submitBtn.innerHTML = `<span>Access Platform Control</span> ${Icons.arrowRight({ size: 16 })}`;

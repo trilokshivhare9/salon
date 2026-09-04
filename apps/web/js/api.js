@@ -78,20 +78,33 @@ export class ApiClient {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), options.timeoutMs || 45000);
+
     try {
       const response = await fetch(`${API_BASE}${endpoint}`, {
         ...options,
         headers,
+        signal: options.signal || controller.signal,
       });
 
-      const data = await response.json();
+      clearTimeout(timeoutId);
+
+      let data;
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        data = await response.json();
+      } else {
+        const text = await response.text();
+        data = { message: text || `Server error (${response.status}: ${response.statusText})` };
+      }
 
       if (!response.ok) {
         if (response.status === 401 && !endpoint.includes('/auth/login')) {
           this.clearSession();
           throw new Error('Session expired or unauthorized. Please log in again.');
         }
-        throw new Error(data.message || 'An error occurred during request.');
+        throw new Error(data.message || `Request failed with status ${response.status}`);
       }
 
       const result = data.data !== undefined ? data.data : data;
@@ -103,6 +116,8 @@ export class ApiClient {
 
       return result;
     } catch (err) {
+      clearTimeout(timeoutId);
+
       // SWR Fallback: if network fails but we have stale cache, return it
       if (isGet && ttlMs > 0) {
         const stale = memoryCache.get(cacheKey);
@@ -111,6 +126,13 @@ export class ApiClient {
           return stale.data;
         }
       }
+
+      if (err.name === 'AbortError') {
+        const timeoutErr = new Error('Request timed out. The cloud server may be waking up from sleep, please try again in a moment.');
+        console.error(`API Timeout on ${endpoint}:`, timeoutErr);
+        throw timeoutErr;
+      }
+
       console.error(`API Error on ${endpoint}:`, err);
       throw err;
     }
