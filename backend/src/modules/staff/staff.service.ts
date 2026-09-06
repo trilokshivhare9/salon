@@ -10,11 +10,26 @@ import {
   AssignStaffServicesDto,
   UpdateStaffWorkingHoursDto,
 } from './dto/create-staff.dto';
-import { StylistStatus, ServiceStatus } from '@prisma/client';
+import { StylistStatus, ServiceStatus, SalonStatus } from '@prisma/client';
 
 @Injectable()
 export class StaffService {
   constructor(private prisma: PrismaService) {}
+
+  private async syncSalonActiveStatus(salonId: string) {
+    const activeStylistCount = await this.prisma.stylist.count({
+      where: { salonId, status: StylistStatus.ACTIVE },
+    });
+    const activeServiceCount = await this.prisma.service.count({
+      where: { salonId, status: ServiceStatus.ACTIVE },
+    });
+
+    const meetsRequirements = activeStylistCount >= 1 && activeServiceCount >= 1;
+    await this.prisma.salon.update({
+      where: { id: salonId },
+      data: { status: meetsRequirements ? SalonStatus.ACTIVE : SalonStatus.INACTIVE },
+    });
+  }
 
   async getSalonStaff(salonId: string) {
     return this.prisma.stylist.findMany({
@@ -65,29 +80,26 @@ export class StaffService {
       );
     }
 
-    // 2. Validate that serviceIds is provided and not empty
-    if (!dto.serviceIds || dto.serviceIds.length === 0) {
-      throw new BadRequestException(
-        'At least one valid service must be assigned when creating a stylist.',
-      );
+    const serviceIds = (dto.serviceIds || []).filter(Boolean);
+
+    // If service IDs are provided, verify that all provided serviceIds exist, belong to this salon, and are ACTIVE
+    if (serviceIds.length > 0) {
+      const matchingServices = await this.prisma.service.findMany({
+        where: {
+          id: { in: serviceIds },
+          salonId,
+          status: ServiceStatus.ACTIVE,
+        },
+      });
+
+      if (matchingServices.length !== serviceIds.length) {
+        throw new BadRequestException(
+          'One or more selected services do not exist, are inactive, or do not belong to this salon.',
+        );
+      }
     }
 
-    // 3. Verify that all provided serviceIds exist, belong to this salon, and are ACTIVE
-    const matchingServices = await this.prisma.service.findMany({
-      where: {
-        id: { in: dto.serviceIds },
-        salonId,
-        status: ServiceStatus.ACTIVE,
-      },
-    });
-
-    if (matchingServices.length !== dto.serviceIds.length) {
-      throw new BadRequestException(
-        'One or more selected services do not exist, are inactive, or do not belong to this salon.',
-      );
-    }
-
-    return this.prisma.$transaction(async (tx) => {
+    const created = await this.prisma.$transaction(async (tx) => {
       const stylist = await tx.stylist.create({
         data: {
           salonId,
@@ -100,8 +112,8 @@ export class StaffService {
         },
       });
 
-      // Link assigned services
-      for (const serviceId of dto.serviceIds) {
+      // Link assigned services if provided
+      for (const serviceId of serviceIds) {
         await tx.stylistService.create({
           data: {
             stylistId: stylist.id,
@@ -118,6 +130,9 @@ export class StaffService {
         },
       });
     });
+
+    await this.syncSalonActiveStatus(salonId);
+    return created;
   }
 
   async updateStaff(salonId: string, staffId: string, dto: UpdateStaffDto) {
@@ -229,7 +244,7 @@ export class StaffService {
     const stylist = await this.getStaffById(salonId, staffId);
     const newStatus = stylist.status === StylistStatus.ACTIVE ? StylistStatus.INACTIVE : StylistStatus.ACTIVE;
 
-    return this.prisma.stylist.update({
+    const updated = await this.prisma.stylist.update({
       where: { id: staffId },
       data: { status: newStatus },
       include: {
@@ -237,13 +252,19 @@ export class StaffService {
         workingHours: true,
       },
     });
+
+    await this.syncSalonActiveStatus(salonId);
+    return updated;
   }
 
   async deleteStaff(salonId: string, staffId: string) {
     await this.getStaffById(salonId, staffId);
 
-    return this.prisma.stylist.delete({
+    const deleted = await this.prisma.stylist.delete({
       where: { id: staffId },
     });
+
+    await this.syncSalonActiveStatus(salonId);
+    return deleted;
   }
 }

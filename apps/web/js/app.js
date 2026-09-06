@@ -77,7 +77,7 @@ class App {
 
     // 2. SUPER ADMIN PLATFORM ROUTE: /#super-admin
     if (hash === 'super-admin' || hash === 'superadmin-login') {
-      if (this.currentUser && this.currentUser.role === 'PLATFORM_ADMIN') {
+      if (this.currentUser && (this.currentUser.role === 'SUPER_ADMIN' || this.currentUser.role === 'PLATFORM_ADMIN')) {
         const portal = new PlatformAdminPortal('app-root', this.currentUser);
         portal.init();
       } else {
@@ -123,10 +123,13 @@ class App {
             <form id="salon-login-form">
               <div class="form-group">
                 <label style="display: flex; align-items: center; gap: 6px;">
-                  ${Icons.user({ size: 14, color: '#94a3b8' })}
-                  <span>Store Email Address</span>
+                  ${Icons.phone ? Icons.phone({ size: 14, color: '#94a3b8' }) : Icons.user({ size: 14, color: '#94a3b8' })}
+                  <span>Owner Mobile Number / WhatsApp</span>
                 </label>
-                <input type="email" class="form-control" id="salon-email" placeholder="owner@glamourstudio.com" autocomplete="email" required />
+                <input type="text" class="form-control" id="salon-email" placeholder="e.g. 7999817743 or +91 79998 17743" autocomplete="tel" required />
+                <div style="font-size: 0.73rem; color: var(--text-muted); margin-top: 4px;">
+                  Enter the WhatsApp registered mobile number linked to your salon.
+                </div>
               </div>
 
               <div class="form-group">
@@ -202,7 +205,7 @@ class App {
         this.handleRoute();
       } catch (err) {
         clearTimeout(wakeUpTimer);
-        errorDiv.textContent = err.message || 'Login failed. Please check store credentials.';
+        errorDiv.textContent = err.message || 'Login failed. Please check your mobile number and password.';
         errorDiv.style.display = 'block';
         submitBtn.innerHTML = `<span>Access Operations Hub</span> ${Icons.arrowRight({ size: 16 })}`;
         submitBtn.removeAttribute('disabled');
@@ -299,7 +302,7 @@ class App {
         const res = await ApiClient.login(email, password);
         clearTimeout(wakeUpTimer);
         this.currentUser = res.user;
-        if (res.user.role !== 'PLATFORM_ADMIN') {
+        if (res.user.role !== 'SUPER_ADMIN' && res.user.role !== 'PLATFORM_ADMIN') {
           throw new Error('Access Denied: Account is not a Platform Super Admin.');
         }
         window.location.hash = '#super-admin';

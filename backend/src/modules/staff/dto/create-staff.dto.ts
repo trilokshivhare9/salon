@@ -30,8 +30,8 @@ export class CreateStaffDto {
 
   @IsArray()
   @IsString({ each: true })
-  @IsNotEmpty({ message: 'At least one service ID must be assigned to the stylist' })
-  serviceIds: string[];
+  @IsOptional()
+  serviceIds?: string[];
 
   @IsBoolean()
   @IsOptional()

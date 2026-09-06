@@ -19,18 +19,66 @@ export class AuthService {
   ) {}
 
   async login(loginDto: LoginDto) {
-    const admin = await this.prisma.admin.findUnique({
-      where: { email: loginDto.email.toLowerCase().trim() },
-      include: { salon: true },
-    });
+    const rawInput = (loginDto.email || '').trim();
+    const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawInput);
+
+    let admin: any = null;
+
+    if (isEmail) {
+      admin = await this.prisma.admin.findUnique({
+        where: { email: rawInput.toLowerCase() },
+        include: { salon: true },
+      });
+    } else {
+      // Lookup by Mobile / WhatsApp Number
+      const digitsOnly = rawInput.replace(/\D/g, '');
+      const candidates = new Set<string>();
+      candidates.add(rawInput);
+      if (digitsOnly) {
+        candidates.add(digitsOnly);
+        candidates.add(`+${digitsOnly}`);
+        if (digitsOnly.length === 10) {
+          candidates.add(`+91${digitsOnly}`);
+          candidates.add(`91${digitsOnly}`);
+          candidates.add(`+91 ${digitsOnly.slice(0, 5)} ${digitsOnly.slice(5)}`);
+          candidates.add(`+91 ${digitsOnly}`);
+        } else if (digitsOnly.length === 12 && digitsOnly.startsWith('91')) {
+          const ten = digitsOnly.slice(2);
+          candidates.add(ten);
+          candidates.add(`+91${ten}`);
+          candidates.add(`+91 ${ten.slice(0, 5)} ${ten.slice(5)}`);
+          candidates.add(`+91 ${ten}`);
+        }
+      }
+      const candidateList = Array.from(candidates);
+
+      // Search by admin's phone or associated salon's phone
+      admin = await this.prisma.admin.findFirst({
+        where: {
+          OR: [
+            { phone: { in: candidateList } },
+            { salon: { phone: { in: candidateList } } },
+          ],
+        },
+        include: { salon: true },
+      });
+    }
 
     if (!admin) {
-      throw new UnauthorizedException('Invalid email or password.');
+      throw new UnauthorizedException(
+        isEmail
+          ? 'Invalid email or password.'
+          : 'Invalid mobile number or password. Please check your credentials.',
+      );
     }
 
     const isPasswordValid = await bcrypt.compare(loginDto.password, admin.passwordHash);
     if (!isPasswordValid) {
-      throw new UnauthorizedException('Invalid email or password.');
+      throw new UnauthorizedException(
+        isEmail
+          ? 'Invalid email or password.'
+          : 'Invalid mobile number or password. Please check your credentials.',
+      );
     }
 
     if (admin.status !== 'ACTIVE') {

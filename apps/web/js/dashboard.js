@@ -2591,22 +2591,27 @@ export class SalonDashboard {
 
     document.getElementById('add-staff-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
-      try {
-        const staff = await ApiClient.createStaff({
-          name: document.getElementById('new-staff-name').value,
-          phone: document.getElementById('new-staff-phone').value,
-          email: document.getElementById('new-staff-email').value || undefined,
-        });
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+      const originalText = submitBtn.innerHTML;
+      submitBtn.textContent = 'Adding Stylist Member...';
+      submitBtn.setAttribute('disabled', 'true');
 
+      try {
         const selectedServices = Array.from(document.querySelectorAll('.staff-service-chk:checked')).map((c) => c.value);
-        if (selectedServices.length > 0 && staff.id) {
-          await ApiClient.assignStaffServices(staff.id, selectedServices);
-        }
+
+        await ApiClient.createStaff({
+          name: document.getElementById('new-staff-name').value.trim(),
+          phone: document.getElementById('new-staff-phone').value.trim(),
+          email: document.getElementById('new-staff-email')?.value?.trim() || undefined,
+          serviceIds: selectedServices,
+        });
 
         modalContainer.innerHTML = '';
         await this.loadData();
         this.render();
       } catch (err) {
+        submitBtn.innerHTML = originalText;
+        submitBtn.removeAttribute('disabled');
         alert(`Failed: ${err.message}`);
       }
     });

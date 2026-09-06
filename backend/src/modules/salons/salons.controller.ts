@@ -48,6 +48,27 @@ export class SalonsController {
   }
 
   @Roles(AdminRole.SUPER_ADMIN)
+  @Post('platform/verify-phone-number')
+  async verifyPhoneNumber(@Body() body: { phone: string; usePlatformBot?: boolean }) {
+    return this.salonsService.verifyPhoneNumberWithMeta(body.phone, body.usePlatformBot);
+  }
+
+  @Roles(AdminRole.SUPER_ADMIN)
+  @Get('platform/verify-meta-phone/:phoneId')
+  async verifyMetaPhoneId(@Param('phoneId') phoneId: string) {
+    return this.salonsService.verifyMetaPhoneNumberId(phoneId);
+  }
+
+  @Roles(AdminRole.SUPER_ADMIN)
+  @Post('platform/:id/link-whatsapp')
+  async linkWhatsApp(
+    @Param('id') salonId: string,
+    @Body() dto: { phoneNumberId: string },
+  ) {
+    return this.salonsService.linkSalonWhatsAppAccount(salonId, dto.phoneNumberId);
+  }
+
+  @Roles(AdminRole.SUPER_ADMIN)
   @Delete('platform/:id')
   async deleteSalon(@Param('id') salonId: string) {
     return this.salonsService.deleteSalonBySuperAdmin(salonId);

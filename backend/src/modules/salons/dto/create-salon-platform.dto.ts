@@ -1,3 +1,4 @@
+import { Transform } from 'class-transformer';
 import {
   IsNotEmpty,
   IsString,
@@ -24,6 +25,10 @@ export class CreateSalonPlatformDto {
 
   @IsOptional()
   @IsString()
+  logoUrl?: string;
+
+  @IsOptional()
+  @IsString()
   @IsIn(['MENS_SALON', 'WOMENS_PARLOUR', 'UNISEX_SALON'], {
     message: 'Category must be MENS_SALON, WOMENS_PARLOUR, or UNISEX_SALON',
   })
@@ -33,14 +38,14 @@ export class CreateSalonPlatformDto {
   @IsString()
   currency?: string;
 
-  @IsNotEmpty({ message: 'Owner full name is required' })
+  @IsNotEmpty({ message: 'Owner name is required' })
   @IsString()
   @MinLength(2, { message: 'Owner name must be at least 2 characters' })
   @MaxLength(100, { message: 'Owner name must not exceed 100 characters' })
   ownerName: string;
 
-  @IsNotEmpty({ message: 'Owner email address is required' })
-  @IsEmail({}, { message: 'Please provide a valid email address' })
+  @IsNotEmpty({ message: 'Owner email is required' })
+  @IsEmail({}, { message: 'Owner email must be a valid email address' })
   email: string;
 
   @IsNotEmpty({ message: 'Owner password is required' })
@@ -50,6 +55,10 @@ export class CreateSalonPlatformDto {
 
   @IsNotEmpty({ message: 'Salon phone number is required' })
   @IsString()
+  @Transform(({ value }) => (typeof value === 'string' ? value.replace(/[\s\-()]/g, '') : value))
+  @Matches(/^[6-9]\d{9}$|^\+?[1-9]\d{9,14}$/, {
+    message: 'Phone number must be a valid 10-digit mobile number or international format (e.g. +917999817743)',
+  })
   phone: string;
 
   @IsNotEmpty({ message: 'City is required' })
@@ -78,6 +87,9 @@ export class CreateSalonPlatformDto {
 
   @IsOptional()
   @IsString()
+  @Matches(/^\d{10,20}$/, {
+    message: 'Meta WhatsApp Phone Number ID must be numeric (typically 15-17 digits, e.g. 1266237649907696)',
+  })
   whatsappPhoneNumberId?: string;
 
   @IsOptional()

@@ -9,6 +9,32 @@ export const API_BASE = useLocal
 const memoryCache = new Map();
 
 export class ApiClient {
+  static getSuperAdminToken() {
+    return localStorage.getItem('super_admin_token');
+  }
+
+  static setSuperAdminToken(token) {
+    if (token) localStorage.setItem('super_admin_token', token);
+  }
+
+  static removeSuperAdminToken() {
+    localStorage.removeItem('super_admin_token');
+    localStorage.removeItem('super_admin_user');
+  }
+
+  static getSuperAdminUser() {
+    try {
+      const raw = localStorage.getItem('super_admin_user');
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  static setSuperAdminUser(user) {
+    if (user) localStorage.setItem('super_admin_user', JSON.stringify(user));
+  }
+
   static getToken() {
     return localStorage.getItem('salon_saas_token');
   }
@@ -68,7 +94,11 @@ export class ApiClient {
       }
     }
 
-    const token = this.getToken();
+    const isPlatformAdmin = endpoint.includes('/salons/platform') || endpoint.includes('/platform') || window.location.hash.startsWith('#super-admin');
+    const token = isPlatformAdmin
+      ? (this.getSuperAdminToken() || this.getToken())
+      : this.getToken();
+
     const headers = {
       'Content-Type': 'application/json',
       ...options.headers,
@@ -100,9 +130,13 @@ export class ApiClient {
       }
 
       if (!response.ok) {
-        if (response.status === 401 && !endpoint.includes('/auth/login')) {
-          this.clearSession();
-          throw new Error('Session expired or unauthorized. Please log in again.');
+        if ((response.status === 401 || response.status === 403) && !endpoint.includes('/auth/login')) {
+          if (isPlatformAdmin) {
+            this.removeSuperAdminToken();
+          } else {
+            this.clearSession();
+          }
+          throw new Error(data.message || 'Session expired or unauthorized. Please log in again.');
         }
         throw new Error(data.message || `Request failed with status ${response.status}`);
       }
@@ -173,10 +207,13 @@ export class ApiClient {
       body: JSON.stringify({ email, password }),
     });
     if (data.accessToken) {
-      this.setToken(data.accessToken);
-    }
-    if (data.user) {
-      this.setUser(data.user);
+      if (data.user?.role === 'SUPER_ADMIN' || data.user?.role === 'PLATFORM_ADMIN') {
+        this.setSuperAdminToken(data.accessToken);
+        this.setSuperAdminUser(data.user);
+      } else {
+        this.setToken(data.accessToken);
+        this.setUser(data.user);
+      }
     }
     this.invalidateCache();
     return data;
@@ -457,6 +494,30 @@ export class ApiClient {
   static async toggleSalonStatusPlatform(salonId) {
     return this.request(`/salons/platform/${salonId}/toggle-status`, {
       method: 'PATCH',
+    });
+  }
+
+  static async verifyMetaPhoneId(phoneNumberId) {
+    return this.request(`/salons/platform/verify-meta-phone/${phoneNumberId}`);
+  }
+
+  static async verifySalonPhoneNumber(phone, usePlatformBot = false) {
+    return this.request('/salons/platform/verify-phone-number', {
+      method: 'POST',
+      body: JSON.stringify({ phone, usePlatformBot }),
+    });
+  }
+
+  static async linkSalonWhatsAppAccount(salonId, phoneNumberId) {
+    return this.request(`/salons/platform/${salonId}/link-whatsapp`, {
+      method: 'POST',
+      body: JSON.stringify({ phoneNumberId }),
+    });
+  }
+
+  static async deleteSalonPlatform(salonId) {
+    return this.request(`/salons/platform/${salonId}`, {
+      method: 'DELETE',
     });
   }
 }
