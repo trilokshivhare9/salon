@@ -9,8 +9,9 @@ import {
   UpdateStaffDto,
   AssignStaffServicesDto,
   UpdateStaffWorkingHoursDto,
+  CreateStaffBreakDto,
 } from './dto/create-staff.dto';
-import { StylistStatus, ServiceStatus, SalonStatus } from '@prisma/client';
+import { StylistStatus, ServiceStatus, SalonStatus, DayOfWeek } from '@prisma/client';
 import { AppointmentsService } from '../appointments/appointments.service';
 
 @Injectable()
@@ -312,4 +313,109 @@ export class StaffService {
     this.appointmentsService.emitSalonEvent(salonId, 'STAFF_UPDATED', { staffId, action: 'DELETE' });
     return result;
   }
+
+  async getStaffBreaks(salonId: string, staffId: string) {
+    await this.getStaffById(salonId, staffId);
+    const records = await this.prisma.stylistWorkingHours.findMany({
+      where: {
+        stylistId: staffId,
+        breakStartTime: { not: null },
+        breakEndTime: { not: null },
+      },
+      orderBy: { dayOfWeek: 'asc' },
+    });
+    return records.map((r) => ({
+      id: r.id,
+      dayOfWeek: r.dayOfWeek,
+      startTime: r.breakStartTime,
+      endTime: r.breakEndTime,
+      title: 'Shift Break',
+    }));
+  }
+
+  async createStaffBreak(salonId: string, staffId: string, dto: CreateStaffBreakDto) {
+    await this.getStaffById(salonId, staffId);
+
+    // Validate times (HH:mm)
+    if (dto.startTime >= dto.endTime) {
+      throw new BadRequestException('Break start time must be earlier than end time');
+    }
+
+    const salonHours = await this.prisma.salonWorkingHours.findUnique({
+      where: {
+        salonId_dayOfWeek: {
+          salonId,
+          dayOfWeek: dto.dayOfWeek,
+        },
+      },
+    });
+
+    const res = await this.prisma.$transaction(async (tx) => {
+      // Mark stylist with custom schedule so break is respected
+      await tx.stylist.update({
+        where: { id: staffId },
+        data: { followsSalonSchedule: false },
+      });
+
+      return tx.stylistWorkingHours.upsert({
+        where: {
+          stylistId_dayOfWeek: {
+            stylistId: staffId,
+            dayOfWeek: dto.dayOfWeek,
+          },
+        },
+        update: {
+          breakStartTime: dto.startTime,
+          breakEndTime: dto.endTime,
+        },
+        create: {
+          stylistId: staffId,
+          dayOfWeek: dto.dayOfWeek,
+          isWorking: salonHours ? !salonHours.isClosed : true,
+          startTime: salonHours?.startTime || '09:00',
+          endTime: salonHours?.endTime || '21:00',
+          breakStartTime: dto.startTime,
+          breakEndTime: dto.endTime,
+        },
+      });
+    });
+
+    this.appointmentsService.emitSalonEvent(salonId, 'STAFF_UPDATED', {
+      staffId,
+      action: 'UPDATE_HOURS',
+    });
+
+    return {
+      id: res.id,
+      dayOfWeek: res.dayOfWeek,
+      startTime: res.breakStartTime,
+      endTime: res.breakEndTime,
+      title: dto.title || 'Shift Break',
+    };
+  }
+
+  async deleteStaffBreak(salonId: string, staffId: string, breakId: string) {
+    await this.getStaffById(salonId, staffId);
+
+    const isDay = Object.values(DayOfWeek).includes(breakId.toUpperCase() as DayOfWeek);
+    if (isDay) {
+      await this.prisma.stylistWorkingHours.updateMany({
+        where: { stylistId: staffId, dayOfWeek: breakId.toUpperCase() as DayOfWeek },
+        data: { breakStartTime: null, breakEndTime: null },
+      });
+    } else {
+      await this.prisma.stylistWorkingHours.updateMany({
+        where: { id: breakId, stylistId: staffId },
+        data: { breakStartTime: null, breakEndTime: null },
+      });
+    }
+
+    this.appointmentsService.emitSalonEvent(salonId, 'STAFF_UPDATED', {
+      staffId,
+      action: 'UPDATE_HOURS',
+    });
+
+    return { success: true };
+  }
 }
+

@@ -97,3 +97,21 @@ export class UpdateStaffWorkingHoursDto {
   @Type(() => StaffDayWorkingHourDto)
   hours: StaffDayWorkingHourDto[];
 }
+
+export class CreateStaffBreakDto {
+  @IsEnum(DayOfWeek)
+  dayOfWeek: DayOfWeek;
+
+  @IsString()
+  @IsNotEmpty()
+  startTime: string; // "13:00"
+
+  @IsString()
+  @IsNotEmpty()
+  endTime: string; // "14:00"
+
+  @IsString()
+  @IsOptional()
+  title?: string;
+}
+

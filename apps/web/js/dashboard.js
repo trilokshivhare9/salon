@@ -2783,7 +2783,7 @@ export class SalonDashboard {
         });
 
         modalContainer.innerHTML = '';
-        await this.loadData();
+        await this.loadData(true);
         this.render();
       } catch (err) {
         alert(err.message);

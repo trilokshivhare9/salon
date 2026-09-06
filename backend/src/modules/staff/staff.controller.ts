@@ -15,6 +15,7 @@ import {
   UpdateStaffDto,
   AssignStaffServicesDto,
   UpdateStaffWorkingHoursDto,
+  CreateStaffBreakDto,
 } from './dto/create-staff.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -96,4 +97,34 @@ export class StaffController {
   ) {
     return this.staffService.deleteStaff(salonId, staffId);
   }
+
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
+  @Get(':id/breaks')
+  async getStaffBreaks(
+    @CurrentSalonId() salonId: string,
+    @Param('id') staffId: string,
+  ) {
+    return this.staffService.getStaffBreaks(salonId, staffId);
+  }
+
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
+  @Post(':id/breaks')
+  async createStaffBreak(
+    @CurrentSalonId() salonId: string,
+    @Param('id') staffId: string,
+    @Body() dto: CreateStaffBreakDto,
+  ) {
+    return this.staffService.createStaffBreak(salonId, staffId, dto);
+  }
+
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
+  @Delete(':id/breaks/:breakId')
+  async deleteStaffBreak(
+    @CurrentSalonId() salonId: string,
+    @Param('id') staffId: string,
+    @Param('breakId') breakId: string,
+  ) {
+    return this.staffService.deleteStaffBreak(salonId, staffId, breakId);
+  }
 }
+

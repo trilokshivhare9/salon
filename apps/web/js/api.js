@@ -367,17 +367,21 @@ export class ApiClient {
 
   static async createStaffBreak(staffId, payload) {
     this.invalidateCache('/staff');
-    return this.request(`/staff/${staffId}/breaks`, {
+    const res = await this.request(`/staff/${staffId}/breaks`, {
       method: 'POST',
       body: JSON.stringify(payload),
     });
+    this.invalidateCache('/staff');
+    return res;
   }
 
   static async deleteStaffBreak(staffId, breakId) {
     this.invalidateCache('/staff');
-    return this.request(`/staff/${staffId}/breaks/${breakId}`, {
+    const res = await this.request(`/staff/${staffId}/breaks/${breakId}`, {
       method: 'DELETE',
     });
+    this.invalidateCache('/staff');
+    return res;
   }
 
   // Service Management (Cached for 3 mins)
