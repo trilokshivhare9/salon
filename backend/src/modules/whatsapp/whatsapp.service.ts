@@ -10,7 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../database/prisma.service';
 import { AvailabilityService, AvailableSlotResponse } from '../availability/availability.service';
 import { AppointmentsService } from '../appointments/appointments.service';
-import { ConversationState, BookingSource, WhatsAppMessageDirection, AppointmentStatus, ClientEtaStatus } from '@prisma/client';
+import { ConversationState, BookingSource, WhatsAppMessageDirection, AppointmentStatus, ClientEtaStatus, WhatsAppMessageStatus } from '@prisma/client';
 import { DateTime } from 'luxon';
 
 export interface InteractiveButton {
@@ -276,23 +276,66 @@ export class WhatsAppService {
 
   async recordStatusLog(statusObj: any) {
     const recipient = this.cleanPhone(statusObj.recipient_id || '');
-    const metaMessageId = statusObj.id || null;
-    const status = (statusObj.status || 'UNKNOWN').toUpperCase();
+    const metaMessageId: string | null = statusObj.id || null;
+    const rawStatus = (statusObj.status || '').toLowerCase();
     const error = statusObj.errors?.[0];
 
-    return this.prisma.whatsAppLog
-      .create({
+    // Map Meta delivery statuses ('sent', 'delivered', 'read', 'failed') to Prisma enum
+    const status: WhatsAppMessageStatus =
+      rawStatus === 'failed'
+        ? WhatsAppMessageStatus.FAILED
+        : WhatsAppMessageStatus.SENT;
+
+    const errorCode = error?.code ? parseInt(String(error.code), 10) || null : null;
+    const errorMessage = error?.title || error?.message || null;
+
+    try {
+      if (metaMessageId) {
+        // Find existing outbound message log to update with delivery/read receipt
+        const existing = await this.prisma.whatsAppLog.findUnique({
+          where: { metaMessageId },
+        });
+
+        if (existing) {
+          return await this.prisma.whatsAppLog.update({
+            where: { id: existing.id },
+            data: {
+              status,
+              errorCode: errorCode ?? existing.errorCode,
+              errorMessage: errorMessage || existing.errorMessage,
+              rawPayload: statusObj,
+            },
+          });
+        }
+
+        return await this.prisma.whatsAppLog.create({
+          data: {
+            phone: recipient,
+            direction: WhatsAppMessageDirection.OUTBOUND,
+            status,
+            metaMessageId,
+            errorCode,
+            errorMessage,
+            rawPayload: statusObj,
+          },
+        });
+      }
+
+      return await this.prisma.whatsAppLog.create({
         data: {
           phone: recipient,
           direction: WhatsAppMessageDirection.OUTBOUND,
           status,
-          metaMessageId,
-          errorCode: error?.code || null,
-          errorMessage: error?.title || error?.message || null,
+          errorCode,
+          errorMessage,
           rawPayload: statusObj,
         },
-      })
-      .catch((e) => this.logger.error('Failed to persist status WhatsApp log:', e));
+      });
+    } catch (e: any) {
+      this.logger.warn(
+        `[WhatsAppService] Delivery status log note (${rawStatus} for ${recipient}): ${e?.message || e}`,
+      );
+    }
   }
 
   async getLogs(filter: { phone?: string; salonId?: string; limit?: number }) {

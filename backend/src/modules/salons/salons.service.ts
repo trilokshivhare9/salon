@@ -11,7 +11,7 @@ import { CreateSalonPlatformDto } from './dto/create-salon-platform.dto';
 import { UpdateSalonDto } from './dto/update-salon.dto';
 import { UpdateWorkingHoursDto } from './dto/working-hours.dto';
 import * as bcrypt from 'bcrypt';
-import { AdminRole, SalonStatus, DayOfWeek, StylistStatus } from '@prisma/client';
+import { AdminRole, SalonStatus, DayOfWeek } from '@prisma/client';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 
 @Injectable()
@@ -22,7 +22,7 @@ export class SalonsService {
     private prisma: PrismaService,
     private configService: ConfigService,
     private whatsAppService: WhatsAppService,
-  ) {}
+  ) { }
 
   // -------------------------------------------------------------
   // SUPER ADMIN (PLATFORM OWNER) METHODS
@@ -298,7 +298,7 @@ export class SalonsService {
           address: dto.address?.trim(),
           city: dto.city.trim(),
           timezone: dto.timezone || 'Asia/Kolkata',
-          status: SalonStatus.INACTIVE,
+          status: SalonStatus.ACTIVE,
           defaultStartTime: openTime,
           defaultEndTime: closeTime,
         },
@@ -380,7 +380,7 @@ export class SalonsService {
       const portalUrl = `${frontendUrl}/#login`;
 
       const welcomeMessage =
-`🎉 *Welcome to StyleSlot!*
+        `🎉 *Welcome to StyleSlot!*
 
 Your salon *${dto.name.trim()}* has been successfully registered.
 
@@ -451,37 +451,15 @@ Here are your salon owner login credentials:
   }
 
   async toggleSalonStatus(salonId: string) {
-    const salon = await this.prisma.salon.findUnique({
-      where: { id: salonId },
-      include: {
-        _count: {
-          select: {
-            stylists: { where: { status: StylistStatus.ACTIVE } },
-            services: { where: { status: 'ACTIVE' } },
-          },
-        },
-      },
-    });
+    const salon = await this.prisma.salon.findUnique({ where: { id: salonId } });
     if (!salon) throw new NotFoundException('Salon not found.');
 
-    if (salon.status !== SalonStatus.ACTIVE) {
-      const stylistCount = salon._count.stylists;
-      const serviceCount = salon._count.services;
-      if (stylistCount < 1 || serviceCount < 1) {
-        throw new BadRequestException(
-          `Cannot activate "${salon.name}". A salon requires at least 1 active stylist and 1 active service before it can become ACTIVE (Currently: ${stylistCount} stylists, ${serviceCount} services).`,
-        );
-      }
-      return this.prisma.salon.update({
-        where: { id: salonId },
-        data: { status: SalonStatus.ACTIVE },
-      });
-    } else {
-      return this.prisma.salon.update({
-        where: { id: salonId },
-        data: { status: SalonStatus.INACTIVE },
-      });
-    }
+    const newStatus = salon.status === SalonStatus.ACTIVE ? SalonStatus.DEACTIVATED : SalonStatus.ACTIVE;
+
+    return this.prisma.salon.update({
+      where: { id: salonId },
+      data: { status: newStatus },
+    });
   }
 
   async deleteSalonBySuperAdmin(salonId: string) {

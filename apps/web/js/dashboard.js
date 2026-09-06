@@ -556,11 +556,11 @@ export class SalonDashboard {
           </div>
           <div class="stations-cards-grid">
             ${(this.staffList && this.staffList.length > 0)
-              ? this.staffList.map((st, idx) => {
-                  const todayAppts = (todayAppointments || []).filter((a) => (a.staff?.id || a.staffId) === st.id);
-                  const inService = todayAppts.find((a) => a.status === 'IN_SERVICE');
-                  const isOccupied = !!inService;
-                  return `
+        ? this.staffList.map((st, idx) => {
+          const todayAppts = (todayAppointments || []).filter((a) => (a.staff?.id || a.staffId) === st.id);
+          const inService = todayAppts.find((a) => a.status === 'IN_SERVICE');
+          const isOccupied = !!inService;
+          return `
                     <div class="station-card ${isOccupied ? 'occupied' : 'ready'}">
                       <div class="station-num-badge">#${idx + 1}</div>
                       <div style="flex: 1; min-width: 0;">
@@ -573,13 +573,13 @@ export class SalonDashboard {
                       </div>
                     </div>
                   `;
-                }).join('')
-              : `
+        }).join('')
+        : `
                 <div style="color: var(--text-muted); font-size: 0.82rem; padding: 6px 0;">
                   No stylists registered yet. Add staff to activate live floor stations.
                 </div>
               `
-            }
+      }
           </div>
         </div>
       </div>
@@ -745,9 +745,9 @@ export class SalonDashboard {
         </div>
         <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px;">
           ${this.staffList.map((st) => {
-            const activeBookings = todayAppointments.filter((a) => a.staffId === st.id && (a.status === 'IN_PROGRESS' || a.status === 'CHECKED_IN'));
-            const isBusy = activeBookings.length > 0;
-            return `
+        const activeBookings = todayAppointments.filter((a) => a.staffId === st.id && (a.status === 'IN_PROGRESS' || a.status === 'CHECKED_IN'));
+        const isBusy = activeBookings.length > 0;
+        return `
               <div class="staff-card" style="display: flex; align-items: center; gap: 14px; padding: 16px;">
                 <div class="staff-avatar" style="width: 44px; height: 44px; font-size: 1.1rem; border-radius: 12px; border: 2px solid ${isBusy ? '#8b5cf6' : '#10b981'}; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.05); font-weight: 800; color: #fff;">
                   ${st.profileImageUrl ? `<img src="${st.profileImageUrl}" alt="${st.name}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 10px;" />` : st.name.charAt(0).toUpperCase()}
@@ -761,7 +761,7 @@ export class SalonDashboard {
                 </div>
               </div>
             `;
-          }).join('')}
+      }).join('')}
         </div>
       </div>
 
@@ -772,390 +772,433 @@ export class SalonDashboard {
   // TAB 3: PURPOSE-DRIVEN OPERATOR CHAIR QUEUE (COMPACT & SORTED)
   // =========================================================================
   renderQueueTab() {
-    const { statusCounts, todayAppointments } = this.summaryData;
+    try {
+      const summary = this.summaryData || {};
+      const statusCounts = summary.statusCounts || {
+        total: 0,
+        confirmed: 0,
+        checkedIn: 0,
+        inService: 0,
+        completed: 0,
+        cancelled: 0,
+        noShow: 0,
+      };
+      const todayAppointments = Array.isArray(summary.todayAppointments)
+        ? summary.todayAppointments
+        : [];
 
-    // Smart Operator Queue Sorting:
-    // 1. IN_SERVICE (In Chair right now) -> TOP Priority
-    // 2. CHECKED_IN (Waiting in salon) -> 2nd
-    // 3. CONFIRMED (Upcoming today) -> Earliest startTime first
-    // 4. COMPLETED (Finished) -> Sinks to bottom, most recent first
-    // 5. CANCELLED / NO_SHOW -> Bottom
-    const getStatusPriority = (status) => {
-      switch (status) {
-        case 'IN_SERVICE': return 1;
-        case 'CHECKED_IN': return 2;
-        case 'CONFIRMED': return 3;
-        case 'COMPLETED': return 4;
-        case 'CANCELLED': return 5;
-        case 'NO_SHOW': return 6;
-        default: return 7;
-      }
-    };
-
-    const sortedAppointments = [...todayAppointments].sort((a, b) => {
-      const pA = getStatusPriority(a.status);
-      const pB = getStatusPriority(b.status);
-      if (pA !== pB) return pA - pB;
-      if (pA <= 3) {
-        return new Date(a.startTime) - new Date(b.startTime);
-      } else {
-        return new Date(b.startTime) - new Date(a.startTime);
-      }
-    });
-
-    // Filter appointments based on operator selection
-    let filteredAppointments = sortedAppointments;
-    if (this.queueFilter === 'WAITING') {
-      filteredAppointments = sortedAppointments.filter((a) => ['CONFIRMED', 'CHECKED_IN'].includes(a.status));
-    } else if (this.queueFilter === 'IN_CHAIR') {
-      filteredAppointments = sortedAppointments.filter((a) => a.status === 'IN_SERVICE');
-    } else if (this.queueFilter === 'COMPLETED') {
-      filteredAppointments = sortedAppointments.filter((a) => a.status === 'COMPLETED');
-    } else if (this.queueFilter === 'CANCELLED') {
-      filteredAppointments = sortedAppointments.filter((a) => ['CANCELLED', 'NO_SHOW'].includes(a.status));
-    }
-
-    const waitingCount = statusCounts.confirmed + statusCounts.checkedIn;
-    const inChairCount = statusCounts.inService;
-    const completedCount = statusCounts.completed;
-    const cancelledCount = (statusCounts.cancelled || 0) + (statusCounts.noShow || 0);
-
-    const todayISO = this.getLocalDateString();
-    const [sy, sm, sd] = (this.selectedDate || todayISO).split('-').map(Number);
-    const selDate = new Date(sy, sm - 1, sd);
-    const [ty, tm, td] = todayISO.split('-').map(Number);
-    const todayDate = new Date(ty, tm - 1, td);
-    const diffDays = Math.round((selDate - todayDate) / (1000 * 60 * 60 * 24));
-    
-    let datePrefix = '';
-    if (diffDays === 0) datePrefix = 'Today, ';
-    else if (diffDays === 1) datePrefix = 'Tom, ';
-    else if (diffDays === -1) datePrefix = 'Yest, ';
-
-    const formattedDateLabel = datePrefix + selDate.toLocaleDateString('en-US', { day: '2-digit', month: 'short' });
-
-    // Avatar color rotation
-    const avatarColors = ['blue', 'purple', 'teal', 'amber', 'rose'];
-    const getAvatarColor = (name) => {
-      const idx = (name || '').charCodeAt(0) % avatarColors.length;
-      return avatarColors[idx];
-    };
-    const getInitials = (name) => {
-      if (!name) return '?';
-      const parts = name.trim().split(/\s+/);
-      return parts.length >= 2
-        ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
-        : parts[0].substring(0, 2).toUpperCase();
-    };
-
-    // Format phone for display
-    const formatPhone = (phone) => {
-      if (!phone) return 'No Phone';
-      const clean = phone.replace(/[^0-9+]/g, '');
-      if (clean.startsWith('+91') && clean.length >= 12) {
-        return `+91 ${clean.slice(3,8)} ${clean.slice(8)}`;
-      }
-      return clean;
-    };
-
-    // Format Booking Creation Time & Source Channel
-    const formatBookingOrigin = (appt) => {
-      const createdDt = appt.createdAt ? new Date(appt.createdAt) : null;
-      let timeLabel = '';
-      if (createdDt && !isNaN(createdDt.getTime())) {
-        const diffMins = Math.floor((Date.now() - createdDt.getTime()) / 60000);
-        if (diffMins < 1) {
-          timeLabel = 'Just now';
-        } else if (diffMins < 60) {
-          timeLabel = `${diffMins}m ago`;
-        } else if (diffMins < 1440) {
-          const hours = Math.floor(diffMins / 60);
-          timeLabel = `${hours}h ago`;
-        } else {
-          timeLabel = createdDt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      // Smart Operator Queue Sorting:
+      // 1. IN_SERVICE (In Chair right now) -> TOP Priority
+      // 2. CHECKED_IN (Waiting in salon) -> 2nd
+      // 3. CONFIRMED (Upcoming today) -> Earliest startTime first
+      // 4. COMPLETED (Finished) -> Sinks to bottom, most recent first
+      // 5. CANCELLED / NO_SHOW -> Bottom
+      const getStatusPriority = (status) => {
+        switch (status) {
+          case 'IN_SERVICE': return 1;
+          case 'CHECKED_IN': return 2;
+          case 'CONFIRMED': return 3;
+          case 'COMPLETED': return 4;
+          case 'CANCELLED': return 5;
+          case 'NO_SHOW': return 6;
+          default: return 7;
         }
+      };
+
+      const sortedAppointments = [...todayAppointments].sort((a, b) => {
+        const pA = getStatusPriority(a.status);
+        const pB = getStatusPriority(b.status);
+        if (pA !== pB) return pA - pB;
+        const timeA = new Date(a.startTime || a.startAt || 0).getTime() || 0;
+        const timeB = new Date(b.startTime || b.startAt || 0).getTime() || 0;
+        if (pA <= 3) {
+          return timeA - timeB;
+        } else {
+          return timeB - timeA;
+        }
+      });
+
+      // Filter appointments based on operator selection
+      let filteredAppointments = sortedAppointments;
+      if (this.queueFilter === 'WAITING') {
+        filteredAppointments = sortedAppointments.filter((a) => ['CONFIRMED', 'CHECKED_IN'].includes(a.status));
+      } else if (this.queueFilter === 'IN_CHAIR') {
+        filteredAppointments = sortedAppointments.filter((a) => a.status === 'IN_SERVICE');
+      } else if (this.queueFilter === 'COMPLETED') {
+        filteredAppointments = sortedAppointments.filter((a) => a.status === 'COMPLETED');
+      } else if (this.queueFilter === 'CANCELLED') {
+        filteredAppointments = sortedAppointments.filter((a) => ['CANCELLED', 'NO_SHOW'].includes(a.status));
       }
 
-      const source = (appt.source || 'WEB').toUpperCase();
-      if (source === 'WHATSAPP') {
-        return `
-          <span class="qc__meta-source qc__meta-source--wa" title="Booked via WhatsApp Assistant">
-            ${Icons.whatsapp({ size: 12, color: '#25D366' })}
-            <span>${timeLabel ? `Booked ${timeLabel} · WhatsApp` : 'WhatsApp Booking'}</span>
-          </span>
-        `;
-      } else if (source === 'WALK_IN') {
-        return `
-          <span class="qc__meta-source qc__meta-source--walkin" title="Direct Walk-In Client">
-            ${Icons.zap({ size: 12, color: '#f59e0b' })}
-            <span>${timeLabel ? `Walk-In ${timeLabel}` : 'Direct Walk-In'}</span>
-          </span>
-        `;
-      } else {
-        return `
-          <span class="qc__meta-source qc__meta-source--web" title="Booked via Online Web Portal">
-            ${Icons.globe({ size: 12, color: '#818cf8' })}
-            <span>${timeLabel ? `Booked ${timeLabel} · Online` : 'Online Booking'}</span>
-          </span>
-        `;
-      }
-    };
+      const waitingCount = (statusCounts.confirmed || 0) + (statusCounts.checkedIn || 0);
+      const inChairCount = statusCounts.inService || 0;
+      const completedCount = statusCounts.completed || 0;
+      const cancelledCount = (statusCounts.cancelled || 0) + (statusCounts.noShow || 0);
 
-    // Format Scheduled Service Time Range Window (12-Hour AM/PM)
-    const formatServiceTimeRange = (appt) => {
-      const startDt = new Date(appt.startTime);
-      const startTimeStr = formatTime12h(startDt);
-      const durationMins = appt.service?.durationMinutes || 30;
-      const endDt = appt.endTime ? new Date(appt.endTime) : new Date(startDt.getTime() + durationMins * 60000);
-      const endTimeStr = formatTime12h(endDt);
-      return { startTimeStr, endTimeStr, timeRangeStr: `${startTimeStr} – ${endTimeStr}`, durationMins };
-    };
+      const todayISO = this.getLocalDateString();
+      const [sy, sm, sd] = (this.selectedDate || todayISO).split('-').map(Number);
+      const selDate = new Date(sy, sm - 1, sd);
+      const [ty, tm, td] = todayISO.split('-').map(Number);
+      const todayDate = new Date(ty, tm - 1, td);
+      const diffDays = Math.round((selDate - todayDate) / (1000 * 60 * 60 * 24));
 
-    // Format Cancellation Details and Timestamp (12-Hour AM/PM)
-    const formatCancellationDetails = (appt) => {
-      const historyList = Array.isArray(appt.statusHistory) ? appt.statusHistory : [];
-      const cancelEntry = historyList.find((h) => h.newStatus === 'CANCELLED') || historyList[0];
-      const cancelledDt = cancelEntry?.createdAt
-        ? new Date(cancelEntry.createdAt)
-        : (appt.updatedAt ? new Date(appt.updatedAt) : null);
-      
-      let timeStr = '';
-      let relativeAgo = '';
-      if (cancelledDt && !isNaN(cancelledDt.getTime())) {
-        timeStr = formatTime12h(cancelledDt);
-        const diffMins = Math.floor((Date.now() - cancelledDt.getTime()) / 60000);
-        if (diffMins < 1) relativeAgo = 'just now';
-        else if (diffMins < 60) relativeAgo = `${diffMins}m ago`;
-        else if (diffMins < 1440) relativeAgo = `${Math.floor(diffMins / 60)}h ago`;
-        else relativeAgo = cancelledDt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      }
+      let datePrefix = '';
+      if (diffDays === 0) datePrefix = 'Today, ';
+      else if (diffDays === 1) datePrefix = 'Tom, ';
+      else if (diffDays === -1) datePrefix = 'Yest, ';
 
-      const reason = cancelEntry?.reason || appt.cancellationReason || 'Cancelled by customer or operator';
-      return { timeStr, relativeAgo, reason };
-    };
+      const formattedDateLabel = datePrefix + selDate.toLocaleDateString('en-US', { day: '2-digit', month: 'short' });
 
+      // Avatar color rotation
+      const avatarColors = ['blue', 'purple', 'teal', 'amber', 'rose'];
+      const getAvatarColor = (name) => {
+        const idx = (name || '').charCodeAt(0) % avatarColors.length;
+        return avatarColors[idx];
+      };
+      const getInitials = (name) => {
+        if (!name) return '?';
+        const parts = name.trim().split(/\s+/);
+        return parts.length >= 2
+          ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+          : parts[0].substring(0, 2).toUpperCase();
+      };
 
-    return `
-      <!-- Date Bar -->
+      // Format phone for display
+      const formatPhone = (phone) => {
+        if (!phone) return 'No Phone';
+        const clean = phone.replace(/[^0-9+]/g, '');
+        if (clean.startsWith('+91') && clean.length >= 12) {
+          return `+91 ${clean.slice(3, 8)} ${clean.slice(8)}`;
+        }
+        return clean;
+      };
 
-      <!-- Date Bar -->
-      <div class="q-date-bar">
-        <div class="q-date-nav">
-          <button class="q-date-arrow" id="btn-date-prev" title="Previous Day">
-            ${Icons.chevronLeft({ size: 16 })}
-          </button>
-          <div class="q-date-badge" title="Tap to select date">
-            <span class="q-date-icon">${Icons.calendar({ size: 15, color: '#a5b4fc' })}</span>
-            <span class="q-date-text" id="date-label-display">${formattedDateLabel}</span>
-            <input type="date" class="q-date-hidden" id="dashboard-date-picker" value="${this.selectedDate}" />
-          </div>
-          <button class="q-date-arrow" id="btn-date-next" title="Next Day">
-            ${Icons.chevronRight({ size: 16 })}
-          </button>
-          ${diffDays !== 0 ? `<button class="q-today-btn" id="btn-date-today">Today</button>` : ''}
-        </div>
+      // Format Booking Creation Time & Source Channel
+      const formatBookingOrigin = (appt) => {
+        const createdDt = appt.createdAt ? new Date(appt.createdAt) : null;
+        let timeLabel = '';
+        if (createdDt && !isNaN(createdDt.getTime())) {
+          const diffMins = Math.floor((Date.now() - createdDt.getTime()) / 60000);
+          if (diffMins < 1) {
+            timeLabel = 'Just now';
+          } else if (diffMins < 60) {
+            timeLabel = `${diffMins}m ago`;
+          } else if (diffMins < 1440) {
+            const hours = Math.floor(diffMins / 60);
+            timeLabel = `${hours}h ago`;
+          } else {
+            timeLabel = createdDt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+          }
+        }
 
-        <div class="q-live-sync">
-          <div class="q-live-pill">
-            <span class="q-live-dot"></span>
-            <span class="q-live-label">Live</span>
-          </div>
-          <button class="q-sync-btn" id="btn-refresh-queue" title="Sync Queue">
-            ${Icons.refreshCw({ size: 14 })}
-          </button>
-        </div>
-      </div>
-
-      <!-- Filter Chips -->
-      <div class="q-filters">
-        <button class="q-chip ${this.queueFilter === 'ALL' ? 'active' : ''}" data-filter="ALL">
-          All <span class="q-chip-count">${todayAppointments.length}</span>
-        </button>
-        <button class="q-chip ${this.queueFilter === 'WAITING' ? 'active' : ''}" data-filter="WAITING">
-          Waiting <span class="q-chip-count">${waitingCount}</span>
-        </button>
-        <button class="q-chip ${this.queueFilter === 'IN_CHAIR' ? 'active' : ''}" data-filter="IN_CHAIR">
-          In Chair <span class="q-chip-count">${inChairCount}</span>
-        </button>
-        <button class="q-chip ${this.queueFilter === 'COMPLETED' ? 'active' : ''}" data-filter="COMPLETED">
-          Done <span class="q-chip-count">${completedCount}</span>
-        </button>
-        <button class="q-chip ${this.queueFilter === 'CANCELLED' ? 'active' : ''}" data-filter="CANCELLED">
-          Cancelled <span class="q-chip-count">${cancelledCount}</span>
-        </button>
-      </div>
-
-      <!-- Queue Cards Stream -->
-      <div class="q-stream">
-        ${filteredAppointments.length === 0 ? `
-          <div class="q-empty">
-            <div class="q-empty-orb">
-              ${Icons.armchair({ size: 30, color: '#818cf8' })}
-            </div>
-            <div class="q-empty-title">Queue is Clear & Ready</div>
-            <div class="q-empty-sub">
-              No ${this.queueFilter === 'ALL' ? '' : this.queueFilter.toLowerCase() + ' '}appointments currently waiting. Walk-in arrivals or WhatsApp bookings appear here in real-time.
-            </div>
-            <div class="q-empty-actions">
-              <button class="btn btn-primary btn-sm btn-fast-walkin" id="btn-fast-walkin" style="gap: 6px; padding: 9px 18px; font-weight: 700; border-radius: 10px;">
-                ${Icons.zap({ size: 14, color: '#fff' })}
-                <span>Fast Walk-In Client</span>
-              </button>
-              <button class="btn btn-secondary btn-sm" id="btn-empty-sync" style="gap: 6px; padding: 9px 16px; border-radius: 10px;">
-                ${Icons.refreshCw({ size: 13, color: '#818cf8' })}
-                <span>Sync Queue</span>
-              </button>
-            </div>
-          </div>
-        ` : filteredAppointments.map((appt) => {
-          const timeRange = formatServiceTimeRange(appt);
-          const cancelDetails = formatCancellationDetails(appt);
-          const cleanPhone = (appt.customer.phone || '').replace(/[^0-9+]/g, '');
-          const rawPhoneForWa = cleanPhone.replace('+', '');
-          const initials = getInitials(appt.customer.name);
-          const avatarCls = getAvatarColor(appt.customer.name);
-          const isDone = appt.status === 'COMPLETED';
-          const isCancelled = ['CANCELLED', 'NO_SHOW'].includes(appt.status);
-          const statusKey = appt.status.toLowerCase();
-
-          const startDt = new Date(appt.startTime);
-          const elapsedMins = Math.max(0, Math.floor((Date.now() - startDt.getTime()) / 60000));
-          const remainingMins = Math.max(0, (appt.service?.durationMinutes || 30) - elapsedMins);
-
+        const source = (appt.source || 'WEB').toUpperCase();
+        if (source === 'WHATSAPP') {
           return `
-            <div class="qc ${isDone ? 'qc--done' : ''} ${isCancelled ? 'qc--cancelled' : ''}">
-              <div class="qc__accent qc__accent--${statusKey}" style="background: ${this.getStatusColor(appt.status)};"></div>
+            <span class="qc__meta-source qc__meta-source--wa" title="Booked via WhatsApp Assistant">
+              ${Icons.whatsapp({ size: 12, color: '#25D366' })}
+              <span>${timeLabel ? `Booked ${timeLabel} · WhatsApp` : 'WhatsApp Booking'}</span>
+            </span>
+          `;
+        } else if (source === 'WALK_IN') {
+          return `
+            <span class="qc__meta-source qc__meta-source--walkin" title="Direct Walk-In Client">
+              ${Icons.zap({ size: 12, color: '#f59e0b' })}
+              <span>${timeLabel ? `Walk-In ${timeLabel}` : 'Direct Walk-In'}</span>
+            </span>
+          `;
+        } else {
+          return `
+            <span class="qc__meta-source qc__meta-source--web" title="Booked via Online Web Portal">
+              ${Icons.globe({ size: 12, color: '#818cf8' })}
+              <span>${timeLabel ? `Booked ${timeLabel} · Online` : 'Online Booking'}</span>
+            </span>
+          `;
+        }
+      };
 
-              <div class="qc__body">
-                <!-- Row 1: Time Window, Origin Telemetry, Status & Price -->
-                <div class="qc__row1">
-                  <div class="qc__time-block">
-                    <div class="qc__time-primary">
-                      <span class="qc__time">${timeRange.timeRangeStr}</span>
-                      <span class="qc__duration-pill">${timeRange.durationMins}m</span>
-                    </div>
-                    <div class="qc__booking-meta">
-                      ${formatBookingOrigin(appt)}
-                    </div>
-                  </div>
-                  <div class="qc__status-wrap">
-                    <span class="qc__status qc__status--${statusKey}">${appt.status.replace('_', ' ')}</span>
-                    <span class="qc__price">₹${appt.price}</span>
-                  </div>
-                </div>
+      // Format Scheduled Service Time Range Window (12-Hour AM/PM)
+      const formatServiceTimeRange = (appt) => {
+        const rawStart = appt.startTime || appt.startAt;
+        const startDt = rawStart ? new Date(rawStart) : new Date();
+        const startTimeStr = formatTime12h(startDt) || '--:--';
+        const durationMins = appt.service?.durationMinutes || appt.durationMinutes || 30;
+        const rawEnd = appt.endTime || appt.endAt;
+        const endDt = rawEnd ? new Date(rawEnd) : new Date(startDt.getTime() + durationMins * 60000);
+        const endTimeStr = formatTime12h(endDt) || '--:--';
+        return { startTimeStr, endTimeStr, timeRangeStr: `${startTimeStr} – ${endTimeStr}`, durationMins };
+      };
 
-                <!-- If Cancelled: Luxury High-Visibility Cancellation Alert Box -->
-                ${isCancelled ? `
-                  <div class="qc__cancellation-card">
-                    <div class="qc__cancellation-header">
-                      <span class="qc__cancellation-icon">${Icons.xCircle({ size: 14, color: '#fb7185' })}</span>
-                      <span class="qc__cancellation-time">Cancelled at ${cancelDetails.timeStr}${cancelDetails.relativeAgo ? ` (${cancelDetails.relativeAgo})` : ''}</span>
-                      <span class="qc__cancellation-badge">CHAIR FREED</span>
-                    </div>
-                    <div class="qc__cancellation-reason">
-                      <strong>Reason:</strong> ${cancelDetails.reason}
-                    </div>
-                  </div>
-                ` : ''}
+      // Format Cancellation Details and Timestamp (12-Hour AM/PM)
+      const formatCancellationDetails = (appt) => {
+        const historyList = Array.isArray(appt.statusHistory) ? appt.statusHistory : [];
+        const cancelEntry = historyList.find((h) => h.newStatus === 'CANCELLED') || historyList[0];
+        const cancelledDt = cancelEntry?.createdAt
+          ? new Date(cancelEntry.createdAt)
+          : (appt.updatedAt ? new Date(appt.updatedAt) : null);
 
-                <!-- Row 2: Client Name, Phone, Assigned Barber + Quick Contact -->
-                <div class="qc__row2">
-                  <div class="qc__client-info">
-                    <div class="qc__avatar qc__avatar--${avatarCls}">
-                      ${initials}
-                    </div>
-                    <div class="qc__client-text">
-                      <div class="qc__name">${appt.customer.name}</div>
-                      <div class="qc__phone">${formatPhone(cleanPhone)}</div>
-                      <div class="qc__barber">Specialist: <strong>${appt.staff.name}</strong></div>
-                    </div>
-                  </div>
-                  <div class="qc__contacts">
-                    <a href="tel:${cleanPhone}" class="qc__contact-btn qc__contact-btn--call" title="Direct Call">
-                      ${Icons.phone({ size: 16 })}
-                    </a>
-                    <a href="https://wa.me/${rawPhoneForWa}" target="_blank" class="qc__contact-btn qc__contact-btn--wa" title="WhatsApp Message">
-                      ${Icons.whatsapp({ size: 16 })}
-                    </a>
-                  </div>
-                </div>
+        let timeStr = '';
+        let relativeAgo = '';
+        if (cancelledDt && !isNaN(cancelledDt.getTime())) {
+          timeStr = formatTime12h(cancelledDt);
+          const diffMins = Math.floor((Date.now() - cancelledDt.getTime()) / 60000);
+          if (diffMins < 1) relativeAgo = 'just now';
+          else if (diffMins < 60) relativeAgo = `${diffMins}m ago`;
+          else if (diffMins < 1440) relativeAgo = `${Math.floor(diffMins / 60)}h ago`;
+          else relativeAgo = cancelledDt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        }
 
-                <!-- Row 3: Service Tag + Live Status Badges -->
-                <div class="qc__row3" style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
-                  <span class="qc__tag qc__tag--service">
-                    ${Icons.scissors({ size: 13, color: '#94a3b8' })}
-                    <span>${appt.service.name}</span>
-                  </span>
-                  ${appt.status === 'IN_SERVICE' ? `
-                    <span class="qc__tag qc__tag--inchair">
-                      <span class="qc__pulse-dot"></span>
-                      <span>In Chair · ~${remainingMins}m left</span>
-                    </span>
-                  ` : ''}
-                  ${appt.clientEtaStatus === 'ON_WAY_10M' || appt.clientEtaStatus === 'ON_WAY_15M' ? `
-                    <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); font-size: 0.72rem; padding: 4px 8px; border-radius: 6px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
-                      ${Icons.clock({ size: 13, color: '#fbbf24' })}
-                      <span>Arriving in ~15m</span>
-                    </span>
-                  ` : ''}
-                </div>
+        const reason = cancelEntry?.reason || appt.cancellationReason || 'Cancelled by customer or operator';
+        return { timeStr, relativeAgo, reason };
+      };
 
-                <!-- Row 4: Action Bar -->
-                <div class="qc__row4">
-                  ${appt.status === 'CONFIRMED' ? `
-                    <div class="qc__cta-wrap">
-                      <button class="qc__cta qc__cta--checkin btn-status" data-id="${appt.id}" data-status="CHECKED_IN">
-                        ${Icons.checkCircle2({ size: 16, color: '#c7d2fe' })}
-                        <span>Check In Client</span>
-                      </button>
-                    </div>
-                    <div class="qc__sec-actions">
-                      <button class="qc__sec-btn btn-open-reschedule" data-id="${appt.id}" data-service="${appt.service.id}" data-staff="${appt.staff.id}" data-name="${appt.customer.name}" title="Reschedule">
-                        ${Icons.calendar({ size: 15 })}
-                      </button>
-                      <button class="qc__sec-btn qc__sec-btn--danger btn-open-cancel" data-id="${appt.id}" data-name="${appt.customer.name}" title="Cancel">
-                        ${Icons.x({ size: 15 })}
-                      </button>
-                    </div>
-                  ` : ''}
+      return `
+        <!-- Date Bar -->
+        <div class="q-date-bar">
+          <div class="q-date-nav">
+            <button class="q-date-arrow" id="btn-date-prev" title="Previous Day">
+              ${Icons.chevronLeft({ size: 16 })}
+            </button>
+            <div class="q-date-badge" title="Tap to select date">
+              <span class="q-date-icon">${Icons.calendar({ size: 15, color: '#a5b4fc' })}</span>
+              <span class="q-date-text" id="date-label-display">${formattedDateLabel}</span>
+              <input type="date" class="q-date-hidden" id="dashboard-date-picker" value="${this.selectedDate}" />
+            </div>
+            <button class="q-date-arrow" id="btn-date-next" title="Next Day">
+              ${Icons.chevronRight({ size: 16 })}
+            </button>
+            ${diffDays !== 0 ? `<button class="q-today-btn" id="btn-date-today">Today</button>` : ''}
+          </div>
 
-                  ${appt.status === 'CHECKED_IN' ? `
-                    <div class="qc__cta-wrap">
-                      <button class="qc__cta qc__cta--seat btn-status" data-id="${appt.id}" data-status="IN_SERVICE">
-                        ${Icons.armchair({ size: 16, color: '#fff' })}
-                        <span>Seat in Chair</span>
-                      </button>
-                    </div>
-                    <div class="qc__sec-actions">
-                      <button class="qc__sec-btn btn-open-reschedule" data-id="${appt.id}" data-service="${appt.service.id}" data-staff="${appt.staff.id}" data-name="${appt.customer.name}" title="Reschedule">
-                        ${Icons.calendar({ size: 15 })}
-                      </button>
-                      <button class="qc__sec-btn qc__sec-btn--danger btn-open-cancel" data-id="${appt.id}" data-name="${appt.customer.name}" title="Cancel">
-                        ${Icons.x({ size: 15 })}
-                      </button>
-                    </div>
-                  ` : ''}
+          <div class="q-live-sync">
+            <div class="q-live-pill">
+              <span class="q-live-dot"></span>
+              <span class="q-live-label">Live</span>
+            </div>
+            <button class="q-sync-btn" id="btn-refresh-queue" title="Sync Queue">
+              ${Icons.refreshCw({ size: 14 })}
+            </button>
+          </div>
+        </div>
 
-                  ${appt.status === 'IN_SERVICE' ? `
-                    <div class="qc__cta-wrap">
-                      <button class="qc__cta qc__cta--finish btn-status" data-id="${appt.id}" data-status="COMPLETED">
-                        ${Icons.check({ size: 16, color: '#fff' })}
-                        <span>Complete & Free Chair</span>
-                      </button>
-                    </div>
-                  ` : ''}
+        <!-- Filter Chips -->
+        <div class="q-filters">
+          <button class="q-chip ${this.queueFilter === 'ALL' ? 'active' : ''}" data-filter="ALL">
+            All <span class="q-chip-count">${todayAppointments.length}</span>
+          </button>
+          <button class="q-chip ${this.queueFilter === 'WAITING' ? 'active' : ''}" data-filter="WAITING">
+            Waiting <span class="q-chip-count">${waitingCount}</span>
+          </button>
+          <button class="q-chip ${this.queueFilter === 'IN_CHAIR' ? 'active' : ''}" data-filter="IN_CHAIR">
+            In Chair <span class="q-chip-count">${inChairCount}</span>
+          </button>
+          <button class="q-chip ${this.queueFilter === 'COMPLETED' ? 'active' : ''}" data-filter="COMPLETED">
+            Done <span class="q-chip-count">${completedCount}</span>
+          </button>
+          <button class="q-chip ${this.queueFilter === 'CANCELLED' ? 'active' : ''}" data-filter="CANCELLED">
+            Cancelled <span class="q-chip-count">${cancelledCount}</span>
+          </button>
+        </div>
 
-                  ${isDone ? `<div class="qc__terminal qc__terminal--done" style="display: flex; align-items: center; justify-content: center; gap: 6px;">${Icons.checkCircle2({ size: 14, color: '#34d399' })} Service Completed</div>` : ''}
-                  ${isCancelled ? `<div class="qc__terminal qc__terminal--cancel" style="display: flex; align-items: center; justify-content: center; gap: 6px;">${Icons.x({ size: 14, color: '#fb7185' })} Booking Cancelled · Chair Released</div>` : ''}
-                </div>
+        <!-- Queue Cards Stream -->
+        <div class="q-stream">
+          ${filteredAppointments.length === 0 ? `
+            <div class="q-empty">
+              <div class="q-empty-orb">
+                ${Icons.armchair({ size: 30, color: '#818cf8' })}
+              </div>
+              <div class="q-empty-title">Queue is Clear & Ready</div>
+              <div class="q-empty-sub">
+                No ${this.queueFilter === 'ALL' ? '' : this.queueFilter.toLowerCase() + ' '}appointments currently waiting. Walk-in arrivals or WhatsApp bookings appear here in real-time.
+              </div>
+              <div class="q-empty-actions">
+                <button class="btn btn-primary btn-sm btn-fast-walkin" id="btn-fast-walkin" style="gap: 6px; padding: 9px 18px; font-weight: 700; border-radius: 10px;">
+                  ${Icons.zap({ size: 14, color: '#fff' })}
+                  <span>Fast Walk-In Client</span>
+                </button>
+                <button class="btn btn-secondary btn-sm" id="btn-empty-sync" style="gap: 6px; padding: 9px 16px; border-radius: 10px;">
+                  ${Icons.refreshCw({ size: 13, color: '#818cf8' })}
+                  <span>Sync Queue</span>
+                </button>
               </div>
             </div>
-          `;
-        }).join('')}
+          ` : filteredAppointments.map((appt) => {
+        const customer = appt.customer || appt.user || {};
+        const staff = appt.staff || appt.stylist || {};
+        const service = appt.service || {};
+        const customerName = customer.name || 'Walk-In Client';
+        const staffName = staff.name || 'Any Stylist';
+        const staffId = staff.id || appt.stylistId || appt.staffId || '';
+        const serviceId = service.id || appt.serviceId || '';
+        const serviceName = service.name || appt.serviceNameSnapshot || 'Service';
+        const price = appt.price ?? service.price ?? 0;
 
-      </div>
+        const timeRange = formatServiceTimeRange(appt);
+        const cancelDetails = formatCancellationDetails(appt);
+        const cleanPhone = (customer.phone || '').replace(/[^0-9+]/g, '');
+        const rawPhoneForWa = cleanPhone.replace('+', '');
+        const initials = getInitials(customerName);
+        const avatarCls = getAvatarColor(customerName);
+        const isDone = appt.status === 'COMPLETED';
+        const isCancelled = ['CANCELLED', 'NO_SHOW'].includes(appt.status);
+        const statusKey = (appt.status || 'CONFIRMED').toLowerCase();
 
-    `;
+        const rawStart = appt.startTime || appt.startAt;
+        const startDt = rawStart ? new Date(rawStart) : new Date();
+        const elapsedMins = Math.max(0, Math.floor((Date.now() - startDt.getTime()) / 60000));
+        const remainingMins = Math.max(0, (service.durationMinutes || appt.durationMinutes || 30) - elapsedMins);
+
+        return `
+              <div class="qc ${isDone ? 'qc--done' : ''} ${isCancelled ? 'qc--cancelled' : ''}">
+                <div class="qc__accent qc__accent--${statusKey}" style="background: ${this.getStatusColor(appt.status)};"></div>
+
+                <div class="qc__body">
+                  <!-- Row 1: Time Window, Origin Telemetry, Status & Price -->
+                  <div class="qc__row1">
+                    <div class="qc__time-block">
+                      <div class="qc__time-primary">
+                        <span class="qc__time">${timeRange.timeRangeStr}</span>
+                        <span class="qc__duration-pill">${timeRange.durationMins}m</span>
+                      </div>
+                      <div class="qc__booking-meta">
+                        ${formatBookingOrigin(appt)}
+                      </div>
+                    </div>
+                    <div class="qc__status-wrap">
+                      <span class="qc__status qc__status--${statusKey}">${(appt.status || 'CONFIRMED').replace('_', ' ')}</span>
+                      <span class="qc__price">₹${price}</span>
+                    </div>
+                  </div>
+
+                  <!-- If Cancelled: Luxury High-Visibility Cancellation Alert Box -->
+                  ${isCancelled ? `
+                    <div class="qc__cancellation-card">
+                      <div class="qc__cancellation-header">
+                        <span class="qc__cancellation-icon">${Icons.xCircle({ size: 14, color: '#fb7185' })}</span>
+                        <span class="qc__cancellation-time">Cancelled at ${cancelDetails.timeStr}${cancelDetails.relativeAgo ? ` (${cancelDetails.relativeAgo})` : ''}</span>
+                        <span class="qc__cancellation-badge">CHAIR FREED</span>
+                      </div>
+                      <div class="qc__cancellation-reason">
+                        <strong>Reason:</strong> ${cancelDetails.reason}
+                      </div>
+                    </div>
+                  ` : ''}
+
+                  <!-- Row 2: Client Name, Phone, Assigned Barber + Quick Contact -->
+                  <div class="qc__row2">
+                    <div class="qc__client-info">
+                      <div class="qc__avatar qc__avatar--${avatarCls}">
+                        ${initials}
+                      </div>
+                      <div class="qc__client-text">
+                        <div class="qc__name">${customerName}</div>
+                        <div class="qc__phone">${formatPhone(cleanPhone)}</div>
+                        <div class="qc__barber">Specialist: <strong>${staffName}</strong></div>
+                      </div>
+                    </div>
+                    <div class="qc__contacts">
+                      ${cleanPhone ? `
+                        <a href="tel:${cleanPhone}" class="qc__contact-btn qc__contact-btn--call" title="Direct Call">
+                          ${Icons.phone({ size: 16 })}
+                        </a>
+                        <a href="https://wa.me/${rawPhoneForWa}" target="_blank" class="qc__contact-btn qc__contact-btn--wa" title="WhatsApp Message">
+                          ${Icons.whatsapp({ size: 16 })}
+                        </a>
+                      ` : ''}
+                    </div>
+                  </div>
+
+                  <!-- Row 3: Service Tag + Live Status Badges -->
+                  <div class="qc__row3" style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                    <span class="qc__tag qc__tag--service">
+                      ${Icons.scissors({ size: 13, color: '#94a3b8' })}
+                      <span>${serviceName}</span>
+                    </span>
+                    ${appt.status === 'IN_SERVICE' ? `
+                      <span class="qc__tag qc__tag--inchair">
+                        <span class="qc__pulse-dot"></span>
+                        <span>In Chair · ~${remainingMins}m left</span>
+                      </span>
+                    ` : ''}
+                    ${appt.clientEtaStatus === 'ON_WAY_10M' || appt.clientEtaStatus === 'ON_WAY_15M' ? `
+                      <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); font-size: 0.72rem; padding: 4px 8px; border-radius: 6px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
+                        ${Icons.clock({ size: 13, color: '#fbbf24' })}
+                        <span>Arriving in ~15m</span>
+                      </span>
+                    ` : ''}
+                  </div>
+
+                  <!-- Row 4: Action Bar -->
+                  <div class="qc__row4">
+                    ${appt.status === 'CONFIRMED' ? `
+                      <div class="qc__cta-wrap">
+                        <button class="qc__cta qc__cta--checkin btn-status" data-id="${appt.id}" data-status="CHECKED_IN">
+                          ${Icons.checkCircle2({ size: 16, color: '#c7d2fe' })}
+                          <span>Check In Client</span>
+                        </button>
+                      </div>
+                      <div class="qc__sec-actions">
+                        <button class="qc__sec-btn btn-open-reschedule" data-id="${appt.id}" data-service="${serviceId}" data-staff="${staffId}" data-name="${customerName}" title="Reschedule">
+                          ${Icons.calendar({ size: 15 })}
+                        </button>
+                        <button class="qc__sec-btn qc__sec-btn--danger btn-open-cancel" data-id="${appt.id}" data-name="${customerName}" title="Cancel">
+                          ${Icons.x({ size: 15 })}
+                        </button>
+                      </div>
+                    ` : ''}
+
+                    ${appt.status === 'CHECKED_IN' ? `
+                      <div class="qc__cta-wrap">
+                        <button class="qc__cta qc__cta--seat btn-status" data-id="${appt.id}" data-status="IN_SERVICE">
+                          ${Icons.armchair({ size: 16, color: '#fff' })}
+                          <span>Seat in Chair</span>
+                        </button>
+                      </div>
+                      <div class="qc__sec-actions">
+                        <button class="qc__sec-btn btn-open-reschedule" data-id="${appt.id}" data-service="${serviceId}" data-staff="${staffId}" data-name="${customerName}" title="Reschedule">
+                          ${Icons.calendar({ size: 15 })}
+                        </button>
+                        <button class="qc__sec-btn qc__sec-btn--danger btn-open-cancel" data-id="${appt.id}" data-name="${customerName}" title="Cancel">
+                          ${Icons.x({ size: 15 })}
+                        </button>
+                      </div>
+                    ` : ''}
+
+                    ${appt.status === 'IN_SERVICE' ? `
+                      <div class="qc__cta-wrap">
+                        <button class="qc__cta qc__cta--finish btn-status" data-id="${appt.id}" data-status="COMPLETED">
+                          ${Icons.check({ size: 16, color: '#fff' })}
+                          <span>Complete & Free Chair</span>
+                        </button>
+                      </div>
+                    ` : ''}
+
+                    ${isDone ? `<div class="qc__terminal qc__terminal--done" style="display: flex; align-items: center; justify-content: center; gap: 6px;">${Icons.checkCircle2({ size: 14, color: '#34d399' })} Service Completed</div>` : ''}
+                    ${isCancelled ? `<div class="qc__terminal qc__terminal--cancel" style="display: flex; align-items: center; justify-content: center; gap: 6px;">${Icons.x({ size: 14, color: '#fb7185' })} Booking Cancelled · Chair Released</div>` : ''}
+                  </div>
+                </div>
+              </div>
+            `;
+      }).join('')}
+
+        </div>
+
+      `;
+    } catch (err) {
+      console.error('[Dashboard] renderQueueTab error:', err);
+      return `
+        <div class="glass-panel" style="padding: 40px; text-align: center;">
+          <div style="font-size: 1.1rem; font-weight: 700; color: #f43f5e; margin-bottom: 8px;">
+            Unable to display live queue
+          </div>
+          <div style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 16px;">
+            ${err?.message || 'An error occurred while rendering the chair queue.'}
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="window.salonDashboard?.loadData(true).then(() => window.salonDashboard?.render())">
+            Reload Queue
+          </button>
+        </div>
+      `;
+    }
   }
 
   getStatusColor(status) {
@@ -1215,22 +1258,22 @@ export class SalonDashboard {
           ` : `
             <div class="staff-capacity-grid">
               ${staff.map((st) => {
-                const todayAppts = appts.filter((a) => (a.staff?.id || a.staffId) === st.id);
-                const inService = todayAppts.find((a) => a.status === 'IN_SERVICE');
-                const confirmedCount = todayAppts.filter((a) => ['CONFIRMED', 'CHECKED_IN', 'IN_SERVICE'].includes(a.status)).length;
-                const completedCount = todayAppts.filter((a) => a.status === 'COMPLETED').length;
+        const todayAppts = appts.filter((a) => (a.staff?.id || a.staffId) === st.id);
+        const inService = todayAppts.find((a) => a.status === 'IN_SERVICE');
+        const confirmedCount = todayAppts.filter((a) => ['CONFIRMED', 'CHECKED_IN', 'IN_SERVICE'].includes(a.status)).length;
+        const completedCount = todayAppts.filter((a) => a.status === 'COMPLETED').length;
 
-                let statusDot = 'status-dot-free';
-                let statusText = 'Available / Free for Walk-ins';
-                if (st.status !== 'ACTIVE') {
-                  statusDot = 'status-dot-off';
-                  statusText = 'Inactive / Off-Duty';
-                } else if (inService) {
-                  statusDot = 'status-dot-busy';
-                  statusText = `In Chair: ${inService.customer?.name || 'Client'}`;
-                }
+        let statusDot = 'status-dot-free';
+        let statusText = 'Available / Free for Walk-ins';
+        if (st.status !== 'ACTIVE') {
+          statusDot = 'status-dot-off';
+          statusText = 'Inactive / Off-Duty';
+        } else if (inService) {
+          statusDot = 'status-dot-busy';
+          statusText = `In Chair: ${inService.customer?.name || 'Client'}`;
+        }
 
-                return `
+        return `
                   <div class="staff-card" style="display: flex; flex-direction: column; justify-content: space-between;">
                     <div>
                       <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px;">
@@ -1263,8 +1306,8 @@ export class SalonDashboard {
                         <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; margin-bottom: 6px;">Qualified Services (${st.services?.length || 0}):</div>
                         <div style="display: flex; flex-wrap: wrap; gap: 4px;">
                           ${(st.services && st.services.length > 0)
-                            ? st.services.map((svc) => `<span class="badge" style="background: rgba(99,102,241,0.15); color: #818cf8; font-size: 0.7rem;">${svc.service?.name || 'Service'}</span>`).join('')
-                            : '<span style="font-size: 0.75rem; color: var(--text-muted);">No services assigned</span>'}
+            ? st.services.map((svc) => `<span class="badge" style="background: rgba(99,102,241,0.15); color: #818cf8; font-size: 0.7rem;">${svc.service?.name || 'Service'}</span>`).join('')
+            : '<span style="font-size: 0.75rem; color: var(--text-muted);">No services assigned</span>'}
                         </div>
                       </div>
                     </div>
@@ -1299,7 +1342,7 @@ export class SalonDashboard {
                     </div>
                   </div>
                 `;
-              }).join('')}
+      }).join('')}
             </div>
           `}
         </div>
@@ -1666,11 +1709,11 @@ export class SalonDashboard {
       container.innerHTML = `
         <div style="display: flex; flex-direction: column; gap: 8px;">
           ${logs.map((l) => {
-            const isInbound = l.direction === 'INBOUND';
-            const timeStr = formatTime12h(l.createdAt);
-            const dateStr = new Date(l.createdAt).toLocaleDateString();
+        const isInbound = l.direction === 'INBOUND';
+        const timeStr = formatTime12h(l.createdAt);
+        const dateStr = new Date(l.createdAt).toLocaleDateString();
 
-            return `
+        return `
               <div class="log-stream-card">
                 <div style="display: flex; align-items: center; gap: 12px; flex: 1;">
                   <span class="${isInbound ? 'log-direction-in' : 'log-direction-out'}">
@@ -1693,7 +1736,7 @@ export class SalonDashboard {
                 </div>
               </div>
             `;
-          }).join('')}
+      }).join('')}
         </div>
       `;
     } catch (err) {
@@ -3201,8 +3244,8 @@ export class SalonDashboard {
           <form id="edit-hours-form">
             <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
               ${days.map((d) => {
-                const wh = existingHours.find((h) => h.dayOfWeek === d.key) || { isWorking: true, startTime: '09:00', endTime: '21:00' };
-                return `
+      const wh = existingHours.find((h) => h.dayOfWeek === d.key) || { isWorking: true, startTime: '09:00', endTime: '21:00' };
+      return `
                   <div style="display: flex; align-items: center; justify-content: space-between; background: var(--bg-input); padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); gap: 10px;">
                     <label style="display: flex; align-items: center; gap: 10px; min-width: 140px; cursor: pointer; margin-bottom: 0;">
                       <input type="checkbox" class="shift-day-chk" data-day="${d.key}" ${wh.isWorking ? 'checked' : ''} style="width: 18px; height: 18px;" />
@@ -3215,7 +3258,7 @@ export class SalonDashboard {
                     </div>
                   </div>
                 `;
-              }).join('')}
+    }).join('')}
             </div>
 
             <button type="submit" class="btn btn-primary" style="width: 100%;">Save Weekly Shift Schedule →</button>

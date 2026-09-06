@@ -247,7 +247,13 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
       },
       whatsappQuota,
       salon: salonInfo,
-      todayAppointments,
+      todayAppointments: todayAppointments.map((appt) => ({
+        ...appt,
+        customer: appt.user,
+        staff: appt.stylist,
+        startTime: appt.startAt,
+        endTime: appt.endAt,
+      })),
     };
   }
 }

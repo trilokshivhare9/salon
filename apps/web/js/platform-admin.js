@@ -110,14 +110,14 @@ export class PlatformAdminPortal {
 
           <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 20px;">
             ${salons.map((s) => {
-              const owner = s.admins && s.admins[0] ? s.admins[0] : (s.users && s.users[0] ? s.users[0] : { name: 'Owner', email: s.email });
-              const staffCount = s._count?.stylists ?? s._count?.staff ?? 0;
-              const serviceCount = s._count?.services ?? 0;
-              const hasMinCatalog = staffCount >= 1 && serviceCount >= 1;
-              const isOperational = s.status === 'ACTIVE' && hasMinCatalog;
-              const waId = s.whatsappAccount?.phoneNumberId;
+      const owner = s.admins && s.admins[0] ? s.admins[0] : (s.users && s.users[0] ? s.users[0] : { name: 'Owner', email: s.email });
+      const staffCount = s._count?.stylists ?? s._count?.staff ?? 0;
+      const serviceCount = s._count?.services ?? 0;
+      const hasMinCatalog = staffCount >= 1 && serviceCount >= 1;
+      const isOperational = s.status === 'ACTIVE' && hasMinCatalog;
+      const waId = s.whatsappAccount?.phoneNumberId;
 
-              return `
+      return `
                 <div class="staff-card" style="display: flex; flex-direction: column; justify-content: space-between;">
                   <div>
                     <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px;">
@@ -188,7 +188,7 @@ export class PlatformAdminPortal {
                   </div>
                 </div>
               `;
-            }).join('')}
+    }).join('')}
           </div>
         </div>
       </main>
