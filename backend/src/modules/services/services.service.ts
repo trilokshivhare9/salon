@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 import { CreateServiceDto, UpdateServiceDto } from './dto/create-service.dto';
+import { ServiceStatus } from '@prisma/client';
 
 @Injectable()
 export class ServicesService {
@@ -10,9 +11,9 @@ export class ServicesService {
     return this.prisma.service.findMany({
       where: { salonId },
       include: {
-        staffAssignments: {
+        stylists: {
           include: {
-            staff: {
+            stylist: {
               select: { id: true, name: true, profileImageUrl: true, status: true },
             },
           },
@@ -26,8 +27,8 @@ export class ServicesService {
     const service = await this.prisma.service.findFirst({
       where: { id: serviceId, salonId },
       include: {
-        staffAssignments: {
-          include: { staff: true },
+        stylists: {
+          include: { stylist: true },
         },
       },
     });
@@ -40,31 +41,17 @@ export class ServicesService {
   }
 
   async createService(salonId: string, dto: CreateServiceDto) {
-    const service = await this.prisma.service.create({
+    return this.prisma.service.create({
       data: {
         salonId,
-        name: dto.name,
-        description: dto.description,
+        name: dto.name.trim(),
+        description: dto.description?.trim(),
         price: dto.price,
         durationMinutes: dto.durationMinutes,
-        category: dto.category,
+        category: dto.category?.trim(),
+        status: ServiceStatus.ACTIVE,
       },
     });
-
-    // Auto-evaluate Salon Activation
-    const [activeStaffCount, activeServicesCount] = await Promise.all([
-      this.prisma.staff.count({ where: { salonId, status: 'ACTIVE' } }),
-      this.prisma.service.count({ where: { salonId, status: 'ACTIVE' } }),
-    ]);
-
-    if (activeStaffCount > 0 && activeServicesCount > 0) {
-      await this.prisma.salon.update({
-        where: { id: salonId },
-        data: { status: 'ACTIVE' },
-      });
-    }
-
-    return service;
   }
 
   async updateService(salonId: string, serviceId: string, dto: UpdateServiceDto) {
@@ -78,47 +65,19 @@ export class ServicesService {
 
   async toggleServiceStatus(salonId: string, serviceId: string) {
     const service = await this.getServiceById(salonId, serviceId);
-    const newStatus = service.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+    const newStatus = service.status === ServiceStatus.ACTIVE ? ServiceStatus.INACTIVE : ServiceStatus.ACTIVE;
 
-    const updated = await this.prisma.service.update({
+    return this.prisma.service.update({
       where: { id: serviceId },
       data: { status: newStatus },
     });
-
-    // Auto-evaluate Salon Activation
-    const [activeStaffCount, activeServicesCount] = await Promise.all([
-      this.prisma.staff.count({ where: { salonId, status: 'ACTIVE' } }),
-      this.prisma.service.count({ where: { salonId, status: 'ACTIVE' } }),
-    ]);
-
-    const salonStatus = activeStaffCount > 0 && activeServicesCount > 0 ? 'ACTIVE' : 'DEACTIVATED';
-    await this.prisma.salon.update({
-      where: { id: salonId },
-      data: { status: salonStatus as any },
-    });
-
-    return updated;
   }
 
   async deleteService(salonId: string, serviceId: string) {
     await this.getServiceById(salonId, serviceId);
 
-    const deleted = await this.prisma.service.delete({
+    return this.prisma.service.delete({
       where: { id: serviceId },
     });
-
-    // Auto-evaluate Salon Activation
-    const [activeStaffCount, activeServicesCount] = await Promise.all([
-      this.prisma.staff.count({ where: { salonId, status: 'ACTIVE' } }),
-      this.prisma.service.count({ where: { salonId, status: 'ACTIVE' } }),
-    ]);
-
-    const salonStatus = activeStaffCount > 0 && activeServicesCount > 0 ? 'ACTIVE' : 'DEACTIVATED';
-    await this.prisma.salon.update({
-      where: { id: salonId },
-      data: { status: salonStatus as any },
-    });
-
-    return deleted;
   }
 }

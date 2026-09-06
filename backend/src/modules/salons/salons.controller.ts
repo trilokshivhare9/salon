@@ -8,17 +8,17 @@ import {
   Body,
   Param,
   UseGuards,
+  Request,
 } from '@nestjs/common';
 import { SalonsService } from './salons.service';
 import { CreateSalonPlatformDto } from './dto/create-salon-platform.dto';
 import { UpdateSalonDto } from './dto/update-salon.dto';
 import { UpdateWorkingHoursDto } from './dto/working-hours.dto';
-import { CreateHolidayDto, CreateBlockedTimeDto } from './dto/holiday.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentSalonId } from '../../common/decorators/tenant.decorator';
-import { UserRole } from '@prisma/client';
+import { AdminRole } from '@prisma/client';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('salons')
@@ -28,43 +28,32 @@ export class SalonsController {
   // -------------------------------------------------------------
   // SUPER ADMIN (PLATFORM OWNER) ENDPOINTS
   // -------------------------------------------------------------
-  @Roles(UserRole.PLATFORM_ADMIN)
+  @Roles(AdminRole.SUPER_ADMIN)
   @Get('platform/all')
   async getAllSalons() {
     return this.salonsService.getAllSalonsForPlatformAdmin();
   }
 
-  @Roles(UserRole.PLATFORM_ADMIN)
+  @Roles(AdminRole.SUPER_ADMIN)
   @Post('platform/create')
-  async createSalonBySuperAdmin(@Body() dto: CreateSalonPlatformDto) {
-    return this.salonsService.createSalonBySuperAdmin(dto);
+  async createSalonBySuperAdmin(@Request() req: any, @Body() dto: CreateSalonPlatformDto) {
+    const superAdminId = req.user?.id || req.user?.sub;
+    return this.salonsService.createSalonBySuperAdmin(superAdminId, dto);
   }
 
-  @Roles(UserRole.PLATFORM_ADMIN)
+  @Roles(AdminRole.SUPER_ADMIN)
   @Patch('platform/:id/toggle-status')
   async toggleSalonStatus(@Param('id') salonId: string) {
     return this.salonsService.toggleSalonStatus(salonId);
   }
 
-  @Roles(UserRole.PLATFORM_ADMIN)
+  @Roles(AdminRole.SUPER_ADMIN)
   @Delete('platform/:id')
   async deleteSalon(@Param('id') salonId: string) {
     return this.salonsService.deleteSalonBySuperAdmin(salonId);
   }
 
-  @Roles(UserRole.PLATFORM_ADMIN)
-  @Post('platform/purge-except')
-  async purgeOldSalons(@Body() dto: { keepSlug: string }) {
-    return this.salonsService.purgeAllOldSalonsExcept(dto.keepSlug);
-  }
-
-  @Roles(UserRole.PLATFORM_ADMIN)
-  @Post('platform/reset-database')
-  async resetDatabase() {
-    return this.salonsService.resetDatabaseToZero();
-  }
-
-  @Roles(UserRole.PLATFORM_ADMIN, UserRole.SALON_ADMIN)
+  @Roles(AdminRole.SUPER_ADMIN, AdminRole.SALON_OWNER)
   @Post(':id/whatsapp-config')
   async updateWhatsAppConfig(
     @Param('id') salonId: string,
@@ -74,14 +63,15 @@ export class SalonsController {
   }
 
   // -------------------------------------------------------------
-  // SALON ADMIN ENDPOINTS
+  // SALON OWNER ENDPOINTS
   // -------------------------------------------------------------
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
   @Get('profile')
   async getProfile(@CurrentSalonId() salonId: string) {
     return this.salonsService.getSalonProfile(salonId);
   }
 
-  @Roles(UserRole.SALON_ADMIN)
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
   @Put('profile')
   async updateProfile(
     @CurrentSalonId() salonId: string,
@@ -90,63 +80,18 @@ export class SalonsController {
     return this.salonsService.updateSalonProfile(salonId, dto);
   }
 
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
   @Get('working-hours')
   async getWorkingHours(@CurrentSalonId() salonId: string) {
     return this.salonsService.getWorkingHours(salonId);
   }
 
-  @Roles(UserRole.SALON_ADMIN)
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
   @Put('working-hours')
   async updateWorkingHours(
     @CurrentSalonId() salonId: string,
     @Body() dto: UpdateWorkingHoursDto,
   ) {
     return this.salonsService.updateWorkingHours(salonId, dto);
-  }
-
-  @Get('holidays')
-  async getHolidays(@CurrentSalonId() salonId: string) {
-    return this.salonsService.getHolidays(salonId);
-  }
-
-  @Roles(UserRole.SALON_ADMIN)
-  @Post('holidays')
-  async addHoliday(
-    @CurrentSalonId() salonId: string,
-    @Body() dto: CreateHolidayDto,
-  ) {
-    return this.salonsService.addHoliday(salonId, dto);
-  }
-
-  @Roles(UserRole.SALON_ADMIN)
-  @Delete('holidays/:id')
-  async deleteHoliday(
-    @CurrentSalonId() salonId: string,
-    @Param('id') holidayId: string,
-  ) {
-    return this.salonsService.deleteHoliday(salonId, holidayId);
-  }
-
-  @Get('blocked-times')
-  async getBlockedTimes(@CurrentSalonId() salonId: string) {
-    return this.salonsService.getBlockedTimes(salonId);
-  }
-
-  @Roles(UserRole.SALON_ADMIN)
-  @Post('blocked-times')
-  async addBlockedTime(
-    @CurrentSalonId() salonId: string,
-    @Body() dto: CreateBlockedTimeDto,
-  ) {
-    return this.salonsService.addBlockedTime(salonId, dto);
-  }
-
-  @Roles(UserRole.SALON_ADMIN)
-  @Delete('blocked-times/:id')
-  async deleteBlockedTime(
-    @CurrentSalonId() salonId: string,
-    @Param('id') blockedTimeId: string,
-  ) {
-    return this.salonsService.deleteBlockedTime(salonId, blockedTimeId);
   }
 }

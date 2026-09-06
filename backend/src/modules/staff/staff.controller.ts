@@ -15,13 +15,12 @@ import {
   UpdateStaffDto,
   AssignStaffServicesDto,
   UpdateStaffWorkingHoursDto,
-  CreateStaffBreakDto,
 } from './dto/create-staff.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentSalonId } from '../../common/decorators/tenant.decorator';
-import { UserRole } from '@prisma/client';
+import { AdminRole } from '@prisma/client';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('staff')
@@ -41,7 +40,7 @@ export class StaffController {
     return this.staffService.getStaffById(salonId, staffId);
   }
 
-  @Roles(UserRole.SALON_ADMIN)
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
   @Post()
   async createStaff(
     @CurrentSalonId() salonId: string,
@@ -50,7 +49,7 @@ export class StaffController {
     return this.staffService.createStaff(salonId, dto);
   }
 
-  @Roles(UserRole.SALON_ADMIN)
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
   @Put(':id')
   async updateStaff(
     @CurrentSalonId() salonId: string,
@@ -60,7 +59,7 @@ export class StaffController {
     return this.staffService.updateStaff(salonId, staffId, dto);
   }
 
-  @Roles(UserRole.SALON_ADMIN)
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
   @Patch(':id/toggle-status')
   async toggleStaffStatus(
     @CurrentSalonId() salonId: string,
@@ -69,7 +68,7 @@ export class StaffController {
     return this.staffService.toggleStaffStatus(salonId, staffId);
   }
 
-  @Roles(UserRole.SALON_ADMIN)
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
   @Put(':id/services')
   async assignServices(
     @CurrentSalonId() salonId: string,
@@ -79,7 +78,7 @@ export class StaffController {
     return this.staffService.assignServices(salonId, staffId, dto);
   }
 
-  @Roles(UserRole.SALON_ADMIN)
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
   @Put(':id/working-hours')
   async updateWorkingHours(
     @CurrentSalonId() salonId: string,
@@ -89,27 +88,7 @@ export class StaffController {
     return this.staffService.updateWorkingHours(salonId, staffId, dto);
   }
 
-  @Roles(UserRole.SALON_ADMIN)
-  @Post(':id/breaks')
-  async addBreak(
-    @CurrentSalonId() salonId: string,
-    @Param('id') staffId: string,
-    @Body() dto: CreateStaffBreakDto,
-  ) {
-    return this.staffService.addBreak(salonId, staffId, dto);
-  }
-
-  @Roles(UserRole.SALON_ADMIN)
-  @Delete(':id/breaks/:breakId')
-  async deleteBreak(
-    @CurrentSalonId() salonId: string,
-    @Param('id') staffId: string,
-    @Param('breakId') breakId: string,
-  ) {
-    return this.staffService.deleteBreak(salonId, staffId, breakId);
-  }
-
-  @Roles(UserRole.SALON_ADMIN)
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
   @Delete(':id')
   async deleteStaff(
     @CurrentSalonId() salonId: string,

@@ -30,8 +30,12 @@ export class CreateStaffDto {
 
   @IsArray()
   @IsString({ each: true })
+  @IsNotEmpty({ message: 'At least one service ID must be assigned to the stylist' })
+  serviceIds: string[];
+
+  @IsBoolean()
   @IsOptional()
-  serviceIds?: string[];
+  followsSalonSchedule?: boolean;
 }
 
 export class UpdateStaffDto {
@@ -50,11 +54,16 @@ export class UpdateStaffDto {
   @IsString()
   @IsOptional()
   profileImageUrl?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  followsSalonSchedule?: boolean;
 }
 
 export class AssignStaffServicesDto {
   @IsArray()
   @IsString({ each: true })
+  @IsNotEmpty({ message: 'serviceIds must not be empty' })
   serviceIds: string[];
 }
 
@@ -66,10 +75,20 @@ export class StaffDayWorkingHourDto {
   isWorking: boolean;
 
   @IsString()
+  @IsNotEmpty()
   startTime: string; // "10:00"
 
   @IsString()
+  @IsNotEmpty()
   endTime: string; // "18:00"
+
+  @IsString()
+  @IsOptional()
+  breakStartTime?: string; // "13:00"
+
+  @IsString()
+  @IsOptional()
+  breakEndTime?: string; // "14:00"
 }
 
 export class UpdateStaffWorkingHoursDto {
@@ -77,21 +96,4 @@ export class UpdateStaffWorkingHoursDto {
   @ValidateNested({ each: true })
   @Type(() => StaffDayWorkingHourDto)
   hours: StaffDayWorkingHourDto[];
-}
-
-export class CreateStaffBreakDto {
-  @IsEnum(DayOfWeek)
-  dayOfWeek: DayOfWeek;
-
-  @IsString()
-  @IsNotEmpty()
-  startTime: string; // "13:00"
-
-  @IsString()
-  @IsNotEmpty()
-  endTime: string; // "14:00"
-
-  @IsString()
-  @IsOptional()
-  title?: string;
 }

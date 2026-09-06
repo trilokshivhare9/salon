@@ -71,7 +71,6 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
       usedConversations = Math.max(cached.metaLiveCount, cached.localConversationCount);
       liveSource = cached.source;
     } else {
-      // Fetch in real-time and cache the result
       const quota = await this.fetchAndCacheQuota(salonId, timezone, targetDate);
       usedConversations = Math.max(quota.metaLiveCount, quota.localConversationCount);
       liveSource = quota.source;
@@ -107,7 +106,6 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
     let metaLiveCount = 0;
     let liveSource = 'REAL_TIME_TRACKING';
 
-    // Meta Graph API call (expensive — cached for 10 minutes)
     const salon = await this.prisma.salon.findUnique({
       where: { id: salonId },
       include: { whatsappAccount: true },
@@ -129,7 +127,7 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
           }
         }
       } catch {
-        // Fallback to real-time session tracking silently
+        // Fallback silently
       }
     }
 
@@ -169,50 +167,43 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
     const dayEnd = targetDate.endOf('day').toJSDate();
     const dateUtcMidnight = new Date(`${targetDateIso}T00:00:00.000Z`);
 
-    // OPTIMIZED: Run appointments query + aggregated counts + quota in parallel
     const [todayAppointments, salonMetrics, whatsappQuota, salonInfo] = await Promise.all([
-      // 1. Appointments for the day (single query with includes)
+      // 1. Appointments for the day
       this.prisma.appointment.findMany({
         where: {
           salonId,
           OR: [
-            { startTime: { gte: dayStart, lte: dayEnd } },
-            { date: dateUtcMidnight },
-            { date: dayStart },
+            { startAt: { gte: dayStart, lte: dayEnd } },
+            { appointmentDate: dateUtcMidnight },
+            { appointmentDate: dayStart },
           ],
         },
         include: {
-          customer: true,
-          staff: true,
+          user: true,
+          stylist: true,
           service: true,
-          statusHistory: {
-            orderBy: { createdAt: 'desc' },
-            take: 2,
-          },
         },
-
-        orderBy: { startTime: 'asc' },
+        orderBy: { startAt: 'asc' },
       }),
 
-      // 2. OPTIMIZED: Single raw SQL for all 3 counts (1 round-trip instead of 3)
+      // 2. Counts
       this.prisma.$queryRaw<[{ customer_count: bigint; staff_count: bigint; service_count: bigint }]>`
         SELECT
-          (SELECT COUNT(*) FROM customers WHERE salon_id = ${salonId}) as customer_count,
-          (SELECT COUNT(*) FROM staff WHERE salon_id = ${salonId} AND status = 'ACTIVE') as staff_count,
+          (SELECT COUNT(*) FROM salon_users WHERE salon_id = ${salonId}) as customer_count,
+          (SELECT COUNT(*) FROM stylists WHERE salon_id = ${salonId} AND status = 'ACTIVE') as staff_count,
           (SELECT COUNT(*) FROM services WHERE salon_id = ${salonId} AND status = 'ACTIVE') as service_count
       `,
 
-      // 3. WhatsApp quota (reads from 10-min background cache when available)
+      // 3. WhatsApp quota
       this.getWhatsAppQuota(salonId, timezone, targetDate),
 
-      // 4. Salon basic info (lightweight)
+      // 4. Salon basic info
       this.prisma.salon.findUnique({
         where: { id: salonId },
         select: { id: true, name: true, slug: true, phone: true },
       }),
     ]);
 
-    // Compute status counts in-memory (zero extra DB queries)
     const statusCounts = {
       total: todayAppointments.length,
       confirmed: 0,

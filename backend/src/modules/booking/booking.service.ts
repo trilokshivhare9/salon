@@ -30,11 +30,11 @@ export class BookingService {
         timezone: true,
         description: true,
         status: true,
-        slotIntervalMinutes: true,
-        minAdvanceNoticeMins: true,
+        defaultStartTime: true,
+        defaultEndTime: true,
         maxAdvanceDays: true,
         cancelWindowHours: true,
-        allowSpecificStaff: true,
+        allowSpecificStylist: true,
         services: {
           where: { status: 'ACTIVE' },
           select: {
@@ -47,7 +47,7 @@ export class BookingService {
           },
           orderBy: { category: 'asc' },
         },
-        staff: {
+        stylists: {
           where: { status: 'ACTIVE' },
           select: {
             id: true,
@@ -63,7 +63,11 @@ export class BookingService {
       throw new NotFoundException('Salon not found or inactive.');
     }
 
-    return salon;
+    return {
+      ...salon,
+      allowSpecificStaff: salon.allowSpecificStylist,
+      staff: salon.stylists,
+    };
   }
 
   async getAvailability(
@@ -94,15 +98,16 @@ export class BookingService {
       appointmentId: appointment.id,
       appointmentNumber: appointment.appointmentNumber,
       status: appointment.status,
-      serviceName: appointment.service.name,
-      staffName: appointment.staff.name,
-      date: appointment.date,
-      startTime: appointment.startTime,
-      endTime: appointment.endTime,
+      serviceName: appointment.serviceNameSnapshot || appointment.service?.name,
+      stylistName: appointment.stylist?.name,
+      staffName: appointment.stylist?.name, // backward compatibility
+      appointmentDate: appointment.appointmentDate,
+      startAt: appointment.startAt,
+      endAt: appointment.endAt,
       price: appointment.price,
       customer: {
-        name: appointment.customer.name,
-        phone: appointment.customer.phone,
+        name: appointment.user?.name,
+        phone: appointment.user?.phone,
       },
       salon: {
         name: salon.name,

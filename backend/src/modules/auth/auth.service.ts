@@ -9,7 +9,7 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../database/prisma.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterSalonDto } from './dto/register.dto';
-import { UserRole } from '@prisma/client';
+import { AdminRole, DayOfWeek } from '@prisma/client';
 
 @Injectable()
 export class AuthService {
@@ -19,29 +19,29 @@ export class AuthService {
   ) {}
 
   async login(loginDto: LoginDto) {
-    const user = await this.prisma.user.findUnique({
-      where: { email: loginDto.email.toLowerCase() },
+    const admin = await this.prisma.admin.findUnique({
+      where: { email: loginDto.email.toLowerCase().trim() },
       include: { salon: true },
     });
 
-    if (!user) {
+    if (!admin) {
       throw new UnauthorizedException('Invalid email or password.');
     }
 
-    const isPasswordValid = await bcrypt.compare(loginDto.password, user.passwordHash);
+    const isPasswordValid = await bcrypt.compare(loginDto.password, admin.passwordHash);
     if (!isPasswordValid) {
       throw new UnauthorizedException('Invalid email or password.');
     }
 
-    if (!user.isActive) {
+    if (admin.status !== 'ACTIVE') {
       throw new UnauthorizedException('Account has been deactivated.');
     }
 
     const payload = {
-      sub: user.id,
-      email: user.email,
-      role: user.role,
-      salonId: user.salonId,
+      sub: admin.id,
+      email: admin.email,
+      role: admin.role,
+      salonId: admin.salonId,
     };
 
     const token = this.jwtService.sign(payload);
@@ -49,18 +49,18 @@ export class AuthService {
     return {
       accessToken: token,
       user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        salonId: user.salonId,
-        salon: user.salon
+        id: admin.id,
+        name: admin.name,
+        email: admin.email,
+        role: admin.role,
+        salonId: admin.salonId,
+        salon: admin.salon
           ? {
-              id: user.salon.id,
-              name: user.salon.name,
-              slug: user.salon.slug,
-              timezone: user.salon.timezone,
-              status: user.salon.status,
+              id: admin.salon.id,
+              name: admin.salon.name,
+              slug: admin.salon.slug,
+              timezone: admin.salon.timezone,
+              status: admin.salon.status,
             }
           : null,
       },
@@ -68,11 +68,12 @@ export class AuthService {
   }
 
   async registerSalon(registerDto: RegisterSalonDto) {
-    const existingUser = await this.prisma.user.findUnique({
-      where: { email: registerDto.email.toLowerCase() },
+    const email = registerDto.email.toLowerCase().trim();
+    const existingAdmin = await this.prisma.admin.findUnique({
+      where: { email },
     });
 
-    if (existingUser) {
+    if (existingAdmin) {
       throw new ConflictException('An account with this email already exists.');
     }
 
@@ -93,88 +94,66 @@ export class AuthService {
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(registerDto.password, salt);
 
-    // Create salon, admin user, default working hours and subscription within a transaction
     return this.prisma.$transaction(async (tx) => {
-      // 1. Create Default Plan if not exists
-      let defaultPlan = await tx.plan.findFirst({ where: { name: 'Trial' } });
-      if (!defaultPlan) {
-        defaultPlan = await tx.plan.create({
-          data: {
-            name: 'Trial',
-            priceMonthly: 0,
-            priceYearly: 0,
-            maxStaff: 10,
-            maxServices: 50,
-            allowWhatsApp: true,
-          },
-        });
-      }
+      // 1. Create a placeholder/creator admin first or create owner directly
+      const ownerAdmin = await tx.admin.create({
+        data: {
+          name: registerDto.ownerName,
+          email,
+          phone: registerDto.phone,
+          passwordHash,
+          role: AdminRole.SALON_OWNER,
+        },
+      });
 
-      // 2. Create Salon
+      // 2. Create Salon with createdByAdminId
       const salon = await tx.salon.create({
         data: {
+          createdByAdminId: ownerAdmin.id,
           name: registerDto.salonName,
           slug,
           phone: registerDto.phone,
-          email: registerDto.email.toLowerCase(),
+          email,
           city: registerDto.city,
           timezone: registerDto.timezone || 'Asia/Kolkata',
+          defaultStartTime: '09:00',
+          defaultEndTime: '21:00',
         },
       });
 
-      // 3. Create Subscription (14 day trial)
-      const trialEndDate = new Date();
-      trialEndDate.setDate(trialEndDate.getDate() + 14);
-
-      await tx.subscription.create({
-        data: {
-          salonId: salon.id,
-          planId: defaultPlan.id,
-          status: 'TRIAL',
-          trialStartDate: new Date(),
-          trialEndDate,
-        },
+      // 3. Link ownerAdmin to this salon
+      await tx.admin.update({
+        where: { id: ownerAdmin.id },
+        data: { salonId: salon.id },
       });
 
-      // 4. Create Salon Admin User
-      const user = await tx.user.create({
-        data: {
-          salonId: salon.id,
-          name: registerDto.ownerName,
-          email: registerDto.email.toLowerCase(),
-          phone: registerDto.phone,
-          passwordHash,
-          role: UserRole.SALON_ADMIN,
-        },
-      });
-
-      // 5. Populate Standard Working Hours (Mon - Sun: 10:00 - 20:00)
-      const days = [
-        'MONDAY',
-        'TUESDAY',
-        'WEDNESDAY',
-        'THURSDAY',
-        'FRIDAY',
-        'SATURDAY',
-        'SUNDAY',
-      ] as const;
+      // 4. Automatically populate 7-Day Default Working Hours
+      const days: DayOfWeek[] = [
+        DayOfWeek.SUNDAY,
+        DayOfWeek.MONDAY,
+        DayOfWeek.TUESDAY,
+        DayOfWeek.WEDNESDAY,
+        DayOfWeek.THURSDAY,
+        DayOfWeek.FRIDAY,
+        DayOfWeek.SATURDAY,
+      ];
 
       for (const day of days) {
-        await tx.workingHours.create({
+        await tx.salonWorkingHours.create({
           data: {
             salonId: salon.id,
             dayOfWeek: day,
-            isOpen: true,
-            openTime: '10:00',
-            closeTime: '20:00',
+            isClosed: false,
+            startTime: '09:00',
+            endTime: '21:00',
           },
         });
       }
 
       const payload = {
-        sub: user.id,
-        email: user.email,
-        role: user.role,
+        sub: ownerAdmin.id,
+        email: ownerAdmin.email,
+        role: ownerAdmin.role,
         salonId: salon.id,
       };
 
@@ -183,10 +162,10 @@ export class AuthService {
       return {
         accessToken: token,
         user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
+          id: ownerAdmin.id,
+          name: ownerAdmin.name,
+          email: ownerAdmin.email,
+          role: ownerAdmin.role,
           salonId: salon.id,
           salon: {
             id: salon.id,
@@ -200,23 +179,23 @@ export class AuthService {
     });
   }
 
-  async getMe(userId: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
+  async getMe(adminId: string) {
+    const admin = await this.prisma.admin.findUnique({
+      where: { id: adminId },
       include: { salon: true },
     });
 
-    if (!user) {
-      throw new NotFoundException('User not found.');
+    if (!admin) {
+      throw new NotFoundException('Admin not found.');
     }
 
     return {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      salonId: user.salonId,
-      salon: user.salon,
+      id: admin.id,
+      name: admin.name,
+      email: admin.email,
+      role: admin.role,
+      salonId: admin.salonId,
+      salon: admin.salon,
     };
   }
 }

@@ -77,7 +77,21 @@ export class WhatsAppController {
       // 2. Process Incoming Messages
       if (message) {
         const fromPhone = message.from;
+        const messageId = message.id; // Meta Message ID
         const phoneNumberId = changes.metadata?.phone_number_id;
+
+        // Deduplication (Section 38): Check if meta_message_id was already received
+        if (messageId) {
+          const existingLog = await this.prisma.whatsAppLog.findUnique({
+            where: { metaMessageId: messageId },
+          });
+          if (existingLog) {
+            this.logger.warn(
+              `[Meta Webhook] 🔁 Duplicate meta_message_id "${messageId}" received from ${fromPhone}. Skipping processing.`,
+            );
+            return res.status(HttpStatus.OK).send('EVENT_RECEIVED');
+          }
+        }
 
         const text =
           message.text?.body ||
@@ -89,7 +103,7 @@ export class WhatsAppController {
         const normalizedText = text.trim().toLowerCase();
 
         this.logger.log(
-          `[Meta Webhook] 📩 Incoming message from ${fromPhone} [PhoneId: ${phoneNumberId}]: "${text}" (interactiveId: ${interactiveId || 'none'})`,
+          `[Meta Webhook] 📩 Incoming message from ${fromPhone} [PhoneId: ${phoneNumberId} | MsgId: ${messageId || 'none'}]: "${text}" (interactiveId: ${interactiveId || 'none'})`,
         );
 
         let salon: any = null;
@@ -147,6 +161,7 @@ export class WhatsAppController {
               text,
               interactiveId,
               payload,
+              messageId,
             );
 
             if (salon) {

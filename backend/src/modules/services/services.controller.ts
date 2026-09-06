@@ -15,7 +15,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentSalonId } from '../../common/decorators/tenant.decorator';
-import { UserRole } from '@prisma/client';
+import { AdminRole } from '@prisma/client';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('services')
@@ -35,7 +35,7 @@ export class ServicesController {
     return this.servicesService.getServiceById(salonId, serviceId);
   }
 
-  @Roles(UserRole.SALON_ADMIN)
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
   @Post()
   async createService(
     @CurrentSalonId() salonId: string,
@@ -44,7 +44,7 @@ export class ServicesController {
     return this.servicesService.createService(salonId, dto);
   }
 
-  @Roles(UserRole.SALON_ADMIN)
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
   @Put(':id')
   async updateService(
     @CurrentSalonId() salonId: string,
@@ -54,7 +54,7 @@ export class ServicesController {
     return this.servicesService.updateService(salonId, serviceId, dto);
   }
 
-  @Roles(UserRole.SALON_ADMIN)
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
   @Patch(':id/toggle-status')
   async toggleServiceStatus(
     @CurrentSalonId() salonId: string,
@@ -63,7 +63,7 @@ export class ServicesController {
     return this.servicesService.toggleServiceStatus(salonId, serviceId);
   }
 
-  @Roles(UserRole.SALON_ADMIN)
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
   @Delete(':id')
   async deleteService(
     @CurrentSalonId() salonId: string,

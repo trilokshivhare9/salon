@@ -14,7 +14,11 @@ export class CreateAppointmentDto {
 
   @IsString()
   @IsOptional()
-  staffId?: string;
+  stylistId?: string;
+
+  @IsString()
+  @IsOptional()
+  staffId?: string; // backwards compatibility
 
   @IsDateString()
   @IsNotEmpty()
@@ -25,8 +29,8 @@ export class CreateAppointmentDto {
   startTime: string; // "10:00" (Local salon time)
 
   @IsString()
-  @IsNotEmpty()
-  customerName: string;
+  @IsOptional()
+  customerName?: string;
 
   @IsString()
   @IsNotEmpty()
@@ -66,5 +70,9 @@ export class RescheduleAppointmentDto {
 
   @IsString()
   @IsOptional()
-  staffId?: string;
+  stylistId?: string;
+
+  @IsString()
+  @IsOptional()
+  staffId?: string; // backwards compatibility
 }

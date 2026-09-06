@@ -54,8 +54,7 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
       const phoneNumberId = salon.whatsappAccount?.phoneNumberId;
 
       // -----------------------------------------------------------------------
-      // STAGE 1: Advance 2-Hour / 1-Hour Reminder
-      // Window: startTime is between (now + 45 mins) and (now + 2 hours 15 mins)
+      // STAGE 1: Advance 2-Hour Reminder
       // -----------------------------------------------------------------------
       const stage1Min = now.plus({ minutes: 45 }).toJSDate();
       const stage1Max = now.plus({ hours: 2, minutes: 15 }).toJSDate();
@@ -65,27 +64,27 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
           salonId: salon.id,
           status: AppointmentStatus.CONFIRMED,
           reminder2hSentAt: null,
-          startTime: {
+          startAt: {
             gte: stage1Min,
             lte: stage1Max,
           },
         },
         include: {
-          customer: true,
-          staff: true,
+          user: true,
+          stylist: true,
           service: true,
         },
       });
 
       for (const appt of stage1Appointments) {
-        if (!appt.customer?.phone) continue;
-        const timeStr = DateTime.fromJSDate(appt.startTime, { zone: tz }).toFormat('hh:mm a');
-        const dateStr = DateTime.fromJSDate(appt.startTime, { zone: tz }).toFormat('dd LLL, EEE');
+        if (!appt.user?.phone) continue;
+        const timeStr = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('hh:mm a');
+        const dateStr = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('dd LLL, EEE');
 
-        const message = `⏰ *APPOINTMENT REMINDER*\n\nHello *${appt.customer.name}*, your upcoming visit at *${salon.name}* is in ~2 hours:\n\n• *Service:* *${appt.service?.name || 'Service'}* (₹${appt.service?.price || '0'})\n• *Specialist:* *${appt.staff?.name || 'Specialist'}*\n• *Date:* *${dateStr}*\n• *Time:* *${timeStr}*\n\n📍 *${salon.name}*\n${salon.address || ''}\n\nWe look forward to seeing you!`;
+        const message = `⏰ *APPOINTMENT REMINDER*\n\nHello *${appt.user.name || 'Customer'}*, your upcoming visit at *${salon.name}* is in ~2 hours:\n\n• *Service:* *${appt.serviceNameSnapshot || appt.service?.name}* (₹${appt.price})\n• *Stylist:* *${appt.stylist?.name || 'Stylist'}*\n• *Date:* *${dateStr}*\n• *Time:* *${timeStr}*\n\n📍 *${salon.name}*\n${salon.address || ''}\n\nWe look forward to seeing you!`;
 
         await this.whatsAppService.sendMetaMessage(
-          appt.customer.phone,
+          appt.user.phone,
           {
             bodyText: message,
             interactiveType: 'button',
@@ -105,12 +104,10 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
         });
 
         stage1Count++;
-        this.logger.log(`Dispatched Stage 1 (2h) Reminder for ${appt.appointmentNumber} to ${appt.customer.phone}`);
       }
 
       // -----------------------------------------------------------------------
       // STAGE 2: Imminent 10-Minute Arrival Alert
-      // Window: startTime is between (now - 5 mins) and (now + 15 mins)
       // -----------------------------------------------------------------------
       const stage2Min = now.minus({ minutes: 5 }).toJSDate();
       const stage2Max = now.plus({ minutes: 15 }).toJSDate();
@@ -120,26 +117,26 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
           salonId: salon.id,
           status: AppointmentStatus.CONFIRMED,
           reminder10mSentAt: null,
-          startTime: {
+          startAt: {
             gte: stage2Min,
             lte: stage2Max,
           },
         },
         include: {
-          customer: true,
-          staff: true,
+          user: true,
+          stylist: true,
           service: true,
         },
       });
 
       for (const appt of stage2Appointments) {
-        if (!appt.customer?.phone) continue;
-        const timeStr = DateTime.fromJSDate(appt.startTime, { zone: tz }).toFormat('hh:mm a');
+        if (!appt.user?.phone) continue;
+        const timeStr = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('hh:mm a');
 
-        const message = `💺 *YOUR CHAIR IS GETTING READY!*\n\nHi *${appt.customer.name}*, your specialist *${appt.staff?.name || 'Specialist'}* is preparing your station for *${timeStr}*.\n\n📍 *${salon.name}*\n${salon.address || ''}\n\nSee you in 10 minutes!`;
+        const message = `💺 *YOUR CHAIR IS GETTING READY!*\n\nHi *${appt.user.name || 'Customer'}*, your stylist *${appt.stylist?.name || 'Stylist'}* is preparing your station for *${timeStr}*.\n\n📍 *${salon.name}*\n${salon.address || ''}\n\nSee you in 10 minutes!`;
 
         await this.whatsAppService.sendMetaMessage(
-          appt.customer.phone,
+          appt.user.phone,
           {
             bodyText: message,
           },
@@ -153,13 +150,10 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
         });
 
         stage2Count++;
-        this.logger.log(`Dispatched Stage 2 (10m) Imminent Alert for ${appt.appointmentNumber} to ${appt.customer.phone}`);
       }
 
       // -----------------------------------------------------------------------
       // STAGE 3: Late-Arrival Follow-Up
-      // Window: startTime was (now - 10 mins) to (now - 30 mins) ago AND status is STILL CONFIRMED
-      // (Client hasn't arrived or checked in yet)
       // -----------------------------------------------------------------------
       const stage3Min = now.minus({ minutes: 30 }).toJSDate();
       const stage3Max = now.minus({ minutes: 10 }).toJSDate();
@@ -169,26 +163,26 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
           salonId: salon.id,
           status: AppointmentStatus.CONFIRMED,
           lateFollowUpSentAt: null,
-          startTime: {
+          startAt: {
             gte: stage3Min,
             lte: stage3Max,
           },
         },
         include: {
-          customer: true,
-          staff: true,
+          user: true,
+          stylist: true,
           service: true,
         },
       });
 
       for (const appt of stage3Appointments) {
-        if (!appt.customer?.phone) continue;
-        const timeStr = DateTime.fromJSDate(appt.startTime, { zone: tz }).toFormat('hh:mm a');
+        if (!appt.user?.phone) continue;
+        const timeStr = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('hh:mm a');
 
-        const message = `👋 Hi *${appt.customer.name}*, we noticed you haven't checked in for your *${timeStr}* appointment with *${appt.staff?.name || 'Specialist'}* yet.\n\nAre you on your way or running a few minutes late?`;
+        const message = `👋 Hi *${appt.user.name || 'Customer'}*, we noticed you haven't checked in for your *${timeStr}* appointment with *${appt.stylist?.name || 'Stylist'}* yet.\n\nAre you on your way or running a few minutes late?`;
 
         await this.whatsAppService.sendMetaMessage(
-          appt.customer.phone,
+          appt.user.phone,
           {
             bodyText: message,
             interactiveType: 'button',
@@ -208,7 +202,6 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
         });
 
         stage3Count++;
-        this.logger.log(`Dispatched Stage 3 Late-Arrival Follow-up for ${appt.appointmentNumber} to ${appt.customer.phone}`);
       }
     }
 

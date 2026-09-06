@@ -249,6 +249,18 @@ export class PlatformAdminPortal {
               <input type="text" class="form-control" id="prov-address" placeholder="e.g. Shop 12, Main Market, Rajwada" />
             </div>
 
+            <!-- Meta WhatsApp Cloud Phone Number ID -->
+            <div class="form-group" style="margin-bottom: 16px;">
+              <label style="display: flex; justify-content: space-between; align-items: center;">
+                <span>Meta WhatsApp Phone Number ID (Optional)</span>
+                <span style="font-size: 0.72rem; color: #10b981; font-weight: 600;">📱 Direct Bot Link</span>
+              </label>
+              <input type="text" class="form-control" id="prov-whatsapp-phone-id" placeholder="e.g. 1266237649907696" />
+              <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 3px;">
+                Connects incoming WhatsApp messages directly to this salon in <code>whatsapp_accounts</code>.
+              </div>
+            </div>
+
             <div style="background: rgba(99,102,241,0.06); border: 1px solid rgba(99,102,241,0.2); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px; font-size: 0.8rem; color: var(--text-secondary); line-height: 1.5;">
               ℹ️ <strong>Zero Dummy Guarantee:</strong> This salon will start clean with 0 staff & 0 services in <strong>DEACTIVATED</strong> status. It will automatically activate as soon as the salon owner adds their first staff member and service.
             </div>
@@ -347,6 +359,7 @@ export class PlatformAdminPortal {
         phone: rawPhone,
         city: document.getElementById('prov-city').value.trim(),
         address: document.getElementById('prov-address')?.value?.trim() || undefined,
+        whatsappPhoneNumberId: document.getElementById('prov-whatsapp-phone-id')?.value?.trim() || undefined,
         timezone: 'Asia/Kolkata',
         openTime: document.getElementById('prov-open-time').value,
         closeTime: document.getElementById('prov-close-time').value,

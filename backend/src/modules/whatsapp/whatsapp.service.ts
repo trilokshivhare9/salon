@@ -10,7 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../database/prisma.service';
 import { AvailabilityService, AvailableSlotResponse } from '../availability/availability.service';
 import { AppointmentsService } from '../appointments/appointments.service';
-import { ConversationState, BookingSource, MessageDirection, AppointmentStatus } from '@prisma/client';
+import { ConversationState, BookingSource, WhatsAppMessageDirection, AppointmentStatus, ClientEtaStatus } from '@prisma/client';
 import { DateTime } from 'luxon';
 
 export interface InteractiveButton {
@@ -85,7 +85,7 @@ export class WhatsAppService {
           data: {
             salonId: salonId || null,
             phone: cleanTo,
-            direction: MessageDirection.OUTBOUND,
+            direction: WhatsAppMessageDirection.OUTBOUND,
             messageText: payload.bodyText || payload.textBody || '',
             interactiveId: payload.interactiveType || null,
             status: 'FAILED',
@@ -127,7 +127,7 @@ export class WhatsAppService {
           body: { text: payload.bodyText || 'Please choose from the menu:' },
           footer: { text: payload.footerText || 'Tap button below to select' },
           action: {
-            button: payload.buttonText || '👉 Tap to Choose',
+            button: (payload.buttonText || '👉 Tap to Choose').slice(0, 20),
             sections: [
               {
                 title: 'Available Options',
@@ -169,7 +169,7 @@ export class WhatsAppService {
           data: {
             salonId: salonId || null,
             phone: cleanTo,
-            direction: MessageDirection.OUTBOUND,
+            direction: WhatsAppMessageDirection.OUTBOUND,
             messageText: payload.bodyText || payload.textBody || '',
             interactiveId: payload.interactiveType || null,
             status: res.ok ? 'SENT' : 'FAILED',
@@ -204,7 +204,22 @@ export class WhatsAppService {
         // Fallback to plain text if interactive message was rejected
         if (bodyData.type === 'interactive') {
           this.logger.warn(`[WhatsAppService] 🔄 Retrying outbound message as plain text fallback to ${toPhone}...`);
-          const fallbackText = payload.textBody || payload.bodyText || 'Please reply to choose an option.';
+          let fallbackText = payload.textBody || payload.bodyText || 'Please reply to choose an option.';
+          if (payload.interactiveType === 'list' && payload.listRows && payload.listRows.length > 0) {
+            const rowsList = payload.listRows
+              .filter((r) => !r.id.includes('period_'))
+              .map((r, idx) => `*${idx + 1}.* ${r.title}`)
+              .join('\n');
+            if (rowsList && !fallbackText.includes(payload.listRows[0].title)) {
+              fallbackText += `\n\n${rowsList}\n\n_Reply with a number (e.g. *1*, *2*) or your time directly._`;
+            }
+          } else if (payload.interactiveType === 'button' && payload.buttons && payload.buttons.length > 0) {
+            const btnList = payload.buttons.map((b, idx) => `*${idx + 1}.* ${b.title}`).join('\n');
+            if (btnList && !fallbackText.includes(payload.buttons[0].title)) {
+              fallbackText += `\n\n${btnList}\n\n_Reply with *1*, *2*, or *3* to continue._`;
+            }
+          }
+
           await fetch(url, {
             method: 'POST',
             headers: {
@@ -240,6 +255,7 @@ export class WhatsAppService {
     messageText: string,
     interactiveId?: string,
     rawPayload?: any,
+    metaMessageId?: string,
   ) {
     const cleanPhone = this.cleanPhone(fromPhone);
     return this.prisma.whatsAppLog
@@ -247,10 +263,11 @@ export class WhatsAppService {
         data: {
           salonId: salonId || null,
           phone: cleanPhone,
-          direction: MessageDirection.INBOUND,
+          direction: WhatsAppMessageDirection.INBOUND,
           messageText,
           interactiveId: interactiveId || null,
           status: 'RECEIVED',
+          metaMessageId: metaMessageId || null,
           rawPayload: rawPayload || null,
         },
       })
@@ -267,7 +284,7 @@ export class WhatsAppService {
       .create({
         data: {
           phone: recipient,
-          direction: MessageDirection.OUTBOUND,
+          direction: WhatsAppMessageDirection.OUTBOUND,
           status,
           metaMessageId,
           errorCode: error?.code || null,
@@ -405,16 +422,16 @@ export class WhatsAppService {
     return this.prisma.appointment.findMany({
       where: {
         salonId,
-        customer: { phone: cleanNumber },
+        user: { phone: cleanNumber },
         status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN] },
-        startTime: { gte: cutoff },
+        startAt: { gte: cutoff },
       },
       include: {
-        customer: true,
-        staff: true,
+        user: true,
+        stylist: true,
         service: true,
       },
-      orderBy: { startTime: 'asc' },
+      orderBy: { startAt: 'asc' },
     });
   }
 
@@ -432,15 +449,19 @@ export class WhatsAppService {
         state: ConversationState.ACTIVE_HUB,
         activeAppointmentId: activeAppt.id,
         selectedServiceId: activeAppt.serviceId,
-        selectedStaffId: activeAppt.staffId,
+        selectedStaffId: activeAppt.stylistId || activeAppt.staffId,
       },
     });
 
     const tz = salon.timezone || 'Asia/Kolkata';
-    const timeFormatted = DateTime.fromJSDate(activeAppt.startTime, { zone: tz }).toFormat('hh:mm a');
-    const dateFormatted = DateTime.fromJSDate(activeAppt.startTime, { zone: tz }).toFormat('dd LLL, EEE');
+    const apptTime = activeAppt.startAt || activeAppt.startTime;
+    const timeFormatted = DateTime.fromJSDate(apptTime, { zone: tz }).toFormat('hh:mm a');
+    const dateFormatted = DateTime.fromJSDate(apptTime, { zone: tz }).toFormat('dd LLL, EEE');
 
-    const reply = `👋 Welcome back, *${activeAppt.customer.name}*!\n\n📅 *Your Upcoming Appointment:*\n• Service: *${activeAppt.service.name}* (₹${activeAppt.price})\n• Specialist: *${activeAppt.staff.name}*\n• Date: *${dateFormatted}*\n• Time: *${timeFormatted}*\n• Status: *${activeAppt.status}* (Ref: *#${activeAppt.appointmentNumber}*)\n\nWhat would you like to do?`;
+    const customerName = activeAppt.user?.name || activeAppt.customer?.name || 'Customer';
+    const stylistName = activeAppt.stylist?.name || activeAppt.staff?.name || 'Stylist';
+
+    const reply = `👋 Welcome back, *${customerName}*!\n\n📅 *Your Upcoming Appointment:*\n• Service: *${activeAppt.service.name}* (₹${activeAppt.price})\n• Specialist: *${stylistName}*\n• Date: *${dateFormatted}*\n• Time: *${timeFormatted}*\n• Status: *${activeAppt.status}* (Ref: *#${activeAppt.appointmentNumber}*)\n\nWhat would you like to do?`;
 
     await this.sendMetaMessage(
       cleanNumber,
@@ -581,19 +602,48 @@ export class WhatsAppService {
   ): Promise<{ replyMessage: string; state: ConversationState; metadata?: any }> {
     const cleanNumber = this.cleanPhone(customerPhone);
 
-    const salon = await this.prisma.salon.findUnique({
+    const salon: any = await this.prisma.salon.findUnique({
       where: { id: salonId },
       include: {
         services: { where: { status: 'ACTIVE' }, orderBy: { name: 'asc' } },
-        staff: { where: { status: 'ACTIVE' }, include: { services: true } },
+        stylists: { where: { status: 'ACTIVE' }, include: { services: true } },
       },
     });
+
+    if (salon) {
+      salon.staff = salon.stylists;
+    }
 
     if (!salon || salon.status !== 'ACTIVE') {
       const reply = 'Sorry, this salon booking service is currently inactive.';
       await this.sendMetaMessage(cleanNumber, { textBody: reply }, phoneNumberId);
       return { replyMessage: reply, state: ConversationState.START };
     }
+
+    // 1. Ensure customer User record exists (Section 1 & 24)
+    let user = await this.prisma.user.findUnique({
+      where: { phone: cleanNumber },
+    });
+    if (!user) {
+      user = await this.prisma.user.create({
+        data: {
+          phone: cleanNumber,
+          name: null,
+        },
+      });
+    }
+
+    // 2. Ensure link to this salon via SalonUser
+    await this.prisma.salonUser.upsert({
+      where: {
+        salonId_userId: { salonId, userId: user.id },
+      },
+      update: {},
+      create: {
+        salonId,
+        userId: user.id,
+      },
+    });
 
     let conversation = await this.prisma.conversation.findUnique({
       where: {
@@ -609,8 +659,14 @@ export class WhatsAppService {
         data: {
           salonId,
           customerPhone: cleanNumber,
+          customerName: user.name || null,
           state: ConversationState.START,
         },
+      });
+    } else if (!conversation.customerName && user.name) {
+      conversation = await this.prisma.conversation.update({
+        where: { id: conversation.id },
+        data: { customerName: user.name },
       });
     }
 
@@ -707,14 +763,14 @@ export class WhatsAppService {
       if (apptId && apptId !== 'late_on_way') {
         await this.prisma.appointment.update({
           where: { id: apptId },
-          data: { clientEtaStatus: 'ON_WAY_10M' },
+          data: { clientEtaStatus: ClientEtaStatus.RUNNING_LATE_10M },
         }).catch(() => {});
       } else {
         const activeAppts = await this.findActiveUpcomingAppointments(salonId, cleanNumber);
         if (activeAppts.length > 0) {
           await this.prisma.appointment.update({
             where: { id: activeAppts[0].id },
-            data: { clientEtaStatus: 'ON_WAY_10M' },
+            data: { clientEtaStatus: ClientEtaStatus.RUNNING_LATE_10M },
           }).catch(() => {});
         }
       }
@@ -911,17 +967,17 @@ export class WhatsAppService {
           if (conversation.activeAppointmentId) {
             const activeAppt = await this.prisma.appointment.findUnique({
               where: { id: conversation.activeAppointmentId },
-              include: { staff: true, service: true },
+              include: { stylist: true, service: true },
             });
 
             if (activeAppt) {
-              const apptStart = DateTime.fromJSDate(activeAppt.startTime, { zone: tz });
+              const apptStart = DateTime.fromJSDate(activeAppt.startAt, { zone: tz });
               const hoursUntilAppt = apptStart.diff(now, 'hours').hours;
               const cancelWindowHours = salon.cancelWindowHours ?? 2;
 
               if (hoursUntilAppt < cancelWindowHours && hoursUntilAppt > -1) {
                 // Critical Window (< 2 hours): Protect salon chair from last-minute abandonment
-                const reply = `⚠️ *Appointment is in less than ${cancelWindowHours} hours!*\n\nSpecialist *${activeAppt.staff?.name || 'Your specialist'}* has already reserved your chair for *${activeAppt.service?.name}*.\n\n• If you are delayed in traffic, tap *'Running 15m Late'* to hold your station.\n• To change your slot today, call our front desk directly at *${salon.phone || 'our desk'}*.`;
+                const reply = `⚠️ *Appointment is in less than ${cancelWindowHours} hours!*\n\nSpecialist *${activeAppt.stylist?.name || 'Your specialist'}* has already reserved your chair for *${activeAppt.serviceNameSnapshot || activeAppt.service?.name}*.\n\n• If you are delayed in traffic, tap *'Running 15m Late'* to hold your station.\n• To change your slot today, call our front desk directly at *${salon.phone || 'our desk'}*.`;
                 await this.sendMetaMessage(
                   cleanNumber,
                   {
@@ -1188,7 +1244,7 @@ export class WhatsAppService {
         const eveningSlots = allSlots.filter((s) => parseInt(s.startTime.split(':')[0], 10) >= 16);
 
         // Period switcher in reschedule flow
-        if (cleanInput.startsWith('rperiod_') || cleanInput.startsWith('period_') || ['morning', 'afternoon', 'evening'].includes(cleanInput)) {
+        if (cleanInput.startsWith('rperiod_') || cleanInput.startsWith('period_') || cleanInput.includes('morning') || cleanInput.includes('afternoon') || cleanInput.includes('evening')) {
           let chosenPeriod: 'morning' | 'afternoon' | 'evening' = 'morning';
           if (cleanInput.includes('afternoon')) chosenPeriod = 'afternoon';
           else if (cleanInput.includes('evening')) chosenPeriod = 'evening';
@@ -1204,20 +1260,26 @@ export class WhatsAppService {
           }));
 
           if (chosenPeriod === 'morning' && afternoonSlots.length > 0) {
-            listRows.push({ id: 'rperiod_afternoon', title: '☀️ View Afternoon Slots →', description: '12:00 PM – 4:00 PM' });
+            listRows.push({ id: 'rperiod_afternoon', title: '☀️ Afternoon Slots →', description: '12:00 PM – 4:00 PM' });
           } else if (chosenPeriod === 'afternoon' && eveningSlots.length > 0) {
-            listRows.push({ id: 'rperiod_evening', title: '🌙 View Evening Slots →', description: '4:00 PM – Close' });
+            listRows.push({ id: 'rperiod_evening', title: '🌙 Evening Slots →', description: '4:00 PM – Close' });
           } else if (chosenPeriod === 'evening' && morningSlots.length > 0) {
-            listRows.push({ id: 'rperiod_morning', title: '🌅 View Morning Slots →', description: '9:00 AM – 12:00 PM' });
+            listRows.push({ id: 'rperiod_morning', title: '🌅 Morning Slots →', description: '9:00 AM – 12:00 PM' });
           }
 
-          const periodReply = `📅 *${DateTime.fromISO(dateStr).toFormat('dd LLL, EEEE')}* — ${periodTitle} Slots:\n\nSelect your new time slot below (or reply with any time, e.g. *5:30 PM*):`;
+          const slotListFormatted = slotsForPeriod
+            .slice(0, 9)
+            .map((s, idx) => `*${idx + 1}.* ⏰ *${this.formatTime12h(s.startTime)}*`)
+            .join('\n');
+
+          const periodReply = `📅 *${DateTime.fromISO(dateStr).toFormat('dd LLL, EEEE')}* — ${periodTitle} Slots:\n\n${slotListFormatted}\n\n👉 Tap *Choose Time* below, or reply with the slot number or your desired time (e.g. *${this.formatTime12h(slotsForPeriod[0].startTime)}*):`;
+
           await this.sendMetaMessage(
             cleanNumber,
             {
               headerText: `${periodTitle} Slots`,
               bodyText: periodReply,
-              buttonText: `⏰ Choose ${chosenPeriod.charAt(0).toUpperCase() + chosenPeriod.slice(1)} Time`,
+              buttonText: '⏰ Choose Time',
               interactiveType: 'list',
               listRows,
             },
@@ -1226,7 +1288,31 @@ export class WhatsAppService {
           return { replyMessage: periodReply, state: ConversationState.SELECT_RESCHEDULE_TIME };
         }
 
-        const selectedSlot = this.parseTimeSlot(input, availability.availableSlots);
+        let selectedSlot = this.parseTimeSlot(input, availability.availableSlots);
+
+        // If numeric input ("1", "2", etc.), check if customer was viewing a specific period
+        const indexNum = parseInt(cleanInput, 10);
+        if (!isNaN(indexNum) && indexNum >= 1) {
+          try {
+            const lastOutbound = await this.prisma.whatsAppLog.findFirst({
+              where: { phone: cleanNumber, direction: WhatsAppMessageDirection.OUTBOUND },
+              orderBy: { createdAt: 'desc' },
+            });
+            if (lastOutbound?.messageText) {
+              let scopedSlots: AvailableSlotResponse[] = allSlots;
+              if (lastOutbound.messageText.includes('Afternoon Slots')) {
+                scopedSlots = afternoonSlots;
+              } else if (lastOutbound.messageText.includes('Evening Slots')) {
+                scopedSlots = eveningSlots;
+              } else if (lastOutbound.messageText.includes('Morning Slots')) {
+                scopedSlots = morningSlots;
+              }
+              if (indexNum <= scopedSlots.length) {
+                selectedSlot = scopedSlots[indexNum - 1];
+              }
+            }
+          } catch {}
+        }
         if (!selectedSlot) {
           if (allSlots.length <= 10) {
             const listRows: InteractiveListRow[] = allSlots.map((s) => ({
@@ -1284,10 +1370,10 @@ export class WhatsAppService {
             },
           });
 
-          const timeFormatted = DateTime.fromJSDate(newAppt.startTime, { zone: tz }).toFormat('hh:mm a');
-          const dateFormatted = DateTime.fromJSDate(newAppt.startTime, { zone: tz }).toFormat('dd LLL, EEE');
+          const timeFormatted = DateTime.fromJSDate(newAppt.startAt, { zone: tz }).toFormat('hh:mm a');
+          const dateFormatted = DateTime.fromJSDate(newAppt.startAt, { zone: tz }).toFormat('dd LLL, EEE');
 
-          const reply = `✅ *Appointment Rescheduled Successfully!*\n\n• *New Date:* ${dateFormatted}\n• *New Time:* ${timeFormatted}\n• *Service:* ${newAppt.service.name}\n• *Specialist:* ${newAppt.staff.name}\n• *New Ref:* #${newAppt.appointmentNumber}\n\nYour previous chair reservation was released. See you soon!`;
+          const reply = `✅ *Appointment Rescheduled Successfully!*\n\n• *New Date:* ${dateFormatted}\n• *New Time:* ${timeFormatted}\n• *Service:* ${newAppt.service.name}\n• *Specialist:* ${newAppt.stylist.name}\n• *New Ref:* #${newAppt.appointmentNumber}\n\nYour previous chair reservation was released. See you soon!`;
           await this.sendMetaMessage(
             cleanNumber,
             {
@@ -1424,7 +1510,7 @@ export class WhatsAppService {
                 headerText: 'Services Menu',
                 bodyText: reply,
                 footerText: 'Tap below to book',
-                buttonText: '✂️ Choose Service to Book',
+                buttonText: '✂️ Choose Service',
                 interactiveType: 'list',
                 listRows,
               },
@@ -1614,7 +1700,7 @@ export class WhatsAppService {
             {
               headerText: 'Available Times',
               bodyText: reply,
-              buttonText: '⏰ Choose Time Slot',
+              buttonText: '⏰ Choose Time',
               interactiveType: 'list',
               listRows,
             },
@@ -1683,7 +1769,7 @@ export class WhatsAppService {
         const eveningSlots = allSlots.filter((s) => parseInt(s.startTime.split(':')[0], 10) >= 16);
 
         // Check if user clicked or typed a period filter
-        if (cleanInput.startsWith('period_') || ['morning', 'afternoon', 'evening'].includes(cleanInput)) {
+        if (cleanInput.startsWith('period_') || cleanInput.includes('morning') || cleanInput.includes('afternoon') || cleanInput.includes('evening')) {
           let chosenPeriod: 'morning' | 'afternoon' | 'evening' = 'morning';
           if (cleanInput.includes('afternoon')) chosenPeriod = 'afternoon';
           else if (cleanInput.includes('evening')) chosenPeriod = 'evening';
@@ -1698,22 +1784,28 @@ export class WhatsAppService {
             description: `Available with ${s.availableStaffCount} stylist(s)`,
           }));
 
-          // Add quick-switch row if other periods exist
+          // Add quick-switch row if other periods exist (max 24 chars for title)
           if (chosenPeriod === 'morning' && afternoonSlots.length > 0) {
-            listRows.push({ id: 'period_afternoon', title: '☀️ View Afternoon Slots →', description: '12:00 PM – 4:00 PM' });
+            listRows.push({ id: 'period_afternoon', title: '☀️ Afternoon Slots →', description: '12:00 PM – 4:00 PM' });
           } else if (chosenPeriod === 'afternoon' && eveningSlots.length > 0) {
-            listRows.push({ id: 'period_evening', title: '🌙 View Evening Slots →', description: '4:00 PM – Close' });
+            listRows.push({ id: 'period_evening', title: '🌙 Evening Slots →', description: '4:00 PM – Close' });
           } else if (chosenPeriod === 'evening' && morningSlots.length > 0) {
-            listRows.push({ id: 'period_morning', title: '🌅 View Morning Slots →', description: '9:00 AM – 12:00 PM' });
+            listRows.push({ id: 'period_morning', title: '🌅 Morning Slots →', description: '9:00 AM – 12:00 PM' });
           }
 
-          const periodReply = `📅 *${DateTime.fromISO(targetDate).toFormat('dd LLL, EEEE')}* — ${periodTitle} Slots:\n\nSelect your preferred time slot below (or reply with any time, e.g. *5:30 PM*):`;
+          const slotListFormatted = slotsForPeriod
+            .slice(0, 9)
+            .map((s, idx) => `*${idx + 1}.* ⏰ *${this.formatTime12h(s.startTime)}*`)
+            .join('\n');
+
+          const periodReply = `📅 *${DateTime.fromISO(targetDate).toFormat('dd LLL, EEEE')}* — ${periodTitle} Slots:\n\n${slotListFormatted}\n\n👉 Tap *Choose Time* below, or reply with the slot number or your desired time (e.g. *${this.formatTime12h(slotsForPeriod[0].startTime)}*):`;
+
           await this.sendMetaMessage(
             cleanNumber,
             {
               headerText: `${periodTitle} Slots`,
               bodyText: periodReply,
-              buttonText: `⏰ Choose ${chosenPeriod.charAt(0).toUpperCase() + chosenPeriod.slice(1)} Time`,
+              buttonText: '⏰ Choose Time',
               interactiveType: 'list',
               listRows,
             },
@@ -1722,7 +1814,31 @@ export class WhatsAppService {
           return { replyMessage: periodReply, state: ConversationState.SELECT_TIME, metadata: { slots: slotsForPeriod } };
         }
 
-        const selectedSlot = this.parseTimeSlot(input, availability.availableSlots);
+        let selectedSlot = this.parseTimeSlot(input, availability.availableSlots);
+
+        // If numeric input ("1", "2", etc.), check if customer was viewing a specific period
+        const indexNum = parseInt(cleanInput, 10);
+        if (!isNaN(indexNum) && indexNum >= 1) {
+          try {
+            const lastOutbound = await this.prisma.whatsAppLog.findFirst({
+              where: { phone: cleanNumber, direction: WhatsAppMessageDirection.OUTBOUND },
+              orderBy: { createdAt: 'desc' },
+            });
+            if (lastOutbound?.messageText) {
+              let scopedSlots: AvailableSlotResponse[] = allSlots;
+              if (lastOutbound.messageText.includes('Afternoon Slots')) {
+                scopedSlots = afternoonSlots;
+              } else if (lastOutbound.messageText.includes('Evening Slots')) {
+                scopedSlots = eveningSlots;
+              } else if (lastOutbound.messageText.includes('Morning Slots')) {
+                scopedSlots = morningSlots;
+              }
+              if (indexNum <= scopedSlots.length) {
+                selectedSlot = scopedSlots[indexNum - 1];
+              }
+            }
+          } catch {}
+        }
 
         if (!selectedSlot) {
           if (allSlots.length <= 10) {
@@ -1760,12 +1876,9 @@ export class WhatsAppService {
           return { replyMessage: 'Please select an available time slot', state: ConversationState.SELECT_TIME };
         }
 
-        const existingCustomer = await this.prisma.customer.findUnique({
+        const existingCustomer = await this.prisma.user.findUnique({
           where: {
-            salonId_phone: {
-              salonId,
-              phone: cleanNumber,
-            },
+            phone: cleanNumber,
           },
         });
 
@@ -1883,7 +1996,7 @@ export class WhatsAppService {
               data: { state: ConversationState.COMPLETED, activeAppointmentId: appointment.id },
             });
 
-            const reply = `🎉 *APPOINTMENT CONFIRMED!*\n\n• Booking ID: *${appointment.appointmentNumber}*\n• Service: *${appointment.service.name}*\n• Specialist: *${appointment.staff.name}*\n• Date: *${dateStr}*\n• Time: *${time12hStr}*\n• Amount: *₹${appointment.price}*\n\n📍 *${salon.name}*\n${salon.address || ''}\n\nWe look forward to seeing you!`;
+            const reply = `🎉 *APPOINTMENT CONFIRMED!*\n\n• Booking ID: *${appointment.appointmentNumber}*\n• Service: *${appointment.service.name}*\n• Specialist: *${appointment.stylist.name}*\n• Date: *${dateStr}*\n• Time: *${time12hStr}*\n• Amount: *₹${appointment.price}*\n\n📍 *${salon.name}*\n${salon.address || ''}\n\nWe look forward to seeing you!`;
             await this.sendMetaMessage(
               cleanNumber,
               {

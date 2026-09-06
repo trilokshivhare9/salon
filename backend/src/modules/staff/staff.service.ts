@@ -1,19 +1,23 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 import {
   CreateStaffDto,
   UpdateStaffDto,
   AssignStaffServicesDto,
   UpdateStaffWorkingHoursDto,
-  CreateStaffBreakDto,
 } from './dto/create-staff.dto';
+import { StylistStatus, ServiceStatus } from '@prisma/client';
 
 @Injectable()
 export class StaffService {
   constructor(private prisma: PrismaService) {}
 
   async getSalonStaff(salonId: string) {
-    return this.prisma.staff.findMany({
+    return this.prisma.stylist.findMany({
       where: { salonId },
       include: {
         services: {
@@ -24,16 +28,13 @@ export class StaffService {
         workingHours: {
           orderBy: { dayOfWeek: 'asc' },
         },
-        breaks: {
-          orderBy: { startTime: 'asc' },
-        },
       },
       orderBy: { createdAt: 'asc' },
     });
   }
 
   async getStaffById(salonId: string, staffId: string) {
-    const staff = await this.prisma.staff.findFirst({
+    const stylist = await this.prisma.stylist.findFirst({
       where: { id: staffId, salonId },
       include: {
         services: {
@@ -42,131 +43,138 @@ export class StaffService {
         workingHours: {
           orderBy: { dayOfWeek: 'asc' },
         },
-        breaks: true,
       },
     });
 
-    if (!staff) {
-      throw new NotFoundException('Staff member not found.');
+    if (!stylist) {
+      throw new NotFoundException('Stylist not found.');
     }
 
-    return staff;
+    return stylist;
   }
 
   async createStaff(salonId: string, dto: CreateStaffDto) {
+    // 1. Verify that active services exist in the salon
+    const totalServices = await this.prisma.service.count({
+      where: { salonId, status: ServiceStatus.ACTIVE },
+    });
+
+    if (totalServices === 0) {
+      throw new BadRequestException(
+        'Cannot create stylist: Salon must have at least one active service before stylists can be created.',
+      );
+    }
+
+    // 2. Validate that serviceIds is provided and not empty
+    if (!dto.serviceIds || dto.serviceIds.length === 0) {
+      throw new BadRequestException(
+        'At least one valid service must be assigned when creating a stylist.',
+      );
+    }
+
+    // 3. Verify that all provided serviceIds exist, belong to this salon, and are ACTIVE
+    const matchingServices = await this.prisma.service.findMany({
+      where: {
+        id: { in: dto.serviceIds },
+        salonId,
+        status: ServiceStatus.ACTIVE,
+      },
+    });
+
+    if (matchingServices.length !== dto.serviceIds.length) {
+      throw new BadRequestException(
+        'One or more selected services do not exist, are inactive, or do not belong to this salon.',
+      );
+    }
+
     return this.prisma.$transaction(async (tx) => {
-      const staff = await tx.staff.create({
+      const stylist = await tx.stylist.create({
         data: {
           salonId,
-          name: dto.name,
-          phone: dto.phone,
-          email: dto.email,
-          profileImageUrl: dto.profileImageUrl,
+          name: dto.name.trim(),
+          phone: dto.phone?.trim() || null,
+          email: dto.email?.trim() || null,
+          profileImageUrl: dto.profileImageUrl || null,
+          status: StylistStatus.ACTIVE,
+          followsSalonSchedule: dto.followsSalonSchedule !== undefined ? dto.followsSalonSchedule : true,
         },
       });
 
-      // Link services if provided
-      if (dto.serviceIds && dto.serviceIds.length > 0) {
-        for (const serviceId of dto.serviceIds) {
-          await tx.staffService.create({
-            data: {
-              staffId: staff.id,
-              serviceId,
-            },
-          });
-        }
-      }
-
-      // Initialize default working hours identical to salon hours
-      const salonHours = await tx.workingHours.findMany({ where: { salonId } });
-      for (const sh of salonHours) {
-        await tx.staffWorkingHours.create({
+      // Link assigned services
+      for (const serviceId of dto.serviceIds) {
+        await tx.stylistService.create({
           data: {
-            staffId: staff.id,
-            dayOfWeek: sh.dayOfWeek,
-            isWorking: sh.isOpen,
-            startTime: sh.openTime,
-            endTime: sh.closeTime,
+            stylistId: stylist.id,
+            serviceId,
           },
         });
       }
 
-      const created = await tx.staff.findUnique({
-        where: { id: staff.id },
+      return tx.stylist.findUnique({
+        where: { id: stylist.id },
         include: {
           services: { include: { service: true } },
           workingHours: true,
         },
       });
-
-      // Auto-evaluate Salon Activation
-      const [activeStaffCount, activeServicesCount] = await Promise.all([
-        tx.staff.count({ where: { salonId, status: 'ACTIVE' } }),
-        tx.service.count({ where: { salonId, status: 'ACTIVE' } }),
-      ]);
-
-      if (activeStaffCount > 0 && activeServicesCount > 0) {
-        await tx.salon.update({
-          where: { id: salonId },
-          data: { status: 'ACTIVE' },
-        });
-      }
-
-      return created;
     });
   }
 
   async updateStaff(salonId: string, staffId: string, dto: UpdateStaffDto) {
     await this.getStaffById(salonId, staffId);
 
-    return this.prisma.staff.update({
+    return this.prisma.stylist.update({
       where: { id: staffId },
-      data: dto,
+      data: {
+        name: dto.name?.trim(),
+        phone: dto.phone?.trim(),
+        email: dto.email?.trim(),
+        profileImageUrl: dto.profileImageUrl,
+        followsSalonSchedule: dto.followsSalonSchedule,
+      },
+      include: {
+        services: { include: { service: true } },
+        workingHours: true,
+      },
     });
-  }
-
-  async toggleStaffStatus(salonId: string, staffId: string) {
-    const staff = await this.getStaffById(salonId, staffId);
-    const newStatus = staff.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
-
-    const updated = await this.prisma.staff.update({
-      where: { id: staffId },
-      data: { status: newStatus },
-    });
-
-    // Auto-evaluate Salon Activation
-    const [activeStaffCount, activeServicesCount] = await Promise.all([
-      this.prisma.staff.count({ where: { salonId, status: 'ACTIVE' } }),
-      this.prisma.service.count({ where: { salonId, status: 'ACTIVE' } }),
-    ]);
-
-    const salonStatus = activeStaffCount > 0 && activeServicesCount > 0 ? 'ACTIVE' : 'DEACTIVATED';
-    await this.prisma.salon.update({
-      where: { id: salonId },
-      data: { status: salonStatus as any },
-    });
-
-    return updated;
   }
 
   async assignServices(salonId: string, staffId: string, dto: AssignStaffServicesDto) {
     await this.getStaffById(salonId, staffId);
 
-    return this.prisma.$transaction(async (tx) => {
-      // Clear existing assignments
-      await tx.staffService.deleteMany({ where: { staffId } });
+    if (!dto.serviceIds || dto.serviceIds.length === 0) {
+      throw new BadRequestException('At least one service must be assigned.');
+    }
 
-      // Create new assignments
+    // Verify all services belong to this salon and are ACTIVE
+    const matchingServices = await this.prisma.service.findMany({
+      where: {
+        id: { in: dto.serviceIds },
+        salonId,
+        status: ServiceStatus.ACTIVE,
+      },
+    });
+
+    if (matchingServices.length !== dto.serviceIds.length) {
+      throw new BadRequestException(
+        'One or more services do not exist, are inactive, or do not belong to this salon.',
+      );
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      // Clear previous and replace
+      await tx.stylistService.deleteMany({ where: { stylistId: staffId } });
+
       for (const serviceId of dto.serviceIds) {
-        await tx.staffService.create({
+        await tx.stylistService.create({
           data: {
-            staffId,
+            stylistId: staffId,
             serviceId,
           },
         });
       }
 
-      return tx.staff.findUnique({
+      return tx.stylist.findUnique({
         where: { id: staffId },
         include: { services: { include: { service: true } } },
       });
@@ -177,11 +185,17 @@ export class StaffService {
     await this.getStaffById(salonId, staffId);
 
     return this.prisma.$transaction(async (tx) => {
+      // Stylist has custom hours now
+      await tx.stylist.update({
+        where: { id: staffId },
+        data: { followsSalonSchedule: false },
+      });
+
       for (const item of dto.hours) {
-        await tx.staffWorkingHours.upsert({
+        await tx.stylistWorkingHours.upsert({
           where: {
-            staffId_dayOfWeek: {
-              staffId,
+            stylistId_dayOfWeek: {
+              stylistId: staffId,
               dayOfWeek: item.dayOfWeek,
             },
           },
@@ -189,71 +203,47 @@ export class StaffService {
             isWorking: item.isWorking,
             startTime: item.startTime,
             endTime: item.endTime,
+            breakStartTime: item.breakStartTime || null,
+            breakEndTime: item.breakEndTime || null,
           },
           create: {
-            staffId,
+            stylistId: staffId,
             dayOfWeek: item.dayOfWeek,
             isWorking: item.isWorking,
             startTime: item.startTime,
             endTime: item.endTime,
+            breakStartTime: item.breakStartTime || null,
+            breakEndTime: item.breakEndTime || null,
           },
         });
       }
 
-      return tx.staffWorkingHours.findMany({
-        where: { staffId },
+      return tx.stylistWorkingHours.findMany({
+        where: { stylistId: staffId },
         orderBy: { dayOfWeek: 'asc' },
       });
     });
   }
 
-  async addBreak(salonId: string, staffId: string, dto: CreateStaffBreakDto) {
-    await this.getStaffById(salonId, staffId);
+  async toggleStaffStatus(salonId: string, staffId: string) {
+    const stylist = await this.getStaffById(salonId, staffId);
+    const newStatus = stylist.status === StylistStatus.ACTIVE ? StylistStatus.INACTIVE : StylistStatus.ACTIVE;
 
-    return this.prisma.staffBreak.create({
-      data: {
-        staffId,
-        dayOfWeek: dto.dayOfWeek,
-        startTime: dto.startTime,
-        endTime: dto.endTime,
-        title: dto.title || 'Break',
+    return this.prisma.stylist.update({
+      where: { id: staffId },
+      data: { status: newStatus },
+      include: {
+        services: { include: { service: true } },
+        workingHours: true,
       },
-    });
-  }
-
-  async deleteBreak(salonId: string, staffId: string, breakId: string) {
-    await this.getStaffById(salonId, staffId);
-
-    return this.prisma.staffBreak.deleteMany({
-      where: { id: breakId, staffId },
     });
   }
 
   async deleteStaff(salonId: string, staffId: string) {
     await this.getStaffById(salonId, staffId);
 
-    return this.prisma.$transaction(async (tx) => {
-      // 1. Delete associated breaks, working hours, and service capabilities
-      await tx.staffBreak.deleteMany({ where: { staffId } });
-      await tx.staffWorkingHours.deleteMany({ where: { staffId } });
-      await tx.staffService.deleteMany({ where: { staffId } });
-
-      // 2. Delete staff member
-      const deleted = await tx.staff.delete({ where: { id: staffId } });
-
-      // 3. Auto-evaluate salon activation status
-      const [activeStaffCount, activeServicesCount] = await Promise.all([
-        tx.staff.count({ where: { salonId, status: 'ACTIVE' } }),
-        tx.service.count({ where: { salonId, status: 'ACTIVE' } }),
-      ]);
-
-      const newStatus = activeStaffCount > 0 && activeServicesCount > 0 ? 'ACTIVE' : 'DEACTIVATED';
-      await tx.salon.update({
-        where: { id: salonId },
-        data: { status: newStatus as any },
-      });
-
-      return deleted;
+    return this.prisma.stylist.delete({
+      where: { id: staffId },
     });
   }
 }

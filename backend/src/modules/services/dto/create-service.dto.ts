@@ -14,7 +14,7 @@ export class CreateServiceDto {
   price: number;
 
   @IsNumber()
-  @Min(5)
+  @Min(1)
   durationMinutes: number;
 
   @IsString()
@@ -37,7 +37,7 @@ export class UpdateServiceDto {
   price?: number;
 
   @IsNumber()
-  @Min(5)
+  @Min(1)
   @IsOptional()
   durationMinutes?: number;
 

@@ -1,4 +1,4 @@
-import { IsArray, IsBoolean, IsEnum, IsNotEmpty, IsString, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsEnum, IsNotEmpty, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { DayOfWeek } from '@prisma/client';
 
@@ -8,15 +8,36 @@ export class DayWorkingHourDto {
   dayOfWeek: DayOfWeek;
 
   @IsBoolean()
-  isOpen: boolean;
+  @IsOptional()
+  isClosed?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  isOpen?: boolean;
 
   @IsString()
-  @IsNotEmpty()
-  openTime: string; // "10:00"
+  @IsOptional()
+  startTime?: string; // "09:00"
 
   @IsString()
-  @IsNotEmpty()
-  closeTime: string; // "20:00"
+  @IsOptional()
+  openTime?: string; // legacy alias
+
+  @IsString()
+  @IsOptional()
+  endTime?: string; // "21:00"
+
+  @IsString()
+  @IsOptional()
+  closeTime?: string; // legacy alias
+
+  @IsString()
+  @IsOptional()
+  breakStartTime?: string; // "13:00"
+
+  @IsString()
+  @IsOptional()
+  breakEndTime?: string; // "14:00"
 }
 
 export class UpdateWorkingHoursDto {

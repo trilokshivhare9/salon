@@ -8,30 +8,46 @@ generator client {
 }
 
 // -----------------------------------------------------------------------------
-// ENUMS
+// ENUMS (Strict Compile-time & Database Typing)
 // -----------------------------------------------------------------------------
 
-enum UserRole {
-  PLATFORM_ADMIN
-  SALON_ADMIN
-  STAFF
+enum AdminRole {
+  SUPER_ADMIN
+  SALON_OWNER
+}
+
+enum AdminStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
 }
 
 enum SalonStatus {
   ACTIVE
   INACTIVE
-  DEACTIVATED
   SUSPENDED
+  DEACTIVATED
 }
 
-enum StaffStatus {
+enum StylistStatus {
   ACTIVE
   INACTIVE
+  SUSPENDED
 }
 
 enum ServiceStatus {
   ACTIVE
   INACTIVE
+}
+
+enum UserStatus {
+  ACTIVE
+  BLOCKED
+}
+
+enum SalonUserStatus {
+  ACTIVE
+  BLOCKED
 }
 
 enum AppointmentStatus {
@@ -43,24 +59,26 @@ enum AppointmentStatus {
   CANCELLED
   NO_SHOW
   RESCHEDULED
+  EXPIRED
 }
 
 enum BookingSource {
-  WEB
   WHATSAPP
+  WEB
+  CUSTOMER_APP
   PHONE
   WALK_IN
   MANUAL
 }
 
 enum DayOfWeek {
-  MONDAY
-  TUESDAY
-  WEDNESDAY
-  THURSDAY
-  FRIDAY
-  SATURDAY
-  SUNDAY
+  SUNDAY    // 0
+  MONDAY    // 1
+  TUESDAY   // 2
+  WEDNESDAY // 3
+  THURSDAY  // 4
+  FRIDAY    // 5
+  SATURDAY  // 6
 }
 
 enum NotificationChannel {
@@ -74,6 +92,19 @@ enum NotificationStatus {
   SENT
   DELIVERED
   FAILED
+}
+
+enum WhatsAppMessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum WhatsAppMessageStatus {
+  RECEIVED
+  PROCESSED
+  SENT
+  FAILED
+  IGNORED
 }
 
 enum ConversationState {
@@ -93,452 +124,390 @@ enum ConversationState {
   COMPLETED
 }
 
-enum MessageDirection {
-  INBOUND
-  OUTBOUND
-}
-
-enum SubscriptionStatus {
-  TRIAL
-  ACTIVE
-  PAST_DUE
-  CANCELLED
-  EXPIRED
+enum ClientEtaStatus {
+  ON_TIME
+  RUNNING_LATE_10M
+  RUNNING_LATE_20M
+  CANCEL_REQUESTED
+  ARRIVED
 }
 
 // -----------------------------------------------------------------------------
-// USER & ACCESS CONTROL
+// 1. ADMINS (Super Admin & Salon Owners)
 // -----------------------------------------------------------------------------
+model Admin {
+  id           String      @id @default(uuid())
+  salonId      String?     @map("salon_id") // NULL for SUPER_ADMIN; required for SALON_OWNER
+  name         String
+  email        String      @unique
+  phone        String?
+  passwordHash String      @map("password_hash")
+  role         AdminRole   @default(SALON_OWNER)
+  status       AdminStatus @default(ACTIVE)
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
 
-model User {
-  id            String       @id @default(uuid())
-  salonId       String?      @map("salon_id")
-  name          String
-  email         String       @unique
-  phone         String?
-  passwordHash  String       @map("password_hash")
-  role          UserRole     @default(SALON_ADMIN)
-  isActive      Boolean      @default(true) @map("is_active")
-  createdAt     DateTime     @default(now()) @map("created_at")
-  updatedAt     DateTime     @updatedAt @map("updated_at")
+  salon               Salon?        @relation("SalonAdmin", fields: [salonId], references: [id], onDelete: SetNull)
+  createdSalons       Salon[]       @relation("AdminCreatedSalons")
+  createdAppointments Appointment[] @relation("AdminCreatedAppointments")
+  auditLogs           AuditLog[]
 
-  salon         Salon?       @relation(fields: [salonId], references: [id], onDelete: Cascade)
-  staffProfile  Staff?
-  auditLogs     AuditLog[]
-
-  @@index([salonId])
   @@index([email])
-  @@map("users")
+  @@index([salonId])
+  @@map("admins")
 }
 
 // -----------------------------------------------------------------------------
-// SALON TENANT
+// 2. SALONS
 // -----------------------------------------------------------------------------
-
 model Salon {
-  id                   String            @id @default(uuid())
+  id                   String      @id @default(uuid())
+  createdByAdminId     String      @map("created_by_admin_id")
   name                 String
-  slug                 String            @unique
-  logoUrl              String?           @map("logo_url")
+  slug                 String      @unique
+  logoUrl              String?     @map("logo_url")
   phone                String
   email                String
   address              String?
   city                 String?
   state                String?
-  country              String            @default("IN")
-  timezone             String            @default("Asia/Kolkata")
+  country              String      @default("IN")
+  timezone             String      @default("Asia/Kolkata")
   description          String?
-  status               SalonStatus       @default(ACTIVE)
-  
-  // Booking Rules Configuration
-  slotIntervalMinutes  Int               @default(30) @map("slot_interval_minutes")
-  minAdvanceNoticeMins Int               @default(30) @map("min_advance_notice_mins")
-  maxAdvanceDays       Int               @default(30) @map("max_advance_days")
-  cancelWindowHours    Int               @default(2) @map("cancel_window_hours")
-  allowSpecificStaff   Boolean           @default(true) @map("allow_specific_staff")
-  
-  createdAt            DateTime          @default(now()) @map("created_at")
-  updatedAt            DateTime          @updatedAt @map("updated_at")
+  status               SalonStatus @default(ACTIVE)
 
-  users                User[]
-  staff                Staff[]
+  // Default operating hours used for 7-day initial seeding
+  defaultStartTime     String      @default("09:00") @map("default_start_time")
+  defaultEndTime       String      @default("21:00") @map("default_end_time")
+
+  // Booking settings
+  maxAdvanceDays       Int         @default(30) @map("max_advance_days")
+  cancelWindowHours    Int         @default(2) @map("cancel_window_hours")
+  allowSpecificStylist Boolean     @default(true) @map("allow_specific_stylist")
+
+  createdAt            DateTime    @default(now()) @map("created_at")
+  updatedAt            DateTime    @updatedAt @map("updated_at")
+
+  createdByAdmin       Admin       @relation("AdminCreatedSalons", fields: [createdByAdminId], references: [id], onDelete: Restrict)
+  admins               Admin[]     @relation("SalonAdmin")
+  stylists             Stylist[]
   services             Service[]
-  customers            Customer[]
+  workingHours         SalonWorkingHours[]
+  salonUsers           SalonUser[]
   appointments         Appointment[]
-  workingHours         WorkingHours[]
-  holidays             Holiday[]
-  blockedTimes         BlockedTime[]
-  whatsappAccount      WhatsAppAccount?
-  subscription         Subscription?
-  auditLogs            AuditLog[]
   conversations        Conversation[]
+  whatsappAccount      WhatsAppAccount?
   whatsappLogs         WhatsAppLog[]
+  notifications        Notification[]
+  auditLogs            AuditLog[]
 
+  @@index([createdByAdminId])
   @@index([slug])
   @@index([status])
   @@map("salons")
 }
 
 // -----------------------------------------------------------------------------
-// STAFF & SERVICES
+// 3. SERVICES (Prerequisite before Stylists)
 // -----------------------------------------------------------------------------
-
-model Staff {
-  id                   String               @id @default(uuid())
-  salonId              String               @map("salon_id")
-  userId               String?              @unique @map("user_id")
-  name                 String
-  phone                String?
-  email                String?
-  profileImageUrl      String?              @map("profile_image_url")
-  status               StaffStatus          @default(ACTIVE)
-  createdAt            DateTime             @default(now()) @map("created_at")
-  updatedAt            DateTime             @updatedAt @map("updated_at")
-
-  salon                Salon                @relation(fields: [salonId], references: [id], onDelete: Cascade)
-  user                 User?                @relation(fields: [userId], references: [id], onDelete: SetNull)
-  services             StaffService[]
-  workingHours         StaffWorkingHours[]
-  breaks               StaffBreak[]
-  appointments         Appointment[]
-  blockedTimes         BlockedTime[]
-
-  @@index([salonId, status])
-  @@map("staff")
-}
-
 model Service {
-  id                   String               @id @default(uuid())
-  salonId              String               @map("salon_id")
-  name                 String
-  description          String?
-  price                Decimal              @db.Decimal(10, 2)
-  durationMinutes      Int                  @map("duration_minutes")
-  category             String?
-  status               ServiceStatus        @default(ACTIVE)
-  createdAt            DateTime             @default(now()) @map("created_at")
-  updatedAt            DateTime             @updatedAt @map("updated_at")
+  id              String        @id @default(uuid())
+  salonId         String        @map("salon_id")
+  name            String
+  description     String?
+  category        String?
+  price           Decimal       @db.Decimal(10, 2)
+  durationMinutes Int           @map("duration_minutes")
+  status          ServiceStatus @default(ACTIVE)
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
 
-  salon                Salon                @relation(fields: [salonId], references: [id], onDelete: Cascade)
-  staffAssignments     StaffService[]
-  appointments         Appointment[]
+  salon           Salon         @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  stylists        StylistService[]
+  appointments    Appointment[]
 
   @@index([salonId, status])
+  @@index([salonId, name])
   @@map("services")
 }
 
-model StaffService {
-  staffId              String               @map("staff_id")
-  serviceId            String               @map("service_id")
-  createdAt            DateTime             @default(now()) @map("created_at")
-
-  staff                Staff                @relation(fields: [staffId], references: [id], onDelete: Cascade)
-  service              Service              @relation(fields: [serviceId], references: [id], onDelete: Cascade)
-
-  @@id([staffId, serviceId])
-  @@index([serviceId])
-  @@map("staff_services")
-}
-
 // -----------------------------------------------------------------------------
-// AVAILABILITY, WORKING HOURS, BREAKS & HOLIDAYS
+// 4. STYLISTS & STYLIST SERVICES
 // -----------------------------------------------------------------------------
-
-model WorkingHours {
-  id                   String               @id @default(uuid())
-  salonId              String               @map("salon_id")
-  dayOfWeek            DayOfWeek            @map("day_of_week")
-  isOpen               Boolean              @default(true) @map("is_open")
-  openTime             String               @map("open_time") // "10:00" (HH:mm)
-  closeTime            String               @map("close_time") // "20:00" (HH:mm)
-
-  salon                Salon                @relation(fields: [salonId], references: [id], onDelete: Cascade)
-
-  @@unique([salonId, dayOfWeek])
-  @@map("working_hours")
-}
-
-model StaffWorkingHours {
-  id                   String               @id @default(uuid())
-  staffId              String               @map("staff_id")
-  dayOfWeek            DayOfWeek            @map("day_of_week")
-  isWorking            Boolean              @default(true) @map("is_working")
-  startTime            String               @map("start_time") // "10:00"
-  endTime              String               @map("end_time")   // "18:00"
-
-  staff                Staff                @relation(fields: [staffId], references: [id], onDelete: Cascade)
-
-  @@unique([staffId, dayOfWeek])
-  @@map("staff_working_hours")
-}
-
-model StaffBreak {
-  id                   String               @id @default(uuid())
-  staffId              String               @map("staff_id")
-  dayOfWeek            DayOfWeek            @map("day_of_week")
-  startTime            String               @map("start_time") // "13:00"
-  endTime              String               @map("end_time")   // "14:00"
-  title                String?              @default("Lunch Break")
-
-  staff                Staff                @relation(fields: [staffId], references: [id], onDelete: Cascade)
-
-  @@index([staffId, dayOfWeek])
-  @@map("staff_breaks")
-}
-
-model Holiday {
-  id                   String               @id @default(uuid())
-  salonId              String               @map("salon_id")
-  date                 DateTime             @db.Date
-  reason               String?
-  createdAt            DateTime             @default(now()) @map("created_at")
-
-  salon                Salon                @relation(fields: [salonId], references: [id], onDelete: Cascade)
-
-  @@unique([salonId, date])
-  @@map("holidays")
-}
-
-model BlockedTime {
-  id                   String               @id @default(uuid())
-  salonId              String               @map("salon_id")
-  staffId              String?              @map("staff_id") // Null means entire salon blocked
-  startTime            DateTime             @map("start_time") @db.Timestamptz
-  endTime              DateTime             @map("end_time") @db.Timestamptz
-  reason               String?
-  createdAt            DateTime             @default(now()) @map("created_at")
-
-  salon                Salon                @relation(fields: [salonId], references: [id], onDelete: Cascade)
-  staff                Staff?               @relation(fields: [staffId], references: [id], onDelete: Cascade)
-
-  @@index([salonId, startTime, endTime])
-  @@index([staffId, startTime, endTime])
-  @@map("blocked_times")
-}
-
-// -----------------------------------------------------------------------------
-// CUSTOMERS & APPOINTMENTS
-// -----------------------------------------------------------------------------
-
-model Customer {
-  id                   String               @id @default(uuid())
-  salonId              String               @map("salon_id")
+model Stylist {
+  id                   String        @id @default(uuid())
+  salonId              String        @map("salon_id")
   name                 String
-  phone                String
+  phone                String?
   email                String?
-  totalVisits          Int                  @default(0) @map("total_visits")
-  totalSpend           Decimal              @default(0.00) @db.Decimal(10, 2) @map("total_spend")
-  cancelledVisits      Int                  @default(0) @map("cancelled_visits")
-  noShowCount          Int                  @default(0) @map("no_show_count")
-  lastVisitAt          DateTime?            @map("last_visit_at")
-  createdAt            DateTime             @default(now()) @map("created_at")
-  updatedAt            DateTime             @updatedAt @map("updated_at")
+  profileImageUrl      String?       @map("profile_image_url")
+  status               StylistStatus @default(ACTIVE)
+  
+  // Follows salon schedule or custom stylist hours
+  followsSalonSchedule Boolean       @default(true) @map("follows_salon_schedule")
 
-  salon                Salon                @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  createdAt            DateTime      @default(now()) @map("created_at")
+  updatedAt            DateTime      @updatedAt @map("updated_at")
+
+  salon                Salon         @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  services             StylistService[]
+  workingHours         StylistWorkingHours[]
   appointments         Appointment[]
 
-  @@unique([salonId, phone])
+  @@index([salonId, status])
   @@index([salonId, name])
-  @@map("customers")
+  @@map("stylists")
 }
 
+model StylistService {
+  stylistId String   @map("stylist_id")
+  serviceId String   @map("service_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  stylist   Stylist  @relation(fields: [stylistId], references: [id], onDelete: Cascade)
+  service   Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@id([stylistId, serviceId])
+  @@index([serviceId])
+  @@map("stylist_services")
+}
+
+// -----------------------------------------------------------------------------
+// 5. WORKING HOURS & BREAKS
+// -----------------------------------------------------------------------------
+model SalonWorkingHours {
+  id             String    @id @default(uuid())
+  salonId        String    @map("salon_id")
+  dayOfWeek      DayOfWeek @map("day_of_week")
+  isClosed       Boolean   @default(false) @map("is_closed")
+  startTime      String    @map("start_time")       // "09:00"
+  endTime        String    @map("end_time")         // "21:00"
+  breakStartTime String?   @map("break_start_time") // "13:00"
+  breakEndTime   String?   @map("break_end_time")   // "14:00"
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  salon          Salon     @relation(fields: [salonId], references: [id], onDelete: Cascade)
+
+  @@unique([salonId, dayOfWeek])
+  @@map("salon_working_hours")
+}
+
+model StylistWorkingHours {
+  id             String    @id @default(uuid())
+  stylistId      String    @map("stylist_id")
+  dayOfWeek      DayOfWeek @map("day_of_week")
+  isWorking      Boolean   @default(true) @map("is_working")
+  startTime      String    @map("start_time")       // "10:00"
+  endTime        String    @map("end_time")         // "18:00"
+  breakStartTime String?   @map("break_start_time") // "13:00"
+  breakEndTime   String?   @map("break_end_time")   // "14:00"
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  stylist        Stylist   @relation(fields: [stylistId], references: [id], onDelete: Cascade)
+
+  @@unique([stylistId, dayOfWeek])
+  @@map("stylist_working_hours")
+}
+
+// -----------------------------------------------------------------------------
+// 6. CUSTOMERS / USERS & SALON USERS
+// -----------------------------------------------------------------------------
+model User {
+  id        String     @id @default(uuid())
+  name      String?
+  phone     String     @unique
+  email     String?
+  status    UserStatus @default(ACTIVE)
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+
+  salonMemberships SalonUser[]
+  appointments     Appointment[]
+  notifications    Notification[]
+
+  @@index([phone])
+  @@map("users")
+}
+
+model SalonUser {
+  id        String          @id @default(uuid())
+  salonId   String          @map("salon_id")
+  userId    String          @map("user_id")
+  status    SalonUserStatus @default(ACTIVE)
+  notes     String?
+  createdAt DateTime        @default(now()) @map("created_at")
+  updatedAt DateTime        @updatedAt @map("updated_at")
+
+  salon     Salon           @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([salonId, userId])
+  @@index([salonId])
+  @@index([userId])
+  @@map("salon_users")
+}
+
+// -----------------------------------------------------------------------------
+// 7. APPOINTMENTS (The Source of Truth)
+// -----------------------------------------------------------------------------
 model Appointment {
-  id                   String                     @id @default(uuid())
-  appointmentNumber    String                     @map("appointment_number") // e.g. "SAL-1001"
-  salonId              String                     @map("salon_id")
-  customerId           String                     @map("customer_id")
-  staffId              String                     @map("staff_id")
-  serviceId            String                     @map("service_id")
-  
-  date                 DateTime                   @db.Date
-  startTime            DateTime                   @map("start_time") @db.Timestamptz
-  endTime              DateTime                   @map("end_time") @db.Timestamptz
-  
-  price                Decimal                    @db.Decimal(10, 2)
-  status               AppointmentStatus          @default(CONFIRMED)
-  source               BookingSource              @default(WEB)
-  notes                String?
-  
-  createdByUserId      String?                    @map("created_by_user_id")
-  
-  // Smart Automated Reminder Tracking & Late Arrival Flags
-  reminder2hSentAt     DateTime?                  @map("reminder_2h_sent_at")
-  reminder10mSentAt    DateTime?                  @map("reminder_10m_sent_at")
-  lateFollowUpSentAt   DateTime?                  @map("late_follow_up_sent_at")
-  clientEtaStatus      String?                    @map("client_eta_status") // e.g. "ON_WAY_10M", "ON_WAY_20M", "CANCEL_REQUESTED"
+  id                  String            @id @default(uuid())
+  appointmentNumber   String            @unique @map("appointment_number")
+  salonId             String            @map("salon_id")
+  userId              String            @map("user_id")
+  stylistId           String            @map("stylist_id")
+  serviceId           String            @map("service_id")
 
-  createdAt            DateTime                   @default(now()) @map("created_at")
-  updatedAt            DateTime                   @updatedAt @map("updated_at")
+  // Snapshots for immutability
+  serviceNameSnapshot String            @map("service_name_snapshot")
+  durationMinutes     Int               @map("duration_minutes")
+  price               Decimal           @db.Decimal(10, 2)
 
-  salon                Salon                      @relation(fields: [salonId], references: [id], onDelete: Restrict)
-  customer             Customer                   @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  staff                Staff                      @relation(fields: [staffId], references: [id], onDelete: Restrict)
-  service              Service                    @relation(fields: [serviceId], references: [id], onDelete: Restrict)
-  
-  statusHistory        AppointmentStatusHistory[]
-  notifications        Notification[]
+  // Booking boundaries
+  startAt             DateTime          @map("start_at") @db.Timestamptz
+  endAt               DateTime          @map("end_at") @db.Timestamptz
+  appointmentDate     DateTime          @map("appointment_date") @db.Date
 
-  @@index([salonId, date])
-  @@index([salonId, staffId, date])
-  @@index([customerId])
-  @@index([status])
+  // Status & Tracking
+  status              AppointmentStatus @default(CONFIRMED)
+  source              BookingSource     @default(WHATSAPP)
+  expiresAt           DateTime?         @map("expires_at") @db.Timestamptz
+  notes               String?
+  createdByAdminId    String?           @map("created_by_admin_id")
+
+  reminder2hSentAt    DateTime?         @map("reminder_2h_sent_at") @db.Timestamptz
+  reminder10mSentAt   DateTime?         @map("reminder_10m_sent_at") @db.Timestamptz
+  lateFollowUpSentAt  DateTime?         @map("late_follow_up_sent_at") @db.Timestamptz
+  clientEtaStatus     ClientEtaStatus?  @map("client_eta_status")
+
+  createdAt           DateTime          @default(now()) @map("created_at")
+  updatedAt           DateTime          @updatedAt @map("updated_at")
+
+  salon               Salon             @relation(fields: [salonId], references: [id], onDelete: Restrict)
+  user                User              @relation(fields: [userId], references: [id], onDelete: Restrict)
+  stylist             Stylist           @relation(fields: [stylistId], references: [id], onDelete: Restrict)
+  service             Service           @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  createdByAdmin      Admin?            @relation("AdminCreatedAppointments", fields: [createdByAdminId], references: [id], onDelete: SetNull)
+  notifications       Notification[]
+
+  @@index([salonId, appointmentDate])
+  @@index([salonId, stylistId, appointmentDate])
+  @@index([stylistId, startAt, endAt])
+  @@index([userId, appointmentDate])
+  @@index([salonId, status])
   @@map("appointments")
 }
 
-model AppointmentStatusHistory {
-  id                   String               @id @default(uuid())
-  appointmentId        String               @map("appointment_id")
-  previousStatus       AppointmentStatus?   @map("previous_status")
-  newStatus            AppointmentStatus    @map("new_status")
-  changedByUserId      String?              @map("changed_by_user_id")
-  reason               String?
-  createdAt            DateTime             @default(now()) @map("created_at")
-
-  appointment          Appointment          @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
-
-  @@index([appointmentId])
-  @@map("appointment_status_history")
-}
-
 // -----------------------------------------------------------------------------
-// NOTIFICATIONS & WHATSAPP
+// 8. WHATSAPP & CONVERSATIONS
 // -----------------------------------------------------------------------------
-
-model Notification {
-  id                   String               @id @default(uuid())
-  salonId              String               @map("salon_id")
-  appointmentId        String?              @map("appointment_id")
-  recipientPhone       String               @map("recipient_phone")
-  channel              NotificationChannel  @default(WHATSAPP)
-  templateName         String?              @map("template_name")
-  messageBody          String               @map("message_body")
-  status               NotificationStatus   @default(PENDING)
-  errorDetails         String?              @map("error_details")
-  sentAt               DateTime?            @map("sent_at")
-  createdAt            DateTime             @default(now()) @map("created_at")
-
-  appointment          Appointment?         @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
-
-  @@index([salonId, status])
-  @@map("notifications")
-}
-
-model WhatsAppAccount {
-  id                   String               @id @default(uuid())
-  salonId              String               @unique @map("salon_id")
-  phoneNumberId        String               @unique @map("phone_number_id")
-  wabaId               String?              @map("waba_id")
-  accessTokenEncrypted String               @map("access_token_encrypted")
-  webhookVerifyToken   String               @map("webhook_verify_token")
-  isActive             Boolean              @default(true) @map("is_active")
-  createdAt            DateTime             @default(now()) @map("created_at")
-  updatedAt            DateTime             @updatedAt @map("updated_at")
-
-  salon                Salon                @relation(fields: [salonId], references: [id], onDelete: Cascade)
-
-  @@map("whatsapp_accounts")
-}
-
 model Conversation {
-  id                   String               @id @default(uuid())
-  salonId              String               @map("salon_id")
-  customerPhone        String               @map("customer_phone")
-  state                ConversationState    @default(START)
-  selectedServiceId    String?              @map("selected_service_id")
-  selectedStaffId      String?              @map("selected_staff_id")
-  selectedDate         DateTime?            @map("selected_date") @db.Date
-  selectedStartTime    DateTime?            @map("selected_start_time") @db.Timestamptz
-  customerName         String?              @map("customer_name")
-  activeAppointmentId  String?              @map("active_appointment_id")
-  updatedAt            DateTime             @updatedAt @map("updated_at")
+  id                  String            @id @default(uuid())
+  salonId             String            @map("salon_id")
+  customerPhone       String            @map("customer_phone")
+  state               ConversationState @default(START)
+  selectedServiceId   String?           @map("selected_service_id")
+  selectedStaffId     String?           @map("selected_staff_id")
+  selectedDate        DateTime?         @map("selected_date") @db.Date
+  selectedStartTime   DateTime?         @map("selected_start_time") @db.Timestamptz
+  customerName        String?           @map("customer_name")
+  activeAppointmentId String?           @map("active_appointment_id")
+  updatedAt           DateTime          @updatedAt @map("updated_at")
 
-  salon                Salon                @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  salon               Salon             @relation(fields: [salonId], references: [id], onDelete: Cascade)
 
   @@unique([salonId, customerPhone])
   @@index([customerPhone])
   @@map("conversations")
 }
 
-model WhatsAppLog {
-  id              String           @id @default(uuid())
-  salonId         String?          @map("salon_id")
-  phone           String
-  direction       MessageDirection @default(INBOUND)
-  messageText     String?          @map("message_text")
-  interactiveId   String?          @map("interactive_id")
-  state           String?
-  status          String           @default("RECEIVED") // RECEIVED, SENT, FAILED, DELIVERED, READ
-  metaMessageId   String?          @map("meta_message_id")
-  errorCode       Int?             @map("error_code")
-  errorMessage    String?          @map("error_message")
-  rawPayload      Json?            @map("raw_payload")
-  createdAt       DateTime         @default(now()) @map("created_at")
+model WhatsAppAccount {
+  id                   String   @id @default(uuid())
+  salonId              String   @unique @map("salon_id")
+  phoneNumberId        String   @unique @map("phone_number_id")
+  wabaId               String?  @map("waba_id")
+  accessTokenEncrypted String   @map("access_token_encrypted")
+  webhookVerifyToken   String   @map("webhook_verify_token")
+  isActive             Boolean  @default(true) @map("is_active")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
 
-  salon           Salon?           @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  salon                Salon    @relation(fields: [salonId], references: [id], onDelete: Cascade)
+
+  @@map("whatsapp_accounts")
+}
+
+model WhatsAppLog {
+  id                String                   @id @default(uuid())
+  salonId           String?                  @map("salon_id")
+  phone             String
+  direction         WhatsAppMessageDirection @default(INBOUND)
+  messageText       String?                  @map("message_text")
+  interactiveId     String?                  @map("interactive_id")
+  conversationState String?                  @map("conversation_state")
+  status            WhatsAppMessageStatus    @default(RECEIVED)
+  metaMessageId     String?                  @unique @map("meta_message_id")
+  errorCode         Int?                     @map("error_code")
+  errorMessage      String?                  @map("error_message")
+  rawPayload        Json?                    @map("raw_payload")
+  createdAt         DateTime                 @default(now()) @map("created_at")
+
+  salon             Salon?                   @relation(fields: [salonId], references: [id], onDelete: Cascade)
 
   @@index([phone])
   @@index([salonId, createdAt])
-  @@index([status])
+  @@index([salonId, status])
   @@map("whatsapp_logs")
 }
 
-// -----------------------------------------------------------------------------
-// SUBSCRIPTIONS & PLANS
-// -----------------------------------------------------------------------------
+model Notification {
+  id                String              @id @default(uuid())
+  salonId           String              @map("salon_id")
+  appointmentId     String?             @map("appointment_id")
+  userId            String?             @map("user_id")
+  recipientPhone    String              @map("recipient_phone")
+  channel           NotificationChannel @default(WHATSAPP)
+  templateName      String?             @map("template_name")
+  messageBody       String              @map("message_body")
+  status            NotificationStatus  @default(PENDING)
+  providerMessageId String?             @map("provider_message_id")
+  errorDetails      String?             @map("error_details")
+  sentAt            DateTime?           @map("sent_at") @db.Timestamptz
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
 
-model Plan {
-  id                   String               @id @default(uuid())
-  name                 String               @unique // "Trial", "Basic", "Pro"
-  priceMonthly         Decimal              @db.Decimal(10, 2) @map("price_monthly")
-  priceYearly          Decimal              @db.Decimal(10, 2) @map("price_yearly")
-  maxStaff             Int                  @default(5) @map("max_staff")
-  maxServices          Int                  @default(20) @map("max_services")
-  allowWhatsApp        Boolean              @default(false) @map("allow_whatsapp")
-  isActive             Boolean              @default(true) @map("is_active")
+  salon             Salon               @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  appointment       Appointment?        @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  user              User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
 
-  subscriptions        Subscription[]
-
-  @@map("plans")
-}
-
-model Subscription {
-  id                   String               @id @default(uuid())
-  salonId              String               @unique @map("salon_id")
-  planId               String               @map("plan_id")
-  status               SubscriptionStatus   @default(TRIAL)
-  trialStartDate       DateTime             @default(now()) @map("trial_start_date")
-  trialEndDate         DateTime             @map("trial_end_date")
-  currentPeriodStart   DateTime?            @map("current_period_start")
-  currentPeriodEnd     DateTime?            @map("current_period_end")
-  createdAt            DateTime             @default(now()) @map("created_at")
-  updatedAt            DateTime             @updatedAt @map("updated_at")
-
-  salon                Salon                @relation(fields: [salonId], references: [id], onDelete: Cascade)
-  plan                 Plan                 @relation(fields: [planId], references: [id], onDelete: Restrict)
-
-  @@map("subscriptions")
+  @@index([salonId, status])
+  @@index([appointmentId])
+  @@index([userId])
+  @@map("notifications")
 }
 
 // -----------------------------------------------------------------------------
-// AUDIT LOGGING
+// 9. AUDIT LOGGING
 // -----------------------------------------------------------------------------
-
 model AuditLog {
-  id                   String               @id @default(uuid())
-  salonId              String?              @map("salon_id")
-  userId               String?              @map("user_id")
-  action               String
-  entityType           String               @map("entity_type")
-  entityId             String               @map("entity_id")
-  metadata             Json?
-  ipAddress            String?              @map("ip_address")
-  userAgent            String?              @map("user_agent")
-  createdAt            DateTime             @default(now()) @map("created_at")
+  id         String   @id @default(uuid())
+  salonId    String?  @map("salon_id")
+  adminId    String?  @map("admin_id")
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id")
+  metadata   Json?
+  ipAddress  String?  @map("ip_address")
+  userAgent  String?  @map("user_agent")
+  createdAt  DateTime @default(now()) @map("created_at")
 
-  salon                Salon?               @relation(fields: [salonId], references: [id], onDelete: Cascade)
-  user                 User?                @relation(fields: [userId], references: [id], onDelete: SetNull)
+  salon      Salon?   @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  admin      Admin?   @relation(fields: [adminId], references: [id], onDelete: SetNull)
 
   @@index([salonId, createdAt])
   @@index([entityType, entityId])
+  @@index([adminId])
   @@map("audit_logs")
 }

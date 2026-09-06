@@ -8,7 +8,7 @@ export interface JwtPayload {
   sub: string;
   email: string;
   role: string;
-  salonId?: string;
+  salonId?: string | null;
 }
 
 @Injectable()
@@ -25,26 +25,26 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: JwtPayload) {
-    const user = await this.prisma.user.findUnique({
+    const admin = await this.prisma.admin.findUnique({
       where: { id: payload.sub },
       include: { salon: true },
     });
 
-    if (!user || !user.isActive) {
-      throw new UnauthorizedException('User is inactive or no longer exists.');
+    if (!admin || admin.status !== 'ACTIVE') {
+      throw new UnauthorizedException('Admin account is inactive or no longer exists.');
     }
 
-    if (user.salon && user.salon.status === 'SUSPENDED' && user.role !== 'PLATFORM_ADMIN') {
+    if (admin.salon && admin.salon.status === 'SUSPENDED' && admin.role !== 'SUPER_ADMIN') {
       throw new UnauthorizedException('Salon account is suspended by platform administration.');
     }
 
     return {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      role: user.role,
-      salonId: user.salonId,
-      salon: user.salon,
+      id: admin.id,
+      email: admin.email,
+      name: admin.name,
+      role: admin.role,
+      salonId: admin.salonId,
+      salon: admin.salon,
     };
   }
 }

@@ -110,8 +110,13 @@ export class SalonDashboard {
       await this.loadData();
       this.render();
 
+      window.salonDashboard = this;
+
       // Connect to Real-time Event Stream for live sync & audio chimes
       if (this.salonProfile?.id) {
+        if (this.realtime) {
+          this.realtime.destroy();
+        }
         this.realtime = new RealtimeNotifier(this.salonProfile.id, async () => {
           // OPTIMIZED: Targeted tab-only re-render (no full DOM teardown)
           await this.loadData();

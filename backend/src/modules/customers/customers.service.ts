@@ -16,24 +16,41 @@ export class CustomersService {
 
     if (search && search.trim().length > 0) {
       const term = search.trim();
-      where.OR = [
-        { name: { contains: term, mode: 'insensitive' } },
-        { phone: { contains: term } },
-      ];
+      where.user = {
+        OR: [
+          { name: { contains: term, mode: 'insensitive' } },
+          { phone: { contains: term } },
+        ],
+      };
     }
 
-    const [total, customers] = await Promise.all([
-      this.prisma.customer.count({ where }),
-      this.prisma.customer.findMany({
+    const [total, salonUsers] = await Promise.all([
+      this.prisma.salonUser.count({ where }),
+      this.prisma.salonUser.findMany({
         where,
-        orderBy: { lastVisitAt: 'desc' },
+        include: {
+          user: true,
+        },
+        orderBy: { createdAt: 'desc' },
         skip,
         take: limit,
       }),
     ]);
 
+    const formattedCustomers = salonUsers.map((su) => ({
+      id: su.id,
+      userId: su.userId,
+      salonId: su.salonId,
+      name: su.user.name || 'Unnamed Client',
+      phone: su.user.phone,
+      email: su.user.email,
+      status: su.status,
+      notes: su.notes,
+      createdAt: su.createdAt,
+    }));
+
     return {
-      data: customers,
+      data: formattedCustomers,
       meta: {
         total,
         page,
@@ -44,24 +61,43 @@ export class CustomersService {
   }
 
   async getCustomerById(salonId: string, customerId: string) {
-    const customer = await this.prisma.customer.findFirst({
-      where: { id: customerId, salonId },
+    const salonUser = await this.prisma.salonUser.findFirst({
+      where: {
+        salonId,
+        OR: [{ id: customerId }, { userId: customerId }],
+      },
       include: {
-        appointments: {
+        user: {
           include: {
-            service: true,
-            staff: { select: { id: true, name: true } },
+            appointments: {
+              where: { salonId },
+              include: {
+                service: true,
+                stylist: { select: { id: true, name: true } },
+              },
+              orderBy: { startAt: 'desc' },
+              take: 20,
+            },
           },
-          orderBy: { startTime: 'desc' },
-          take: 20,
         },
       },
     });
 
-    if (!customer) {
+    if (!salonUser) {
       throw new NotFoundException('Customer not found.');
     }
 
-    return customer;
+    return {
+      id: salonUser.id,
+      userId: salonUser.userId,
+      salonId: salonUser.salonId,
+      name: salonUser.user.name || 'Unnamed Client',
+      phone: salonUser.user.phone,
+      email: salonUser.user.email,
+      status: salonUser.status,
+      notes: salonUser.notes,
+      appointments: salonUser.user.appointments,
+      createdAt: salonUser.createdAt,
+    };
   }
 }
