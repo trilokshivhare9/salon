@@ -299,52 +299,70 @@ export class ApiClient {
   static async createStaff(payload) {
     this.invalidateCache('/staff');
     this.invalidateCache('/reports');
-    return this.request('/staff', {
+    const res = await this.request('/staff', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
+    this.invalidateCache('/staff');
+    this.invalidateCache('/reports');
+    return res;
   }
   static async updateStaff(id, payload) {
     this.invalidateCache('/staff');
     this.invalidateCache('/reports');
-    return this.request(`/staff/${id}`, {
+    const res = await this.request(`/staff/${id}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
+    this.invalidateCache('/staff');
+    this.invalidateCache('/reports');
+    return res;
   }
 
   static async toggleStaffStatus(id) {
     this.invalidateCache('/staff');
     this.invalidateCache('/reports');
-    return this.request(`/staff/${id}/toggle-status`, {
+    const res = await this.request(`/staff/${id}/toggle-status`, {
       method: 'PATCH',
     });
+    this.invalidateCache('/staff');
+    this.invalidateCache('/reports');
+    return res;
   }
 
   static async assignStaffServices(staffId, serviceIds) {
     this.invalidateCache('/staff');
     this.invalidateCache('/services');
     this.invalidateCache('/reports');
-    return this.request(`/staff/${staffId}/services`, {
+    const res = await this.request(`/staff/${staffId}/services`, {
       method: 'PUT',
       body: JSON.stringify({ serviceIds }),
     });
+    this.invalidateCache('/staff');
+    this.invalidateCache('/services');
+    this.invalidateCache('/reports');
+    return res;
   }
 
   static async deleteStaff(id) {
     this.invalidateCache('/staff');
     this.invalidateCache('/reports');
-    return this.request(`/staff/${id}`, {
+    const res = await this.request(`/staff/${id}`, {
       method: 'DELETE',
     });
+    this.invalidateCache('/staff');
+    this.invalidateCache('/reports');
+    return res;
   }
 
   static async updateStaffWorkingHours(staffId, hours) {
     this.invalidateCache('/staff');
-    return this.request(`/staff/${staffId}/working-hours`, {
+    const res = await this.request(`/staff/${staffId}/working-hours`, {
       method: 'PUT',
       body: JSON.stringify({ hours }),
     });
+    this.invalidateCache('/staff');
+    return res;
   }
 
   static async createStaffBreak(staffId, payload) {
@@ -370,35 +388,47 @@ export class ApiClient {
   static async createService(payload) {
     this.invalidateCache('/services');
     this.invalidateCache('/reports');
-    return this.request('/services', {
+    const res = await this.request('/services', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
+    this.invalidateCache('/services');
+    this.invalidateCache('/reports');
+    return res;
   }
 
   static async updateService(id, payload) {
     this.invalidateCache('/services');
     this.invalidateCache('/reports');
-    return this.request(`/services/${id}`, {
+    const res = await this.request(`/services/${id}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
+    this.invalidateCache('/services');
+    this.invalidateCache('/reports');
+    return res;
   }
 
   static async toggleServiceStatus(id) {
     this.invalidateCache('/services');
     this.invalidateCache('/reports');
-    return this.request(`/services/${id}/toggle-status`, {
+    const res = await this.request(`/services/${id}/toggle-status`, {
       method: 'PATCH',
     });
+    this.invalidateCache('/services');
+    this.invalidateCache('/reports');
+    return res;
   }
 
   static async deleteService(id) {
     this.invalidateCache('/services');
     this.invalidateCache('/reports');
-    return this.request(`/services/${id}`, {
+    const res = await this.request(`/services/${id}`, {
       method: 'DELETE',
     });
+    this.invalidateCache('/services');
+    this.invalidateCache('/reports');
+    return res;
   }
 
   // Salon Configuration & Blocked Times (Cached for 5 mins)

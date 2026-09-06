@@ -22,7 +22,15 @@ import { filter } from 'rxjs/operators';
 
 export interface SalonRealtimeEvent {
   salonId: string;
-  type: 'NEW_BOOKING' | 'STATUS_UPDATED' | 'RESCHEDULED' | 'CANCELLED' | 'BOOKING_CANCELLED' | 'APPOINTMENT_UPDATED';
+  type:
+    | 'NEW_BOOKING'
+    | 'STATUS_UPDATED'
+    | 'RESCHEDULED'
+    | 'CANCELLED'
+    | 'BOOKING_CANCELLED'
+    | 'APPOINTMENT_UPDATED'
+    | 'STAFF_UPDATED'
+    | 'SERVICE_UPDATED';
   data: any;
   timestamp: string;
 }

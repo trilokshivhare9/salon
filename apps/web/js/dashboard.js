@@ -117,10 +117,15 @@ export class SalonDashboard {
         if (this.realtime) {
           this.realtime.destroy();
         }
-        this.realtime = new RealtimeNotifier(this.salonProfile.id, async () => {
-          // OPTIMIZED: Targeted tab-only re-render (no full DOM teardown)
-          await this.loadData();
-          this.refreshActiveTab();
+        this.realtime = new RealtimeNotifier(this.salonProfile.id, async (payload) => {
+          // Live sync from SSE stream (appointments, staff, services)
+          await this.loadData(true);
+          const isStaffOrService = payload?.type === 'STAFF_UPDATED' || payload?.type === 'SERVICE_UPDATED';
+          if (isStaffOrService || this.activeTab === 'staff' || this.activeTab === 'services') {
+            this.render();
+          } else {
+            this.refreshActiveTab();
+          }
         });
       }
     } catch (err) {
@@ -159,6 +164,16 @@ export class SalonDashboard {
       const queueBadge = this.container.querySelector('.bottom-nav-badge');
       if (queueBadge && this.summaryData?.statusCounts) {
         queueBadge.textContent = this.summaryData.statusCounts.total;
+      }
+
+      // Live update desktop tab labels with current counts
+      const staffTabSpan = this.container.querySelector('.nav-tab[data-tab="staff"] span');
+      if (staffTabSpan && this.staffList) {
+        staffTabSpan.textContent = `Stylists (${this.staffList.length})`;
+      }
+      const servicesTabSpan = this.container.querySelector('.nav-tab[data-tab="services"] span');
+      if (servicesTabSpan && this.servicesList) {
+        servicesTabSpan.textContent = `Service Menu (${this.servicesList.length})`;
       }
     } else {
       // Fallback to full re-render if tab-content not found
@@ -203,7 +218,7 @@ export class SalonDashboard {
     }
   }
 
-  async loadData(fullReload = false) {
+  async loadData(fullReload = true) {
     const fallbackSummary = {
       statusCounts: { total: 0, confirmed: 0, checkedIn: 0, inService: 0, completed: 0, cancelled: 0, noShow: 0 },
       todayAppointments: [],
@@ -212,22 +227,22 @@ export class SalonDashboard {
       whatsappQuota: { limit: 1000, used: 0, remaining: 1000, percentUsed: 0, resetsOn: '1st of next month' },
     };
 
-    if (fullReload || !this.staffList || this.staffList.length === 0 || !this.servicesList || this.servicesList.length === 0) {
+    if (fullReload) {
       try {
         const [summary, staff, services, profile] = await Promise.all([
-          ApiClient.getDashboardSummary(this.selectedDate, fullReload).catch((err) => {
+          ApiClient.getDashboardSummary(this.selectedDate, true).catch((err) => {
             console.warn('[Dashboard] Summary fetch error:', err);
             return this.summaryData || fallbackSummary;
           }),
-          ApiClient.getStaff(fullReload).catch((err) => {
+          ApiClient.getStaff(true).catch((err) => {
             console.warn('[Dashboard] Staff fetch error:', err);
             return this.staffList || [];
           }),
-          ApiClient.getServices(fullReload).catch((err) => {
+          ApiClient.getServices(true).catch((err) => {
             console.warn('[Dashboard] Services fetch error:', err);
             return this.servicesList || [];
           }),
-          ApiClient.getSalonProfile(fullReload).catch((err) => {
+          ApiClient.getSalonProfile(true).catch((err) => {
             console.warn('[Dashboard] Profile fetch error:', err);
             return this.salonProfile || {};
           }),
@@ -1843,7 +1858,7 @@ export class SalonDashboard {
       const syncBtn = document.getElementById('btn-refresh-queue');
       syncBtn?.classList.add('syncing');
       try {
-        await this.loadData();
+        await this.loadData(false);
       } finally {
         this.render();
       }
@@ -2269,7 +2284,7 @@ export class SalonDashboard {
     tabContent.querySelectorAll('.btn-toggle-staff').forEach((btn) => {
       btn.addEventListener('click', async (e) => {
         const id = e.currentTarget.getAttribute('data-id');
-        try { await ApiClient.toggleStaffStatus(id); await this.loadData(); this.render(); } catch (err) { alert(err.message); }
+        try { await ApiClient.toggleStaffStatus(id); await this.loadData(true); this.render(); } catch (err) { alert(err.message); }
       });
     });
     tabContent.querySelectorAll('.btn-assign-services').forEach((btn) => {
@@ -2650,7 +2665,7 @@ export class SalonDashboard {
         });
 
         modalContainer.innerHTML = '';
-        await this.loadData();
+        await this.loadData(true);
         this.render();
       } catch (err) {
         submitBtn.innerHTML = originalText;
@@ -2699,7 +2714,7 @@ export class SalonDashboard {
       try {
         await ApiClient.assignStaffServices(staffId, selected);
         modalContainer.innerHTML = '';
-        await this.loadData();
+        await this.loadData(true);
         this.render();
       } catch (err) {
         alert(err.message);
@@ -3002,7 +3017,7 @@ export class SalonDashboard {
         });
 
         modalContainer.innerHTML = '';
-        await this.loadData();
+        await this.loadData(true);
         this.render();
       } catch (err) {
         alert(err.message);
@@ -3112,7 +3127,7 @@ export class SalonDashboard {
         });
 
         modalContainer.innerHTML = '';
-        await this.loadData();
+        await this.loadData(true);
         this.render();
       } catch (err) {
         alert(err.message);
@@ -3171,7 +3186,7 @@ export class SalonDashboard {
         });
 
         modalContainer.innerHTML = '';
-        await this.loadData();
+        await this.loadData(true);
         this.render();
       } catch (err) {
         alert(`Failed: ${err.message}`);
@@ -3207,7 +3222,7 @@ export class SalonDashboard {
       try {
         await ApiClient.deleteStaff(staffId);
         modalContainer.innerHTML = '';
-        await this.loadData();
+        await this.loadData(true);
         this.render();
       } catch (err) {
         alert(`Failed to delete stylist: ${err.message}`);
@@ -3286,7 +3301,7 @@ export class SalonDashboard {
       try {
         await ApiClient.updateStaffWorkingHours(staffId, hoursPayload);
         modalContainer.innerHTML = '';
-        await this.loadData();
+        await this.loadData(true);
         this.render();
       } catch (err) {
         alert(`Failed to update hours: ${err.message}`);
@@ -3322,7 +3337,7 @@ export class SalonDashboard {
       try {
         await ApiClient.deleteService(serviceId);
         modalContainer.innerHTML = '';
-        await this.loadData();
+        await this.loadData(true);
         this.render();
       } catch (err) {
         alert(`Failed to delete service: ${err.message}`);

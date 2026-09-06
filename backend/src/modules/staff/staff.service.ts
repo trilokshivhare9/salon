@@ -11,10 +11,14 @@ import {
   UpdateStaffWorkingHoursDto,
 } from './dto/create-staff.dto';
 import { StylistStatus, ServiceStatus, SalonStatus } from '@prisma/client';
+import { AppointmentsService } from '../appointments/appointments.service';
 
 @Injectable()
 export class StaffService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private appointmentsService: AppointmentsService,
+  ) {}
 
   private async syncSalonActiveStatus(salonId: string) {
     const activeStylistCount = await this.prisma.stylist.count({
@@ -132,13 +136,14 @@ export class StaffService {
     });
 
     await this.syncSalonActiveStatus(salonId);
+    this.appointmentsService.emitSalonEvent(salonId, 'STAFF_UPDATED', { staffId: created.id, action: 'CREATE' });
     return created;
   }
 
   async updateStaff(salonId: string, staffId: string, dto: UpdateStaffDto) {
     await this.getStaffById(salonId, staffId);
 
-    return this.prisma.stylist.update({
+    const updated = await this.prisma.stylist.update({
       where: { id: staffId },
       data: {
         name: dto.name?.trim(),
@@ -152,6 +157,9 @@ export class StaffService {
         workingHours: true,
       },
     });
+
+    this.appointmentsService.emitSalonEvent(salonId, 'STAFF_UPDATED', { staffId, action: 'UPDATE' });
+    return updated;
   }
 
   async assignServices(salonId: string, staffId: string, dto: AssignStaffServicesDto) {
@@ -176,30 +184,34 @@ export class StaffService {
       );
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const res = await this.prisma.$transaction(async (tx) => {
       // Clear previous and replace
       await tx.stylistService.deleteMany({ where: { stylistId: staffId } });
 
-      for (const serviceId of dto.serviceIds) {
-        await tx.stylistService.create({
-          data: {
-            stylistId: staffId,
-            serviceId,
-          },
-        });
-      }
+      await tx.stylistService.createMany({
+        data: dto.serviceIds.map((serviceId) => ({
+          stylistId: staffId,
+          serviceId,
+        })),
+      });
 
       return tx.stylist.findUnique({
         where: { id: staffId },
-        include: { services: { include: { service: true } } },
+        include: {
+          services: { include: { service: true } },
+          workingHours: true,
+        },
       });
     });
+
+    this.appointmentsService.emitSalonEvent(salonId, 'STAFF_UPDATED', { staffId, action: 'ASSIGN_SERVICES' });
+    return res;
   }
 
   async updateWorkingHours(salonId: string, staffId: string, dto: UpdateStaffWorkingHoursDto) {
     await this.getStaffById(salonId, staffId);
 
-    return this.prisma.$transaction(async (tx) => {
+    const res = await this.prisma.$transaction(async (tx) => {
       // Stylist has custom hours now
       await tx.stylist.update({
         where: { id: staffId },
@@ -238,6 +250,9 @@ export class StaffService {
         orderBy: { dayOfWeek: 'asc' },
       });
     });
+
+    this.appointmentsService.emitSalonEvent(salonId, 'STAFF_UPDATED', { staffId, action: 'UPDATE_HOURS' });
+    return res;
   }
 
   async toggleStaffStatus(salonId: string, staffId: string) {
@@ -254,17 +269,47 @@ export class StaffService {
     });
 
     await this.syncSalonActiveStatus(salonId);
+    this.appointmentsService.emitSalonEvent(salonId, 'STAFF_UPDATED', { staffId, action: 'TOGGLE' });
     return updated;
   }
 
   async deleteStaff(salonId: string, staffId: string) {
     await this.getStaffById(salonId, staffId);
 
-    const deleted = await this.prisma.stylist.delete({
-      where: { id: staffId },
+    const result = await this.prisma.$transaction(async (tx) => {
+      // 1. Remove appointments tied to this stylist so ON DELETE RESTRICT does not block deletion
+      await tx.appointment.deleteMany({
+        where: { salonId, stylistId: staffId },
+      });
+
+      // 2. Clear active conversation reference if any
+      await tx.conversation.updateMany({
+        where: { salonId, selectedStaffId: staffId },
+        data: { selectedStaffId: null },
+      });
+
+      // 3. Delete the stylist record (Prisma cascades stylist_services and stylist_working_hours)
+      const deleted = await tx.stylist.delete({
+        where: { id: staffId },
+      });
+
+      // 4. Sync salon active status (auto-deactivates if < 1 active stylist or service)
+      const activeStylistCount = await tx.stylist.count({
+        where: { salonId, status: StylistStatus.ACTIVE },
+      });
+      const activeServiceCount = await tx.service.count({
+        where: { salonId, status: ServiceStatus.ACTIVE },
+      });
+      const meetsRequirements = activeStylistCount >= 1 && activeServiceCount >= 1;
+      await tx.salon.update({
+        where: { id: salonId },
+        data: { status: meetsRequirements ? SalonStatus.ACTIVE : SalonStatus.INACTIVE },
+      });
+
+      return deleted;
     });
 
-    await this.syncSalonActiveStatus(salonId);
-    return deleted;
+    this.appointmentsService.emitSalonEvent(salonId, 'STAFF_UPDATED', { staffId, action: 'DELETE' });
+    return result;
   }
 }
