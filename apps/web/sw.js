@@ -1,5 +1,5 @@
-// SalonFlow PWA Service Worker (v1.0.0)
-const CACHE_NAME = 'salonflow-cache-v1';
+// SalonFlow PWA Service Worker (v3.0.0 - Network-First for instant deploys)
+const CACHE_NAME = 'salonflow-cache-v3';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -15,19 +15,20 @@ const STATIC_ASSETS = [
   'https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap'
 ];
 
-// Install Event: Cache Core Static Shell
+// Install Event: Pre-cache offline UI shell and skip waiting immediately
 self.addEventListener('install', (event) => {
+  self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
       console.log('[ServiceWorker] Pre-caching offline UI shell');
       return cache.addAll(STATIC_ASSETS).catch((err) => {
         console.warn('[ServiceWorker] Pre-cache partial fail (non-fatal):', err);
       });
-    }).then(() => self.skipWaiting())
+    })
   );
 });
 
-// Activate Event: Clean Old Caches
+// Activate Event: Purge all old caches and claim clients immediately
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => {
@@ -43,7 +44,7 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch Event: Network-First for APIs, Cache-First for UI Assets
+// Fetch Event: Network-First for APIs & Scripts (Guarantees instant updates)
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
@@ -60,10 +61,10 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Static Assets: Stale-While-Revalidate Strategy
+  // Static Assets & Scripts: Network-First Strategy (Always fresh code, offline fallback)
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      const fetchPromise = fetch(event.request).then((networkResponse) => {
+    fetch(event.request)
+      .then((networkResponse) => {
         if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
           const responseToCache = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => {
@@ -71,10 +72,8 @@ self.addEventListener('fetch', (event) => {
           });
         }
         return networkResponse;
-      }).catch(() => cachedResponse);
-
-      return cachedResponse || fetchPromise;
-    })
+      })
+      .catch(() => caches.match(event.request))
   );
 });
 
