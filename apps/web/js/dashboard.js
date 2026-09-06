@@ -2070,15 +2070,9 @@ export class SalonDashboard {
 
     // Toggle Staff Status
     this.container.querySelectorAll('.btn-toggle-staff').forEach((btn) => {
-      btn.addEventListener('click', async (e) => {
+      btn.addEventListener('click', (e) => {
         const id = e.currentTarget.getAttribute('data-id');
-        try {
-          await ApiClient.toggleStaffStatus(id);
-          await this.loadData();
-          this.render();
-        } catch (err) {
-          alert(err.message);
-        }
+        this.handleToggleStaff(id);
       });
     });
 
@@ -2282,9 +2276,9 @@ export class SalonDashboard {
       });
     });
     tabContent.querySelectorAll('.btn-toggle-staff').forEach((btn) => {
-      btn.addEventListener('click', async (e) => {
+      btn.addEventListener('click', (e) => {
         const id = e.currentTarget.getAttribute('data-id');
-        try { await ApiClient.toggleStaffStatus(id); await this.loadData(true); this.render(); } catch (err) { alert(err.message); }
+        this.handleToggleStaff(id);
       });
     });
     tabContent.querySelectorAll('.btn-assign-services').forEach((btn) => {
@@ -2600,6 +2594,25 @@ export class SalonDashboard {
     });
   }
 
+  async handleToggleStaff(id) {
+    if (!id) return;
+    const idx = this.staffList.findIndex((s) => String(s.id) === String(id));
+    if (idx !== -1) {
+      this.staffList[idx] = {
+        ...this.staffList[idx],
+        status: this.staffList[idx].status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE',
+      };
+      this.render();
+    }
+    try {
+      await ApiClient.toggleStaffStatus(id);
+      this.loadData(true).then(() => this.refreshActiveTab()).catch(() => {});
+    } catch (err) {
+      alert(`Status update failed: ${err.message}`);
+      this.loadData(true).then(() => this.render()).catch(() => {});
+    }
+  }
+
   showAddStaffModal() {
     const modalContainer = document.getElementById('modal-container');
 
@@ -2657,16 +2670,23 @@ export class SalonDashboard {
       try {
         const selectedServices = Array.from(document.querySelectorAll('.staff-service-chk:checked')).map((c) => c.value);
 
-        await ApiClient.createStaff({
+        const created = await ApiClient.createStaff({
           name: document.getElementById('new-staff-name').value.trim(),
           phone: document.getElementById('new-staff-phone').value.trim(),
           email: document.getElementById('new-staff-email')?.value?.trim() || undefined,
           serviceIds: selectedServices,
         });
 
+        if (created && created.id) {
+          this.staffList = [created, ...this.staffList.filter((s) => s.id !== created.id)];
+        }
+
         modalContainer.innerHTML = '';
-        await this.loadData(true);
         this.render();
+
+        this.loadData(true).then(() => {
+          this.refreshActiveTab();
+        }).catch(() => {});
       } catch (err) {
         submitBtn.innerHTML = originalText;
         submitBtn.removeAttribute('disabled');
@@ -2712,10 +2732,17 @@ export class SalonDashboard {
       e.preventDefault();
       const selected = Array.from(document.querySelectorAll('.chk-assign-svc:checked')).map((c) => c.value);
       try {
-        await ApiClient.assignStaffServices(staffId, selected);
+        const updated = await ApiClient.assignStaffServices(staffId, selected);
+        const idx = this.staffList.findIndex((s) => String(s.id) === String(staffId));
+        if (idx !== -1 && updated) {
+          this.staffList[idx] = { ...this.staffList[idx], ...updated };
+        }
         modalContainer.innerHTML = '';
-        await this.loadData(true);
         this.render();
+
+        this.loadData(true).then(() => {
+          this.refreshActiveTab();
+        }).catch(() => {});
       } catch (err) {
         alert(err.message);
       }
@@ -2783,8 +2810,11 @@ export class SalonDashboard {
         });
 
         modalContainer.innerHTML = '';
-        await this.loadData(true);
         this.render();
+
+        this.loadData(true).then(() => {
+          this.refreshActiveTab();
+        }).catch(() => {});
       } catch (err) {
         alert(err.message);
       }
@@ -3007,18 +3037,26 @@ export class SalonDashboard {
       const rawCat = categorySelect.value;
       const finalCategory = rawCat === 'CUSTOM' ? (customCatInput.value.trim() || 'General') : rawCat;
 
+      const payload = {
+        name: nameInput.value.trim(),
+        price: parseFloat(priceInput.value),
+        durationMinutes: parseInt(durationSelect.value, 10),
+        category: finalCategory,
+        description: descInput.value.trim(),
+      };
+
       try {
-        await ApiClient.createService({
-          name: nameInput.value.trim(),
-          price: parseFloat(priceInput.value),
-          durationMinutes: parseInt(durationSelect.value, 10),
-          category: finalCategory,
-          description: descInput.value.trim(),
-        });
+        const created = await ApiClient.createService(payload);
+        if (created && created.id) {
+          this.servicesList = [created, ...this.servicesList.filter((s) => s.id !== created.id)];
+        }
 
         modalContainer.innerHTML = '';
-        await this.loadData(true);
         this.render();
+
+        this.loadData(true).then(() => {
+          this.refreshActiveTab();
+        }).catch(() => {});
       } catch (err) {
         alert(err.message);
       }
@@ -3117,18 +3155,33 @@ export class SalonDashboard {
       const rawCat = categorySelect.value;
       const finalCategory = rawCat === 'CUSTOM' ? (customCatInput.value.trim() || 'General') : rawCat;
 
+      const payload = {
+        name: document.getElementById('edit-svc-name').value.trim(),
+        price: parseFloat(document.getElementById('edit-svc-price').value),
+        durationMinutes: parseInt(document.getElementById('edit-svc-duration').value, 10),
+        category: finalCategory,
+        description: document.getElementById('edit-svc-desc').value.trim(),
+      };
+
       try {
-        await ApiClient.updateService(service.id, {
-          name: document.getElementById('edit-svc-name').value.trim(),
-          price: parseFloat(document.getElementById('edit-svc-price').value),
-          durationMinutes: parseInt(document.getElementById('edit-svc-duration').value, 10),
-          category: finalCategory,
-          description: document.getElementById('edit-svc-desc').value.trim(),
-        });
+        const updated = await ApiClient.updateService(service.id, payload);
+
+        // Immediate in-memory state update for 0ms reactivity
+        const idx = this.servicesList.findIndex((s) => String(s.id) === String(service.id));
+        if (idx !== -1) {
+          this.servicesList[idx] = {
+            ...this.servicesList[idx],
+            ...payload,
+            ...(updated && typeof updated === 'object' ? updated : {}),
+          };
+        }
 
         modalContainer.innerHTML = '';
-        await this.loadData(true);
         this.render();
+
+        this.loadData(true).then(() => {
+          this.refreshActiveTab();
+        }).catch(() => {});
       } catch (err) {
         alert(err.message);
       }
@@ -3177,17 +3230,32 @@ export class SalonDashboard {
 
     document.getElementById('edit-staff-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
+      const payload = {
+        name: document.getElementById('edit-staff-name').value.trim(),
+        phone: document.getElementById('edit-staff-phone').value.trim(),
+        email: document.getElementById('edit-staff-email').value.trim() || undefined,
+        profileImageUrl: document.getElementById('edit-staff-img').value.trim() || undefined,
+      };
+
       try {
-        await ApiClient.updateStaff(staff.id, {
-          name: document.getElementById('edit-staff-name').value.trim(),
-          phone: document.getElementById('edit-staff-phone').value.trim(),
-          email: document.getElementById('edit-staff-email').value.trim() || undefined,
-          profileImageUrl: document.getElementById('edit-staff-img').value.trim() || undefined,
-        });
+        const updated = await ApiClient.updateStaff(staff.id, payload);
+
+        // Immediate in-memory state update for 0ms reactivity
+        const idx = this.staffList.findIndex((s) => String(s.id) === String(staff.id));
+        if (idx !== -1) {
+          this.staffList[idx] = {
+            ...this.staffList[idx],
+            ...payload,
+            ...(updated && typeof updated === 'object' ? updated : {}),
+          };
+        }
 
         modalContainer.innerHTML = '';
-        await this.loadData(true);
         this.render();
+
+        this.loadData(true).then(() => {
+          this.refreshActiveTab();
+        }).catch(() => {});
       } catch (err) {
         alert(`Failed: ${err.message}`);
       }
@@ -3221,9 +3289,13 @@ export class SalonDashboard {
     document.getElementById('btn-confirm-delete-staff')?.addEventListener('click', async () => {
       try {
         await ApiClient.deleteStaff(staffId);
+        this.staffList = this.staffList.filter((s) => s.id !== staffId);
         modalContainer.innerHTML = '';
-        await this.loadData(true);
         this.render();
+
+        this.loadData(true).then(() => {
+          this.refreshActiveTab();
+        }).catch(() => {});
       } catch (err) {
         alert(`Failed to delete stylist: ${err.message}`);
       }
@@ -3300,9 +3372,19 @@ export class SalonDashboard {
 
       try {
         await ApiClient.updateStaffWorkingHours(staffId, hoursPayload);
+        const idx = this.staffList.findIndex((s) => String(s.id) === String(staffId));
+        if (idx !== -1) {
+          this.staffList[idx] = {
+            ...this.staffList[idx],
+            workingHours: hoursPayload,
+          };
+        }
         modalContainer.innerHTML = '';
-        await this.loadData(true);
         this.render();
+
+        this.loadData(true).then(() => {
+          this.refreshActiveTab();
+        }).catch(() => {});
       } catch (err) {
         alert(`Failed to update hours: ${err.message}`);
       }
@@ -3336,9 +3418,13 @@ export class SalonDashboard {
     document.getElementById('btn-confirm-delete-svc')?.addEventListener('click', async () => {
       try {
         await ApiClient.deleteService(serviceId);
+        this.servicesList = this.servicesList.filter((s) => s.id !== serviceId);
         modalContainer.innerHTML = '';
-        await this.loadData(true);
         this.render();
+
+        this.loadData(true).then(() => {
+          this.refreshActiveTab();
+        }).catch(() => {});
       } catch (err) {
         alert(`Failed to delete service: ${err.message}`);
       }

@@ -101,6 +101,8 @@ export class ApiClient {
 
     const headers = {
       'Content-Type': 'application/json',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
       ...options.headers,
     };
 
@@ -114,6 +116,7 @@ export class ApiClient {
     try {
       const response = await fetch(`${API_BASE}${endpoint}`, {
         ...options,
+        cache: 'no-store',
         headers,
         signal: options.signal || controller.signal,
       });
@@ -293,7 +296,8 @@ export class ApiClient {
 
   // Staff Management (Cached for 3 mins)
   static async getStaff(bypassCache = false) {
-    return this.request('/staff', {}, bypassCache ? 0 : 180000);
+    const url = bypassCache ? `/staff?_t=${Date.now()}` : '/staff';
+    return this.request(url, {}, bypassCache ? 0 : 180000);
   }
 
   static async createStaff(payload) {
@@ -386,7 +390,8 @@ export class ApiClient {
 
   // Service Management (Cached for 3 mins)
   static async getServices(bypassCache = false) {
-    return this.request('/services', {}, bypassCache ? 0 : 180000);
+    const url = bypassCache ? `/services?_t=${Date.now()}` : '/services';
+    return this.request(url, {}, bypassCache ? 0 : 180000);
   }
 
   static async createService(payload) {
