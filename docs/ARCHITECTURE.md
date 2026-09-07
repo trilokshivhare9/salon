@@ -179,16 +179,28 @@ When two customers attempt to book the exact same staff member at `17:00` simult
    * Re-evaluate availability within the locked transaction boundary.
    * If available, insert the appointment and commit. If unavailable, abort and throw `ConflictException(409)`.
 
-2. **Tier 2: PostgreSQL Temporal Range Exclusion Constraint (GiST)**
-   * At the database engine level, an appointment time interval cannot overlap with another active appointment for the same staff member:
+2. **Tier 2: PostgreSQL Temporal Range Exclusion Constraints (GiST)**
+   * At the database engine level, appointment intervals cannot overlap for the same stylist or customer within the salon:
      ```sql
      CREATE EXTENSION IF NOT EXISTS btree_gist;
+
+     -- Stylist single-booking constraint
      ALTER TABLE appointments 
-     ADD CONSTRAINT no_overlapping_staff_appointments 
+     ADD CONSTRAINT no_overlapping_stylist_appointments 
      EXCLUDE USING gist (
-       staff_id WITH =,
-       tstzrange(start_time, end_time) WITH &&
-     ) WHERE (status NOT IN ('CANCELLED', 'NO_SHOW', 'RESCHEDULED'));
+       salon_id WITH =,
+       stylist_id WITH =,
+       tstzrange(start_at, end_at, '[)') WITH &&
+     ) WHERE (status IN ('CONFIRMED', 'CHECKED_IN', 'IN_SERVICE'));
+
+     -- Salon-scoped customer single-booking constraint
+     ALTER TABLE appointments 
+     ADD CONSTRAINT no_overlapping_customer_appointments 
+     EXCLUDE USING gist (
+       salon_id WITH =,
+       salon_user_id WITH =,
+       tstzrange(start_at, end_at, '[)') WITH &&
+     ) WHERE (status IN ('CONFIRMED', 'CHECKED_IN', 'IN_SERVICE'));
      ```
    * If any race condition ever bypasses application logic, the database immediately aborts the insertion with constraint violation code `23P01`.
 

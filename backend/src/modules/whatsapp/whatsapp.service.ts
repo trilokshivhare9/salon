@@ -1227,6 +1227,40 @@ export class WhatsAppService {
           return { replyMessage: reply, state: ConversationState.SELECT_RESCHEDULE_DATE };
 
         } else if (input === 'btn_cancel_appt' || normalized.includes('cancel')) {
+          const tz = salon.timezone || 'Asia/Kolkata';
+          const now = DateTime.now().setZone(tz);
+
+          if (conversation.activeAppointmentId) {
+            const activeAppt = await this.prisma.appointment.findUnique({
+              where: { id: conversation.activeAppointmentId },
+              include: { stylist: true, service: true },
+            });
+
+            if (activeAppt) {
+              const apptStart = DateTime.fromJSDate(activeAppt.startAt, { zone: tz });
+              const hoursUntilAppt = apptStart.diff(now, 'hours').hours;
+              const cancelWindowHours = salon.cancelWindowHours ?? 2;
+
+              if (hoursUntilAppt < cancelWindowHours && hoursUntilAppt > -1) {
+                // Critical Window (< 2 hours): Protect salon chair from last-minute cancellation
+                const reply = `⚠️ *Appointment is in less than ${cancelWindowHours} hours!*\n\nSpecialist *${activeAppt.stylist?.name || 'Your specialist'}* has already reserved your chair for *${activeAppt.serviceNameSnapshot || activeAppt.service?.name}*.\n\nAppointments cannot be cancelled online within ${cancelWindowHours} hours of your scheduled time.\n\n• If you are delayed in traffic, tap *'Running 15m Late'* to hold your station.\n• For emergency changes, please call our front desk directly at *${salon.phone || 'our desk'}*.`;
+                await this.sendMetaMessage(
+                  cleanNumber,
+                  {
+                    bodyText: reply,
+                    interactiveType: 'button',
+                    buttons: [
+                      { id: 'btn_eta_late_15', title: '🚗 Running 15m Late' },
+                      { id: 'btn_menu', title: '📋 Main Menu' },
+                    ],
+                  },
+                  phoneNumberId,
+                );
+                return { replyMessage: reply, state: ConversationState.START };
+              }
+            }
+          }
+
           await this.prisma.conversation.update({
             where: { id: conversation.id },
             data: { state: ConversationState.CONFIRM_CANCEL },
