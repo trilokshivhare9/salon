@@ -1,6 +1,6 @@
 {
   "name": "salon-saas-backend",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Multi-Tenant Salon Appointment & Customer Management SaaS Core Backend Engine",
   "author": "Antigravity",
   "private": true,

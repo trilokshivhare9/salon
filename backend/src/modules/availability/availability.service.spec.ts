@@ -115,7 +115,7 @@ describe('AvailabilityService (Unit Tests)', () => {
     jest.spyOn(prisma.stylist, 'findMany').mockResolvedValue([mockStylists[0]] as any);
     jest.spyOn(prisma.appointment, 'findMany').mockResolvedValue([]);
 
-    // 2026-12-14 is Monday (future date)
+    // 2026-09-14 is Monday (future date within 30-day maxAdvanceDays window)
     const result = await service.getAvailableSlots(mockSalonId, mockService1.id, '2026-09-14');
     expect(result.availableSlots).toEqual([]);
   });
