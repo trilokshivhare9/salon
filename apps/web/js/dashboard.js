@@ -3,71 +3,48 @@ import { RealtimeNotifier } from './realtime.js';
 import { SoundManager } from './sound.js';
 import { Icons } from './icons.js';
 
-export const SERVICE_CATALOG_PRESETS = [
-  {
-    category: 'Hair Care & Styling',
-    icon: '✂️',
-    presets: [
-      { name: 'Standard Haircut', price: 100, duration: 20, desc: 'Classic precision haircut, scissor styling, and neck clean-up.' },
-      { name: 'Fade & Modern Textured Haircut', price: 150, duration: 30, desc: 'Skin fade, low/mid fade with matte textured top styling.' },
-      { name: 'Kids Haircut (बच्चों की कटिंग)', price: 80, duration: 20, desc: 'Gentle and stylish haircut for kids under 12.' },
-      { name: 'Hair Wash & Blowdry Styling', price: 120, duration: 15, desc: 'Deep scalp cleanse, conditioning, and blowdry finish.' },
-    ],
-  },
-  {
-    category: 'Beard & Shaving',
-    icon: '🧔',
-    presets: [
-      { name: 'Clean Razor Shave (शेविंग)', price: 60, duration: 15, desc: 'Hot towel prep, smooth foam razor shave, and aftershave splash.' },
-      { name: 'Beard Trim & Precision Line-up', price: 80, duration: 15, desc: 'Beard reshaping, trimmer fade, and sharp cheek/jaw line-up.' },
-      { name: 'Luxury Beard Spa & Hot Oil', price: 180, duration: 30, desc: 'Steam, beard softening oil massage, shaping, and balm conditioning.' },
-    ],
-  },
-  {
-    category: 'Combos & Packages',
-    icon: '🔥',
-    presets: [
-      { name: 'Haircut + Beard Styling Combo', price: 180, duration: 35, desc: 'Complete head and beard grooming package at a discounted combo rate.' },
-      { name: 'Grooming Royale: Hair + Beard + Champy', price: 280, duration: 50, desc: 'Signature package: custom haircut, beard styling, and relaxing oil champy.' },
-      { name: 'Haircut + D-Tan Face Pack', price: 320, duration: 45, desc: 'Hair styling combined with deep tanning removal face pack.' },
-      { name: 'Shave + Charcoal Face Mask', price: 220, duration: 30, desc: 'Clean razor shave with deep pore blackhead purifying mask.' },
-    ],
-  },
-  {
-    category: 'Head Massage & Champy',
-    icon: '💆',
-    presets: [
-      { name: 'Herbal Oil Head Massage (Champy)', price: 100, duration: 20, desc: 'Traditional cooling herbal oil acupressure scalp massage.' },
-      { name: 'Menthol Ice Cool Scalp Massage', price: 150, duration: 20, desc: 'Refreshing menthol ice cream/oil stress-relief massage.' },
-    ],
-  },
-  {
-    category: 'Facial, Bleach & D-Tan',
-    icon: '✨',
-    presets: [
-      { name: 'Instant D-Tan Face Pack', price: 200, duration: 20, desc: 'Removes sun tan, cleans pores, and restores natural skin radiance.' },
-      { name: 'Charcoal Deep Cleanse Detox', price: 250, duration: 30, desc: 'Blackhead extraction, charcoal mask, and cold towel finish.' },
-      { name: 'Fruit Glow / Gold Facial', price: 600, duration: 45, desc: '5-step salon facial with exfoliation, cream massage, and glow mask.' },
-    ],
-  },
-  {
-    category: 'Hair Color & Highlights',
-    icon: '🎨',
-    presets: [
-      { name: 'Black Hair Color / Dye Application', price: 150, duration: 30, desc: 'Ammonia-free rich black gray coverage with scalp wash.' },
-      { name: 'Natural Herbal Mehndi / Henna', price: 200, duration: 45, desc: 'Pure organic henna treatment for hair nourishment and rich tint.' },
-      { name: 'Global Hair Color & Highlights', price: 1200, duration: 75, desc: 'Premium salon color transformation with fashion shades.' },
-    ],
-  },
-  {
-    category: 'Hair Spa & Keratin',
-    icon: '🧖',
-    presets: [
-      { name: 'Deep Nourishing Hair Spa', price: 700, duration: 45, desc: 'Intensive hair mask with steam therapy and scalp relaxation.' },
-      { name: 'Keratin / Smoothening Treatment', price: 2500, duration: 120, desc: 'Frizz-free protein smoothing treatment for glossy straight hair.' },
-    ],
-  },
+export const SERVICE_CATEGORIES = [
+  { category: 'Hair Care & Styling', icon: '✂️' },
+  { category: 'Beard & Shaving', icon: '🧔' },
+  { category: 'Combos & Packages', icon: '🔥' },
+  { category: 'Head Massage & Champy', icon: '💆' },
+  { category: 'Facial, Bleach & D-Tan', icon: '✨' },
+  { category: 'Hair Color & Highlights', icon: '🎨' },
+  { category: 'Hair Spa & Keratin', icon: '🧖' },
 ];
+
+export const SERVICE_DURATION_OPTIONS = [
+  { value: 30, label: '30 mins' },
+  { value: 45, label: '45 mins' },
+  { value: 60, label: '60 mins (1 hr)' },
+  { value: 75, label: '75 mins (1 hr 15m)' },
+  { value: 90, label: '90 mins (1 hr 30m)' },
+  { value: 105, label: '105 mins (1 hr 45m)' },
+  { value: 120, label: '120 mins (2 hrs)' },
+  { value: 135, label: '135 mins (2 hrs 15m)' },
+  { value: 150, label: '150 mins (2 hrs 30m)' },
+  { value: 165, label: '165 mins (2 hrs 45m)' },
+  { value: 180, label: '180 mins (3 hrs)' },
+  { value: 195, label: '195 mins (3 hrs 15m)' },
+  { value: 210, label: '210 mins (3 hrs 30m)' },
+  { value: 225, label: '225 mins (3 hrs 45m)' },
+  { value: 240, label: '240 mins (4 hrs)' },
+];
+
+export function renderServiceDurationOptions(selectedDuration = 30) {
+  const selectedNum = parseInt(selectedDuration, 10) || 30;
+  let hasMatch = false;
+  const optionsHtml = SERVICE_DURATION_OPTIONS.map((opt) => {
+    const isSel = opt.value === selectedNum;
+    if (isSel) hasMatch = true;
+    return `<option value="${opt.value}" ${isSel ? 'selected' : ''}>${opt.label}</option>`;
+  }).join('');
+
+  if (!hasMatch && selectedNum > 0) {
+    return `<option value="${selectedNum}" selected>${selectedNum} mins (Legacy - select multiple of 15)</option>` + optionsHtml;
+  }
+  return optionsHtml;
+}
 
 export class SalonDashboard {
   constructor(containerId, currentUser = null) {
@@ -2898,7 +2875,6 @@ export class SalonDashboard {
 
   showAddServiceModal() {
     const modalContainer = document.getElementById('modal-container');
-    const defaultCat = SERVICE_CATALOG_PRESETS[0];
 
     modalContainer.innerHTML = `
       <div class="modal-backdrop show">
@@ -2913,7 +2889,7 @@ export class SalonDashboard {
             <div class="form-group">
               <label>Service Category *</label>
               <select class="form-control" id="svc-category-select" required>
-                ${SERVICE_CATALOG_PRESETS.map((c) => `
+                ${SERVICE_CATEGORIES.map((c) => `
                   <option value="${c.category}">${c.icon} ${c.category}</option>
                 `).join('')}
                 <option value="CUSTOM">➕ Other / Custom Category...</option>
@@ -2926,45 +2902,27 @@ export class SalonDashboard {
               <input type="text" class="form-control" id="svc-custom-cat-input" placeholder="e.g. Bridal Special, Pedicure, Tattoo" />
             </div>
 
-            <!-- 2. Optional Suggestions Dropdown -->
-            <div class="form-group">
-              <label>Service Suggestions <span style="color: var(--text-muted); font-weight: normal; font-size: 0.8rem;">(Optional - pick to auto-fill)</span></label>
-              <select class="form-control" id="svc-preset-select">
-                <!-- Dynamically populated via JS -->
-              </select>
-            </div>
-
-            <!-- 3. Service Name Text Field -->
+            <!-- 2. Service Name Text Field -->
             <div class="form-group">
               <label>Service Name *</label>
               <input type="text" class="form-control" id="svc-name" placeholder="e.g. Standard Haircut / Hair + Beard Combo" required />
             </div>
 
-            <!-- 4. Price & Duration -->
+            <!-- 3. Price & Duration -->
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
               <div class="form-group">
                 <label>Price (₹) *</label>
                 <input type="number" class="form-control" id="svc-price" placeholder="100" min="0" required />
               </div>
               <div class="form-group">
-                <label>Duration *</label>
+                <label>Duration * <span style="color: var(--text-muted); font-size: 0.8rem; font-weight: normal;">(Min 30m, 15m steps)</span></label>
                 <select class="form-control" id="svc-duration" required>
-                  <option value="15">15 mins</option>
-                  <option value="20" selected>20 mins</option>
-                  <option value="25">25 mins</option>
-                  <option value="30">30 mins</option>
-                  <option value="35">35 mins</option>
-                  <option value="45">45 mins</option>
-                  <option value="50">50 mins</option>
-                  <option value="60">60 mins</option>
-                  <option value="75">75 mins</option>
-                  <option value="90">90 mins</option>
-                  <option value="120">120 mins</option>
+                  ${renderServiceDurationOptions(30)}
                 </select>
               </div>
             </div>
 
-            <!-- 5. Description -->
+            <!-- 4. Description -->
             <div class="form-group">
               <label>Service Description <span style="color: var(--text-muted); font-weight: normal; font-size: 0.8rem;">(Optional)</span></label>
               <textarea class="form-control" id="svc-desc" rows="2" placeholder="Brief details about the treatment / service..."></textarea>
@@ -2981,66 +2939,33 @@ export class SalonDashboard {
     const categorySelect = document.getElementById('svc-category-select');
     const customCatGroup = document.getElementById('svc-custom-cat-group');
     const customCatInput = document.getElementById('svc-custom-cat-input');
-    const presetSelect = document.getElementById('svc-preset-select');
     const nameInput = document.getElementById('svc-name');
     const priceInput = document.getElementById('svc-price');
     const durationSelect = document.getElementById('svc-duration');
     const descInput = document.getElementById('svc-desc');
 
-    const updatePresetsForCategory = (catName) => {
-      if (catName === 'CUSTOM') {
-        customCatGroup.style.display = 'block';
-        presetSelect.innerHTML = `<option value="">-- No suggestions for custom category --</option>`;
-        return;
-      }
-
-      customCatGroup.style.display = 'none';
-      const catObj = SERVICE_CATALOG_PRESETS.find((c) => c.category === catName);
-      if (!catObj) return;
-
-      presetSelect.innerHTML = `
-        <option value="">-- Select from suggestions (Optional) --</option>
-        ${catObj.presets.map((p, idx) => `
-          <option value="${idx}">${p.name} (₹${p.price} • ${p.duration}m)</option>
-        `).join('')}
-      `;
-    };
-
-    const applyPreset = (preset) => {
-      nameInput.value = preset.name;
-      priceInput.value = preset.price;
-      durationSelect.value = preset.duration;
-      descInput.value = preset.desc || '';
-    };
-
     categorySelect?.addEventListener('change', (e) => {
-      updatePresetsForCategory(e.target.value);
-    });
-
-    presetSelect?.addEventListener('change', (e) => {
-      const val = e.target.value;
-      if (val === '') return;
-
-      const catName = categorySelect.value;
-      const catObj = SERVICE_CATALOG_PRESETS.find((c) => c.category === catName);
-      const preset = catObj?.presets[parseInt(val, 10)];
-      if (preset) {
-        applyPreset(preset);
+      if (e.target.value === 'CUSTOM') {
+        customCatGroup.style.display = 'block';
+      } else {
+        customCatGroup.style.display = 'none';
       }
     });
-
-    // Initialize with first category
-    updatePresetsForCategory(defaultCat.category);
 
     document.getElementById('add-service-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       const rawCat = categorySelect.value;
       const finalCategory = rawCat === 'CUSTOM' ? (customCatInput.value.trim() || 'General') : rawCat;
+      const dur = parseInt(durationSelect.value, 10);
+      if (isNaN(dur) || dur < 30 || dur % 15 !== 0) {
+        alert('Service duration must be at least 30 minutes and a multiple of 15 (e.g. 30, 45, 60, 75, 90 mins).');
+        return;
+      }
 
       const payload = {
         name: nameInput.value.trim(),
         price: parseFloat(priceInput.value),
-        durationMinutes: parseInt(durationSelect.value, 10),
+        durationMinutes: dur,
         category: finalCategory,
         description: descInput.value.trim(),
       };
@@ -3065,7 +2990,7 @@ export class SalonDashboard {
 
   showEditServiceModal(service) {
     const modalContainer = document.getElementById('modal-container');
-    const matchedCat = SERVICE_CATALOG_PRESETS.find((c) => c.category === service.category);
+    const matchedCat = SERVICE_CATEGORIES.find((c) => c.category === service.category);
     const initialCatValue = matchedCat ? service.category : 'CUSTOM';
 
     modalContainer.innerHTML = `
@@ -3081,7 +3006,7 @@ export class SalonDashboard {
             <div class="form-group">
               <label>Service Category *</label>
               <select class="form-control" id="edit-svc-category-select" required>
-                ${SERVICE_CATALOG_PRESETS.map((c) => `
+                ${SERVICE_CATEGORIES.map((c) => `
                   <option value="${c.category}" ${c.category === service.category ? 'selected' : ''}>${c.icon} ${c.category}</option>
                 `).join('')}
                 <option value="CUSTOM" ${initialCatValue === 'CUSTOM' ? 'selected' : ''}>➕ Other / Custom Category...</option>
@@ -3107,19 +3032,9 @@ export class SalonDashboard {
                 <input type="number" class="form-control" id="edit-svc-price" value="${service.price}" min="0" required />
               </div>
               <div class="form-group">
-                <label>Duration *</label>
+                <label>Duration * <span style="color: var(--text-muted); font-size: 0.8rem; font-weight: normal;">(Min 30m, 15m steps)</span></label>
                 <select class="form-control" id="edit-svc-duration" required>
-                  <option value="15" ${service.durationMinutes == 15 ? 'selected' : ''}>15 mins</option>
-                  <option value="20" ${service.durationMinutes == 20 ? 'selected' : ''}>20 mins</option>
-                  <option value="25" ${service.durationMinutes == 25 ? 'selected' : ''}>25 mins</option>
-                  <option value="30" ${service.durationMinutes == 30 ? 'selected' : ''}>30 mins</option>
-                  <option value="35" ${service.durationMinutes == 35 ? 'selected' : ''}>35 mins</option>
-                  <option value="45" ${service.durationMinutes == 45 ? 'selected' : ''}>45 mins</option>
-                  <option value="50" ${service.durationMinutes == 50 ? 'selected' : ''}>50 mins</option>
-                  <option value="60" ${service.durationMinutes == 60 ? 'selected' : ''}>60 mins</option>
-                  <option value="75" ${service.durationMinutes == 75 ? 'selected' : ''}>75 mins</option>
-                  <option value="90" ${service.durationMinutes == 90 ? 'selected' : ''}>90 mins</option>
-                  <option value="120" ${service.durationMinutes == 120 ? 'selected' : ''}>120 mins</option>
+                  ${renderServiceDurationOptions(service.durationMinutes || 30)}
                 </select>
               </div>
             </div>
@@ -3154,11 +3069,16 @@ export class SalonDashboard {
       e.preventDefault();
       const rawCat = categorySelect.value;
       const finalCategory = rawCat === 'CUSTOM' ? (customCatInput.value.trim() || 'General') : rawCat;
+      const dur = parseInt(document.getElementById('edit-svc-duration').value, 10);
+      if (isNaN(dur) || dur < 30 || dur % 15 !== 0) {
+        alert('Service duration must be at least 30 minutes and a multiple of 15 (e.g. 30, 45, 60, 75, 90 mins).');
+        return;
+      }
 
       const payload = {
         name: document.getElementById('edit-svc-name').value.trim(),
         price: parseFloat(document.getElementById('edit-svc-price').value),
-        durationMinutes: parseInt(document.getElementById('edit-svc-duration').value, 10),
+        durationMinutes: dur,
         category: finalCategory,
         description: document.getElementById('edit-svc-desc').value.trim(),
       };
