@@ -4,6 +4,8 @@ import {
   IsOptional,
   IsString,
   Min,
+  IsArray,
+  IsUUID,
   registerDecorator,
   ValidationOptions,
   ValidationArguments,
@@ -49,6 +51,11 @@ export class CreateServiceDto {
   @IsString()
   @IsOptional()
   category?: string;
+
+  @IsArray()
+  @IsUUID('4', { each: true, message: 'Each stylistId must be a valid UUID' })
+  @IsOptional()
+  stylistIds?: string[];
 }
 
 export class UpdateServiceDto {
@@ -74,4 +81,10 @@ export class UpdateServiceDto {
   @IsString()
   @IsOptional()
   category?: string;
+
+  @IsArray()
+  @IsUUID('4', { each: true, message: 'Each stylistId must be a valid UUID' })
+  @IsOptional()
+  stylistIds?: string[];
 }
+

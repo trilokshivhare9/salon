@@ -217,6 +217,7 @@ describe('AppointmentsService (Unit Tests)', () => {
         date: '2026-09-08',
         salonTimezone: 'Asia/Kolkata',
         serviceDurationMinutes: 30,
+        status: 'AVAILABLE',
         availableSlots: [
           {
             startTime: '14:00',
@@ -269,6 +270,7 @@ describe('AppointmentsService (Unit Tests)', () => {
         date: '2026-09-08',
         salonTimezone: 'Asia/Kolkata',
         serviceDurationMinutes: 30,
+        status: 'AVAILABLE',
         availableSlots: [
           {
             startTime: '11:00',

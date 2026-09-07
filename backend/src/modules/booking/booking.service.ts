@@ -36,7 +36,14 @@ export class BookingService {
         cancelWindowHours: true,
         allowSpecificStylist: true,
         services: {
-          where: { status: 'ACTIVE' },
+          where: {
+            status: 'ACTIVE',
+            stylists: {
+              some: {
+                stylist: { status: 'ACTIVE' },
+              },
+            },
+          },
           select: {
             id: true,
             name: true,

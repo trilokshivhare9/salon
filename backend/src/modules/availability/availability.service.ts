@@ -7,6 +7,15 @@ import { PrismaService } from '../../database/prisma.service';
 import { DateTime } from 'luxon';
 import { DayOfWeek } from '@prisma/client';
 
+export type AvailabilityStatus =
+  | 'AVAILABLE'
+  | 'PAST_DATE'
+  | 'MAX_ADVANCE_EXCEEDED'
+  | 'SALON_CLOSED'
+  | 'NO_QUALIFIED_STAFF'
+  | 'STAFF_UNAVAILABLE'
+  | 'FULLY_BOOKED';
+
 export interface AvailableSlotResponse {
   startTime: string;       // "17:00" (Local salon time)
   endTime: string;         // "18:30" (startTime + serviceDuration)
@@ -21,6 +30,8 @@ export interface AvailabilityResult {
   salonTimezone: string;
   serviceDurationMinutes: number;
   availableSlots: AvailableSlotResponse[];
+  status: AvailabilityStatus;
+  statusReason?: string;
 }
 
 @Injectable()
@@ -92,6 +103,8 @@ export class AvailabilityService {
         salonTimezone: timezone,
         serviceDurationMinutes: 0,
         availableSlots: [],
+        status: 'PAST_DATE',
+        statusReason: 'Cannot book appointments for past dates.',
       };
     }
 
@@ -103,6 +116,8 @@ export class AvailabilityService {
         salonTimezone: timezone,
         serviceDurationMinutes: 0,
         availableSlots: [],
+        status: 'MAX_ADVANCE_EXCEEDED',
+        statusReason: `Bookings can only be made up to ${salon.maxAdvanceDays} days in advance.`,
       };
     }
 
@@ -124,18 +139,19 @@ export class AvailabilityService {
 
     const totalServiceDuration = services.reduce((sum, s) => sum + s.durationMinutes, 0);
 
+    const isSalonClosed = !salonWorkingHours || salonWorkingHours.isClosed;
     const salonOpenMinutes =
-      salonWorkingHours && !salonWorkingHours.isClosed
+      !isSalonClosed && salonWorkingHours
         ? this.parseTimeStringToMinutes(salonWorkingHours.startTime)
         : null;
     const salonCloseMinutes =
-      salonWorkingHours && !salonWorkingHours.isClosed
+      !isSalonClosed && salonWorkingHours
         ? this.parseTimeStringToMinutes(salonWorkingHours.endTime)
         : null;
 
     const salonBreak =
+      !isSalonClosed &&
       salonWorkingHours &&
-      !salonWorkingHours.isClosed &&
       salonWorkingHours.breakStartTime &&
       salonWorkingHours.breakEndTime
         ? {
@@ -165,13 +181,32 @@ export class AvailabilityService {
     });
 
     if (eligibleStylists.length === 0) {
+      // Diagnostic check: Does the salon have ANY active stylists qualified for these services?
+      const totalSalonQualifiedCount = await this.prisma.stylist.count({
+        where: {
+          salonId,
+          status: 'ACTIVE',
+          AND: serviceIds.map((sId) => ({ services: { some: { serviceId: sId } } })),
+        },
+      });
+
+      const diagnosticStatus: AvailabilityStatus =
+        totalSalonQualifiedCount === 0 ? 'NO_QUALIFIED_STAFF' : 'STAFF_UNAVAILABLE';
+      const diagnosticReason =
+        totalSalonQualifiedCount === 0
+          ? 'No active stylists in the salon are assigned or qualified to perform the selected service(s).'
+          : 'The selected specialist is not available on this date.';
+
       return {
         date: dateStr,
         salonTimezone: timezone,
         serviceDurationMinutes: totalServiceDuration,
         availableSlots: [],
+        status: diagnosticStatus,
+        statusReason: diagnosticReason,
       };
     }
+
 
     // 4. Fetch existing active blocking appointments for eligible stylists on this date
     const apptWhere: any = {
@@ -340,11 +375,26 @@ export class AvailabilityService {
       })
       .sort((a, b) => a.startTime.localeCompare(b.startTime));
 
+    let finalStatus: AvailabilityStatus = 'AVAILABLE';
+    let finalReason = `${availableSlots.length} slot(s) available for booking.`;
+
+    if (availableSlots.length === 0) {
+      if (isSalonClosed && eligibleStylists.every((st) => st.followsSalonSchedule)) {
+        finalStatus = 'SALON_CLOSED';
+        finalReason = 'The salon is closed on this day.';
+      } else {
+        finalStatus = 'FULLY_BOOKED';
+        finalReason = 'All appointment slots are fully booked or unavailable on this date.';
+      }
+    }
+
     return {
       date: dateStr,
       salonTimezone: timezone,
       serviceDurationMinutes: totalServiceDuration,
       availableSlots,
+      status: finalStatus,
+      statusReason: finalReason,
     };
   }
 }

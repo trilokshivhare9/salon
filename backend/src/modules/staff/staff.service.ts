@@ -92,23 +92,32 @@ export class StaffService {
       );
     }
 
-    const serviceIds = (dto.serviceIds || []).filter(Boolean);
+    let serviceIds: string[] = [];
 
-    // If service IDs are provided, verify that all provided serviceIds exist, belong to this salon, and are ACTIVE
-    if (serviceIds.length > 0) {
-      const matchingServices = await this.prisma.service.findMany({
-        where: {
-          id: { in: serviceIds },
-          salonId,
-          status: ServiceStatus.ACTIVE,
-        },
-      });
+    if (dto.serviceIds !== undefined) {
+      serviceIds = (dto.serviceIds || []).filter(Boolean);
+      if (serviceIds.length > 0) {
+        const matchingServices = await this.prisma.service.findMany({
+          where: {
+            id: { in: serviceIds },
+            salonId,
+            status: ServiceStatus.ACTIVE,
+          },
+        });
 
-      if (matchingServices.length !== serviceIds.length) {
-        throw new BadRequestException(
-          'One or more selected services do not exist, are inactive, or do not belong to this salon.',
-        );
+        if (matchingServices.length !== serviceIds.length) {
+          throw new BadRequestException(
+            'One or more selected services do not exist, are inactive, or do not belong to this salon.',
+          );
+        }
       }
+    } else {
+      // Default: auto-assign all active services in the salon so staff can take bookings immediately
+      const activeServices = await this.prisma.service.findMany({
+        where: { salonId, status: ServiceStatus.ACTIVE },
+        select: { id: true },
+      });
+      serviceIds = activeServices.map((s) => s.id);
     }
 
     const created = await this.prisma.$transaction(async (tx) => {
@@ -124,14 +133,15 @@ export class StaffService {
         },
       });
 
-      // Link assigned services if provided
-      for (const serviceId of serviceIds) {
-        await tx.stylistService.create({
-          data: {
+      // Link assigned services if any
+      if (serviceIds.length > 0) {
+        await tx.stylistService.createMany({
+          data: serviceIds.map((serviceId) => ({
             salonId,
             stylistId: stylist.id,
             serviceId,
-          },
+          })),
+          skipDuplicates: true,
         });
       }
 

@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 import { CreateServiceDto, UpdateServiceDto } from './dto/create-service.dto';
-import { ServiceStatus, SalonStatus, StylistStatus } from '@prisma/client';
+import { ServiceStatus, SalonStatus, StylistStatus, AppointmentStatus } from '@prisma/client';
 import { AppointmentsService } from '../appointments/appointments.service';
 
 @Injectable()
@@ -35,6 +35,9 @@ export class ServicesService {
             stylist: true,
           },
         },
+        _count: {
+          select: { stylists: true },
+        },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -48,6 +51,9 @@ export class ServicesService {
           include: {
             stylist: true,
           },
+        },
+        _count: {
+          select: { stylists: true },
         },
       },
     });
@@ -67,20 +73,76 @@ export class ServicesService {
       throw new BadRequestException('Service duration must be at least 30 minutes and a multiple of 15.');
     }
 
-    const service = await this.prisma.service.create({
-      data: {
-        salonId,
-        name: dto.name.trim(),
-        description: dto.description?.trim(),
-        price: dto.price,
-        durationMinutes: dto.durationMinutes,
-        category: dto.category?.trim(),
-        status: ServiceStatus.ACTIVE,
-      },
+    // Determine target stylists to link
+    let targetStylistIds: string[] = [];
+
+    if (dto.stylistIds !== undefined) {
+      // Explicit stylist list provided (can be empty array if explicitly desired)
+      if (dto.stylistIds.length > 0) {
+        const matchingStylists = await this.prisma.stylist.findMany({
+          where: {
+            id: { in: dto.stylistIds },
+            salonId,
+            status: StylistStatus.ACTIVE,
+          },
+          select: { id: true },
+        });
+
+        if (matchingStylists.length !== dto.stylistIds.length) {
+          throw new BadRequestException(
+            'One or more selected stylists do not exist, are inactive, or do not belong to this salon.',
+          );
+        }
+        targetStylistIds = matchingStylists.map((s) => s.id);
+      }
+    } else {
+      // Default: automatically assign all active stylists in the salon
+      const activeStylists = await this.prisma.stylist.findMany({
+        where: { salonId, status: StylistStatus.ACTIVE },
+        select: { id: true },
+      });
+      targetStylistIds = activeStylists.map((s) => s.id);
+    }
+
+    const service = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.service.create({
+        data: {
+          salonId,
+          name: dto.name.trim(),
+          description: dto.description?.trim(),
+          price: dto.price,
+          durationMinutes: dto.durationMinutes,
+          category: dto.category?.trim(),
+          status: ServiceStatus.ACTIVE,
+        },
+      });
+
+      if (targetStylistIds.length > 0) {
+        await tx.stylistService.createMany({
+          data: targetStylistIds.map((stylistId) => ({
+            salonId,
+            stylistId,
+            serviceId: created.id,
+          })),
+          skipDuplicates: true,
+        });
+      }
+
+      return tx.service.findUnique({
+        where: { id: created.id },
+        include: {
+          stylists: {
+            include: { stylist: true },
+          },
+          _count: {
+            select: { stylists: true },
+          },
+        },
+      });
     });
 
     await this.syncSalonActiveStatus(salonId);
-    this.appointmentsService.emitSalonEvent(salonId, 'SERVICE_UPDATED', { serviceId: service.id, action: 'CREATE' });
+    this.appointmentsService.emitSalonEvent(salonId, 'SERVICE_UPDATED', { serviceId: service!.id, action: 'CREATE' });
     return service;
   }
 
@@ -94,9 +156,61 @@ export class ServicesService {
       throw new BadRequestException('Service duration must be at least 30 minutes and a multiple of 15.');
     }
 
-    const updated = await this.prisma.service.update({
-      where: { id: serviceId },
-      data: dto,
+    const { stylistIds, ...serviceData } = dto;
+
+    // Validate stylistIds if provided
+    if (stylistIds !== undefined && stylistIds.length > 0) {
+      const matchingStylists = await this.prisma.stylist.findMany({
+        where: {
+          id: { in: stylistIds },
+          salonId,
+          status: StylistStatus.ACTIVE,
+        },
+        select: { id: true },
+      });
+
+      if (matchingStylists.length !== stylistIds.length) {
+        throw new BadRequestException(
+          'One or more selected stylists do not exist, are inactive, or do not belong to this salon.',
+        );
+      }
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.service.update({
+        where: { id: serviceId },
+        data: serviceData,
+      });
+
+      // If stylistIds was provided, update stylist_services mapping
+      if (stylistIds !== undefined) {
+        await tx.stylistService.deleteMany({
+          where: { salonId, serviceId },
+        });
+
+        if (stylistIds.length > 0) {
+          await tx.stylistService.createMany({
+            data: stylistIds.map((stylistId) => ({
+              salonId,
+              stylistId,
+              serviceId,
+            })),
+            skipDuplicates: true,
+          });
+        }
+      }
+
+      return tx.service.findUnique({
+        where: { id: serviceId },
+        include: {
+          stylists: {
+            include: { stylist: true },
+          },
+          _count: {
+            select: { stylists: true },
+          },
+        },
+      });
     });
 
     await this.syncSalonActiveStatus(salonId);
@@ -111,6 +225,14 @@ export class ServicesService {
     const updated = await this.prisma.service.update({
       where: { id: serviceId },
       data: { status: newStatus },
+      include: {
+        stylists: {
+          include: { stylist: true },
+        },
+        _count: {
+          select: { stylists: true },
+        },
+      },
     });
 
     await this.syncSalonActiveStatus(salonId);
@@ -120,6 +242,22 @@ export class ServicesService {
 
   async deleteService(salonId: string, serviceId: string) {
     await this.getServiceById(salonId, serviceId);
+
+    // Guard: Prevent deletion if there are future active appointments
+    const futureAppointmentsCount = await this.prisma.appointment.count({
+      where: {
+        salonId,
+        serviceId,
+        startAt: { gte: new Date() },
+        status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN, AppointmentStatus.IN_SERVICE] },
+      },
+    });
+
+    if (futureAppointmentsCount > 0) {
+      throw new BadRequestException(
+        `Cannot delete service: There are ${futureAppointmentsCount} upcoming active appointment(s) booked for this service. Please cancel or reschedule them, or deactivate the service instead.`,
+      );
+    }
 
     const result = await this.prisma.$transaction(async (tx) => {
       // 1. Remove appointments tied to this service so ON DELETE RESTRICT does not block deletion
@@ -158,3 +296,4 @@ export class ServicesService {
     return result;
   }
 }
+

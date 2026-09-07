@@ -86,7 +86,7 @@ describe('AvailabilityService (Unit Tests)', () => {
             salon: { findUnique: jest.fn() },
             service: { findMany: jest.fn() },
             salonWorkingHours: { findUnique: jest.fn() },
-            stylist: { findMany: jest.fn() },
+            stylist: { findMany: jest.fn(), count: jest.fn() },
             appointment: { findMany: jest.fn() },
           },
         },
@@ -211,5 +211,46 @@ describe('AvailabilityService (Unit Tests)', () => {
     // Priya works starting from 08:00
     expect(slotTimes).toContain('08:00');
     expect(slotTimes).toContain('08:15');
+  });
+
+  describe('Diagnostic AvailabilityStatus codes', () => {
+    it('should return NO_QUALIFIED_STAFF when no active stylists are qualified for the service', async () => {
+      jest.spyOn(prisma.salon, 'findUnique').mockResolvedValue(mockSalon as any);
+      jest.spyOn(prisma.service, 'findMany').mockResolvedValue([mockService1] as any);
+      jest.spyOn(prisma.salonWorkingHours, 'findUnique').mockResolvedValue(mockSalonWorkingHours as any);
+      jest.spyOn(prisma.stylist, 'findMany').mockResolvedValue([]);
+      jest.spyOn(prisma.stylist, 'count').mockResolvedValue(0); // zero qualified stylists in salon
+
+      const result = await service.getAvailableSlots(mockSalonId, mockService1.id, '2026-09-14');
+      expect(result.availableSlots).toEqual([]);
+      expect(result.status).toBe('NO_QUALIFIED_STAFF');
+      expect(result.statusReason).toContain('No active stylists');
+    });
+
+    it('should return SALON_CLOSED when salon is closed and all eligible stylists follow salon schedule', async () => {
+      jest.spyOn(prisma.salon, 'findUnique').mockResolvedValue(mockSalon as any);
+      jest.spyOn(prisma.service, 'findMany').mockResolvedValue([mockService1] as any);
+      jest.spyOn(prisma.salonWorkingHours, 'findUnique').mockResolvedValue({
+        salonId: mockSalonId,
+        dayOfWeek: DayOfWeek.MONDAY,
+        isClosed: true,
+        startTime: '10:00',
+        endTime: '20:00',
+      } as any);
+      jest.spyOn(prisma.stylist, 'findMany').mockResolvedValue([mockStylists[0]] as any); // follows salon schedule
+      jest.spyOn(prisma.appointment, 'findMany').mockResolvedValue([]);
+
+      const result = await service.getAvailableSlots(mockSalonId, mockService1.id, '2026-09-14');
+      expect(result.availableSlots).toEqual([]);
+      expect(result.status).toBe('SALON_CLOSED');
+    });
+
+    it('should return PAST_DATE when requested date is in the past', async () => {
+      jest.spyOn(prisma.salon, 'findUnique').mockResolvedValue(mockSalon as any);
+
+      const result = await service.getAvailableSlots(mockSalonId, mockService1.id, '2020-01-01');
+      expect(result.availableSlots).toEqual([]);
+      expect(result.status).toBe('PAST_DATE');
+    });
   });
 });

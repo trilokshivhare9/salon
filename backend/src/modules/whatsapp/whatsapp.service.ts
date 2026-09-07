@@ -800,7 +800,17 @@ export class WhatsAppService {
     const salon: any = await this.prisma.salon.findUnique({
       where: { id: salonId },
       include: {
-        services: { where: { status: 'ACTIVE' }, orderBy: { name: 'asc' } },
+        services: {
+          where: {
+            status: 'ACTIVE',
+            stylists: {
+              some: {
+                stylist: { status: 'ACTIVE' },
+              },
+            },
+          },
+          orderBy: { name: 'asc' },
+        },
         stylists: { where: { status: 'ACTIVE' }, include: { services: true } },
       },
     });
@@ -1335,7 +1345,17 @@ export class WhatsAppService {
 
 
         if (availability.availableSlots.length === 0) {
-          const reply = `⚠️ No available slots on *${targetDate.toFormat('dd LLL, EEEE')}*. Please choose another date:`;
+          let reply = `⚠️ No available slots on *${targetDate.toFormat('dd LLL, EEEE')}*. Please choose another date:`;
+          if (availability.status === 'SALON_CLOSED') {
+            reply = `📅 We are closed on *${targetDate.toFormat('EEEE')}s*. Please choose another date:`;
+          } else if (availability.status === 'FULLY_BOOKED') {
+            reply = `⚠️ All slots on *${targetDate.toFormat('dd LLL, EEEE')}* are fully booked! Please choose another date:`;
+          } else if (availability.status === 'STAFF_UNAVAILABLE') {
+            reply = `⚠️ Our specialists are not available on *${targetDate.toFormat('dd LLL, EEEE')}*. Please choose another date:`;
+          } else if (availability.status === 'NO_QUALIFIED_STAFF') {
+            reply = `⚠️ This service is currently unavailable for booking. Please choose another date or service:`;
+          }
+
           await this.sendMetaMessage(
             cleanNumber,
             {
@@ -1855,7 +1875,53 @@ export class WhatsAppService {
         );
 
         if (availability.availableSlots.length === 0) {
-          const reply = `⚠️ Sorry, no slots available on *${targetDate.toFormat('dd LLL, EEEE')}*.`;
+          if (availability.status === 'NO_QUALIFIED_STAFF') {
+            const selectedSvc = await this.prisma.service.findUnique({
+              where: { id: conversation.selectedServiceId! },
+              select: { name: true },
+            });
+            const svcName = selectedSvc?.name || 'Selected service';
+            const reply = `⚠️ *${svcName}* is temporarily unavailable for online booking. Please choose another service:`;
+
+            await this.prisma.conversation.update({
+              where: { id: conversation.id },
+              data: { state: ConversationState.SELECT_SERVICE, selectedServiceId: null },
+            });
+
+            const listRows: InteractiveListRow[] = salon.services.map((s: any) => ({
+              id: `svc_${s.id}`,
+              title: s.name,
+              description: `₹${s.price} • ${s.durationMinutes} mins`,
+            }));
+
+            if (listRows.length > 0) {
+              await this.sendMetaMessage(
+                cleanNumber,
+                {
+                  headerText: `${salon.name} Menu`,
+                  bodyText: reply,
+                  footerText: 'Tap below to select',
+                  buttonText: '✂️ Select Service',
+                  interactiveType: 'list',
+                  listRows,
+                },
+                phoneNumberId,
+              );
+            } else {
+              await this.sendMetaMessage(cleanNumber, { textBody: reply }, phoneNumberId);
+            }
+            return { replyMessage: reply, state: ConversationState.SELECT_SERVICE };
+          }
+
+          let reply = `⚠️ Sorry, no slots available on *${targetDate.toFormat('dd LLL, EEEE')}*.`;
+          if (availability.status === 'SALON_CLOSED') {
+            reply = `📅 We are closed on *${targetDate.toFormat('EEEE')}s*. Please pick another date:`;
+          } else if (availability.status === 'FULLY_BOOKED') {
+            reply = `⚠️ All slots on *${targetDate.toFormat('dd LLL, EEEE')}* are fully booked! Please pick another date:`;
+          } else if (availability.status === 'STAFF_UNAVAILABLE') {
+            reply = `⚠️ Our specialists are not available on *${targetDate.toFormat('dd LLL, EEEE')}*. Please pick another date:`;
+          }
+
           await this.sendMetaMessage(
             cleanNumber,
             {
@@ -1944,7 +2010,17 @@ export class WhatsAppService {
         );
 
         if (availability.availableSlots.length === 0) {
-          const reply = `⚠️ Sorry, no slots are currently available on *${targetDate}*. Please choose another date:`;
+          let reply = `⚠️ Sorry, no slots are currently available on *${targetDate}*. Please choose another date:`;
+          if (availability.status === 'SALON_CLOSED') {
+            reply = `📅 The salon is closed on this day. Please choose another date:`;
+          } else if (availability.status === 'FULLY_BOOKED') {
+            reply = `⚠️ All slots on *${targetDate}* are fully booked! Please choose another date:`;
+          } else if (availability.status === 'STAFF_UNAVAILABLE') {
+            reply = `⚠️ Our specialists are not available on *${targetDate}*. Please choose another date:`;
+          } else if (availability.status === 'NO_QUALIFIED_STAFF') {
+            reply = `⚠️ This service is currently unavailable for booking. Please choose another service:`;
+          }
+
           await this.sendMetaMessage(
             cleanNumber,
             {

@@ -327,10 +327,26 @@ export class BookingWizard {
       this.state.availableSlots = data.availableSlots || [];
 
       if (this.state.availableSlots.length === 0) {
+        let title = 'No Available Slots on this Date';
+        let sub = 'Please choose another date or specialist.';
+        if (data.status === 'SALON_CLOSED') {
+          title = 'Salon is Closed on this Date';
+          sub = 'Please select an alternate day of the week.';
+        } else if (data.status === 'NO_QUALIFIED_STAFF') {
+          title = 'Service Temporarily Unavailable';
+          sub = 'No stylists are currently assigned to perform this service online.';
+        } else if (data.status === 'FULLY_BOOKED') {
+          title = 'Fully Booked for this Date';
+          sub = 'All appointment slots are taken. Please try another day.';
+        } else if (data.status === 'STAFF_UNAVAILABLE') {
+          title = 'Specialist Unavailable';
+          sub = 'The selected specialist does not work on this date. Try another specialist or date.';
+        }
+
         slotsContainer.innerHTML = `
           <div style="text-align: center; padding: 30px; background: rgba(239, 68, 68, 0.05); border: 1px solid rgba(239,68,68,0.2); border-radius: var(--radius-md);">
-            <div style="color: #f87171; font-weight: 600; margin-bottom: 4px;">No Available Slots on this Date</div>
-            <div style="color: var(--text-muted); font-size: 0.85rem;">Please choose another date or specialist.</div>
+            <div style="color: #f87171; font-weight: 600; margin-bottom: 4px;">${title}</div>
+            <div style="color: var(--text-muted); font-size: 0.85rem;">${sub}</div>
           </div>
         `;
         return;

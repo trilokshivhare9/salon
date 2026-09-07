@@ -1396,12 +1396,22 @@ export class SalonDashboard {
                     <p style="font-size: 0.84rem; color: var(--text-secondary); margin-bottom: 16px; min-height: 38px; line-height: 1.5;">
                       ${s.description || 'Standard salon treatment service.'}
                     </p>
-                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 14px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 8px;">
                       <span style="display: flex; align-items: center; gap: 5px;">
                         ${Icons.clock({ size: 13, color: '#94a3b8' })}
                         <strong>${s.durationMinutes || 30}</strong> mins
                       </span>
                       <span class="badge badge-confirmed">${s.category || 'General'}</span>
+                    </div>
+                    <div style="margin-bottom: 14px;">
+                      ${(() => {
+                        const count = (s.stylists && s.stylists.length) || s._count?.stylists || 0;
+                        if (count > 0) {
+                          return `<span class="badge" style="background: rgba(34, 197, 94, 0.12); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.25); font-size: 0.76rem; padding: 3px 8px; border-radius: 999px;">✓ ${count} Stylist${count > 1 ? 's' : ''} Assigned</span>`;
+                        } else {
+                          return `<span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); font-size: 0.76rem; padding: 3px 8px; border-radius: 999px;" title="No stylists assigned. Clients cannot book this service on WhatsApp or Web.">⚠️ 0 Staff (Unbookable)</span>`;
+                        }
+                      })()}
                     </div>
                   </div>
                   <div style="display: flex; gap: 8px; border-top: 1px solid var(--border-subtle); padding-top: 12px;">
@@ -2079,15 +2089,16 @@ export class SalonDashboard {
     // Edit Service Modal
     this.container.querySelectorAll('.btn-edit-service').forEach((btn) => {
       btn.addEventListener('click', (e) => {
-        const data = {
-          id: e.currentTarget.getAttribute('data-id'),
+        const id = e.currentTarget.getAttribute('data-id');
+        const service = (this.servicesList || []).find((s) => String(s.id) === String(id)) || {
+          id,
           name: e.currentTarget.getAttribute('data-name'),
           price: e.currentTarget.getAttribute('data-price'),
           durationMinutes: e.currentTarget.getAttribute('data-duration'),
           category: e.currentTarget.getAttribute('data-category'),
           description: e.currentTarget.getAttribute('data-desc'),
         };
-        this.showEditServiceModal(data);
+        this.showEditServiceModal(service);
       });
     });
 
@@ -2273,14 +2284,16 @@ export class SalonDashboard {
     document.getElementById('btn-add-service')?.addEventListener('click', () => this.showAddServiceModal());
     tabContent.querySelectorAll('.btn-edit-service').forEach((btn) => {
       btn.addEventListener('click', (e) => {
-        this.showEditServiceModal({
-          id: e.currentTarget.getAttribute('data-id'),
+        const id = e.currentTarget.getAttribute('data-id');
+        const service = (this.servicesList || []).find((s) => String(s.id) === String(id)) || {
+          id,
           name: e.currentTarget.getAttribute('data-name'),
           price: e.currentTarget.getAttribute('data-price'),
           durationMinutes: e.currentTarget.getAttribute('data-duration'),
           category: e.currentTarget.getAttribute('data-category'),
           description: e.currentTarget.getAttribute('data-desc'),
-        });
+        };
+        this.showEditServiceModal(service);
       });
     });
     tabContent.querySelectorAll('.btn-delete-service').forEach((btn) => {
@@ -2875,6 +2888,7 @@ export class SalonDashboard {
 
   showAddServiceModal() {
     const modalContainer = document.getElementById('modal-container');
+    const activeStaff = (this.staffList || []).filter((st) => st.status === 'ACTIVE' || !st.status);
 
     modalContainer.innerHTML = `
       <div class="modal-backdrop show">
@@ -2928,6 +2942,26 @@ export class SalonDashboard {
               <textarea class="form-control" id="svc-desc" rows="2" placeholder="Brief details about the treatment / service..."></textarea>
             </div>
 
+            <!-- 5. Assigned Team Members -->
+            <div class="form-group">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <label style="margin-bottom: 0;">Assigned Stylists <span style="color: var(--text-muted); font-size: 0.8rem; font-weight: normal;">(Who provides this service?)</span></label>
+                ${activeStaff.length > 0 ? `
+                  <button type="button" id="btn-toggle-all-svc-staff" class="btn btn-secondary btn-sm" style="font-size: 0.75rem; padding: 2px 8px;">Deselect All</button>
+                ` : ''}
+              </div>
+              <div style="max-height: 140px; overflow-y: auto; background: var(--bg-input); padding: 8px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);">
+                ${activeStaff.length === 0 ? `
+                  <div style="font-size: 0.8rem; color: var(--text-muted); padding: 4px;">No active stylists in salon yet. Staff can be assigned later.</div>
+                ` : activeStaff.map((st) => `
+                  <label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; margin-bottom: 6px; cursor: pointer;">
+                    <input type="checkbox" class="svc-staff-assign-chk" value="${st.id}" checked />
+                    <span>${st.name} ${st.phone ? `<span style="color: var(--text-muted); font-size: 0.78rem;">(${st.phone})</span>` : ''}</span>
+                  </label>
+                `).join('')}
+              </div>
+            </div>
+
             <button type="submit" class="btn btn-primary" style="width: 100%;">Create Service →</button>
           </form>
         </div>
@@ -2943,6 +2977,13 @@ export class SalonDashboard {
     const priceInput = document.getElementById('svc-price');
     const durationSelect = document.getElementById('svc-duration');
     const descInput = document.getElementById('svc-desc');
+
+    document.getElementById('btn-toggle-all-svc-staff')?.addEventListener('click', (e) => {
+      const chks = document.querySelectorAll('.svc-staff-assign-chk');
+      const allChecked = Array.from(chks).every((c) => c.checked);
+      chks.forEach((c) => (c.checked = !allChecked));
+      e.target.textContent = allChecked ? 'Select All' : 'Deselect All';
+    });
 
     categorySelect?.addEventListener('change', (e) => {
       if (e.target.value === 'CUSTOM') {
@@ -2962,12 +3003,15 @@ export class SalonDashboard {
         return;
       }
 
+      const selectedStylistIds = Array.from(document.querySelectorAll('.svc-staff-assign-chk:checked')).map((c) => c.value);
+
       const payload = {
         name: nameInput.value.trim(),
         price: parseFloat(priceInput.value),
         durationMinutes: dur,
         category: finalCategory,
         description: descInput.value.trim(),
+        stylistIds: selectedStylistIds,
       };
 
       try {
@@ -2992,6 +3036,7 @@ export class SalonDashboard {
     const modalContainer = document.getElementById('modal-container');
     const matchedCat = SERVICE_CATEGORIES.find((c) => c.category === service.category);
     const initialCatValue = matchedCat ? service.category : 'CUSTOM';
+    const activeStaff = (this.staffList || []).filter((st) => st.status === 'ACTIVE' || !st.status);
 
     modalContainer.innerHTML = `
       <div class="modal-backdrop show">
@@ -3045,6 +3090,29 @@ export class SalonDashboard {
               <textarea class="form-control" id="edit-svc-desc" rows="2">${service.description || ''}</textarea>
             </div>
 
+            <!-- 5. Assigned Team Members -->
+            <div class="form-group">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <label style="margin-bottom: 0;">Assigned Stylists <span style="color: var(--text-muted); font-size: 0.8rem; font-weight: normal;">(Who provides this service?)</span></label>
+                ${activeStaff.length > 0 ? `
+                  <button type="button" id="btn-toggle-all-edit-svc-staff" class="btn btn-secondary btn-sm" style="font-size: 0.75rem; padding: 2px 8px;">Toggle All</button>
+                ` : ''}
+              </div>
+              <div style="max-height: 140px; overflow-y: auto; background: var(--bg-input); padding: 8px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);">
+                ${activeStaff.length === 0 ? `
+                  <div style="font-size: 0.8rem; color: var(--text-muted); padding: 4px;">No active stylists in salon yet.</div>
+                ` : activeStaff.map((st) => {
+                  const isAssigned = (service.stylists || []).some((s) => String(s.stylistId || s.stylist?.id || s.id) === String(st.id));
+                  return `
+                    <label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; margin-bottom: 6px; cursor: pointer;">
+                      <input type="checkbox" class="edit-svc-staff-assign-chk" value="${st.id}" ${isAssigned ? 'checked' : ''} />
+                      <span>${st.name} ${st.phone ? `<span style="color: var(--text-muted); font-size: 0.78rem;">(${st.phone})</span>` : ''}</span>
+                    </label>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+
             <button type="submit" class="btn btn-primary" style="width: 100%;">Save Changes to Menu →</button>
           </form>
         </div>
@@ -3065,6 +3133,12 @@ export class SalonDashboard {
       }
     });
 
+    document.getElementById('btn-toggle-all-edit-svc-staff')?.addEventListener('click', () => {
+      const chks = document.querySelectorAll('.edit-svc-staff-assign-chk');
+      const allChecked = Array.from(chks).every((c) => c.checked);
+      chks.forEach((c) => (c.checked = !allChecked));
+    });
+
     document.getElementById('edit-service-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       const rawCat = categorySelect.value;
@@ -3075,12 +3149,15 @@ export class SalonDashboard {
         return;
       }
 
+      const selectedStylistIds = Array.from(document.querySelectorAll('.edit-svc-staff-assign-chk:checked')).map((c) => c.value);
+
       const payload = {
         name: document.getElementById('edit-svc-name').value.trim(),
         price: parseFloat(document.getElementById('edit-svc-price').value),
         durationMinutes: dur,
         category: finalCategory,
         description: document.getElementById('edit-svc-desc').value.trim(),
+        stylistIds: selectedStylistIds,
       };
 
       try {
