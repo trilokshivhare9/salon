@@ -1,3 +1,4 @@
+import { Transform } from 'class-transformer';
 import {
   IsNotEmpty,
   IsNumber,
@@ -31,10 +32,12 @@ export function IsMultipleOf15(validationOptions?: ValidationOptions) {
 }
 
 export class CreateServiceDto {
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
-  @IsNotEmpty()
+  @IsNotEmpty({ message: 'Service name cannot be empty or blank' })
   name: string;
 
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @IsOptional()
   description?: string;
@@ -48,6 +51,7 @@ export class CreateServiceDto {
   @IsMultipleOf15()
   durationMinutes: number;
 
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @IsOptional()
   category?: string;
@@ -59,10 +63,13 @@ export class CreateServiceDto {
 }
 
 export class UpdateServiceDto {
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
+  @IsNotEmpty({ message: 'Service name cannot be empty or blank if provided' })
   @IsOptional()
   name?: string;
 
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @IsOptional()
   description?: string;
@@ -78,6 +85,7 @@ export class UpdateServiceDto {
   @IsOptional()
   durationMinutes?: number;
 
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @IsOptional()
   category?: string;

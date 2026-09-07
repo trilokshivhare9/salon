@@ -66,6 +66,9 @@ export class ServicesService {
   }
 
   async createService(salonId: string, dto: CreateServiceDto) {
+    if (!dto.name || dto.name.trim().length === 0) {
+      throw new BadRequestException('Service name cannot be empty or blank.');
+    }
     if (dto.price !== undefined && dto.price < 0) {
       throw new BadRequestException('Service price cannot be negative.');
     }
@@ -149,6 +152,19 @@ export class ServicesService {
   async updateService(salonId: string, serviceId: string, dto: UpdateServiceDto) {
     await this.getServiceById(salonId, serviceId);
 
+    if (dto.name !== undefined) {
+      const trimmedName = dto.name.trim();
+      if (trimmedName.length === 0) {
+        throw new BadRequestException('Service name cannot be empty or blank.');
+      }
+      dto.name = trimmedName;
+    }
+    if (dto.description !== undefined) {
+      dto.description = dto.description?.trim();
+    }
+    if (dto.category !== undefined) {
+      dto.category = dto.category?.trim();
+    }
     if (dto.price !== undefined && dto.price < 0) {
       throw new BadRequestException('Service price cannot be negative.');
     }
@@ -243,35 +259,28 @@ export class ServicesService {
   async deleteService(salonId: string, serviceId: string) {
     await this.getServiceById(salonId, serviceId);
 
-    // Guard: Prevent deletion if there are future active appointments
-    const futureAppointmentsCount = await this.prisma.appointment.count({
+    // Guard: Prevent deletion if ANY appointment (historical or active) is tied to this service
+    const totalAppointmentsCount = await this.prisma.appointment.count({
       where: {
         salonId,
         serviceId,
-        startAt: { gte: new Date() },
-        status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN, AppointmentStatus.IN_SERVICE] },
       },
     });
 
-    if (futureAppointmentsCount > 0) {
+    if (totalAppointmentsCount > 0) {
       throw new BadRequestException(
-        `Cannot delete service: There are ${futureAppointmentsCount} upcoming active appointment(s) booked for this service. Please cancel or reschedule them, or deactivate the service instead.`,
+        `Cannot delete service: There are ${totalAppointmentsCount} appointment(s) (historical or active) booked for this service. Please deactivate the service instead to preserve business records and customer visit history.`,
       );
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
-      // 1. Remove appointments tied to this service so ON DELETE RESTRICT does not block deletion
-      await tx.appointment.deleteMany({
-        where: { salonId, serviceId },
-      });
-
-      // 2. Clear active conversation reference if any
+      // 1. Clear active conversation reference if any
       await tx.conversation.updateMany({
         where: { salonId, selectedServiceId: serviceId },
         data: { selectedServiceId: null },
       });
 
-      // 3. Delete the service record (Prisma cascades stylist_services)
+      // 2. Delete the service record (Prisma cascades stylist_services)
       const deleted = await tx.service.delete({
         where: { id: serviceId },
       });
