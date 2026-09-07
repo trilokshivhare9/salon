@@ -16,9 +16,10 @@ import {
   RescheduleAppointmentDto,
 } from './dto/create-appointment.dto';
 import { DateTime } from 'luxon';
-import { AppointmentStatus, BookingSource, ClientEtaStatus } from '@prisma/client';
+import { AppointmentStatus, BookingSource, ClientEtaStatus, DayOfWeek, StylistStatus, ServiceStatus } from '@prisma/client';
 import { Subject, Observable } from 'rxjs';
 import { filter } from 'rxjs/operators';
+import * as crypto from 'crypto';
 
 export interface SalonRealtimeEvent {
   salonId: string;
@@ -34,6 +35,41 @@ export interface SalonRealtimeEvent {
   data: any;
   timestamp: string;
 }
+
+export const VALID_STATUS_TRANSITIONS: Record<AppointmentStatus, AppointmentStatus[]> = {
+  [AppointmentStatus.CONFIRMED]: [
+    AppointmentStatus.CHECKED_IN,
+    AppointmentStatus.CANCELLED,
+    AppointmentStatus.NO_SHOW,
+  ],
+  [AppointmentStatus.CHECKED_IN]: [
+    AppointmentStatus.IN_SERVICE,
+    AppointmentStatus.CANCELLED,
+    AppointmentStatus.NO_SHOW,
+  ],
+  [AppointmentStatus.IN_SERVICE]: [
+    AppointmentStatus.COMPLETED,
+  ],
+  [AppointmentStatus.COMPLETED]: [], // Terminal
+  [AppointmentStatus.CANCELLED]: [], // Terminal
+  [AppointmentStatus.NO_SHOW]: [],   // Terminal
+};
+
+const appointmentInclude = {
+  salonUser: {
+    include: {
+      user: true,
+    },
+  },
+  stylist: true,
+  service: true,
+  services: {
+    include: {
+      service: true,
+    },
+    orderBy: { orderIndex: 'asc' as const },
+  },
+};
 
 @Injectable()
 export class AppointmentsService {
@@ -66,20 +102,16 @@ export class AppointmentsService {
     return phone.replace(/[^\d+]/g, '');
   }
 
-  private getLockKeys(salonId: string, stylistId: string, dateStr: string): [number, number] {
-    const str1 = `${salonId}:${dateStr}`;
-    const str2 = `${stylistId}:${dateStr}`;
-    let hash1 = 0;
-    let hash2 = 0;
-    for (let i = 0; i < str1.length; i++) {
-      hash1 = (hash1 << 5) - hash1 + str1.charCodeAt(i);
-      hash1 |= 0;
-    }
-    for (let i = 0; i < str2.length; i++) {
-      hash2 = (hash2 << 5) - hash2 + str2.charCodeAt(i);
-      hash2 |= 0;
-    }
-    return [Math.abs(hash1), Math.abs(hash2)];
+  private hashToSignedInt32(input: string): number {
+    return crypto.createHash('sha256').update(input).digest().readInt32BE(0);
+  }
+
+  private formatAppointment(appt: any) {
+    if (!appt) return null;
+    return {
+      ...appt,
+      user: appt.salonUser?.user || null,
+    };
   }
 
   async getAppointments(
@@ -105,7 +137,10 @@ export class AppointmentsService {
     }
     const targetUser = filters.userId || filters.customerId;
     if (targetUser) {
-      whereClause.userId = targetUser;
+      whereClause.OR = [
+        { salonUserId: targetUser },
+        { salonUser: { userId: targetUser } },
+      ];
     }
     if (filters.startDate && filters.endDate) {
       whereClause.appointmentDate = {
@@ -116,15 +151,13 @@ export class AppointmentsService {
       whereClause.appointmentDate = new Date(filters.startDate);
     }
 
-    return this.prisma.appointment.findMany({
+    const appointments = await this.prisma.appointment.findMany({
       where: whereClause,
-      include: {
-        user: true,
-        stylist: true,
-        service: true,
-      },
+      include: appointmentInclude,
       orderBy: { startAt: 'asc' },
     });
+
+    return appointments.map((appt) => this.formatAppointment(appt));
   }
 
   async getSalonAppointments(salonId: string, dateStr?: string, status?: AppointmentStatus) {
@@ -134,18 +167,14 @@ export class AppointmentsService {
   async getAppointmentById(salonId: string, appointmentId: string) {
     const appointment = await this.prisma.appointment.findFirst({
       where: { id: appointmentId, salonId },
-      include: {
-        user: true,
-        stylist: true,
-        service: true,
-      },
+      include: appointmentInclude,
     });
 
     if (!appointment) {
       throw new NotFoundException('Appointment not found.');
     }
 
-    return appointment;
+    return this.formatAppointment(appointment);
   }
 
   async createAppointment(
@@ -164,10 +193,41 @@ export class AppointmentsService {
     const timezone = salon.timezone || 'Asia/Kolkata';
     const requestedStylistId = dto.stylistId || dto.staffId;
 
-    // 1. Verify availability
+    // 1. Resolve Services (Multi-service support)
+    const serviceIds =
+      dto.serviceIds && dto.serviceIds.length > 0
+        ? dto.serviceIds
+        : dto.serviceId
+        ? [dto.serviceId]
+        : [];
+
+    if (serviceIds.length === 0) {
+      throw new BadRequestException('At least one service must be selected.');
+    }
+
+    const services = await this.prisma.service.findMany({
+      where: {
+        id: { in: serviceIds },
+        salonId,
+        status: 'ACTIVE',
+      },
+    });
+
+    if (services.length !== serviceIds.length) {
+      throw new NotFoundException('One or more selected services are invalid, inactive, or not found.');
+    }
+
+    // Preserve the requested service selection order
+    const orderedServices = serviceIds.map((id) => services.find((s) => s.id === id)!);
+    const totalDuration = orderedServices.reduce((sum, s) => sum + s.durationMinutes, 0);
+    const totalPrice = orderedServices.reduce((sum, s) => sum + Number(s.price), 0);
+    const primaryService = orderedServices[0];
+    const serviceNameSnapshot = orderedServices.map((s) => s.name).join(', ');
+
+    // 2. Verify availability
     const availability = await this.availabilityService.getAvailableSlots(
       salonId,
-      dto.serviceId,
+      serviceIds,
       dto.date,
       requestedStylistId,
     );
@@ -182,39 +242,7 @@ export class AppointmentsService {
       );
     }
 
-    // 2. Select stylist (either requested stylist or auto-assign least loaded stylist)
-    let assignedStylistId = requestedStylistId;
-    if (!assignedStylistId || !matchingSlot.eligibleStaffIds.includes(assignedStylistId)) {
-      const appointmentCounts = await this.prisma.appointment.groupBy({
-        by: ['stylistId'],
-        where: {
-          salonId,
-          appointmentDate: new Date(dto.date),
-          stylistId: { in: matchingSlot.eligibleStaffIds },
-          status: { notIn: ['CANCELLED', 'NO_SHOW', 'RESCHEDULED', 'EXPIRED'] },
-        },
-        _count: { id: true },
-      });
-
-      const countMap = new Map<string, number>();
-      matchingSlot.eligibleStaffIds.forEach((id) => countMap.set(id, 0));
-      appointmentCounts.forEach((c) => countMap.set(c.stylistId, c._count.id));
-
-      const sortedStaff = matchingSlot.eligibleStaffIds.sort(
-        (a, b) => (countMap.get(a) || 0) - (countMap.get(b) || 0),
-      );
-      assignedStylistId = sortedStaff[0];
-    }
-
-    // 3. Fetch Service Details for Timing & Pricing Snapshots
-    const service = await this.prisma.service.findUnique({
-      where: { id: dto.serviceId },
-    });
-
-    if (!service || service.status !== 'ACTIVE') {
-      throw new NotFoundException('Selected service not found or inactive.');
-    }
-
+    // Calculate start and end times in local salon timezone
     const [startH, startM] = dto.startTime.split(':').map((v) => parseInt(v, 10));
     const startDt = DateTime.fromISO(dto.date, { zone: timezone }).set({
       hour: startH,
@@ -222,60 +250,66 @@ export class AppointmentsService {
       second: 0,
       millisecond: 0,
     });
-    const endDt = startDt.plus({ minutes: service.durationMinutes });
+    const endDt = startDt.plus({ minutes: totalDuration });
+    const dayOfWeek = startDt.toFormat('cccc').toUpperCase() as DayOfWeek;
 
     const cleanPhone = this.sanitizePhone(dto.customerPhone);
 
-    // 4. PostgreSQL Advisory Locking & Atomic Transaction
-    const [key1, key2] = this.getLockKeys(salonId, assignedStylistId, dto.date);
+    // 3. Resolve Customer & SalonUser Identity
+    let user = await this.prisma.user.findUnique({
+      where: { phone: cleanPhone },
+    });
+
+    if (!user) {
+      user = await this.prisma.user.create({
+        data: {
+          phone: cleanPhone,
+          name: dto.customerName || null,
+          email: dto.customerEmail || null,
+        },
+      });
+    } else if (dto.customerName && !user.name) {
+      user = await this.prisma.user.update({
+        where: { id: user.id },
+        data: { name: dto.customerName },
+      });
+    }
+
+    const salonUser = await this.prisma.salonUser.upsert({
+      where: {
+        salonId_userId: { salonId, userId: user.id },
+      },
+      update: {},
+      create: {
+        salonId,
+        userId: user.id,
+      },
+    });
+
+    // 4. Global 3-Level Lock Hierarchy & Atomic Transaction
+    const key1 = this.hashToSignedInt32(`salon:${salonId}`);
+    const scheduleKey2 = this.hashToSignedInt32(`schedule:${dayOfWeek}`);
+    const customerKey2 = this.hashToSignedInt32(`cust:${salonUser.id}:${dto.date}`);
 
     try {
       const createdAppt = await this.prisma.$transaction(
         async (tx) => {
-          // Acquire transaction-scoped advisory lock for the stylist on this date
+          // Level 1: Acquire shared schedule resource lock (allows concurrent bookings on the same day)
           await tx.$executeRawUnsafe(
-            `SELECT pg_advisory_xact_lock(${key1}, ${key2})`,
+            `SELECT pg_advisory_xact_lock_shared(${key1}, ${scheduleKey2})`,
           );
 
-          // Find or create global User record
-          let user = await tx.user.findUnique({
-            where: { phone: cleanPhone },
-          });
+          // Level 2: Acquire customer resource lock
+          await tx.$executeRawUnsafe(
+            `SELECT pg_advisory_xact_lock(${key1}, ${customerKey2})`,
+          );
 
-          if (!user) {
-            user = await tx.user.create({
-              data: {
-                phone: cleanPhone,
-                name: dto.customerName || null,
-                email: dto.customerEmail || null,
-              },
-            });
-          } else if (dto.customerName && !user.name) {
-            user = await tx.user.update({
-              where: { id: user.id },
-              data: { name: dto.customerName },
-            });
-          }
-
-          // Link customer to salon via SalonUser
-          await tx.salonUser.upsert({
-            where: {
-              salonId_userId: { salonId, userId: user.id },
-            },
-            update: {},
-            create: {
-              salonId,
-              userId: user.id,
-            },
-          });
-
-          // Check for overlapping active appointment on this stylist
-          const overlap = await tx.appointment.findFirst({
+          // Check for salon-scoped customer overlap
+          const customerOverlap = await tx.appointment.findFirst({
             where: {
               salonId,
-              stylistId: assignedStylistId,
-              appointmentDate: new Date(dto.date),
-              status: { notIn: ['CANCELLED', 'NO_SHOW', 'RESCHEDULED', 'EXPIRED'] },
+              salonUserId: salonUser.id,
+              status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN, AppointmentStatus.IN_SERVICE] },
               AND: [
                 { startAt: { lt: endDt.toJSDate() } },
                 { endAt: { gt: startDt.toJSDate() } },
@@ -283,26 +317,160 @@ export class AppointmentsService {
             },
           });
 
-          if (overlap) {
+          if (customerOverlap) {
             throw new ConflictException(
-              'A concurrent booking just took this stylist time. Please choose another slot.',
+              'You already have an active appointment at this salon during the selected time.',
             );
+          }
+
+          // Level 3: Stylist Resource Lock
+          let assignedStylistId: string | null = null;
+
+          if (requestedStylistId) {
+            // Specific Stylist: exclusive lock
+            const stylistKey2 = this.hashToSignedInt32(`stylist:${requestedStylistId}:${dto.date}`);
+            await tx.$executeRawUnsafe(
+              `SELECT pg_advisory_xact_lock(${key1}, ${stylistKey2})`,
+            );
+
+            const overlap = await tx.appointment.findFirst({
+              where: {
+                salonId,
+                stylistId: requestedStylistId,
+                status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN, AppointmentStatus.IN_SERVICE] },
+                AND: [
+                  { startAt: { lt: endDt.toJSDate() } },
+                  { endAt: { gt: startDt.toJSDate() } },
+                ],
+              },
+            });
+
+            if (overlap) {
+              throw new ConflictException(
+                'A concurrent booking just took this stylist time. Please choose another slot.',
+              );
+            }
+            assignedStylistId = requestedStylistId;
+          } else {
+            // Any Stylist: Deterministic candidate ordering with try-lock fallback
+            const candidateIds = [...matchingSlot.eligibleStaffIds].sort();
+
+            for (const candidateId of candidateIds) {
+              const candKey2 = this.hashToSignedInt32(`stylist:${candidateId}:${dto.date}`);
+              const lockRows = await tx.$queryRawUnsafe<[{ pg_try_advisory_xact_lock: boolean }]>(
+                `SELECT pg_try_advisory_xact_lock(${key1}, ${candKey2})`,
+              );
+
+              if (lockRows?.[0]?.pg_try_advisory_xact_lock) {
+                // Lock acquired; verify candidate has no overlapping active appointments
+                const overlap = await tx.appointment.findFirst({
+                  where: {
+                    salonId,
+                    stylistId: candidateId,
+                    status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN, AppointmentStatus.IN_SERVICE] },
+                    AND: [
+                      { startAt: { lt: endDt.toJSDate() } },
+                      { endAt: { gt: startDt.toJSDate() } },
+                    ],
+                  },
+                });
+
+                if (!overlap) {
+                  assignedStylistId = candidateId;
+                  break;
+                }
+              }
+            }
+
+            if (!assignedStylistId) {
+              throw new ConflictException(
+                'All eligible specialists are currently occupied or being booked. Please choose another slot.',
+              );
+            }
+          }
+
+          // Re-verify assigned stylist status under lock (FOR SHARE to serialize with deactivation)
+          await tx.$executeRawUnsafe(
+            `SELECT id FROM stylists WHERE id = '${assignedStylistId!}' FOR SHARE`,
+          );
+          const assignedStylist = await tx.stylist.findUnique({
+            where: { id: assignedStylistId! },
+            select: { id: true, followsSalonSchedule: true, status: true },
+          });
+
+          if (!assignedStylist || assignedStylist.status !== StylistStatus.ACTIVE) {
+            throw new ConflictException('Selected specialist is inactive or no longer available.');
+          }
+
+          // Re-verify services status under lock
+          const activeServices = await tx.service.findMany({
+            where: {
+              id: { in: serviceIds },
+              salonId,
+              status: ServiceStatus.ACTIVE,
+            },
+          });
+          if (activeServices.length !== serviceIds.length) {
+            throw new ConflictException('One or more selected services are inactive or no longer available.');
+          }
+
+          // Re-verify stylist-service assignments under lock
+          const activeAssignments = await tx.stylistService.findMany({
+            where: {
+              salonId,
+              stylistId: assignedStylistId!,
+              serviceId: { in: serviceIds },
+            },
+          });
+          if (activeAssignments.length !== serviceIds.length) {
+            throw new ConflictException('Specialist is no longer assigned to perform the selected services.');
+          }
+
+          if (assignedStylist.followsSalonSchedule) {
+            const currentSalonHours = await tx.salonWorkingHours.findUnique({
+              where: { salonId_dayOfWeek: { salonId, dayOfWeek } },
+            });
+
+            if (!currentSalonHours || currentSalonHours.isClosed) {
+              throw new ConflictException(`Salon is closed on ${dayOfWeek}.`);
+            }
+
+            const apptStartStr = dto.startTime;
+            const apptEndStr = endDt.toFormat('HH:mm');
+
+            if (currentSalonHours.startTime && apptStartStr < currentSalonHours.startTime) {
+              throw new ConflictException(
+                `Appointment start time ${apptStartStr} is earlier than salon opening time ${currentSalonHours.startTime}.`,
+              );
+            }
+            if (currentSalonHours.endTime && apptEndStr > currentSalonHours.endTime) {
+              throw new ConflictException(
+                `Appointment end time ${apptEndStr} exceeds salon closing time ${currentSalonHours.endTime}.`,
+              );
+            }
+            if (currentSalonHours.breakStartTime && currentSalonHours.breakEndTime) {
+              if (apptStartStr < currentSalonHours.breakEndTime && apptEndStr > currentSalonHours.breakStartTime) {
+                throw new ConflictException(
+                  `Appointment conflicts with salon break (${currentSalonHours.breakStartTime}-${currentSalonHours.breakEndTime}).`,
+                );
+              }
+            }
           }
 
           // Generate Human-friendly sequential appointment number
           const appointmentNumber = `SAL-${Math.floor(100000 + Math.random() * 900000)}`;
 
-          // Create appointment with historical snapshots
+          // Create parent Appointment record with snapshots
           const appointment = await tx.appointment.create({
             data: {
               appointmentNumber,
               salonId,
-              userId: user.id,
+              salonUserId: salonUser.id,
               stylistId: assignedStylistId,
-              serviceId: service.id,
-              serviceNameSnapshot: service.name,
-              durationMinutes: service.durationMinutes,
-              price: service.price,
+              serviceId: primaryService.id,
+              serviceNameSnapshot,
+              durationMinutes: totalDuration,
+              price: totalPrice,
               appointmentDate: new Date(dto.date),
               startAt: startDt.toJSDate(),
               endAt: endDt.toJSDate(),
@@ -311,11 +479,20 @@ export class AppointmentsService {
               notes: dto.notes,
               createdByAdminId: createdByAdminId || null,
             },
-            include: {
-              user: true,
-              stylist: true,
-              service: true,
-            },
+            include: appointmentInclude,
+          });
+
+          // Insert individual AppointmentService rows
+          await tx.appointmentService.createMany({
+            data: orderedServices.map((s, idx) => ({
+              salonId,
+              appointmentId: appointment.id,
+              serviceId: s.id,
+              serviceNameSnapshot: s.name,
+              durationMinutes: s.durationMinutes,
+              price: s.price,
+              orderIndex: idx,
+            })),
           });
 
           // Create notification ledger row
@@ -325,20 +502,32 @@ export class AppointmentsService {
               appointmentId: appointment.id,
               userId: user.id,
               recipientPhone: cleanPhone,
-              messageBody: `Your appointment #${appointment.appointmentNumber} for ${service.name} is confirmed for ${dto.date} at ${dto.startTime}.`,
+              messageBody: `Your appointment #${appointment.appointmentNumber} for ${serviceNameSnapshot} is confirmed for ${dto.date} at ${dto.startTime}.`,
               status: 'PENDING',
             },
           });
 
           return appointment;
         },
-        { timeout: 10000 },
+        { timeout: 15000 },
       );
 
-      this.emitSalonEvent(salonId, 'NEW_BOOKING', createdAppt);
-      return createdAppt;
-    } catch (err) {
-      if (err instanceof ConflictException) throw err;
+      const formatted = this.formatAppointment(createdAppt);
+      this.emitSalonEvent(salonId, 'NEW_BOOKING', formatted);
+      return formatted;
+    } catch (err: any) {
+      if (err?.code === '23P01') {
+        throw new ConflictException(
+          'A concurrent booking just took this slot. Please select another time.',
+        );
+      }
+      if (
+        err instanceof ConflictException ||
+        err instanceof BadRequestException ||
+        err instanceof NotFoundException
+      ) {
+        throw err;
+      }
       this.logger.error(`Error creating appointment: ${err.message}`, err.stack);
       throw err;
     }
@@ -348,21 +537,42 @@ export class AppointmentsService {
     salonId: string,
     appointmentId: string,
     dto: UpdateAppointmentStatusDto,
+    adminId?: string,
   ) {
-    await this.getAppointmentById(salonId, appointmentId);
+    const appointment = await this.getAppointmentById(salonId, appointmentId);
+
+    const allowedTransitions = VALID_STATUS_TRANSITIONS[appointment.status as AppointmentStatus] || [];
+    if (!allowedTransitions.includes(dto.status)) {
+      throw new BadRequestException(
+        `Cannot transition appointment status from ${appointment.status} to ${dto.status}.`,
+      );
+    }
+
+    // 2-hour cutoff rule for customers on cancellation (admin can override)
+    if (dto.status === AppointmentStatus.CANCELLED && !adminId) {
+      const salon = await this.prisma.salon.findUnique({ where: { id: salonId } });
+      const cancelWindowHours = salon?.cancelWindowHours ?? 2;
+      const nowMs = Date.now();
+      const apptStartMs = new Date(appointment.startAt).getTime();
+      if (apptStartMs - nowMs < cancelWindowHours * 60 * 60 * 1000) {
+        throw new BadRequestException(
+          `Appointments cannot be cancelled within ${cancelWindowHours} hours of the start time.`,
+        );
+      }
+    }
 
     const updated = await this.prisma.appointment.update({
       where: { id: appointmentId },
-      data: { status: dto.status },
-      include: {
-        user: true,
-        stylist: true,
-        service: true,
+      data: {
+        status: dto.status,
+        notes: dto.reason ? `${appointment.notes || ''} [Status note: ${dto.reason}]`.trim() : appointment.notes,
       },
+      include: appointmentInclude,
     });
 
-    this.emitSalonEvent(salonId, 'STATUS_UPDATED', updated);
-    return updated;
+    const formatted = this.formatAppointment(updated);
+    this.emitSalonEvent(salonId, 'STATUS_UPDATED', formatted);
+    return formatted;
   }
 
   async updateStatus(
@@ -371,7 +581,7 @@ export class AppointmentsService {
     dto: UpdateAppointmentStatusDto,
     adminId?: string,
   ) {
-    return this.updateAppointmentStatus(salonId, appointmentId, dto);
+    return this.updateAppointmentStatus(salonId, appointmentId, dto, adminId);
   }
 
   async updateEtaStatus(salonId: string, appointmentId: string, etaStatus: any) {
@@ -380,15 +590,12 @@ export class AppointmentsService {
     const updated = await this.prisma.appointment.update({
       where: { id: appointmentId },
       data: { clientEtaStatus: etaStatus as ClientEtaStatus },
-      include: {
-        user: true,
-        stylist: true,
-        service: true,
-      },
+      include: appointmentInclude,
     });
 
-    this.emitSalonEvent(salonId, 'APPOINTMENT_UPDATED', updated);
-    return updated;
+    const formatted = this.formatAppointment(updated);
+    this.emitSalonEvent(salonId, 'APPOINTMENT_UPDATED', formatted);
+    return formatted;
   }
 
   async rescheduleAppointment(
@@ -399,8 +606,27 @@ export class AppointmentsService {
   ) {
     const appointment = await this.getAppointmentById(salonId, appointmentId);
 
+    if (appointment.status !== AppointmentStatus.CONFIRMED) {
+      throw new BadRequestException(
+        `Only CONFIRMED appointments can be rescheduled. Current status: ${appointment.status}.`,
+      );
+    }
+
     const salon = await this.prisma.salon.findUnique({ where: { id: salonId } });
-    const timezone = salon?.timezone || 'Asia/Kolkata';
+    if (!salon) throw new NotFoundException('Salon not found.');
+    const timezone = salon.timezone || 'Asia/Kolkata';
+
+    // 2-hour cutoff rule for customers (admin can override)
+    const cancelWindowHours = salon.cancelWindowHours ?? 2;
+    if (!adminId) {
+      const nowMs = Date.now();
+      const apptStartMs = new Date(appointment.startAt).getTime();
+      if (apptStartMs - nowMs < cancelWindowHours * 60 * 60 * 1000) {
+        throw new BadRequestException(
+          `Appointments cannot be rescheduled within ${cancelWindowHours} hours of the start time.`,
+        );
+      }
+    }
 
     const targetStylistId = dto.stylistId || dto.staffId || appointment.stylistId;
 
@@ -429,25 +655,178 @@ export class AppointmentsService {
       millisecond: 0,
     });
     const endDt = startDt.plus({ minutes: appointment.durationMinutes });
+    const dayOfWeek = startDt.toFormat('cccc').toUpperCase() as DayOfWeek;
 
-    const updated = await this.prisma.appointment.update({
-      where: { id: appointmentId },
-      data: {
-        appointmentDate: new Date(dto.newDate),
-        startAt: startDt.toJSDate(),
-        endAt: endDt.toJSDate(),
-        stylistId: targetStylistId,
-        status: AppointmentStatus.CONFIRMED,
-      },
-      include: {
-        user: true,
-        stylist: true,
-        service: true,
-      },
-    });
+    // Lock hierarchy for rescheduling:
+    // Level 1: Schedule lock on new day
+    // Level 2: Customer lock on new date
+    // Level 3: Stylist lock on new date
+    const key1 = this.hashToSignedInt32(`salon:${salonId}`);
+    const newScheduleKey2 = this.hashToSignedInt32(`schedule:${dayOfWeek}`);
+    const customerKey2 = this.hashToSignedInt32(`cust:${appointment.salonUserId}:${dto.newDate}`);
+    const targetStylistKey2 = this.hashToSignedInt32(`stylist:${targetStylistId}:${dto.newDate}`);
 
-    this.emitSalonEvent(salonId, 'RESCHEDULED', updated);
-    return updated;
+    try {
+      const updated = await this.prisma.$transaction(
+        async (tx) => {
+          // Level 1: Shared schedule lock
+          await tx.$executeRawUnsafe(
+            `SELECT pg_advisory_xact_lock_shared(${key1}, ${newScheduleKey2})`,
+          );
+
+          // Level 2: Customer lock
+          await tx.$executeRawUnsafe(
+            `SELECT pg_advisory_xact_lock(${key1}, ${customerKey2})`,
+          );
+
+          // Check salon customer overlap (excluding current appointment being rescheduled)
+          const custOverlap = await tx.appointment.findFirst({
+            where: {
+              salonId,
+              salonUserId: appointment.salonUserId,
+              id: { not: appointmentId },
+              status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN, AppointmentStatus.IN_SERVICE] },
+              AND: [
+                { startAt: { lt: endDt.toJSDate() } },
+                { endAt: { gt: startDt.toJSDate() } },
+              ],
+            },
+          });
+
+          if (custOverlap) {
+            throw new ConflictException(
+              'You already have another appointment at this salon during this rescheduled time.',
+            );
+          }
+
+          // Level 3: Stylist lock
+          await tx.$executeRawUnsafe(
+            `SELECT pg_advisory_xact_lock(${key1}, ${targetStylistKey2})`,
+          );
+
+          // Check stylist overlap (excluding current appointment being rescheduled)
+          const stylistOverlap = await tx.appointment.findFirst({
+            where: {
+              salonId,
+              stylistId: targetStylistId,
+              id: { not: appointmentId },
+              status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN, AppointmentStatus.IN_SERVICE] },
+              AND: [
+                { startAt: { lt: endDt.toJSDate() } },
+                { endAt: { gt: startDt.toJSDate() } },
+              ],
+            },
+          });
+
+          if (stylistOverlap) {
+            throw new ConflictException(
+              'A concurrent booking just took this specialist time. Please choose another slot.',
+            );
+          }
+
+          // Re-verify target stylist status under lock (FOR SHARE to serialize with deactivation)
+          await tx.$executeRawUnsafe(
+            `SELECT id FROM stylists WHERE id = '${targetStylistId}' FOR SHARE`,
+          );
+          const targetStylist = await tx.stylist.findUnique({
+            where: { id: targetStylistId },
+            select: { id: true, followsSalonSchedule: true, status: true },
+          });
+
+          if (!targetStylist || targetStylist.status !== StylistStatus.ACTIVE) {
+            throw new ConflictException('Selected specialist is inactive or no longer available.');
+          }
+
+          // Re-verify service status under lock
+          const activeService = await tx.service.findFirst({
+            where: {
+              id: appointment.serviceId,
+              salonId,
+              status: ServiceStatus.ACTIVE,
+            },
+          });
+          if (!activeService) {
+            throw new ConflictException('Selected service is inactive or no longer available.');
+          }
+
+          // Re-verify stylist-service assignment under lock
+          const activeAssignment = await tx.stylistService.findFirst({
+            where: {
+              salonId,
+              stylistId: targetStylistId,
+              serviceId: appointment.serviceId,
+            },
+          });
+          if (!activeAssignment) {
+            throw new ConflictException('Specialist is no longer assigned to perform this service.');
+          }
+
+          if (targetStylist.followsSalonSchedule) {
+            const currentSalonHours = await tx.salonWorkingHours.findUnique({
+              where: { salonId_dayOfWeek: { salonId, dayOfWeek } },
+            });
+
+            if (!currentSalonHours || currentSalonHours.isClosed) {
+              throw new ConflictException(`Salon is closed on ${dayOfWeek}.`);
+            }
+
+            const apptStartStr = dto.newStartTime;
+            const apptEndStr = endDt.toFormat('HH:mm');
+
+            if (currentSalonHours.startTime && apptStartStr < currentSalonHours.startTime) {
+              throw new ConflictException(
+                `Rescheduled start time ${apptStartStr} is earlier than salon opening time ${currentSalonHours.startTime}.`,
+              );
+            }
+            if (currentSalonHours.endTime && apptEndStr > currentSalonHours.endTime) {
+              throw new ConflictException(
+                `Rescheduled end time ${apptEndStr} exceeds salon closing time ${currentSalonHours.endTime}.`,
+              );
+            }
+            if (currentSalonHours.breakStartTime && currentSalonHours.breakEndTime) {
+              if (apptStartStr < currentSalonHours.breakEndTime && apptEndStr > currentSalonHours.breakStartTime) {
+                throw new ConflictException(
+                  `Rescheduled appointment conflicts with salon break (${currentSalonHours.breakStartTime}-${currentSalonHours.breakEndTime}).`,
+                );
+              }
+            }
+          }
+
+          // In-place mutation of the appointment
+          return tx.appointment.update({
+            where: { id: appointmentId },
+            data: {
+              appointmentDate: new Date(dto.newDate),
+              startAt: startDt.toJSDate(),
+              endAt: endDt.toJSDate(),
+              stylistId: targetStylistId,
+              status: AppointmentStatus.CONFIRMED,
+            },
+            include: appointmentInclude,
+          });
+        },
+        { timeout: 15000 },
+      );
+
+      const formatted = this.formatAppointment(updated);
+      this.emitSalonEvent(salonId, 'RESCHEDULED', formatted);
+      return formatted;
+    } catch (err: any) {
+      if (err?.code === '23P01') {
+        throw new ConflictException(
+          'A concurrent booking just took this slot. Please select another time.',
+        );
+      }
+      if (
+        err instanceof ConflictException ||
+        err instanceof BadRequestException ||
+        err instanceof NotFoundException
+      ) {
+        throw err;
+      }
+      this.logger.error(`Error rescheduling appointment: ${err.message}`, err.stack);
+      throw err;
+    }
   }
 
   async addServiceToAppointment(salonId: string, appointmentId: string, serviceId: string) {
@@ -460,7 +839,9 @@ export class AppointmentsService {
       throw new NotFoundException('Service not found or inactive.');
     }
 
-    const newEndAt = DateTime.fromJSDate(appointment.endAt).plus({ minutes: extraService.durationMinutes }).toJSDate();
+    const newEndAt = DateTime.fromJSDate(appointment.endAt)
+      .plus({ minutes: extraService.durationMinutes })
+      .toJSDate();
 
     // Check if stylist has conflicting appointment
     const conflictBooking = await this.prisma.appointment.findFirst({
@@ -469,7 +850,7 @@ export class AppointmentsService {
         stylistId: appointment.stylistId,
         appointmentDate: appointment.appointmentDate,
         id: { not: appointmentId },
-        status: { notIn: ['CANCELLED', 'NO_SHOW', 'RESCHEDULED'] },
+        status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN, AppointmentStatus.IN_SERVICE] },
         startAt: { lt: newEndAt },
         endAt: { gt: appointment.endAt },
       },
@@ -488,45 +869,62 @@ export class AppointmentsService {
       };
     }
 
-    const updatedAppointment = await this.prisma.appointment.update({
-      where: { id: appointmentId },
-      data: {
-        endAt: newEndAt,
-        durationMinutes: appointment.durationMinutes + extraService.durationMinutes,
-        price: Number(appointment.price) + Number(extraService.price),
-      },
-      include: { stylist: true, service: true, user: true },
+    const existingServicesCount = await this.prisma.appointmentService.count({
+      where: { salonId, appointmentId },
     });
 
+    const updatedAppointment = await this.prisma.$transaction(async (tx) => {
+      await tx.appointmentService.create({
+        data: {
+          salonId,
+          appointmentId,
+          serviceId: extraService.id,
+          serviceNameSnapshot: extraService.name,
+          durationMinutes: extraService.durationMinutes,
+          price: extraService.price,
+          orderIndex: existingServicesCount,
+        },
+      });
+
+      return tx.appointment.update({
+        where: { id: appointmentId },
+        data: {
+          endAt: newEndAt,
+          durationMinutes: appointment.durationMinutes + extraService.durationMinutes,
+          price: Number(appointment.price) + Number(extraService.price),
+          serviceNameSnapshot: `${appointment.serviceNameSnapshot}, ${extraService.name}`,
+        },
+        include: appointmentInclude,
+      });
+    });
+
+    const formatted = this.formatAppointment(updatedAppointment);
     return {
       success: true,
       updatedAppointment: {
-        ...updatedAppointment,
-        startTime: updatedAppointment.startAt,
-        endTime: updatedAppointment.endAt,
-        staff: updatedAppointment.stylist,
+        ...formatted,
+        startTime: formatted.startAt,
+        endTime: formatted.endAt,
+        staff: formatted.stylist,
       },
       extraService,
     };
   }
 
-  async cancelAppointment(salonId: string, appointmentId: string, reason?: string) {
-    const appointment = await this.getAppointmentById(salonId, appointmentId);
-
-    const updated = await this.prisma.appointment.update({
-      where: { id: appointmentId },
-      data: {
+  async cancelAppointment(
+    salonId: string,
+    appointmentId: string,
+    reason?: string,
+    adminId?: string,
+  ) {
+    return this.updateAppointmentStatus(
+      salonId,
+      appointmentId,
+      {
         status: AppointmentStatus.CANCELLED,
-        notes: reason ? `${appointment.notes || ''} [Cancelled: ${reason}]` : appointment.notes,
+        reason,
       },
-      include: {
-        user: true,
-        stylist: true,
-        service: true,
-      },
-    });
-
-    this.emitSalonEvent(salonId, 'CANCELLED', updated);
-    return updated;
+      adminId,
+    );
   }
 }

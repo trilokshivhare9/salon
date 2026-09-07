@@ -54,12 +54,17 @@ export class AvailabilityService {
 
   async getAvailableSlots(
     salonId: string,
-    serviceId: string,
+    serviceIdOrIds: string | string[],
     dateStr: string, // YYYY-MM-DD
     preferredStylistId?: string,
     excludeAppointmentId?: string,
     candidateStepMinutes: number = 15,
   ): Promise<AvailabilityResult> {
+    const serviceIds = Array.isArray(serviceIdOrIds) ? serviceIdOrIds : [serviceIdOrIds];
+    if (serviceIds.length === 0) {
+      throw new BadRequestException('At least one serviceId must be provided.');
+    }
+
     // 1. Load Salon & validate
     const salon = await this.prisma.salon.findUnique({
       where: { id: salonId },
@@ -103,48 +108,47 @@ export class AvailabilityService {
 
     const dayOfWeek = this.getDayOfWeekEnum(requestedDate);
 
-    // 2. Fetch Service & Salon Operating Hours in parallel
-    const [service, salonWorkingHours] = await Promise.all([
-      this.prisma.service.findFirst({
-        where: { id: serviceId, salonId, status: 'ACTIVE' },
+    // 2. Fetch Services & Salon Operating Hours in parallel
+    const [services, salonWorkingHours] = await Promise.all([
+      this.prisma.service.findMany({
+        where: { id: { in: serviceIds }, salonId, status: 'ACTIVE' },
       }),
       this.prisma.salonWorkingHours.findUnique({
         where: { salonId_dayOfWeek: { salonId, dayOfWeek } },
       }),
     ]);
 
-    if (!service) {
-      throw new NotFoundException('Service is inactive or does not exist.');
+    if (services.length !== serviceIds.length) {
+      throw new NotFoundException('One or more selected services are inactive or do not exist.');
     }
 
-    const serviceDuration = service.durationMinutes;
+    const totalServiceDuration = services.reduce((sum, s) => sum + s.durationMinutes, 0);
 
-    // Check if salon is closed on this day
-    if (!salonWorkingHours || salonWorkingHours.isClosed) {
-      return {
-        date: dateStr,
-        salonTimezone: timezone,
-        serviceDurationMinutes: serviceDuration,
-        availableSlots: [],
-      };
-    }
-
-    const salonOpenMinutes = this.parseTimeStringToMinutes(salonWorkingHours.startTime);
-    const salonCloseMinutes = this.parseTimeStringToMinutes(salonWorkingHours.endTime);
+    const salonOpenMinutes =
+      salonWorkingHours && !salonWorkingHours.isClosed
+        ? this.parseTimeStringToMinutes(salonWorkingHours.startTime)
+        : null;
+    const salonCloseMinutes =
+      salonWorkingHours && !salonWorkingHours.isClosed
+        ? this.parseTimeStringToMinutes(salonWorkingHours.endTime)
+        : null;
 
     const salonBreak =
-      salonWorkingHours.breakStartTime && salonWorkingHours.breakEndTime
+      salonWorkingHours &&
+      !salonWorkingHours.isClosed &&
+      salonWorkingHours.breakStartTime &&
+      salonWorkingHours.breakEndTime
         ? {
             start: this.parseTimeStringToMinutes(salonWorkingHours.breakStartTime),
             end: this.parseTimeStringToMinutes(salonWorkingHours.breakEndTime),
           }
         : null;
 
-    // 3. Query eligible active stylists assigned to this service
+    // 3. Query eligible active stylists assigned to ALL requested services
     const stylistQueryWhere: any = {
       salonId,
       status: 'ACTIVE',
-      services: { some: { serviceId } },
+      AND: serviceIds.map((sId) => ({ services: { some: { serviceId: sId } } })),
     };
     if (preferredStylistId) {
       stylistQueryWhere.id = preferredStylistId;
@@ -157,22 +161,23 @@ export class AvailabilityService {
           where: { dayOfWeek },
         },
       },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     });
 
     if (eligibleStylists.length === 0) {
       return {
         date: dateStr,
         salonTimezone: timezone,
-        serviceDurationMinutes: serviceDuration,
+        serviceDurationMinutes: totalServiceDuration,
         availableSlots: [],
       };
     }
 
-    // 4. Fetch existing appointments for eligible stylists on this date
+    // 4. Fetch existing active blocking appointments for eligible stylists on this date
     const apptWhere: any = {
       salonId,
       appointmentDate: new Date(dateStr),
-      status: { notIn: ['CANCELLED', 'NO_SHOW', 'RESCHEDULED', 'EXPIRED'] },
+      status: { in: ['CONFIRMED', 'CHECKED_IN', 'IN_SERVICE'] },
     };
     if (excludeAppointmentId) {
       apptWhere.id = { not: excludeAppointmentId };
@@ -199,48 +204,49 @@ export class AvailabilityService {
     // 5. Continuous Free-Interval Calculation per Stylist
     const slotsMap = new Map<string, { startTime: string; endTime: string; eligibleStylistIds: Set<string> }>();
 
-    for (const stylist of eligibleStylists) {
-      let stylistOpen = salonOpenMinutes;
-      let stylistClose = salonCloseMinutes;
-      let stylistBreak: { start: number; end: number } | null = null;
+    // Advance notice check if booking for today: zero artificial buffer, strictly next 15-min mark
+    let earliestAllowedMinutes = 0;
+    if (requestedDate.hasSame(todayInSalonZone, 'day')) {
+      const nowMinuteOfDay = nowInSalonZone.hour * 60 + nowInSalonZone.minute;
+      const rem = nowMinuteOfDay % candidateStepMinutes;
+      earliestAllowedMinutes = rem === 0 ? nowMinuteOfDay : nowMinuteOfDay + (candidateStepMinutes - rem);
+    }
 
-      if (!stylist.followsSalonSchedule) {
+    for (const stylist of eligibleStylists) {
+      let effectiveOpen: number;
+      let effectiveClose: number;
+      const busyIntervals: { start: number; end: number }[] = [];
+
+      if (stylist.followsSalonSchedule) {
+        if (salonOpenMinutes === null || salonCloseMinutes === null) {
+          continue; // Salon is closed today
+        }
+        effectiveOpen = salonOpenMinutes;
+        effectiveClose = salonCloseMinutes;
+        if (salonBreak) {
+          busyIntervals.push(salonBreak);
+        }
+      } else {
+        // Custom stylist schedule: independent of salon hours
         const customHours = stylist.workingHours[0];
         if (!customHours || !customHours.isWorking) {
           continue; // Stylist not working today
         }
-        stylistOpen = this.parseTimeStringToMinutes(customHours.startTime);
-        stylistClose = this.parseTimeStringToMinutes(customHours.endTime);
+        effectiveOpen = this.parseTimeStringToMinutes(customHours.startTime);
+        effectiveClose = this.parseTimeStringToMinutes(customHours.endTime);
         if (customHours.breakStartTime && customHours.breakEndTime) {
-          stylistBreak = {
+          busyIntervals.push({
             start: this.parseTimeStringToMinutes(customHours.breakStartTime),
             end: this.parseTimeStringToMinutes(customHours.breakEndTime),
-          };
+          });
         }
       }
-
-      // Effective operating interval: stylist hours bounded by salon operating hours
-      const effectiveOpen = Math.max(salonOpenMinutes, stylistOpen);
-      const effectiveClose = Math.min(salonCloseMinutes, stylistClose);
 
       if (effectiveOpen >= effectiveClose) {
         continue;
       }
 
-      // Collect all busy intervals to subtract
-      const busyIntervals: { start: number; end: number }[] = [];
-
-      // Mandatory salon break (highest priority)
-      if (salonBreak) {
-        busyIntervals.push(salonBreak);
-      }
-
-      // Stylist break (if custom)
-      if (stylistBreak) {
-        busyIntervals.push(stylistBreak);
-      }
-
-      // Existing appointments
+      // Add existing active appointments
       const appts = appointmentsByStylist.get(stylist.id) || [];
       for (const a of appts) {
         busyIntervals.push(a);
@@ -269,35 +275,27 @@ export class AvailabilityService {
         freeIntervals = nextFree;
       }
 
-      // Filter intervals that can accommodate the continuous service duration
+      // Filter intervals that can accommodate the continuous total service duration
       const validFreeIntervals = freeIntervals.filter(
-        (intv) => intv.end - intv.start >= serviceDuration,
+        (intv) => intv.end - intv.start >= totalServiceDuration,
       );
-
-      // Advance notice check if booking for today
-      let earliestAllowedMinutes = 0;
-      if (requestedDate.hasSame(todayInSalonZone, 'day')) {
-        const earliestAllowedDt = nowInSalonZone.plus({ minutes: 15 }); // 15 min buffer
-        earliestAllowedMinutes = earliestAllowedDt.hour * 60 + earliestAllowedDt.minute;
-      }
 
       // Generate candidate start times within continuous free intervals
       for (const interval of validFreeIntervals) {
-        // Step in candidate resolution (default: 15 min)
         let candidateStart = interval.start;
-        // Align candidate start to the step if desired
+        // Align candidate start up to the step
         const remainder = candidateStart % candidateStepMinutes;
         if (remainder !== 0) {
           candidateStart += candidateStepMinutes - remainder;
         }
 
-        while (candidateStart + serviceDuration <= interval.end) {
+        while (candidateStart + totalServiceDuration <= interval.end) {
           if (
             !requestedDate.hasSame(todayInSalonZone, 'day') ||
             candidateStart >= earliestAllowedMinutes
           ) {
             const timeKey = this.formatMinutesToTime(candidateStart);
-            const endTimeKey = this.formatMinutesToTime(candidateStart + serviceDuration);
+            const endTimeKey = this.formatMinutesToTime(candidateStart + totalServiceDuration);
 
             if (!slotsMap.has(timeKey)) {
               slotsMap.set(timeKey, {
@@ -313,6 +311,10 @@ export class AvailabilityService {
       }
     }
 
+    // Build deterministic sorted stylist ID list reference for stable ordering
+    const stylistIdOrderMap = new Map<string, number>();
+    eligibleStylists.forEach((st, idx) => stylistIdOrderMap.set(st.id, idx));
+
     // 6. Format and sort final slots
     const availableSlots: AvailableSlotResponse[] = Array.from(slotsMap.values())
       .map((slot) => {
@@ -322,13 +324,18 @@ export class AvailabilityService {
         const isoStart = requestedDate.set({ hour: h, minute: m, second: 0, millisecond: 0 }).toUTC().toISO()!;
         const isoEnd = requestedDate.set({ hour: eh, minute: em, second: 0, millisecond: 0 }).toUTC().toISO()!;
 
+        // Sort eligible stylists deterministically matching eligibleStylists order
+        const sortedStaffIds = Array.from(slot.eligibleStylistIds).sort(
+          (a, b) => (stylistIdOrderMap.get(a) ?? 0) - (stylistIdOrderMap.get(b) ?? 0),
+        );
+
         return {
           startTime: slot.startTime,
           endTime: slot.endTime,
           isoStartTime: isoStart,
           isoEndTime: isoEnd,
-          availableStaffCount: slot.eligibleStylistIds.size,
-          eligibleStaffIds: Array.from(slot.eligibleStylistIds),
+          availableStaffCount: sortedStaffIds.length,
+          eligibleStaffIds: sortedStaffIds,
         };
       })
       .sort((a, b) => a.startTime.localeCompare(b.startTime));
@@ -336,7 +343,7 @@ export class AvailabilityService {
     return {
       date: dateStr,
       salonTimezone: timezone,
-      serviceDurationMinutes: serviceDuration,
+      serviceDurationMinutes: totalServiceDuration,
       availableSlots,
     };
   }

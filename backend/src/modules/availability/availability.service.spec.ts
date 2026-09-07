@@ -8,57 +8,73 @@ describe('AvailabilityService (Unit Tests)', () => {
   let prisma: PrismaService;
 
   const mockSalonId = 'salon-test-123';
-  const mockServiceId = 'service-haircut-456';
-  const mockStaffId = 'staff-rahul-789';
+  const mockServiceId1 = 'service-haircut-456';
+  const mockServiceId2 = 'service-beard-789';
+  const mockStylistId1 = 'stylist-rahul-001';
+  const mockStylistId2 = 'stylist-priya-002';
 
   const mockSalon = {
     id: mockSalonId,
     status: 'ACTIVE',
     timezone: 'Asia/Kolkata',
-    slotIntervalMinutes: 30,
-    minAdvanceNoticeMins: 30,
     maxAdvanceDays: 30,
   };
 
-  const mockService = {
-    id: mockServiceId,
+  const mockService1 = {
+    id: mockServiceId1,
     salonId: mockSalonId,
     name: 'Haircut',
     durationMinutes: 30,
+    price: 350,
     status: 'ACTIVE',
   };
 
-  const mockStaff = [
+  const mockService2 = {
+    id: mockServiceId2,
+    salonId: mockSalonId,
+    name: 'Beard Trim',
+    durationMinutes: 15,
+    price: 150,
+    status: 'ACTIVE',
+  };
+
+  const mockSalonWorkingHours = {
+    salonId: mockSalonId,
+    dayOfWeek: DayOfWeek.MONDAY,
+    isClosed: false,
+    startTime: '10:00',
+    endTime: '20:00',
+    breakStartTime: '13:00',
+    breakEndTime: '14:00',
+  };
+
+  const mockStylists = [
     {
-      id: mockStaffId,
+      id: mockStylistId1,
       name: 'Rahul',
       salonId: mockSalonId,
       status: 'ACTIVE',
+      followsSalonSchedule: true,
+      workingHours: [],
+    },
+    {
+      id: mockStylistId2,
+      name: 'Priya (Custom Schedule)',
+      salonId: mockSalonId,
+      status: 'ACTIVE',
+      followsSalonSchedule: false,
       workingHours: [
         {
           dayOfWeek: DayOfWeek.MONDAY,
           isWorking: true,
-          startTime: '10:00',
-          endTime: '20:00',
-        },
-      ],
-      breaks: [
-        {
-          dayOfWeek: DayOfWeek.MONDAY,
-          startTime: '13:00',
-          endTime: '14:00',
+          startTime: '08:00',
+          endTime: '16:00',
+          breakStartTime: '12:00',
+          breakEndTime: '12:30',
         },
       ],
     },
   ];
-
-  const mockWorkingHours = {
-    salonId: mockSalonId,
-    dayOfWeek: DayOfWeek.MONDAY,
-    isOpen: true,
-    openTime: '10:00',
-    closeTime: '20:00',
-  };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -68,12 +84,10 @@ describe('AvailabilityService (Unit Tests)', () => {
           provide: PrismaService,
           useValue: {
             salon: { findUnique: jest.fn() },
-            holiday: { findFirst: jest.fn() },
-            service: { findFirst: jest.fn() },
-            staff: { findMany: jest.fn() },
-            workingHours: { findUnique: jest.fn() },
+            service: { findMany: jest.fn() },
+            salonWorkingHours: { findUnique: jest.fn() },
+            stylist: { findMany: jest.fn() },
             appointment: { findMany: jest.fn() },
-            blockedTime: { findMany: jest.fn() },
           },
         },
       ],
@@ -87,68 +101,115 @@ describe('AvailabilityService (Unit Tests)', () => {
     expect(service).toBeDefined();
   });
 
-  it('should return empty slots if salon is marked as closed for a holiday', async () => {
+  it('should return empty slots if salon is closed on that day and no custom stylists are working', async () => {
     jest.spyOn(prisma.salon, 'findUnique').mockResolvedValue(mockSalon as any);
-    jest.spyOn(prisma.holiday, 'findFirst').mockResolvedValue({ id: 'hol-1', reason: 'Diwali' } as any);
+    jest.spyOn(prisma.service, 'findMany').mockResolvedValue([mockService1] as any);
+    jest.spyOn(prisma.salonWorkingHours, 'findUnique').mockResolvedValue({
+      salonId: mockSalonId,
+      dayOfWeek: DayOfWeek.MONDAY,
+      isClosed: true,
+      startTime: '10:00',
+      endTime: '20:00',
+    } as any);
+    // Only Rahul who follows salon schedule
+    jest.spyOn(prisma.stylist, 'findMany').mockResolvedValue([mockStylists[0]] as any);
+    jest.spyOn(prisma.appointment, 'findMany').mockResolvedValue([]);
 
-    // Pick a future Monday
-    const result = await service.getAvailableSlots(mockSalonId, mockServiceId, '2026-09-07');
-
+    // 2026-12-14 is Monday (future date)
+    const result = await service.getAvailableSlots(mockSalonId, mockService1.id, '2026-09-14');
     expect(result.availableSlots).toEqual([]);
   });
 
-  it('should accurately exclude lunch break (13:00 - 14:00) from generated slots', async () => {
+  it('should exclude salon break (13:00 - 14:00) for salon-schedule stylists', async () => {
     jest.spyOn(prisma.salon, 'findUnique').mockResolvedValue(mockSalon as any);
-    jest.spyOn(prisma.holiday, 'findFirst').mockResolvedValue(null);
-    jest.spyOn(prisma.service, 'findFirst').mockResolvedValue(mockService as any);
-    jest.spyOn(prisma.staff, 'findMany').mockResolvedValue(mockStaff as any);
-    jest.spyOn(prisma.workingHours, 'findUnique').mockResolvedValue(mockWorkingHours as any);
+    jest.spyOn(prisma.service, 'findMany').mockResolvedValue([mockService1] as any);
+    jest.spyOn(prisma.salonWorkingHours, 'findUnique').mockResolvedValue(mockSalonWorkingHours as any);
+    jest.spyOn(prisma.stylist, 'findMany').mockResolvedValue([mockStylists[0]] as any);
     jest.spyOn(prisma.appointment, 'findMany').mockResolvedValue([]);
-    jest.spyOn(prisma.blockedTime, 'findMany').mockResolvedValue([]);
 
-    // 2026-09-07 is a Monday
-    const result = await service.getAvailableSlots(mockSalonId, mockServiceId, '2026-09-07');
-
+    const result = await service.getAvailableSlots(mockSalonId, mockService1.id, '2026-09-14');
     expect(result.availableSlots.length).toBeGreaterThan(0);
-    const slotTimes = result.availableSlots.map((s) => s.startTime);
 
-    // 10:00, 10:30, 11:00, 11:30, 12:00, 12:30 must exist
+    const slotTimes = result.availableSlots.map((s) => s.startTime);
     expect(slotTimes).toContain('10:00');
     expect(slotTimes).toContain('12:30');
-
-    // 13:00 and 13:30 MUST NOT exist because of 13:00 - 14:00 lunch break!
+    // 13:00 and 13:30 should not exist because service duration is 30m and break is 13:00-14:00
     expect(slotTimes).not.toContain('13:00');
     expect(slotTimes).not.toContain('13:30');
-
-    // 14:00 must resume
     expect(slotTimes).toContain('14:00');
   });
 
-  it('should exclude slots overlapping with existing non-cancelled appointments', async () => {
+  it('should exclude slots overlapping with existing CONFIRMED, CHECKED_IN, or IN_SERVICE appointments', async () => {
     jest.spyOn(prisma.salon, 'findUnique').mockResolvedValue(mockSalon as any);
-    jest.spyOn(prisma.holiday, 'findFirst').mockResolvedValue(null);
-    jest.spyOn(prisma.service, 'findFirst').mockResolvedValue(mockService as any);
-    jest.spyOn(prisma.staff, 'findMany').mockResolvedValue(mockStaff as any);
-    jest.spyOn(prisma.workingHours, 'findUnique').mockResolvedValue(mockWorkingHours as any);
-    jest.spyOn(prisma.blockedTime, 'findMany').mockResolvedValue([]);
+    jest.spyOn(prisma.service, 'findMany').mockResolvedValue([mockService1] as any);
+    jest.spyOn(prisma.salonWorkingHours, 'findUnique').mockResolvedValue(mockSalonWorkingHours as any);
+    jest.spyOn(prisma.stylist, 'findMany').mockResolvedValue([mockStylists[0]] as any);
 
-    // Existing appointment at 11:00 AM - 11:30 AM (UTC converted)
-    const apptStartUtc = new Date('2026-09-07T05:30:00.000Z'); // 11:00 AM IST
-    const apptEndUtc = new Date('2026-09-07T06:00:00.000Z');   // 11:30 AM IST
+    // Existing appointment 11:00 - 11:30 IST (05:30 - 06:00 UTC) on 2026-09-14
+    const apptStart = new Date('2026-09-14T05:30:00.000Z');
+    const apptEnd = new Date('2026-09-14T06:00:00.000Z');
 
     jest.spyOn(prisma.appointment, 'findMany').mockResolvedValue([
       {
-        staffId: mockStaffId,
-        startTime: apptStartUtc,
-        endTime: apptEndUtc,
+        stylistId: mockStylistId1,
+        startAt: apptStart,
+        endAt: apptEnd,
       } as any,
     ]);
 
-    const result = await service.getAvailableSlots(mockSalonId, mockServiceId, '2026-09-07');
+    const result = await service.getAvailableSlots(mockSalonId, mockService1.id, '2026-09-14');
     const slotTimes = result.availableSlots.map((s) => s.startTime);
 
     expect(slotTimes).toContain('10:30');
-    expect(slotTimes).not.toContain('11:00'); // Blocked by appointment!
+    expect(slotTimes).not.toContain('11:00'); // Blocked by active appointment!
     expect(slotTimes).toContain('11:30');
+  });
+
+  it('should handle multi-service duration summation correctly (30m + 15m = 45m)', async () => {
+    jest.spyOn(prisma.salon, 'findUnique').mockResolvedValue(mockSalon as any);
+    jest.spyOn(prisma.service, 'findMany').mockResolvedValue([mockService1, mockService2] as any);
+    jest.spyOn(prisma.salonWorkingHours, 'findUnique').mockResolvedValue(mockSalonWorkingHours as any);
+    jest.spyOn(prisma.stylist, 'findMany').mockResolvedValue([mockStylists[0]] as any);
+    jest.spyOn(prisma.appointment, 'findMany').mockResolvedValue([]);
+
+    const result = await service.getAvailableSlots(
+      mockSalonId,
+      [mockService1.id, mockService2.id],
+      '2026-09-14',
+    );
+
+    expect(result.serviceDurationMinutes).toBe(45);
+    const slot1000 = result.availableSlots.find((s) => s.startTime === '10:00');
+    expect(slot1000).toBeDefined();
+    expect(slot1000?.endTime).toBe('10:45');
+
+    // With 45m duration and break at 13:00, 12:30 would end at 13:15, so 12:30 must be excluded
+    const slotTimes = result.availableSlots.map((s) => s.startTime);
+    expect(slotTimes).not.toContain('12:30');
+    expect(slotTimes).toContain('12:15'); // 12:15 to 13:00 fits perfectly!
+  });
+
+  it('should allow custom-schedule stylists to operate outside salon hours independently', async () => {
+    jest.spyOn(prisma.salon, 'findUnique').mockResolvedValue(mockSalon as any);
+    jest.spyOn(prisma.service, 'findMany').mockResolvedValue([mockService1] as any);
+    // Salon closed
+    jest.spyOn(prisma.salonWorkingHours, 'findUnique').mockResolvedValue({
+      salonId: mockSalonId,
+      dayOfWeek: DayOfWeek.MONDAY,
+      isClosed: true,
+      startTime: '10:00',
+      endTime: '20:00',
+    } as any);
+    // Only Priya (custom schedule 08:00 - 16:00)
+    jest.spyOn(prisma.stylist, 'findMany').mockResolvedValue([mockStylists[1]] as any);
+    jest.spyOn(prisma.appointment, 'findMany').mockResolvedValue([]);
+
+    const result = await service.getAvailableSlots(mockSalonId, mockService1.id, '2026-09-14');
+    expect(result.availableSlots.length).toBeGreaterThan(0);
+
+    const slotTimes = result.availableSlots.map((s) => s.startTime);
+    // Priya works starting from 08:00
+    expect(slotTimes).toContain('08:00');
+    expect(slotTimes).toContain('08:15');
   });
 });

@@ -70,21 +70,26 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
           },
         },
         include: {
-          user: true,
+          salonUser: {
+            include: {
+              user: true,
+            },
+          },
           stylist: true,
           service: true,
         },
       });
 
       for (const appt of stage1Appointments) {
-        if (!appt.user?.phone) continue;
+        const user = appt.salonUser?.user;
+        if (!user?.phone) continue;
         const timeStr = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('hh:mm a');
         const dateStr = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('dd LLL, EEE');
 
-        const message = `⏰ *APPOINTMENT REMINDER*\n\nHello *${appt.user.name || 'Customer'}*, your upcoming visit at *${salon.name}* is in ~2 hours:\n\n• *Service:* *${appt.serviceNameSnapshot || appt.service?.name}* (₹${appt.price})\n• *Stylist:* *${appt.stylist?.name || 'Stylist'}*\n• *Date:* *${dateStr}*\n• *Time:* *${timeStr}*\n\n📍 *${salon.name}*\n${salon.address || ''}\n\nWe look forward to seeing you!`;
+        const message = `⏰ *APPOINTMENT REMINDER*\n\nHello *${user.name || 'Customer'}*, your upcoming visit at *${salon.name}* is in ~2 hours:\n\n• *Service:* *${appt.serviceNameSnapshot || appt.service?.name}* (₹${appt.price})\n• *Stylist:* *${appt.stylist?.name || 'Stylist'}*\n• *Date:* *${dateStr}*\n• *Time:* *${timeStr}*\n\n📍 *${salon.name}*\n${salon.address || ''}\n\nWe look forward to seeing you!`;
 
         await this.whatsAppService.sendMetaMessage(
-          appt.user.phone,
+          user.phone,
           {
             bodyText: message,
             interactiveType: 'button',
@@ -123,20 +128,25 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
           },
         },
         include: {
-          user: true,
+          salonUser: {
+            include: {
+              user: true,
+            },
+          },
           stylist: true,
           service: true,
         },
       });
 
       for (const appt of stage2Appointments) {
-        if (!appt.user?.phone) continue;
+        const user = appt.salonUser?.user;
+        if (!user?.phone) continue;
         const timeStr = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('hh:mm a');
 
-        const message = `💺 *YOUR CHAIR IS GETTING READY!*\n\nHi *${appt.user.name || 'Customer'}*, your stylist *${appt.stylist?.name || 'Stylist'}* is preparing your station for *${timeStr}*.\n\n📍 *${salon.name}*\n${salon.address || ''}\n\nSee you in 10 minutes!`;
+        const message = `💺 *YOUR CHAIR IS GETTING READY!*\n\nHi *${user.name || 'Customer'}*, your stylist *${appt.stylist?.name || 'Stylist'}* is preparing your station for *${timeStr}*.\n\n📍 *${salon.name}*\n${salon.address || ''}\n\nSee you in 10 minutes!`;
 
         await this.whatsAppService.sendMetaMessage(
-          appt.user.phone,
+          user.phone,
           {
             bodyText: message,
           },
@@ -169,20 +179,25 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
           },
         },
         include: {
-          user: true,
+          salonUser: {
+            include: {
+              user: true,
+            },
+          },
           stylist: true,
           service: true,
         },
       });
 
       for (const appt of stage3Appointments) {
-        if (!appt.user?.phone) continue;
+        const user = appt.salonUser?.user;
+        if (!user?.phone) continue;
         const timeStr = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('hh:mm a');
 
-        const message = `👋 Hi *${appt.user.name || 'Customer'}*, we noticed you haven't checked in for your *${timeStr}* appointment with *${appt.stylist?.name || 'Stylist'}* yet.\n\nAre you on your way or running a few minutes late?`;
+        const message = `👋 Hi *${user.name || 'Customer'}*, we noticed you haven't checked in for your *${timeStr}* appointment with *${appt.stylist?.name || 'Stylist'}* yet.\n\nAre you on your way or running a few minutes late?`;
 
         await this.whatsAppService.sendMetaMessage(
-          appt.user.phone,
+          user.phone,
           {
             bodyText: message,
             interactiveType: 'button',

@@ -11,7 +11,9 @@ import { CreateSalonPlatformDto } from './dto/create-salon-platform.dto';
 import { UpdateSalonDto } from './dto/update-salon.dto';
 import { UpdateWorkingHoursDto } from './dto/working-hours.dto';
 import * as bcrypt from 'bcrypt';
-import { AdminRole, SalonStatus, DayOfWeek } from '@prisma/client';
+import * as crypto from 'crypto';
+import { DateTime } from 'luxon';
+import { AdminRole, SalonStatus, DayOfWeek, AppointmentStatus } from '@prisma/client';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 
 @Injectable()
@@ -564,12 +566,95 @@ Here are your salon owner login credentials:
     });
   }
 
+  private hashToSignedInt32(input: string): number {
+    return crypto.createHash('sha256').update(input).digest().readInt32BE(0);
+  }
+
   async updateWorkingHours(salonId: string, dto: UpdateWorkingHoursDto) {
+    const salon = await this.prisma.salon.findUnique({ where: { id: salonId } });
+    if (!salon) throw new NotFoundException('Salon not found.');
+    const tz = salon.timezone || 'Asia/Kolkata';
+
     return this.prisma.$transaction(async (tx) => {
       for (const item of dto.hours) {
         const isClosed = item.isClosed !== undefined ? item.isClosed : (item.isOpen !== undefined ? !item.isOpen : false);
         const startTime = item.startTime || item.openTime || '09:00';
         const endTime = item.endTime || item.closeTime || '21:00';
+
+        if (startTime >= endTime) {
+          throw new BadRequestException('Shift start time must be earlier than shift end time.');
+        }
+
+        // Validate break if provided
+        if (item.breakStartTime || item.breakEndTime) {
+          if (!item.breakStartTime || !item.breakEndTime) {
+            throw new BadRequestException('Both break start time and break end time must be specified.');
+          }
+          if (item.breakStartTime >= item.breakEndTime) {
+            throw new BadRequestException('Break start time must be earlier than break end time.');
+          }
+          if (item.breakStartTime <= startTime || item.breakEndTime >= endTime) {
+            throw new BadRequestException('Break times must fall strictly within the salon operating shift.');
+          }
+          const [bStartH, bStartM] = item.breakStartTime.split(':').map(Number);
+          const [bEndH, bEndM] = item.breakEndTime.split(':').map(Number);
+          const breakDuration = (bEndH * 60 + bEndM) - (bStartH * 60 + bStartM);
+          if (breakDuration < 15 || breakDuration % 15 !== 0) {
+            throw new BadRequestException('Break duration must be at least 15 minutes and divisible by 15.');
+          }
+        }
+
+        // Level 1: Acquire exclusive schedule lock for this salon and day
+        const key1 = this.hashToSignedInt32(`salon:${salonId}`);
+        const scheduleKey2 = this.hashToSignedInt32(`schedule:${item.dayOfWeek}`);
+        await tx.$executeRawUnsafe(
+          `SELECT pg_advisory_xact_lock(${key1}, ${scheduleKey2})`,
+        );
+
+        // Check active future appointments strictly for stylists who follow the salon schedule
+        const now = new Date();
+        const futureAppointments = await tx.appointment.findMany({
+          where: {
+            salonId,
+            startAt: { gt: now },
+            status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN, AppointmentStatus.IN_SERVICE] },
+            stylist: { followsSalonSchedule: true },
+          },
+          include: { stylist: true },
+        });
+
+        const dayAppointments = futureAppointments.filter((appt) => {
+          const dayName = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('cccc').toUpperCase();
+          return dayName === item.dayOfWeek;
+        });
+
+        if (isClosed) {
+          if (dayAppointments.length > 0) {
+            const conflicting = dayAppointments[0];
+            throw new ConflictException(
+              `Cannot close salon on ${item.dayOfWeek}: stylist ${conflicting.stylist.name} has existing future appointment #${conflicting.appointmentNumber}.`,
+            );
+          }
+        } else {
+          for (const appt of dayAppointments) {
+            const apptStart = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('HH:mm');
+            const apptEnd = DateTime.fromJSDate(appt.endAt, { zone: tz }).toFormat('HH:mm');
+
+            if (apptStart < startTime || apptEnd > endTime) {
+              throw new ConflictException(
+                `Cannot update salon hours on ${item.dayOfWeek} to ${startTime}-${endTime}: future appointment #${appt.appointmentNumber} (${apptStart}-${apptEnd}) falls outside the operating window.`,
+              );
+            }
+
+            if (item.breakStartTime && item.breakEndTime) {
+              if (apptStart < item.breakEndTime && apptEnd > item.breakStartTime) {
+                throw new ConflictException(
+                  `Cannot set salon break on ${item.dayOfWeek} to ${item.breakStartTime}-${item.breakEndTime}: future appointment #${appt.appointmentNumber} (${apptStart}-${apptEnd}) conflicts with the break.`,
+                );
+              }
+            }
+          }
+        }
 
         await tx.salonWorkingHours.upsert({
           where: {

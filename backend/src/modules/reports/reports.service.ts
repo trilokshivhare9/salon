@@ -179,7 +179,11 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
           ],
         },
         include: {
-          user: true,
+          salonUser: {
+            include: {
+              user: true,
+            },
+          },
           stylist: true,
           service: true,
         },
@@ -247,9 +251,9 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
       },
       whatsappQuota,
       salon: salonInfo,
-      todayAppointments: todayAppointments.map((appt) => ({
+      todayAppointments: todayAppointments.map((appt: any) => ({
         ...appt,
-        customer: appt.user,
+        customer: appt.salonUser?.user,
         staff: appt.stylist,
         startTime: appt.startAt,
         endTime: appt.endAt,

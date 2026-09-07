@@ -36,3 +36,8 @@ Thumbs.db
 # Docker volume data
 infrastructure/postgres_data/
 infrastructure/redis_data/
+
+# Backups & Dumps
+backups/
+*.dump
+

@@ -51,15 +51,12 @@ enum SalonUserStatus {
 }
 
 enum AppointmentStatus {
-  PENDING
   CONFIRMED
   CHECKED_IN
   IN_SERVICE
   COMPLETED
   CANCELLED
   NO_SHOW
-  RESCHEDULED
-  EXPIRED
 }
 
 enum BookingSource {
@@ -225,7 +222,9 @@ model Service {
   salon           Salon         @relation(fields: [salonId], references: [id], onDelete: Cascade)
   stylists        StylistService[]
   appointments    Appointment[]
+  appointmentServices AppointmentService[]
 
+  @@unique([salonId, id])
   @@index([salonId, status])
   @@index([salonId, name])
   @@map("services")
@@ -254,21 +253,23 @@ model Stylist {
   workingHours         StylistWorkingHours[]
   appointments         Appointment[]
 
+  @@unique([salonId, id])
   @@index([salonId, status])
   @@index([salonId, name])
   @@map("stylists")
 }
 
 model StylistService {
+  salonId   String   @map("salon_id")
   stylistId String   @map("stylist_id")
   serviceId String   @map("service_id")
   createdAt DateTime @default(now()) @map("created_at")
 
-  stylist   Stylist  @relation(fields: [stylistId], references: [id], onDelete: Cascade)
-  service   Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  stylist   Stylist  @relation(fields: [salonId, stylistId], references: [salonId, id], onDelete: Cascade)
+  service   Service  @relation(fields: [salonId, serviceId], references: [salonId, id], onDelete: Cascade)
 
-  @@id([stylistId, serviceId])
-  @@index([serviceId])
+  @@id([salonId, stylistId, serviceId])
+  @@index([salonId, serviceId])
   @@map("stylist_services")
 }
 
@@ -324,7 +325,6 @@ model User {
   updatedAt DateTime   @updatedAt @map("updated_at")
 
   salonMemberships SalonUser[]
-  appointments     Appointment[]
   notifications    Notification[]
 
   @@index([phone])
@@ -332,17 +332,19 @@ model User {
 }
 
 model SalonUser {
-  id        String          @id @default(uuid())
-  salonId   String          @map("salon_id")
-  userId    String          @map("user_id")
-  status    SalonUserStatus @default(ACTIVE)
-  notes     String?
-  createdAt DateTime        @default(now()) @map("created_at")
-  updatedAt DateTime        @updatedAt @map("updated_at")
+  id           String          @id @default(uuid())
+  salonId      String          @map("salon_id")
+  userId       String          @map("user_id")
+  status       SalonUserStatus @default(ACTIVE)
+  notes        String?
+  createdAt    DateTime        @default(now()) @map("created_at")
+  updatedAt    DateTime        @updatedAt @map("updated_at")
 
-  salon     Salon           @relation(fields: [salonId], references: [id], onDelete: Cascade)
-  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  salon        Salon           @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  appointments Appointment[]
 
+  @@unique([salonId, id])
   @@unique([salonId, userId])
   @@index([salonId])
   @@index([userId])
@@ -356,7 +358,7 @@ model Appointment {
   id                  String            @id @default(uuid())
   appointmentNumber   String            @unique @map("appointment_number")
   salonId             String            @map("salon_id")
-  userId              String            @map("user_id")
+  salonUserId         String            @map("salon_user_id")
   stylistId           String            @map("stylist_id")
   serviceId           String            @map("service_id")
 
@@ -386,18 +388,39 @@ model Appointment {
   updatedAt           DateTime          @updatedAt @map("updated_at")
 
   salon               Salon             @relation(fields: [salonId], references: [id], onDelete: Restrict)
-  user                User              @relation(fields: [userId], references: [id], onDelete: Restrict)
-  stylist             Stylist           @relation(fields: [stylistId], references: [id], onDelete: Restrict)
-  service             Service           @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  salonUser           SalonUser         @relation(fields: [salonId, salonUserId], references: [salonId, id], onDelete: Restrict)
+  stylist             Stylist           @relation(fields: [salonId, stylistId], references: [salonId, id], onDelete: Restrict)
+  service             Service           @relation(fields: [salonId, serviceId], references: [salonId, id], onDelete: Restrict)
+  services            AppointmentService[]
   createdByAdmin      Admin?            @relation("AdminCreatedAppointments", fields: [createdByAdminId], references: [id], onDelete: SetNull)
   notifications       Notification[]
 
+  @@unique([salonId, id])
   @@index([salonId, appointmentDate])
   @@index([salonId, stylistId, appointmentDate])
   @@index([stylistId, startAt, endAt])
-  @@index([userId, appointmentDate])
+  @@index([salonId, salonUserId, appointmentDate])
   @@index([salonId, status])
   @@map("appointments")
+}
+
+model AppointmentService {
+  id                  String      @id @default(uuid())
+  salonId             String      @map("salon_id")
+  appointmentId       String      @map("appointment_id")
+  serviceId           String      @map("service_id")
+  serviceNameSnapshot String      @map("service_name_snapshot")
+  durationMinutes     Int         @map("duration_minutes")
+  price               Decimal     @db.Decimal(10, 2)
+  orderIndex          Int         @default(0) @map("order_index")
+  createdAt           DateTime    @default(now()) @map("created_at")
+
+  appointment         Appointment @relation(fields: [salonId, appointmentId], references: [salonId, id], onDelete: Cascade)
+  service             Service     @relation(fields: [salonId, serviceId], references: [salonId, id], onDelete: Restrict)
+
+  @@index([salonId, appointmentId])
+  @@index([salonId, serviceId])
+  @@map("appointment_services")
 }
 
 // -----------------------------------------------------------------------------

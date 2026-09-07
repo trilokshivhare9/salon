@@ -1,4 +1,32 @@
-import { IsNotEmpty, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+  registerDecorator,
+  ValidationOptions,
+  ValidationArguments,
+} from 'class-validator';
+
+export function IsMultipleOf15(validationOptions?: ValidationOptions) {
+  return function (object: Object, propertyName: string) {
+    registerDecorator({
+      name: 'isMultipleOf15',
+      target: object.constructor,
+      propertyName: propertyName,
+      options: validationOptions,
+      validator: {
+        validate(value: any, _args: ValidationArguments) {
+          return typeof value === 'number' && value > 0 && value % 15 === 0;
+        },
+        defaultMessage(_args: ValidationArguments) {
+          return 'durationMinutes must be a multiple of 15 (e.g. 30, 45, 60, 75, 90)';
+        },
+      },
+    });
+  };
+}
 
 export class CreateServiceDto {
   @IsString()
@@ -14,7 +42,8 @@ export class CreateServiceDto {
   price: number;
 
   @IsNumber()
-  @Min(1)
+  @Min(30, { message: 'Service duration must be at least 30 minutes' })
+  @IsMultipleOf15()
   durationMinutes: number;
 
   @IsString()
@@ -37,7 +66,8 @@ export class UpdateServiceDto {
   price?: number;
 
   @IsNumber()
-  @Min(1)
+  @Min(30, { message: 'Service duration must be at least 30 minutes' })
+  @IsMultipleOf15()
   @IsOptional()
   durationMinutes?: number;
 

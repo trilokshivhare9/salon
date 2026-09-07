@@ -67,18 +67,15 @@ export class CustomersService {
         OR: [{ id: customerId }, { userId: customerId }],
       },
       include: {
-        user: {
+        user: true,
+        appointments: {
+          where: { salonId },
           include: {
-            appointments: {
-              where: { salonId },
-              include: {
-                service: true,
-                stylist: { select: { id: true, name: true } },
-              },
-              orderBy: { startAt: 'desc' },
-              take: 20,
-            },
+            service: true,
+            stylist: { select: { id: true, name: true } },
           },
+          orderBy: { startAt: 'desc' },
+          take: 20,
         },
       },
     });
@@ -96,7 +93,7 @@ export class CustomersService {
       email: salonUser.user.email,
       status: salonUser.status,
       notes: salonUser.notes,
-      appointments: salonUser.user.appointments,
+      appointments: salonUser.appointments,
       createdAt: salonUser.createdAt,
     };
   }

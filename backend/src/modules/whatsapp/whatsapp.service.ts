@@ -459,18 +459,17 @@ export class WhatsAppService {
     }
   }
 
-  // Helper: Query active upcoming appointments for a customer
   private async findActiveUpcomingAppointments(salonId: string, cleanNumber: string) {
     const cutoff = new Date(Date.now() - 30 * 60 * 1000); // within last 30 mins or in future
     return this.prisma.appointment.findMany({
       where: {
         salonId,
-        user: { phone: cleanNumber },
+        salonUser: { user: { phone: cleanNumber } },
         status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN] },
         startAt: { gte: cutoff },
       },
       include: {
-        user: true,
+        salonUser: { include: { user: true } },
         stylist: true,
         service: true,
       },
@@ -501,7 +500,7 @@ export class WhatsAppService {
     const timeFormatted = DateTime.fromJSDate(apptTime, { zone: tz }).toFormat('hh:mm a');
     const dateFormatted = DateTime.fromJSDate(apptTime, { zone: tz }).toFormat('dd LLL, EEE');
 
-    const customerName = activeAppt.user?.name || activeAppt.customer?.name || 'Customer';
+    const customerName = activeAppt.salonUser?.user?.name || activeAppt.user?.name || activeAppt.customer?.name || 'Customer';
     const stylistName = activeAppt.stylist?.name || activeAppt.staff?.name || 'Stylist';
 
     const reply = `👋 Welcome back, *${customerName}*!\n\n📅 *Your Upcoming Appointment:*\n• Service: *${activeAppt.service.name}* (₹${activeAppt.price})\n• Specialist: *${stylistName}*\n• Date: *${dateFormatted}*\n• Time: *${timeFormatted}*\n• Status: *${activeAppt.status}* (Ref: *#${activeAppt.appointmentNumber}*)\n\nWhat would you like to do?`;
@@ -633,6 +632,159 @@ export class WhatsAppService {
     if (subMatch) return subMatch;
 
     return null;
+  }
+
+  /**
+   * Builds an interactive list view for a selected time period (Morning, Afternoon, Evening)
+   * with complete pagination so no slots between 12 PM - 4 PM or 4 PM - Close are ever cut off.
+   */
+  private buildPeriodSlotView(
+    allSlots: AvailableSlotResponse[],
+    cleanInput: string,
+    isReschedule: boolean,
+    targetDateStr: string,
+  ): {
+    headerText: string;
+    bodyText: string;
+    listRows: InteractiveListRow[];
+    scopedSlots: AvailableSlotResponse[];
+    chosenPeriod: 'morning' | 'afternoon' | 'evening';
+  } {
+    const morningSlots = allSlots.filter((s) => parseInt(s.startTime.split(':')[0], 10) < 12);
+    const afternoonSlots = allSlots.filter((s) => {
+      const h = parseInt(s.startTime.split(':')[0], 10);
+      return h >= 12 && h < 16;
+    });
+    const eveningSlots = allSlots.filter((s) => parseInt(s.startTime.split(':')[0], 10) >= 16);
+
+    let chosenPeriod: 'morning' | 'afternoon' | 'evening' = 'morning';
+    if (cleanInput.includes('afternoon')) chosenPeriod = 'afternoon';
+    else if (cleanInput.includes('evening')) chosenPeriod = 'evening';
+    else if (morningSlots.length === 0 && afternoonSlots.length > 0) chosenPeriod = 'afternoon';
+    else if (morningSlots.length === 0 && afternoonSlots.length === 0 && eveningSlots.length > 0) chosenPeriod = 'evening';
+
+    const periodSlots = chosenPeriod === 'morning' ? morningSlots : chosenPeriod === 'afternoon' ? afternoonSlots : eveningSlots;
+    const slotsForPeriod = periodSlots.length > 0 ? periodSlots : allSlots;
+
+    // Parse page index (e.g. period_afternoon_p2 or rperiod_evening_2)
+    let page = 1;
+    const pageMatch = cleanInput.match(/(?:_p|_page|_)(\d+)/);
+    if (pageMatch) {
+      page = Math.max(1, parseInt(pageMatch[1], 10));
+    }
+
+    const prefix = isReschedule ? 'r' : '';
+    const periodTitle = chosenPeriod === 'morning' ? '🌅 Morning' : chosenPeriod === 'afternoon' ? '☀️ Afternoon' : '🌙 Evening';
+    const totalSlots = slotsForPeriod.length;
+
+    // Meta Interactive List allows max 10 rows.
+    // If totalSlots <= 8, everything fits in 1 single page!
+    // If totalSlots > 8 and <= 16, 8 slots per page (2 pages).
+    // If totalSlots > 16, 7 slots per page.
+    let pageSize = 8;
+    if (totalSlots > 16) pageSize = 7;
+    const totalPages = Math.max(1, Math.ceil(totalSlots / pageSize));
+    if (page > totalPages) page = totalPages;
+
+    const startIndex = (page - 1) * pageSize;
+    const pageSlots = slotsForPeriod.slice(startIndex, startIndex + pageSize);
+
+    const listRows: InteractiveListRow[] = pageSlots.map((s) => ({
+      id: `${prefix}slot_${s.startTime}`,
+      title: `⏰ ${this.formatTime12h(s.startTime)}`,
+      description: s.availableStaffCount ? `Available with ${s.availableStaffCount} stylist(s)` : `Available slot`,
+    }));
+
+    // Pagination Row: Next Page (if more slots exist in this period)
+    if (page < totalPages) {
+      const nextStart = page * pageSize;
+      const nextSlotsRemaining = slotsForPeriod.slice(nextStart);
+      const nextRangeStart = this.formatTime12h(nextSlotsRemaining[0].startTime);
+      const nextRangeEnd = this.formatTime12h(nextSlotsRemaining[nextSlotsRemaining.length - 1].startTime);
+      listRows.push({
+        id: `${prefix}period_${chosenPeriod}_p${page + 1}`,
+        title: `▶️ More ${chosenPeriod === 'morning' ? 'Morning' : chosenPeriod === 'afternoon' ? 'Afternoon' : 'Evening'} →`.slice(0, 24),
+        description: `${nextRangeStart} – ${nextRangeEnd}`.slice(0, 72),
+      });
+    }
+
+    // Pagination Row: Previous Page (if coming back)
+    if (page > 1) {
+      const prevSlots = slotsForPeriod.slice(0, startIndex);
+      const prevRangeStart = this.formatTime12h(prevSlots[0].startTime);
+      const prevRangeEnd = this.formatTime12h(prevSlots[prevSlots.length - 1].startTime);
+      listRows.push({
+        id: `${prefix}period_${chosenPeriod}_p${page - 1}`,
+        title: `◀️ Earlier ${chosenPeriod === 'morning' ? 'Morning' : chosenPeriod === 'afternoon' ? 'Afternoon' : 'Evening'}`.slice(0, 24),
+        description: `${prevRangeStart} – ${prevRangeEnd}`.slice(0, 72),
+      });
+    }
+
+    // Cross-Period Switcher Rows (switch between periods)
+    if (listRows.length < 10) {
+      if (chosenPeriod === 'morning' && afternoonSlots.length > 0) {
+        listRows.push({
+          id: `${prefix}period_afternoon`,
+          title: '☀️ Afternoon Slots →',
+          description: '12:00 PM – 4:00 PM',
+        });
+      } else if (chosenPeriod === 'afternoon' && eveningSlots.length > 0) {
+        listRows.push({
+          id: `${prefix}period_evening`,
+          title: '🌙 Evening Slots →',
+          description: '4:00 PM – Close',
+        });
+      } else if (chosenPeriod === 'evening' && morningSlots.length > 0) {
+        listRows.push({
+          id: `${prefix}period_morning`,
+          title: '🌅 Morning Slots →',
+          description: 'Open – 12:00 PM',
+        });
+      }
+    }
+
+    if (listRows.length < 10 && chosenPeriod === 'evening' && afternoonSlots.length > 0) {
+      listRows.push({
+        id: `${prefix}period_afternoon`,
+        title: '☀️ Afternoon Slots →',
+        description: '12:00 PM – 4:00 PM',
+      });
+    }
+
+    // Strict guard to never exceed Meta's 10-row limit
+    while (listRows.length > 10) {
+      listRows.pop();
+    }
+
+    // Format numbered text list for the message body
+    const slotListFormatted = pageSlots
+      .map((s, idx) => `*${startIndex + idx + 1}.* ⏰ *${this.formatTime12h(s.startTime)}*`)
+      .join('\n');
+
+    const pageIndicator = totalPages > 1 ? ` (Page ${page} of ${totalPages})` : '';
+    const dateFormatted = DateTime.fromISO(targetDateStr).isValid
+      ? DateTime.fromISO(targetDateStr).toFormat('dd LLL, EEEE')
+      : targetDateStr;
+
+    let periodReply = `📅 *${dateFormatted}* — ${periodTitle} Slots${pageIndicator}:\n\n${slotListFormatted}`;
+
+    if (totalPages > 1 && page < totalPages) {
+      const nextStart = page * pageSize;
+      const nextSlotsRemaining = slotsForPeriod.slice(nextStart);
+      const nextRangeStart = this.formatTime12h(nextSlotsRemaining[0].startTime);
+      const nextRangeEnd = this.formatTime12h(nextSlotsRemaining[nextSlotsRemaining.length - 1].startTime);
+      periodReply += `\n\n_(Showing ${startIndex + 1}–${startIndex + pageSlots.length} of ${totalSlots} ${chosenPeriod} slots. Tap **"More ${chosenPeriod === 'afternoon' ? 'Afternoon' : 'Evening'} →"** below for ${nextRangeStart} – ${nextRangeEnd})_`;
+    }
+
+    periodReply += `\n\n👉 Tap *Choose Time* below, or reply with the slot number or your desired time (e.g. *${this.formatTime12h(pageSlots[0].startTime)}*):`;
+
+    return {
+      headerText: `${periodTitle} Slots${pageIndicator}`.slice(0, 60),
+      bodyText: periodReply,
+      listRows,
+      scopedSlots: slotsForPeriod,
+      chosenPeriod,
+    };
   }
 
   // Core Conversation Handler for both Meta Webhook and Web Simulator
@@ -1285,50 +1437,56 @@ export class WhatsAppService {
           return h >= 12 && h < 16;
         });
         const eveningSlots = allSlots.filter((s) => parseInt(s.startTime.split(':')[0], 10) >= 16);
+        // Check if user clicked or typed a period filter or pagination
+        let effectiveInput = cleanInput;
+        if (
+          (cleanInput.includes('more') || cleanInput.includes('next') || cleanInput.includes('later') || cleanInput.includes('earlier') || cleanInput.includes('back')) &&
+          !cleanInput.includes('afternoon') && !cleanInput.includes('evening') && !cleanInput.includes('morning')
+        ) {
+          try {
+            const lastOutbound = await this.prisma.whatsAppLog.findFirst({
+              where: { phone: cleanNumber, direction: WhatsAppMessageDirection.OUTBOUND },
+              orderBy: { createdAt: 'desc' },
+            });
+            if (lastOutbound?.messageText) {
+              const txt = lastOutbound.messageText;
+              let currentPeriod = 'afternoon';
+              if (txt.includes('Evening Slots')) currentPeriod = 'evening';
+              else if (txt.includes('Morning Slots')) currentPeriod = 'morning';
+
+              const pageMatch = txt.match(/Page (\d+) of (\d+)/);
+              let currentPage = pageMatch ? parseInt(pageMatch[1], 10) : 1;
+              if (cleanInput.includes('earlier') || cleanInput.includes('back')) {
+                currentPage = Math.max(1, currentPage - 1);
+              } else {
+                currentPage += 1;
+              }
+              effectiveInput = `rperiod_${currentPeriod}_p${currentPage}`;
+            }
+          } catch {}
+        }
 
         // Period switcher in reschedule flow
-        if (cleanInput.startsWith('rperiod_') || cleanInput.startsWith('period_') || cleanInput.includes('morning') || cleanInput.includes('afternoon') || cleanInput.includes('evening')) {
-          let chosenPeriod: 'morning' | 'afternoon' | 'evening' = 'morning';
-          if (cleanInput.includes('afternoon')) chosenPeriod = 'afternoon';
-          else if (cleanInput.includes('evening')) chosenPeriod = 'evening';
-
-          let slotsForPeriod = chosenPeriod === 'morning' ? morningSlots : chosenPeriod === 'afternoon' ? afternoonSlots : eveningSlots;
-          if (slotsForPeriod.length === 0) slotsForPeriod = allSlots.slice(0, 10);
-
-          const periodTitle = chosenPeriod === 'morning' ? '🌅 Morning' : chosenPeriod === 'afternoon' ? '☀️ Afternoon' : '🌙 Evening';
-          const listRows: InteractiveListRow[] = slotsForPeriod.slice(0, 9).map((s) => ({
-            id: `rslot_${s.startTime}`,
-            title: `⏰ ${this.formatTime12h(s.startTime)}`,
-            description: `Available slot`,
-          }));
-
-          if (chosenPeriod === 'morning' && afternoonSlots.length > 0) {
-            listRows.push({ id: 'rperiod_afternoon', title: '☀️ Afternoon Slots →', description: '12:00 PM – 4:00 PM' });
-          } else if (chosenPeriod === 'afternoon' && eveningSlots.length > 0) {
-            listRows.push({ id: 'rperiod_evening', title: '🌙 Evening Slots →', description: '4:00 PM – Close' });
-          } else if (chosenPeriod === 'evening' && morningSlots.length > 0) {
-            listRows.push({ id: 'rperiod_morning', title: '🌅 Morning Slots →', description: '9:00 AM – 12:00 PM' });
-          }
-
-          const slotListFormatted = slotsForPeriod
-            .slice(0, 9)
-            .map((s, idx) => `*${idx + 1}.* ⏰ *${this.formatTime12h(s.startTime)}*`)
-            .join('\n');
-
-          const periodReply = `📅 *${DateTime.fromISO(dateStr).toFormat('dd LLL, EEEE')}* — ${periodTitle} Slots:\n\n${slotListFormatted}\n\n👉 Tap *Choose Time* below, or reply with the slot number or your desired time (e.g. *${this.formatTime12h(slotsForPeriod[0].startTime)}*):`;
-
+        if (
+          effectiveInput.startsWith('rperiod_') ||
+          effectiveInput.startsWith('period_') ||
+          effectiveInput.includes('morning') ||
+          effectiveInput.includes('afternoon') ||
+          effectiveInput.includes('evening')
+        ) {
+          const view = this.buildPeriodSlotView(allSlots, effectiveInput, true, dateStr);
           await this.sendMetaMessage(
             cleanNumber,
             {
-              headerText: `${periodTitle} Slots`,
-              bodyText: periodReply,
+              headerText: view.headerText,
+              bodyText: view.bodyText,
               buttonText: '⏰ Choose Time',
               interactiveType: 'list',
-              listRows,
+              listRows: view.listRows,
             },
             phoneNumberId,
           );
-          return { replyMessage: periodReply, state: ConversationState.SELECT_RESCHEDULE_TIME };
+          return { replyMessage: view.bodyText, state: ConversationState.SELECT_RESCHEDULE_TIME };
         }
 
         let selectedSlot = this.parseTimeSlot(input, availability.availableSlots);
@@ -1395,7 +1553,7 @@ export class WhatsAppService {
         }
 
         try {
-          const newAppt = await this.appointmentsService.rescheduleAppointment(
+          const newAppt: any = await this.appointmentsService.rescheduleAppointment(
             salonId,
             conversation.activeAppointmentId,
             {
@@ -1810,51 +1968,56 @@ export class WhatsAppService {
           return h >= 12 && h < 16;
         });
         const eveningSlots = allSlots.filter((s) => parseInt(s.startTime.split(':')[0], 10) >= 16);
+        // Check if user clicked or typed a period filter or pagination
+        let effectiveInput = cleanInput;
+        if (
+          (cleanInput.includes('more') || cleanInput.includes('next') || cleanInput.includes('later') || cleanInput.includes('earlier') || cleanInput.includes('back')) &&
+          !cleanInput.includes('afternoon') && !cleanInput.includes('evening') && !cleanInput.includes('morning')
+        ) {
+          try {
+            const lastOutbound = await this.prisma.whatsAppLog.findFirst({
+              where: { phone: cleanNumber, direction: WhatsAppMessageDirection.OUTBOUND },
+              orderBy: { createdAt: 'desc' },
+            });
+            if (lastOutbound?.messageText) {
+              const txt = lastOutbound.messageText;
+              let currentPeriod = 'afternoon';
+              if (txt.includes('Evening Slots')) currentPeriod = 'evening';
+              else if (txt.includes('Morning Slots')) currentPeriod = 'morning';
+
+              const pageMatch = txt.match(/Page (\d+) of (\d+)/);
+              let currentPage = pageMatch ? parseInt(pageMatch[1], 10) : 1;
+              if (cleanInput.includes('earlier') || cleanInput.includes('back')) {
+                currentPage = Math.max(1, currentPage - 1);
+              } else {
+                currentPage += 1;
+              }
+              effectiveInput = `period_${currentPeriod}_p${currentPage}`;
+            }
+          } catch {}
+        }
 
         // Check if user clicked or typed a period filter
-        if (cleanInput.startsWith('period_') || cleanInput.includes('morning') || cleanInput.includes('afternoon') || cleanInput.includes('evening')) {
-          let chosenPeriod: 'morning' | 'afternoon' | 'evening' = 'morning';
-          if (cleanInput.includes('afternoon')) chosenPeriod = 'afternoon';
-          else if (cleanInput.includes('evening')) chosenPeriod = 'evening';
-
-          let slotsForPeriod = chosenPeriod === 'morning' ? morningSlots : chosenPeriod === 'afternoon' ? afternoonSlots : eveningSlots;
-          if (slotsForPeriod.length === 0) slotsForPeriod = allSlots.slice(0, 10);
-
-          const periodTitle = chosenPeriod === 'morning' ? '🌅 Morning' : chosenPeriod === 'afternoon' ? '☀️ Afternoon' : '🌙 Evening';
-          const listRows: InteractiveListRow[] = slotsForPeriod.slice(0, 9).map((s) => ({
-            id: `slot_${s.startTime}`,
-            title: `⏰ ${this.formatTime12h(s.startTime)}`,
-            description: `Available with ${s.availableStaffCount} stylist(s)`,
-          }));
-
-          // Add quick-switch row if other periods exist (max 24 chars for title)
-          if (chosenPeriod === 'morning' && afternoonSlots.length > 0) {
-            listRows.push({ id: 'period_afternoon', title: '☀️ Afternoon Slots →', description: '12:00 PM – 4:00 PM' });
-          } else if (chosenPeriod === 'afternoon' && eveningSlots.length > 0) {
-            listRows.push({ id: 'period_evening', title: '🌙 Evening Slots →', description: '4:00 PM – Close' });
-          } else if (chosenPeriod === 'evening' && morningSlots.length > 0) {
-            listRows.push({ id: 'period_morning', title: '🌅 Morning Slots →', description: '9:00 AM – 12:00 PM' });
-          }
-
-          const slotListFormatted = slotsForPeriod
-            .slice(0, 9)
-            .map((s, idx) => `*${idx + 1}.* ⏰ *${this.formatTime12h(s.startTime)}*`)
-            .join('\n');
-
-          const periodReply = `📅 *${DateTime.fromISO(targetDate).toFormat('dd LLL, EEEE')}* — ${periodTitle} Slots:\n\n${slotListFormatted}\n\n👉 Tap *Choose Time* below, or reply with the slot number or your desired time (e.g. *${this.formatTime12h(slotsForPeriod[0].startTime)}*):`;
-
+        if (
+          effectiveInput.startsWith('period_') ||
+          effectiveInput.startsWith('rperiod_') ||
+          effectiveInput.includes('morning') ||
+          effectiveInput.includes('afternoon') ||
+          effectiveInput.includes('evening')
+        ) {
+          const view = this.buildPeriodSlotView(allSlots, effectiveInput, false, targetDate);
           await this.sendMetaMessage(
             cleanNumber,
             {
-              headerText: `${periodTitle} Slots`,
-              bodyText: periodReply,
+              headerText: view.headerText,
+              bodyText: view.bodyText,
               buttonText: '⏰ Choose Time',
               interactiveType: 'list',
-              listRows,
+              listRows: view.listRows,
             },
             phoneNumberId,
           );
-          return { replyMessage: periodReply, state: ConversationState.SELECT_TIME, metadata: { slots: slotsForPeriod } };
+          return { replyMessage: view.bodyText, state: ConversationState.SELECT_TIME, metadata: { slots: view.scopedSlots } };
         }
 
         let selectedSlot = this.parseTimeSlot(input, availability.availableSlots);
@@ -2023,7 +2186,7 @@ export class WhatsAppService {
           const time12hStr = this.formatTime12h(timeSlotStr);
 
           try {
-            const appointment = await this.appointmentsService.createAppointment(salonId, {
+            const appointment: any = await this.appointmentsService.createAppointment(salonId, {
               serviceId: conversation.selectedServiceId!,
               staffId: conversation.selectedStaffId || undefined,
               date: dateStr,

@@ -89,7 +89,7 @@ export class BookingService {
     const salon = await this.getSalonBySlug(slug);
     dto.source = BookingSource.WEB;
 
-    const appointment = await this.appointmentsService.createAppointment(
+    const appointment: any = await this.appointmentsService.createAppointment(
       salon.id,
       dto,
     );
@@ -106,8 +106,8 @@ export class BookingService {
       endAt: appointment.endAt,
       price: appointment.price,
       customer: {
-        name: appointment.user?.name,
-        phone: appointment.user?.phone,
+        name: appointment.user?.name || appointment.salonUser?.user?.name,
+        phone: appointment.user?.phone || appointment.salonUser?.user?.phone,
       },
       salon: {
         name: salon.name,

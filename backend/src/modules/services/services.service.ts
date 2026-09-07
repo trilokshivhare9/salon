@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 import { CreateServiceDto, UpdateServiceDto } from './dto/create-service.dto';
 import { ServiceStatus, SalonStatus, StylistStatus } from '@prisma/client';
@@ -60,6 +60,13 @@ export class ServicesService {
   }
 
   async createService(salonId: string, dto: CreateServiceDto) {
+    if (dto.price !== undefined && dto.price < 0) {
+      throw new BadRequestException('Service price cannot be negative.');
+    }
+    if (dto.durationMinutes !== undefined && (dto.durationMinutes < 30 || dto.durationMinutes % 15 !== 0)) {
+      throw new BadRequestException('Service duration must be at least 30 minutes and a multiple of 15.');
+    }
+
     const service = await this.prisma.service.create({
       data: {
         salonId,
@@ -79,6 +86,13 @@ export class ServicesService {
 
   async updateService(salonId: string, serviceId: string, dto: UpdateServiceDto) {
     await this.getServiceById(salonId, serviceId);
+
+    if (dto.price !== undefined && dto.price < 0) {
+      throw new BadRequestException('Service price cannot be negative.');
+    }
+    if (dto.durationMinutes !== undefined && (dto.durationMinutes < 30 || dto.durationMinutes % 15 !== 0)) {
+      throw new BadRequestException('Service duration must be at least 30 minutes and a multiple of 15.');
+    }
 
     const updated = await this.prisma.service.update({
       where: { id: serviceId },

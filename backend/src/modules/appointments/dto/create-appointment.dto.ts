@@ -9,8 +9,11 @@ import { AppointmentStatus, BookingSource } from '@prisma/client';
 
 export class CreateAppointmentDto {
   @IsString()
-  @IsNotEmpty()
-  serviceId: string;
+  @IsOptional()
+  serviceId?: string;
+
+  @IsOptional()
+  serviceIds?: string[];
 
   @IsString()
   @IsOptional()
