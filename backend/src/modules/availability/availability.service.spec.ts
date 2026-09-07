@@ -208,9 +208,109 @@ describe('AvailabilityService (Unit Tests)', () => {
     expect(result.availableSlots.length).toBeGreaterThan(0);
 
     const slotTimes = result.availableSlots.map((s) => s.startTime);
-    // Priya works starting from 08:00
+    // Priya works starting from 08:00 with 30m service duration -> slots at 08:00, 08:30 (not 08:15)
     expect(slotTimes).toContain('08:00');
-    expect(slotTimes).toContain('08:15');
+    expect(slotTimes).toContain('08:30');
+    expect(slotTimes).not.toContain('08:15');
+  });
+
+  describe('Dynamic Service-Duration Slot Interval Generation', () => {
+    it('30-minute service: generates slots at exact 30-minute intervals (10:00, 10:30, 11:00, 11:30)', async () => {
+      jest.spyOn(prisma.salon, 'findUnique').mockResolvedValue(mockSalon as any);
+      jest.spyOn(prisma.service, 'findMany').mockResolvedValue([mockService1] as any); // 30m
+      jest.spyOn(prisma.salonWorkingHours, 'findUnique').mockResolvedValue(mockSalonWorkingHours as any); // 10:00-20:00, break 13:00-14:00
+      jest.spyOn(prisma.stylist, 'findMany').mockResolvedValue([mockStylists[0]] as any);
+      jest.spyOn(prisma.appointment, 'findMany').mockResolvedValue([]);
+
+      const result = await service.getAvailableSlots(mockSalonId, mockService1.id, '2026-09-14');
+      expect(result.serviceDurationMinutes).toBe(30);
+
+      const slotTimes = result.availableSlots.map((s) => s.startTime);
+      // Morning block before 13:00 break
+      expect(slotTimes).toEqual(
+        expect.arrayContaining(['10:00', '10:30', '11:00', '11:30', '12:00', '12:30']),
+      );
+      // Ensure 15m intermediate times are NOT generated
+      expect(slotTimes).not.toContain('10:15');
+      expect(slotTimes).not.toContain('10:45');
+      expect(slotTimes).not.toContain('11:15');
+      expect(slotTimes).not.toContain('11:45');
+      expect(slotTimes).not.toContain('12:15');
+      expect(slotTimes).not.toContain('12:45');
+      // Break 13:00 - 14:00 excluded
+      expect(slotTimes).not.toContain('13:00');
+      expect(slotTimes).not.toContain('13:30');
+      // Resumes at 14:00
+      expect(slotTimes).toContain('14:00');
+      expect(slotTimes).toContain('14:30');
+    });
+
+    it('45-minute service: generates slots at exact 45-minute intervals (10:00, 10:45, 11:30, 12:15)', async () => {
+      const mock45mService = {
+        id: 'service-45m',
+        salonId: mockSalonId,
+        name: 'Hair Coloring',
+        durationMinutes: 45,
+        price: '1500.00',
+        status: 'ACTIVE',
+      };
+      jest.spyOn(prisma.salon, 'findUnique').mockResolvedValue(mockSalon as any);
+      jest.spyOn(prisma.service, 'findMany').mockResolvedValue([mock45mService] as any);
+      jest.spyOn(prisma.salonWorkingHours, 'findUnique').mockResolvedValue(mockSalonWorkingHours as any); // 10:00-20:00, break 13:00-14:00
+      jest.spyOn(prisma.stylist, 'findMany').mockResolvedValue([mockStylists[0]] as any);
+      jest.spyOn(prisma.appointment, 'findMany').mockResolvedValue([]);
+
+      const result = await service.getAvailableSlots(mockSalonId, mock45mService.id, '2026-09-14');
+      expect(result.serviceDurationMinutes).toBe(45);
+
+      const slotTimes = result.availableSlots.map((s) => s.startTime);
+      // Exactly matches the user requirement: 10:00, 10:45, 11:30, 12:15
+      expect(slotTimes).toContain('10:00');
+      expect(slotTimes).toContain('10:45');
+      expect(slotTimes).toContain('11:30');
+      expect(slotTimes).toContain('12:15');
+      // 12:15 to 13:00 completes at break start; next slot after break is 14:00, then 14:45, 15:30
+      expect(slotTimes).toContain('14:00');
+      expect(slotTimes).toContain('14:45');
+      expect(slotTimes).toContain('15:30');
+      // Intermediate arbitrary times NOT present
+      expect(slotTimes).not.toContain('10:15');
+      expect(slotTimes).not.toContain('10:30');
+      expect(slotTimes).not.toContain('11:00');
+      expect(slotTimes).not.toContain('12:00');
+    });
+
+    it('60-minute service: generates slots at exact 60-minute intervals (10:00, 11:00, 12:00, 14:00)', async () => {
+      const mock60mService = {
+        id: 'service-60m',
+        salonId: mockSalonId,
+        name: 'Keratin Treatment',
+        durationMinutes: 60,
+        price: '3000.00',
+        status: 'ACTIVE',
+      };
+      jest.spyOn(prisma.salon, 'findUnique').mockResolvedValue(mockSalon as any);
+      jest.spyOn(prisma.service, 'findMany').mockResolvedValue([mock60mService] as any);
+      jest.spyOn(prisma.salonWorkingHours, 'findUnique').mockResolvedValue(mockSalonWorkingHours as any); // 10:00-20:00, break 13:00-14:00
+      jest.spyOn(prisma.stylist, 'findMany').mockResolvedValue([mockStylists[0]] as any);
+      jest.spyOn(prisma.appointment, 'findMany').mockResolvedValue([]);
+
+      const result = await service.getAvailableSlots(mockSalonId, mock60mService.id, '2026-09-14');
+      expect(result.serviceDurationMinutes).toBe(60);
+
+      const slotTimes = result.availableSlots.map((s) => s.startTime);
+      expect(slotTimes).toContain('10:00');
+      expect(slotTimes).toContain('11:00');
+      expect(slotTimes).toContain('12:00');
+      // 12:00 ends at 13:00 (break start); break 13:00-14:00; resume 14:00
+      expect(slotTimes).not.toContain('13:00');
+      expect(slotTimes).toContain('14:00');
+      expect(slotTimes).toContain('15:00');
+      expect(slotTimes).toContain('16:00');
+      // 30m / 15m intermediate times NOT present
+      expect(slotTimes).not.toContain('10:30');
+      expect(slotTimes).not.toContain('11:30');
+    });
   });
 
   describe('Diagnostic AvailabilityStatus codes', () => {

@@ -1,5 +1,6 @@
 import { PrismaClient, DayOfWeek, AppointmentStatus, StylistStatus, ServiceStatus, SalonStatus, AdminRole } from '@prisma/client';
 import * as crypto from 'crypto';
+import * as bcrypt from 'bcrypt';
 
 export const TEST_DB_URL = 'postgresql://trilokshivhare@localhost:5432/salon_test_qa';
 process.env.DATABASE_URL = TEST_DB_URL;
@@ -57,10 +58,12 @@ export async function cleanAllTestData() {
 }
 
 export async function seedBasePlatform() {
+  const passwordHash = await bcrypt.hash('adminPassword123', 10);
+
   const superAdmin = await prisma.admin.create({
     data: {
       email: `superadmin-${Date.now()}@platform.com`,
-      passwordHash: 'hash',
+      passwordHash,
       name: 'Super Admin',
       role: AdminRole.SUPER_ADMIN,
     },
@@ -77,6 +80,16 @@ export async function seedBasePlatform() {
       status: SalonStatus.ACTIVE,
       defaultStartTime: '09:00',
       defaultEndTime: '18:00',
+    },
+  });
+
+  const salonOwnerA = await prisma.admin.create({
+    data: {
+      email: `owner-alpha-${Date.now()}@platform.com`,
+      passwordHash,
+      name: 'Salon Alpha Owner',
+      role: AdminRole.SALON_OWNER,
+      salonId: salonA.id,
     },
   });
 
@@ -118,7 +131,7 @@ export async function seedBasePlatform() {
     });
   }
 
-  return { superAdmin, salonA, salonB };
+  return { superAdmin, salonOwnerA, salonA, salonB };
 }
 
 export async function auditAll17Invariants(): Promise<{ passed: boolean; violations: string[] }> {

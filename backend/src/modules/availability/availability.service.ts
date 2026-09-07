@@ -69,7 +69,7 @@ export class AvailabilityService {
     dateStr: string, // YYYY-MM-DD
     preferredStylistId?: string,
     excludeAppointmentId?: string,
-    candidateStepMinutes: number = 15,
+    candidateStepMinutes?: number,
   ): Promise<AvailabilityResult> {
     const serviceIds = Array.isArray(serviceIdOrIds) ? serviceIdOrIds : [serviceIdOrIds];
     if (serviceIds.length === 0) {
@@ -138,6 +138,12 @@ export class AvailabilityService {
     }
 
     const totalServiceDuration = services.reduce((sum, s) => sum + s.durationMinutes, 0);
+
+    // Slot interval is driven directly by total service duration (e.g. 30m, 45m, 60m) unless explicitly overridden
+    const stepMinutes =
+      candidateStepMinutes !== undefined && candidateStepMinutes > 0
+        ? candidateStepMinutes
+        : (totalServiceDuration > 0 ? totalServiceDuration : 15);
 
     const isSalonClosed = !salonWorkingHours || salonWorkingHours.isClosed;
     const salonOpenMinutes =
@@ -239,12 +245,16 @@ export class AvailabilityService {
     // 5. Continuous Free-Interval Calculation per Stylist
     const slotsMap = new Map<string, { startTime: string; endTime: string; eligibleStylistIds: Set<string> }>();
 
-    // Advance notice check if booking for today: zero artificial buffer, strictly next 15-min mark
+    // Advance notice check if booking for today: zero artificial buffer, only upcoming slots
     let earliestAllowedMinutes = 0;
     if (requestedDate.hasSame(todayInSalonZone, 'day')) {
       const nowMinuteOfDay = nowInSalonZone.hour * 60 + nowInSalonZone.minute;
-      const rem = nowMinuteOfDay % candidateStepMinutes;
-      earliestAllowedMinutes = rem === 0 ? nowMinuteOfDay : nowMinuteOfDay + (candidateStepMinutes - rem);
+      if (candidateStepMinutes !== undefined && candidateStepMinutes > 0) {
+        const rem = nowMinuteOfDay % stepMinutes;
+        earliestAllowedMinutes = rem === 0 ? nowMinuteOfDay : nowMinuteOfDay + (stepMinutes - rem);
+      } else {
+        earliestAllowedMinutes = nowMinuteOfDay;
+      }
     }
 
     for (const stylist of eligibleStylists) {
@@ -315,13 +325,15 @@ export class AvailabilityService {
         (intv) => intv.end - intv.start >= totalServiceDuration,
       );
 
-      // Generate candidate start times within continuous free intervals
+      // Generate candidate start times within continuous free intervals using the service-duration interval
       for (const interval of validFreeIntervals) {
         let candidateStart = interval.start;
-        // Align candidate start up to the step
-        const remainder = candidateStart % candidateStepMinutes;
-        if (remainder !== 0) {
-          candidateStart += candidateStepMinutes - remainder;
+        // If an explicit custom step was requested, align candidate start to that step
+        if (candidateStepMinutes !== undefined && candidateStepMinutes > 0) {
+          const remainder = candidateStart % stepMinutes;
+          if (remainder !== 0) {
+            candidateStart += stepMinutes - remainder;
+          }
         }
 
         while (candidateStart + totalServiceDuration <= interval.end) {
@@ -341,7 +353,7 @@ export class AvailabilityService {
             }
             slotsMap.get(timeKey)!.eligibleStylistIds.add(stylist.id);
           }
-          candidateStart += candidateStepMinutes;
+          candidateStart += stepMinutes;
         }
       }
     }
