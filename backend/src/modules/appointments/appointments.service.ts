@@ -547,6 +547,13 @@ export class AppointmentsService {
   ) {
     const appointment = await this.getAppointmentById(salonId, appointmentId);
 
+    // Idempotency Protection: If already in target status or both current and target are CANCELLED/NO_SHOW, return existing record
+    const isTargetCancelledNoShow = ([AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW] as string[]).includes(dto.status);
+    const isCurrentCancelledNoShow = ([AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW] as string[]).includes(appointment.status);
+    if (appointment.status === dto.status || (isCurrentCancelledNoShow && isTargetCancelledNoShow)) {
+      return appointment;
+    }
+
     const allowedTransitions = VALID_STATUS_TRANSITIONS[appointment.status as AppointmentStatus] || [];
     if (!allowedTransitions.includes(dto.status)) {
       throw new BadRequestException(
@@ -554,24 +561,51 @@ export class AppointmentsService {
       );
     }
 
-    // 2-hour cutoff rule for customers on cancellation (admin can override)
-    if (dto.status === AppointmentStatus.CANCELLED && !adminId) {
-      const salon = await this.prisma.salon.findUnique({ where: { id: salonId } });
-      const cancelWindowHours = salon?.cancelWindowHours ?? 2;
-      const nowMs = Date.now();
-      const apptStartMs = new Date(appointment.startAt).getTime();
-      if (apptStartMs - nowMs < cancelWindowHours * 60 * 60 * 1000) {
-        throw new BadRequestException(
-          `Appointments cannot be cancelled within ${cancelWindowHours} hours of the start time.`,
-        );
-      }
+    const nowMs = Date.now();
+    const apptStartMs = new Date(appointment.startAt).getTime();
+    const hoursRemaining = (apptStartMs - nowMs) / (1000 * 60 * 60);
+
+    // Process Penalty Strike Calculation (< 2 hours remaining & client fault / unresponsive)
+    let isPenaltyApplied = false;
+    let remainingPenalties = 2;
+    let newCount = 0;
+
+    const isClientFault =
+      dto.reasonCategory === 'CLIENT_UNRESPONSIVE' ||
+      dto.reasonCategory === 'CLIENT_MISTAKE' ||
+      !adminId;
+
+    if (
+      isTargetCancelledNoShow &&
+      isClientFault &&
+      dto.reasonCategory !== 'SALON_EMERGENCY' &&
+      hoursRemaining < 2 &&
+      appointment.salonUserId
+    ) {
+      const salonUser = await this.prisma.salonUser.findUnique({
+        where: { id: appointment.salonUserId },
+      });
+      const currentCount = salonUser?.yearlyNoShowCount || 0;
+      newCount = currentCount + 1;
+      remainingPenalties = Math.max(0, 3 - newCount);
+      const isBlocked = newCount >= 3;
+
+      await this.prisma.salonUser.update({
+        where: { id: appointment.salonUserId },
+        data: {
+          yearlyNoShowCount: newCount,
+          lastNoShowDate: new Date(),
+          isBookingBlocked: isBlocked,
+        },
+      });
+      isPenaltyApplied = true;
     }
 
     const updated = await this.prisma.appointment.update({
       where: { id: appointmentId },
       data: {
         status: dto.status,
-        notes: dto.reason ? `${appointment.notes || ''} [Status note: ${dto.reason}]`.trim() : appointment.notes,
+        notes: dto.reason ? `${appointment.notes || ''} [Note: ${dto.reason}]`.trim() : appointment.notes,
       },
       include: appointmentInclude,
     });
@@ -579,16 +613,55 @@ export class AppointmentsService {
     const formatted = this.formatAppointment(updated);
     this.emitSalonEvent(salonId, 'STATUS_UPDATED', formatted);
 
-    // Dispatch Automated Customer WhatsApp Engagement Messages
+    // Dispatch Customer WhatsApp Notifications
     const salon = await this.prisma.salon.findUnique({
       where: { id: salonId },
       include: { whatsappAccount: true },
     });
 
     const userPhone = updated.salonUser?.user?.phone;
+    const userName = updated.salonUser?.user?.name || 'Customer';
+
     if (salon && userPhone && salon.whatsappAccount?.phoneNumberId) {
-      if (dto.status === AppointmentStatus.CHECKED_IN) {
-        const welcomeMsg = `👋 *WELCOME TO ${salon.name.toUpperCase()}!*\n\nHi *${updated.salonUser?.user?.name || 'Customer'}*, you are checked in! Your stylist *${updated.stylist?.name || 'Stylist'}* will call you to the chair shortly.`;
+      const phoneNumberId = salon.whatsappAccount.phoneNumberId;
+      const tz = salon.timezone || 'Asia/Kolkata';
+      const timeStr = DateTime.fromJSDate(new Date(updated.startAt), { zone: tz }).toFormat('hh:mm a');
+
+      if (isTargetCancelledNoShow) {
+        if (dto.reasonCategory === 'SALON_EMERGENCY') {
+          // Salon Emergency Apology (NO Penalty)
+          const apologyMsg = `🙏 *SALON NOTICE: APPOINTMENT CANCELED*\n\nHi *${userName}*, we sincerely apologize! Your appointment for *${timeStr}* at *${salon.name}* was canceled due to a salon emergency.\n\n✨ *No penalty has been applied* to your account. We welcome you to rebook at your convenience!`;
+          await this.whatsappService.sendMetaMessage(
+            userPhone,
+            {
+              bodyText: apologyMsg,
+              interactiveType: 'button',
+              buttons: [{ id: 'btn_book', title: '📅 Book New Visit' }],
+            },
+            phoneNumberId,
+            salonId,
+          ).catch(() => {});
+        } else if (isPenaltyApplied) {
+          // Penalty Strike Notice
+          let message = '';
+          if (remainingPenalties > 0) {
+            message = `⚠️ *LATE CANCELLATION / NO-SHOW PENALTY RECORDED*\n\nHi *${userName}*, your appointment for *${timeStr}* at *${salon.name}* was canceled with less than 2 hours remaining.\n\n⚠️ *Penalty Strike Recorded:* You have *1 penalty strike* recorded. You have *${remainingPenalties} penalty strike(s) remaining* this year before automatic slot booking is locked.`;
+          } else {
+            message = `⚠️ *ACCOUNT BOOKING LOCKED*\n\nHi *${userName}*, you have accumulated *3 penalty strikes* this year for missed or late-canceled appointments. Automatic slot booking is now locked for your account.\n\n📞 *Please contact the Salon Owner* directly to request access unblock.`;
+          }
+          await this.whatsappService.sendMetaMessage(
+            userPhone,
+            {
+              bodyText: message,
+              interactiveType: 'button',
+              buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
+            },
+            phoneNumberId,
+            salonId,
+          ).catch(() => {});
+        }
+      } else if (dto.status === AppointmentStatus.CHECKED_IN) {
+        const welcomeMsg = `👋 *WELCOME TO ${salon.name.toUpperCase()}!*\n\nHi *${userName}*, you are checked in! Your stylist *${updated.stylist?.name || 'Stylist'}* will call you to the chair shortly.`;
         await this.whatsappService.sendMetaMessage(
           userPhone,
           {
@@ -596,11 +669,11 @@ export class AppointmentsService {
             interactiveType: 'button',
             buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
           },
-          salon.whatsappAccount.phoneNumberId,
+          phoneNumberId,
           salonId,
         ).catch(() => {});
       } else if (dto.status === AppointmentStatus.COMPLETED) {
-        const receiptMsg = `✨ *THANK YOU FOR VISITING ${salon.name.toUpperCase()}!*\n\nHi *${updated.salonUser?.user?.name || 'Customer'}*, thank you for visiting us today!\n\n• *Service:* *${updated.serviceNameSnapshot}*\n• *Stylist:* *${updated.stylist?.name || 'Stylist'}*\n• *Total Paid:* *₹${updated.price}*\n\n⭐ *How was your experience today?*`;
+        const receiptMsg = `✨ *THANK YOU FOR VISITING ${salon.name.toUpperCase()}!*\n\nHi *${userName}*, thank you for visiting us today!\n\n• *Service:* *${updated.serviceNameSnapshot}*\n• *Stylist:* *${updated.stylist?.name || 'Stylist'}*\n• *Total Paid:* *₹${updated.price}*\n\n⭐ *How was your experience today?*`;
         await this.whatsappService.sendMetaMessage(
           userPhone,
           {
@@ -611,14 +684,22 @@ export class AppointmentsService {
               { id: 'btn_start', title: '📅 Book Next Visit' },
             ],
           },
-          salon.whatsappAccount.phoneNumberId,
+          phoneNumberId,
           salonId,
         ).catch(() => {});
       }
     }
 
+    // Trigger Smart Move-Up Broadcast (ONLY if appointment startAt is in the FUTURE: apptStartMs > Date.now())
+    if (isTargetCancelledNoShow && apptStartMs > Date.now()) {
+      await this.triggerSmartMoveUpBroadcast(formatted).catch((err) => {
+        this.logger.warn(`Move-up broadcast trigger warning: ${err.message}`);
+      });
+    }
+
     return formatted;
   }
+
 
   async proposeAdminReschedule(
     salonId: string,

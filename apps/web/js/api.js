@@ -276,14 +276,15 @@ export class ApiClient {
     });
   }
 
-  static async updateAppointmentStatus(id, status, reason = '') {
+  static async updateAppointmentStatus(id, status, reason = '', reasonCategory = '') {
     this.invalidateCache('/reports');
     this.invalidateCache('/appointments');
     return this.request(`/appointments/${id}/status`, {
       method: 'PATCH',
-      body: JSON.stringify({ status, reason }),
+      body: JSON.stringify({ status, reason, reasonCategory }),
     });
   }
+
 
   static async rescheduleAppointment(id, payload) {
     this.invalidateCache('/reports');

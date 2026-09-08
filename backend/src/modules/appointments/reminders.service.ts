@@ -323,4 +323,59 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
 
     return { stage1: stage1Count, stage2: stage2Count, stage3: stage3Count, stage4: stage4Count };
   }
+
+  async recordPenaltyStrike(
+    salonUserId: string | null,
+    salonId: string,
+    timeStr: string,
+    stylistName: string,
+    userPhone?: string,
+    userName?: string,
+    phoneNumberId?: string,
+  ) {
+    let remainingPenalties = 2;
+    let newCount = 1;
+    if (salonUserId) {
+      const salonUser = await this.prisma.salonUser.findUnique({
+        where: { id: salonUserId },
+      });
+
+      const currentCount = salonUser?.yearlyNoShowCount || 0;
+      newCount = currentCount + 1;
+      remainingPenalties = Math.max(0, 3 - newCount);
+      const isBlocked = newCount >= 3;
+
+      await this.prisma.salonUser.update({
+        where: { id: salonUserId },
+        data: {
+          yearlyNoShowCount: newCount,
+          lastNoShowDate: new Date(),
+          isBookingBlocked: isBlocked,
+        },
+      });
+    }
+
+    if (userPhone && phoneNumberId) {
+      let message = '';
+      if (remainingPenalties > 0) {
+        message = `⚠️ *LATE CANCELLATION / NO-SHOW PENALTY RECORDED*\n\nHi *${userName || 'Customer'}*, your appointment for *${timeStr}* with *${stylistName || 'Stylist'}* was canceled with less than 2 hours remaining.\n\n⚠️ *Penalty Strike Recorded:* You have *1 penalty strike* recorded. You have *${remainingPenalties} penalty strike(s) remaining* this year before automatic slot booking is locked.`;
+      } else {
+        message = `⚠️ *ACCOUNT BOOKING LOCKED*\n\nHi *${userName || 'Customer'}*, you have accumulated *3 penalty strikes* this year for missed or late-canceled appointments. Automatic slot booking is now locked for your account.\n\n📞 *Please contact the Salon Owner* directly to request access unblock.`;
+      }
+
+      await this.whatsAppService.sendMetaMessage(
+        userPhone,
+        {
+          bodyText: message,
+          interactiveType: 'button',
+          buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
+        },
+        phoneNumberId,
+        salonId,
+      ).catch(() => {});
+    }
+
+    return { newCount, remainingPenalties };
+  }
 }
+
