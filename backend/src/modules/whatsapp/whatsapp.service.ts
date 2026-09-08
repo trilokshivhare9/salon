@@ -10,7 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../database/prisma.service';
 import { AvailabilityService, AvailableSlotResponse } from '../availability/availability.service';
 import { AppointmentsService } from '../appointments/appointments.service';
-import { ConversationState, BookingSource, WhatsAppMessageDirection, AppointmentStatus, ClientEtaStatus, WhatsAppMessageStatus } from '@prisma/client';
+import { ConversationState, BookingSource, WhatsAppMessageDirection, AppointmentStatus, ClientEtaStatus, WhatsAppMessageStatus, ServiceGender } from '@prisma/client';
 import { DateTime } from 'luxon';
 
 export interface InteractiveButton {
@@ -635,6 +635,313 @@ export class WhatsAppService {
     );
   }
 
+  // -------------------------------------------------------------------------
+  // 2-TIER SERVICE HIERARCHY & GENDER FILTERING HELPERS
+  // -------------------------------------------------------------------------
+
+  public getEffectiveGender(conversation: any, salonUser: any): ServiceGender {
+    if (conversation.tempBookingGender) {
+      return conversation.tempBookingGender as ServiceGender;
+    }
+    if (salonUser?.gender) {
+      return salonUser.gender as ServiceGender;
+    }
+    return ServiceGender.UNISEX;
+  }
+
+  public filterServicesByGender(services: any[], effectiveGender: ServiceGender): any[] {
+    if (!effectiveGender || effectiveGender === ServiceGender.UNISEX) {
+      return services;
+    }
+    return services.filter((s) => {
+      const tgt = s.targetGender || ServiceGender.UNISEX;
+      if (effectiveGender === ServiceGender.MALE) {
+        return tgt === ServiceGender.MALE || tgt === ServiceGender.UNISEX;
+      }
+      if (effectiveGender === ServiceGender.FEMALE) {
+        return tgt === ServiceGender.FEMALE || tgt === ServiceGender.UNISEX;
+      }
+      if (effectiveGender === ServiceGender.KIDS) {
+        return tgt === ServiceGender.KIDS || tgt === ServiceGender.UNISEX;
+      }
+      return true;
+    });
+  }
+
+  public getGenderLabel(gender: ServiceGender): string {
+    switch (gender) {
+      case ServiceGender.MALE:
+        return '👨 Men';
+      case ServiceGender.FEMALE:
+        return '👩 Women';
+      case ServiceGender.KIDS:
+        return '👶 Kids';
+      case ServiceGender.UNISEX:
+      default:
+        return '✂️ Unisex / All';
+    }
+  }
+
+  public getGenderBadge(gender: ServiceGender): string {
+    switch (gender) {
+      case ServiceGender.MALE:
+        return '👨';
+      case ServiceGender.FEMALE:
+        return '👩';
+      case ServiceGender.KIDS:
+        return '👶';
+      case ServiceGender.UNISEX:
+      default:
+        return '✂️';
+    }
+  }
+
+  async promptGenderSelection(
+    conversationId: string,
+    cleanNumber: string,
+    salon: any,
+    phoneNumberId?: string,
+  ): Promise<{ replyMessage: string; state: ConversationState }> {
+    const reply = `👤 *Choose Booking Audience*\n\nWho are you booking this appointment for?`;
+    await this.sendMetaMessage(
+      cleanNumber,
+      {
+        headerText: `${salon.name} Gender Filter`,
+        bodyText: reply,
+        interactiveType: 'button',
+        buttons: [
+          { id: 'gender_select_MALE', title: '👨 Men' },
+          { id: 'gender_select_FEMALE', title: '👩 Women' },
+          { id: 'gender_select_UNISEX', title: '✂️ Show All' },
+        ],
+      },
+      phoneNumberId,
+    );
+    return { replyMessage: reply, state: ConversationState.SELECT_CATEGORY };
+  }
+
+  async promptCategorySelection(
+    conversation: any,
+    cleanNumber: string,
+    salon: any,
+    salonUser: any,
+    phoneNumberId?: string,
+  ): Promise<{ replyMessage: string; state: ConversationState }> {
+    const effectiveGender = this.getEffectiveGender(conversation, salonUser);
+    const genderLabel = this.getGenderLabel(effectiveGender);
+
+    const activeServices = this.filterServicesByGender(salon.services || [], effectiveGender);
+
+    if (activeServices.length === 0) {
+      const reply = `⚠️ No services found for *${genderLabel}*. Tap *Switch Gender* to view other services:`;
+      await this.sendMetaMessage(
+        cleanNumber,
+        {
+          bodyText: reply,
+          interactiveType: 'button',
+          buttons: [
+            { id: 'btn_switch_gender', title: '🔄 Switch Gender' },
+            { id: 'btn_start', title: '🏠 Main Menu' },
+          ],
+        },
+        phoneNumberId,
+      );
+      await this.prisma.conversation.update({
+        where: { id: conversation.id },
+        data: { state: ConversationState.SELECT_CATEGORY, selectedCategoryId: null },
+      });
+      return { replyMessage: reply, state: ConversationState.SELECT_CATEGORY };
+    }
+
+    const categoriesWithServices = (salon.serviceCategories || [])
+      .map((cat: any) => {
+        const catServices = activeServices.filter((s) => s.categoryId === cat.id);
+        return { ...cat, matchingCount: catServices.length };
+      })
+      .filter((cat: any) => cat.matchingCount > 0);
+
+    const uncategorizedServices = activeServices.filter((s) => !s.categoryId);
+
+    // If salon has no categories OR all services are uncategorized, jump to service list directly
+    if (categoriesWithServices.length === 0) {
+      return this.promptServiceSelection(conversation, cleanNumber, salon, salonUser, phoneNumberId);
+    }
+
+    await this.prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { state: ConversationState.SELECT_CATEGORY, selectedCategoryId: null },
+    });
+
+    const totalItems = categoriesWithServices.length + (uncategorizedServices.length > 0 ? 1 : 0);
+
+    if (totalItems <= 2) {
+      const buttons: Array<{ id: string; title: string }> = categoriesWithServices.map((cat: any) => ({
+        id: `cat_${cat.id}`,
+        title: `${cat.icon || '📂'} ${cat.name}`.slice(0, 20),
+      }));
+
+      if (uncategorizedServices.length > 0) {
+        buttons.push({ id: 'cat_uncategorized', title: 'General Services'.slice(0, 20) });
+      }
+
+      if (buttons.length < 3) {
+        buttons.push({ id: 'btn_switch_gender', title: '🔄 Switch Gender'.slice(0, 20) });
+      }
+
+      const reply = `📂 *Select Category*\nFilter: *${genderLabel}*\n\nPlease choose a category:`;
+      await this.sendMetaMessage(
+        cleanNumber,
+        {
+          headerText: `${salon.name} Menu`,
+          bodyText: reply,
+          interactiveType: 'button',
+          buttons,
+        },
+        phoneNumberId,
+      );
+      return { replyMessage: reply, state: ConversationState.SELECT_CATEGORY };
+    } else {
+      const listRows: InteractiveListRow[] = categoriesWithServices.map((cat: any) => ({
+        id: `cat_${cat.id}`,
+        title: `${cat.icon || '📂'} ${cat.name}`,
+        description: `${cat.matchingCount} service${cat.matchingCount > 1 ? 's' : ''} available`,
+      }));
+
+      if (uncategorizedServices.length > 0) {
+        listRows.push({
+          id: 'cat_uncategorized',
+          title: 'General Services',
+          description: `${uncategorizedServices.length} service${uncategorizedServices.length > 1 ? 's' : ''}`,
+        });
+      }
+
+      listRows.push({
+        id: 'btn_switch_gender',
+        title: '🔄 Switch Gender Filter',
+        description: `Currently showing: ${genderLabel}`,
+      });
+
+      const reply = `📂 *Service Categories*\nFilter: *${genderLabel}*\n\nPlease tap below to choose a category:`;
+      await this.sendMetaMessage(
+        cleanNumber,
+        {
+          headerText: `${salon.name} Menu`,
+          bodyText: reply,
+          footerText: 'Tap below to select category',
+          buttonText: '📂 View Categories',
+          interactiveType: 'list',
+          listRows,
+        },
+        phoneNumberId,
+      );
+      return { replyMessage: reply, state: ConversationState.SELECT_CATEGORY };
+    }
+  }
+
+  async promptServiceSelection(
+    conversation: any,
+    cleanNumber: string,
+    salon: any,
+    salonUser: any,
+    phoneNumberId?: string,
+    categoryId?: string | null,
+  ): Promise<{ replyMessage: string; state: ConversationState; metadata?: any }> {
+    const effectiveGender = this.getEffectiveGender(conversation, salonUser);
+    const genderLabel = this.getGenderLabel(effectiveGender);
+
+    const activeGenderServices = this.filterServicesByGender(salon.services || [], effectiveGender);
+    const targetCatId = categoryId !== undefined ? categoryId : conversation.selectedCategoryId;
+
+    let targetServices = activeGenderServices;
+    let categoryName = '';
+
+    if (targetCatId) {
+      if (targetCatId === 'uncategorized') {
+        targetServices = activeGenderServices.filter((s) => !s.categoryId);
+        categoryName = 'General Services';
+      } else {
+        targetServices = activeGenderServices.filter((s) => s.categoryId === targetCatId);
+        const cat = (salon.serviceCategories || []).find((c: any) => c.id === targetCatId);
+        categoryName = cat ? cat.name : '';
+      }
+    }
+
+    if (targetServices.length === 0) {
+      const reply = `⚠️ No services available in this category for *${genderLabel}*.`;
+      await this.sendMetaMessage(
+        cleanNumber,
+        {
+          bodyText: reply,
+          interactiveType: 'button',
+          buttons: [
+            { id: 'cat_back', title: '⬅️ Categories' },
+            { id: 'btn_switch_gender', title: '🔄 Switch Gender' },
+          ],
+        },
+        phoneNumberId,
+      );
+      await this.prisma.conversation.update({
+        where: { id: conversation.id },
+        data: { state: ConversationState.SELECT_SERVICE },
+      });
+      return { replyMessage: reply, state: ConversationState.SELECT_SERVICE };
+    }
+
+    const hasCategories = (salon.serviceCategories || []).length > 0;
+    if (targetServices.length === 1 && !hasCategories) {
+      return this.handleServiceChosen(conversation.id, cleanNumber, salon, targetServices[0], phoneNumberId);
+    }
+
+    await this.prisma.conversation.update({
+      where: { id: conversation.id },
+      data: {
+        state: ConversationState.SELECT_SERVICE,
+        selectedCategoryId: targetCatId || null,
+      },
+    });
+
+    const listRows: InteractiveListRow[] = targetServices.map((s) => {
+      const genderIcon = this.getGenderBadge(s.targetGender);
+      return {
+        id: `svc_${s.id}`,
+        title: s.name,
+        description: `${genderIcon} ₹${s.price} • ${s.durationMinutes} mins`,
+      };
+    });
+
+    if (hasCategories) {
+      listRows.push({
+        id: 'cat_back',
+        title: '⬅️ Back to Categories',
+        description: 'Browse other service categories',
+      });
+    }
+
+    listRows.push({
+      id: 'btn_switch_gender',
+      title: '🔄 Switch Gender Filter',
+      description: `Current filter: ${genderLabel}`,
+    });
+
+    const catHeader = categoryName ? ` (${categoryName})` : '';
+    const reply = `✂️ *Select a Service${catHeader}*\nFilter: *${genderLabel}*\n\nPlease choose a service below:`;
+
+    await this.sendMetaMessage(
+      cleanNumber,
+      {
+        headerText: `${salon.name} Services`,
+        bodyText: reply,
+        footerText: 'Tap below to select',
+        buttonText: '✂️ Select Service',
+        interactiveType: 'list',
+        listRows,
+      },
+      phoneNumberId,
+    );
+
+    return { replyMessage: reply, state: ConversationState.SELECT_SERVICE, metadata: { services: targetServices } };
+  }
+
   /**
    * Helper to format "HH:mm" time strings to 12-hour AM/PM format (e.g. "14:00" -> "2:00 PM")
    */
@@ -869,6 +1176,9 @@ export class WhatsAppService {
     const salon: any = await this.prisma.salon.findUnique({
       where: { id: salonId },
       include: {
+        serviceCategories: {
+          orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+        },
         services: {
           where: {
             status: 'ACTIVE',
@@ -877,6 +1187,9 @@ export class WhatsAppService {
                 stylist: { status: 'ACTIVE' },
               },
             },
+          },
+          include: {
+            serviceCategory: true,
           },
           orderBy: { name: 'asc' },
         },
@@ -1394,6 +1707,8 @@ We look forward to seeing you earlier today.`;
     const isKnownButtonPayload =
       isGlobalButton ||
       input.startsWith('btn_') ||
+      input.startsWith('cat_') ||
+      input.startsWith('gender_select_') ||
       input.startsWith('addon_') ||
       input.startsWith('rdate_') ||
       input.startsWith('rslot_') ||
@@ -1425,8 +1740,11 @@ We look forward to seeing you earlier today.`;
           case ConversationState.SELECT_RESCHEDULE_TIME:
             isAllowedForState = input.startsWith('rslot_');
             break;
+          case ConversationState.SELECT_CATEGORY:
+            isAllowedForState = input.startsWith('cat_') || input.startsWith('gender_select_') || input === 'btn_switch_gender';
+            break;
           case ConversationState.SELECT_SERVICE:
-            isAllowedForState = input.startsWith('svc_');
+            isAllowedForState = input.startsWith('svc_') || input === 'cat_back' || input.startsWith('gender_select_') || input === 'btn_switch_gender';
             break;
           case ConversationState.SELECT_STAFF:
             isAllowedForState = input.startsWith('staff_');
@@ -2215,73 +2533,11 @@ We look forward to seeing you earlier today.`;
         }
       }
       case ConversationState.START: {
-        if (input === '1' || input === 'btn_book' || normalized.includes('book')) {
-          // If only 1 service in the salon -> auto select and advance!
-          if (salon.services.length === 1) {
-            return this.handleServiceChosen(conversation.id, cleanNumber, salon, salon.services[0], phoneNumberId);
-          }
-
-          // Multiple services -> show list picker
-          await this.prisma.conversation.update({
-            where: { id: conversation.id },
-            data: { state: ConversationState.SELECT_SERVICE },
-          });
-
-          const listRows: InteractiveListRow[] = salon.services.map((s) => ({
-            id: `svc_${s.id}`,
-            title: s.name,
-            description: `₹${s.price} • ${s.durationMinutes} mins`,
-          }));
-
-          const reply = `✂️ *Select a Service*\nPlease choose a service from the list:`;
-          await this.sendMetaMessage(
-            cleanNumber,
-            {
-              headerText: `${salon.name} Menu`,
-              bodyText: reply,
-              footerText: 'Tap below to select',
-              buttonText: '✂️ Select Service',
-              interactiveType: 'list',
-              listRows,
-            },
-            phoneNumberId,
-          );
-
-          return { replyMessage: reply, state: ConversationState.SELECT_SERVICE, metadata: { services: salon.services } };
-        } else if (input === '2' || input === 'btn_services' || normalized.includes('service') || normalized.includes('menu')) {
-          if (salon.services.length === 1) {
-            const singleSvc = salon.services[0];
-            const reply = `✨ *Services Menu:*\n\n• *${singleSvc.name}*: ₹${singleSvc.price} (${singleSvc.durationMinutes} mins)${singleSvc.description ? `\n  _${singleSvc.description}_` : ''}`;
-            await this.sendMetaMessage(
-              cleanNumber,
-              {
-                bodyText: reply,
-                interactiveType: 'button',
-                buttons: [{ id: `svc_${singleSvc.id}`, title: `📅 Book (₹${singleSvc.price})` }],
-              },
-              phoneNumberId,
-            );
-            return { replyMessage: reply, state: ConversationState.START };
+        if (input === '1' || input === 'btn_book' || normalized.includes('book') || input === '2' || input === 'btn_services' || normalized.includes('service') || normalized.includes('menu')) {
+          if ((salon.serviceCategories || []).length > 0) {
+            return this.promptCategorySelection(conversation, cleanNumber, salon, salonUser, phoneNumberId);
           } else {
-            const listRows: InteractiveListRow[] = salon.services.map((s) => ({
-              id: `svc_${s.id}`,
-              title: s.name,
-              description: `₹${s.price} • ${s.durationMinutes} mins`,
-            }));
-            const reply = `✨ *${salon.name} Services Menu*\n\nSelect a service below to book directly:`;
-            await this.sendMetaMessage(
-              cleanNumber,
-              {
-                headerText: 'Services Menu',
-                bodyText: reply,
-                footerText: 'Tap below to book',
-                buttonText: '✂️ Choose Service',
-                interactiveType: 'list',
-                listRows,
-              },
-              phoneNumberId,
-            );
-            return { replyMessage: reply, state: ConversationState.SELECT_SERVICE, metadata: { services: salon.services } };
+            return this.promptServiceSelection(conversation, cleanNumber, salon, salonUser, phoneNumberId);
           }
         } else if (input === '3' || input === 'btn_info' || normalized.includes('info')) {
           const reply = `📍 *${salon.name}*\n\nAddress: ${salon.address || 'India'}, ${salon.city || ''}\nPhone: ${salon.phone}\nTimings: 09:00 AM – 09:00 PM`;
@@ -2309,37 +2565,128 @@ We look forward to seeing you earlier today.`;
         }
       }
 
+      case ConversationState.SELECT_CATEGORY: {
+        if (input === 'btn_switch_gender' || input.startsWith('gender_select_')) {
+          if (input.startsWith('gender_select_')) {
+            const newGender = input.replace('gender_select_', '') as ServiceGender;
+            conversation = await this.prisma.conversation.update({
+              where: { id: conversation.id },
+              data: { tempBookingGender: newGender },
+            });
+            if (salonUser && !salonUser.gender) {
+              await this.prisma.salonUser.update({
+                where: { id: salonUser.id },
+                data: { gender: newGender },
+              });
+              salonUser.gender = newGender;
+            }
+          } else {
+            return this.promptGenderSelection(conversation.id, cleanNumber, salon, phoneNumberId);
+          }
+          return this.promptCategorySelection(conversation, cleanNumber, salon, salonUser, phoneNumberId);
+        }
+
+        let selectedCatId: string | null = null;
+        if (input.startsWith('cat_')) {
+          selectedCatId = input.replace('cat_', '');
+        } else {
+          const effectiveGender = this.getEffectiveGender(conversation, salonUser);
+          const activeServices = this.filterServicesByGender(salon.services || [], effectiveGender);
+          const categoriesWithServices = (salon.serviceCategories || []).filter((cat: any) =>
+            activeServices.some((s) => s.categoryId === cat.id),
+          );
+
+          const num = parseInt(input, 10);
+          if (!isNaN(num) && num >= 1 && num <= categoriesWithServices.length) {
+            selectedCatId = categoriesWithServices[num - 1].id;
+          } else {
+            const matchedCat = categoriesWithServices.find((cat: any) =>
+              cat.name.toLowerCase().includes(normalized),
+            );
+            if (matchedCat) {
+              selectedCatId = matchedCat.id;
+            } else if (normalized.includes('general') || normalized.includes('uncategorized')) {
+              selectedCatId = 'uncategorized';
+            }
+          }
+        }
+
+        if (!selectedCatId) {
+          return this.promptCategorySelection(conversation, cleanNumber, salon, salonUser, phoneNumberId);
+        }
+
+        return this.promptServiceSelection(
+          conversation,
+          cleanNumber,
+          salon,
+          salonUser,
+          phoneNumberId,
+          selectedCatId,
+        );
+      }
+
       case ConversationState.SELECT_SERVICE: {
+        if (input === 'cat_back') {
+          return this.promptCategorySelection(conversation, cleanNumber, salon, salonUser, phoneNumberId);
+        }
+
+        if (input === 'btn_switch_gender' || input.startsWith('gender_select_')) {
+          if (input.startsWith('gender_select_')) {
+            const newGender = input.replace('gender_select_', '') as ServiceGender;
+            conversation = await this.prisma.conversation.update({
+              where: { id: conversation.id },
+              data: { tempBookingGender: newGender },
+            });
+            if (salonUser && !salonUser.gender) {
+              await this.prisma.salonUser.update({
+                where: { id: salonUser.id },
+                data: { gender: newGender },
+              });
+              salonUser.gender = newGender;
+            }
+            return this.promptServiceSelection(
+              conversation,
+              cleanNumber,
+              salon,
+              salonUser,
+              phoneNumberId,
+              conversation.selectedCategoryId,
+            );
+          } else {
+            return this.promptGenderSelection(conversation.id, cleanNumber, salon, phoneNumberId);
+          }
+        }
+
+        const effectiveGender = this.getEffectiveGender(conversation, salonUser);
+        const activeGenderServices = this.filterServicesByGender(salon.services || [], effectiveGender);
+        const targetServices = conversation.selectedCategoryId
+          ? conversation.selectedCategoryId === 'uncategorized'
+            ? activeGenderServices.filter((s) => !s.categoryId)
+            : activeGenderServices.filter((s) => s.categoryId === conversation.selectedCategoryId)
+          : activeGenderServices;
+
         let selectedService = null;
         if (input.startsWith('svc_')) {
           const svcId = input.replace('svc_', '');
-          selectedService = salon.services.find((s) => s.id === svcId);
+          selectedService = targetServices.find((s) => s.id === svcId) || (salon.services || []).find((s: any) => s.id === svcId);
         } else {
           const num = parseInt(input, 10);
-          if (!isNaN(num) && num >= 1 && num <= salon.services.length) {
-            selectedService = salon.services[num - 1];
+          if (!isNaN(num) && num >= 1 && num <= targetServices.length) {
+            selectedService = targetServices[num - 1];
           } else {
-            selectedService = salon.services.find((s) => s.name.toLowerCase().includes(normalized));
+            selectedService = targetServices.find((s) => s.name.toLowerCase().includes(normalized)) || (salon.services || []).find((s: any) => s.name.toLowerCase().includes(normalized));
           }
         }
 
         if (!selectedService) {
-          const listRows: InteractiveListRow[] = salon.services.map((s) => ({
-            id: `svc_${s.id}`,
-            title: s.name,
-            description: `₹${s.price} • ${s.durationMinutes} mins`,
-          }));
-          await this.sendMetaMessage(
+          return this.promptServiceSelection(
+            conversation,
             cleanNumber,
-            {
-              bodyText: `❌ Please select a service from the list below:`,
-              buttonText: '✂️ View Services',
-              interactiveType: 'list',
-              listRows,
-            },
+            salon,
+            salonUser,
             phoneNumberId,
+            conversation.selectedCategoryId,
           );
-          return { replyMessage: 'Please select a service', state: ConversationState.SELECT_SERVICE };
         }
 
         return this.handleServiceChosen(conversation.id, cleanNumber, salon, selectedService, phoneNumberId);

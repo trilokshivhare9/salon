@@ -7,10 +7,12 @@ import {
   Min,
   IsArray,
   IsUUID,
+  IsEnum,
   registerDecorator,
   ValidationOptions,
   ValidationArguments,
 } from 'class-validator';
+import { ServiceGender } from '@prisma/client';
 
 export function IsMultipleOf15(validationOptions?: ValidationOptions) {
   return function (object: Object, propertyName: string) {
@@ -56,6 +58,14 @@ export class CreateServiceDto {
   @IsOptional()
   category?: string;
 
+  @IsUUID('4', { message: 'categoryId must be a valid UUID' })
+  @IsOptional()
+  categoryId?: string;
+
+  @IsEnum(ServiceGender, { message: 'targetGender must be MALE, FEMALE, UNISEX, or KIDS' })
+  @IsOptional()
+  targetGender?: ServiceGender;
+
   @IsArray()
   @IsUUID('4', { each: true, message: 'Each stylistId must be a valid UUID' })
   @IsOptional()
@@ -89,6 +99,14 @@ export class UpdateServiceDto {
   @IsString()
   @IsOptional()
   category?: string;
+
+  @IsUUID('4', { message: 'categoryId must be a valid UUID' })
+  @IsOptional()
+  categoryId?: string;
+
+  @IsEnum(ServiceGender, { message: 'targetGender must be MALE, FEMALE, UNISEX, or KIDS' })
+  @IsOptional()
+  targetGender?: ServiceGender;
 
   @IsArray()
   @IsUUID('4', { each: true, message: 'Each stylistId must be a valid UUID' })

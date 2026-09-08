@@ -30,6 +30,7 @@ export class ServicesService {
     return this.prisma.service.findMany({
       where: { salonId },
       include: {
+        serviceCategory: true,
         stylists: {
           include: {
             stylist: true,
@@ -39,7 +40,83 @@ export class ServicesService {
           select: { stylists: true },
         },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [
+        { serviceCategory: { sortOrder: 'asc' } },
+        { createdAt: 'desc' },
+      ],
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // SERVICE CATEGORY MANAGEMENT
+  // ---------------------------------------------------------------------------
+  async getServiceCategories(salonId: string) {
+    return this.prisma.serviceCategory.findMany({
+      where: { salonId },
+      include: {
+        _count: { select: { services: true } },
+      },
+      orderBy: { sortOrder: 'asc' },
+    });
+  }
+
+  async createServiceCategory(salonId: string, name: string, icon?: string, sortOrder?: number) {
+    if (!name || typeof name !== 'string') {
+      throw new BadRequestException('Category name is required');
+    }
+    const trimmedName = name.trim();
+    if (!trimmedName) throw new BadRequestException('Category name cannot be empty');
+    if (trimmedName.length > 255) {
+      throw new BadRequestException('Category name cannot exceed 255 characters');
+    }
+
+    const existing = await this.prisma.serviceCategory.findFirst({
+      where: { salonId, name: { equals: trimmedName, mode: 'insensitive' } },
+    });
+    if (existing) {
+      throw new BadRequestException(`Category "${trimmedName}" already exists in this salon.`);
+    }
+
+    return this.prisma.serviceCategory.create({
+      data: {
+        salonId,
+        name: trimmedName,
+        icon: icon || 'scissors',
+        sortOrder: sortOrder || 0,
+      },
+    });
+  }
+
+  async updateServiceCategory(salonId: string, categoryId: string, name?: string, icon?: string, sortOrder?: number) {
+    const existing = await this.prisma.serviceCategory.findFirst({
+      where: { id: categoryId, salonId },
+    });
+    if (!existing) throw new NotFoundException('Service category not found');
+
+    const data: any = {};
+    if (name !== undefined) {
+      const trimmed = name.trim();
+      if (!trimmed) throw new BadRequestException('Category name cannot be empty');
+      data.name = trimmed;
+    }
+    if (icon !== undefined) data.icon = icon;
+    if (sortOrder !== undefined) data.sortOrder = sortOrder;
+
+    return this.prisma.serviceCategory.update({
+      where: { id: categoryId },
+      data,
+    });
+  }
+
+  async deleteServiceCategory(salonId: string, categoryId: string) {
+    const existing = await this.prisma.serviceCategory.findFirst({
+      where: { id: categoryId, salonId },
+    });
+    if (!existing) throw new NotFoundException('Service category not found');
+
+    // onDelete: SetNull on Prisma will unbind services safely
+    return this.prisma.serviceCategory.delete({
+      where: { id: categoryId },
     });
   }
 
@@ -47,6 +124,7 @@ export class ServicesService {
     const service = await this.prisma.service.findFirst({
       where: { id: serviceId, salonId },
       include: {
+        serviceCategory: true,
         stylists: {
           include: {
             stylist: true,
@@ -80,7 +158,6 @@ export class ServicesService {
     let targetStylistIds: string[] = [];
 
     if (dto.stylistIds !== undefined) {
-      // Explicit stylist list provided (can be empty array if explicitly desired)
       if (dto.stylistIds.length > 0) {
         const matchingStylists = await this.prisma.stylist.findMany({
           where: {
@@ -99,12 +176,19 @@ export class ServicesService {
         targetStylistIds = matchingStylists.map((s) => s.id);
       }
     } else {
-      // Default: automatically assign all active stylists in the salon
       const activeStylists = await this.prisma.stylist.findMany({
         where: { salonId, status: StylistStatus.ACTIVE },
         select: { id: true },
       });
       targetStylistIds = activeStylists.map((s) => s.id);
+    }
+
+    // Validate categoryId if provided
+    if (dto.categoryId) {
+      const cat = await this.prisma.serviceCategory.findFirst({
+        where: { id: dto.categoryId, salonId },
+      });
+      if (!cat) throw new BadRequestException('Selected Service Category does not exist in this salon.');
     }
 
     const service = await this.prisma.$transaction(async (tx) => {
@@ -116,6 +200,8 @@ export class ServicesService {
           price: dto.price,
           durationMinutes: dto.durationMinutes,
           category: dto.category?.trim(),
+          categoryId: dto.categoryId || null,
+          targetGender: dto.targetGender || 'UNISEX',
           status: ServiceStatus.ACTIVE,
         },
       });
@@ -134,6 +220,7 @@ export class ServicesService {
       return tx.service.findUnique({
         where: { id: created.id },
         include: {
+          serviceCategory: true,
           stylists: {
             include: { stylist: true },
           },
@@ -170,6 +257,13 @@ export class ServicesService {
     }
     if (dto.durationMinutes !== undefined && (dto.durationMinutes < 30 || dto.durationMinutes % 15 !== 0)) {
       throw new BadRequestException('Service duration must be at least 30 minutes and a multiple of 15.');
+    }
+
+    if (dto.categoryId) {
+      const cat = await this.prisma.serviceCategory.findFirst({
+        where: { id: dto.categoryId, salonId },
+      });
+      if (!cat) throw new BadRequestException('Selected Service Category does not exist in this salon.');
     }
 
     const { stylistIds, ...serviceData } = dto;
@@ -219,6 +313,7 @@ export class ServicesService {
       return tx.service.findUnique({
         where: { id: serviceId },
         include: {
+          serviceCategory: true,
           stylists: {
             include: { stylist: true },
           },

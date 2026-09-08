@@ -1421,10 +1421,15 @@ export class SalonDashboard {
               </h3>
               <p style="color: var(--text-secondary); font-size: 0.85rem;">Manage prices, duration intervals, and client booking offerings.</p>
             </div>
-            <button class="btn btn-primary btn-sm" id="btn-add-service" style="gap: 6px;">
-              ${Icons.plus({ size: 14 })}
-              <span>Add New Service</span>
-            </button>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-secondary btn-sm" id="btn-manage-categories" style="gap: 6px;">
+                <span>📂 Manage Categories</span>
+              </button>
+              <button class="btn btn-primary btn-sm" id="btn-add-service" style="gap: 6px;">
+                ${Icons.plus({ size: 14 })}
+                <span>Add New Service</span>
+              </button>
+            </div>
           </div>
 
           ${services.length === 0 ? `
@@ -1456,7 +1461,16 @@ export class SalonDashboard {
                         ${Icons.clock({ size: 13, color: '#94a3b8' })}
                         <strong>${s.durationMinutes || 30}</strong> mins
                       </span>
-                      <span class="badge badge-confirmed">${s.category || 'General'}</span>
+                      <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+                        <span class="badge badge-confirmed">${s.category || 'General'}</span>
+                        ${(() => {
+                          const g = s.targetGender || 'UNISEX';
+                          const labelMap = { MALE: '👨 Men', FEMALE: '👩 Women', UNISEX: '✂️ Unisex', KIDS: '👶 Kids' };
+                          const bgMap = { MALE: 'rgba(59, 130, 246, 0.15)', FEMALE: 'rgba(236, 72, 153, 0.15)', UNISEX: 'rgba(168, 85, 247, 0.15)', KIDS: 'rgba(245, 158, 11, 0.15)' };
+                          const colorMap = { MALE: '#60a5fa', FEMALE: '#f472b6', UNISEX: '#c084fc', KIDS: '#fbbf24' };
+                          return `<span class="badge" style="background: ${bgMap[g]}; color: ${colorMap[g]}; font-size: 0.76rem; padding: 2px 8px; border-radius: 6px; font-weight: 600;">${labelMap[g]}</span>`;
+                        })()}
+                      </div>
                     </div>
                     <div style="margin-bottom: 14px;">
                       ${(() => {
@@ -2340,6 +2354,7 @@ export class SalonDashboard {
     });
 
     // Services Tab Buttons
+    document.getElementById('btn-manage-categories')?.addEventListener('click', () => this.showManageCategoriesModal());
     document.getElementById('btn-add-service')?.addEventListener('click', () => this.showAddServiceModal());
     tabContent.querySelectorAll('.btn-edit-service').forEach((btn) => {
       btn.addEventListener('click', (e) => {
@@ -3020,6 +3035,99 @@ export class SalonDashboard {
     });
   }
 
+  async showManageCategoriesModal() {
+    const modalContainer = document.getElementById('modal-container');
+    try {
+      this.categoriesList = await ApiClient.getServiceCategories(true).catch(() => []);
+    } catch (e) {
+      console.warn('Failed to load categories', e);
+    }
+    const categories = Array.isArray(this.categoriesList) ? this.categoriesList : [];
+
+    modalContainer.innerHTML = `
+      <div class="modal-backdrop show">
+        <div class="modal-content modal-content-md" style="max-height: 90vh; overflow-y: auto;">
+          <div class="modal-header">
+            <h3>📂 Manage Service Categories</h3>
+            <button class="close-btn" id="btn-close-modal">&times;</button>
+          </div>
+          <div style="padding: 16px;">
+            <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 16px;">
+              Categories organize your services in the WhatsApp booking flow and customer menu.
+            </p>
+            
+            <!-- Category Create Form -->
+            <form id="add-category-form" style="display: flex; gap: 8px; margin-bottom: 20px; align-items: flex-end;">
+              <div style="flex: 2;">
+                <label style="font-size: 0.8rem;">Category Name *</label>
+                <input type="text" class="form-control" id="cat-name-input" placeholder="e.g. Hair Care, Facials" required />
+              </div>
+              <div style="flex: 1;">
+                <label style="font-size: 0.8rem;">Icon/Emoji</label>
+                <input type="text" class="form-control" id="cat-icon-input" placeholder="✂️" value="✂️" />
+              </div>
+              <button type="submit" class="btn btn-primary btn-sm" style="height: 38px;">➕ Add</button>
+            </form>
+
+            <div class="category-list" style="display: flex; flex-direction: column; gap: 8px;">
+              ${categories.length === 0 ? `
+                <div style="text-align: center; padding: 20px; color: var(--text-muted); font-size: 0.85rem;">No categories created yet. Add one above!</div>
+              ` : categories.map((c) => `
+                <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.05); padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);">
+                  <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 1.1rem;">${c.icon || '📂'}</span>
+                    <strong style="color: #fff; font-size: 0.95rem;">${c.name}</strong>
+                  </div>
+                  <div style="display: flex; gap: 6px;">
+                    <button class="btn btn-danger-outline btn-sm btn-delete-cat" data-id="${c.id}" data-name="${c.name}" style="padding: 4px 10px;" title="Delete Category">
+                      ${Icons.trash({ size: 12 })}
+                    </button>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('btn-close-modal')?.addEventListener('click', () => {
+      modalContainer.innerHTML = '';
+    });
+
+    document.getElementById('add-category-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const name = document.getElementById('cat-name-input').value.trim();
+      const icon = document.getElementById('cat-icon-input').value.trim() || '✂️';
+      if (!name) return;
+      try {
+        await ApiClient.createServiceCategory({ name, icon });
+        showNotification(`Category "${name}" created!`, 'success');
+        this.showManageCategoriesModal();
+        this.refreshData();
+      } catch (err) {
+        showNotification(err.message || 'Failed to create category', 'error');
+      }
+    });
+
+    document.querySelectorAll('.btn-delete-cat').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        const id = btn.getAttribute('data-id');
+        const name = btn.getAttribute('data-name');
+        if (confirm(`Delete category "${name}"? Services in this category will become general uncategorized services.`)) {
+          try {
+            await ApiClient.deleteServiceCategory(id);
+            showNotification(`Category "${name}" deleted`, 'success');
+            this.showManageCategoriesModal();
+            this.refreshData();
+          } catch (err) {
+            showNotification(err.message || 'Failed to delete category', 'error');
+          }
+        }
+      });
+    });
+  }
+
   showAddServiceModal() {
     const modalContainer = document.getElementById('modal-container');
     const activeStaff = (this.staffList || []).filter((st) => st.status === 'ACTIVE' || !st.status);
@@ -3048,6 +3156,17 @@ export class SalonDashboard {
             <div class="form-group" id="svc-custom-cat-group" style="display: none;">
               <label>Custom Category Name *</label>
               <input type="text" class="form-control" id="svc-custom-cat-input" placeholder="e.g. Bridal Special, Pedicure, Tattoo" />
+            </div>
+
+            <!-- Target Audience / Gender -->
+            <div class="form-group">
+              <label>Target Audience / Gender *</label>
+              <select class="form-control" id="svc-gender" required>
+                <option value="UNISEX" selected>✂️ Unisex (Both Men & Women)</option>
+                <option value="MALE">👨 Men Only</option>
+                <option value="FEMALE">👩 Women Only</option>
+                <option value="KIDS">👶 Kids Only</option>
+              </select>
             </div>
 
             <!-- 2. Service Name Text Field -->
@@ -3144,6 +3263,7 @@ export class SalonDashboard {
         price: parseFloat(priceInput.value),
         durationMinutes: dur,
         category: finalCategory,
+        targetGender: document.getElementById('svc-gender').value || 'UNISEX',
         description: descInput.value.trim(),
         stylistIds: selectedStylistIds,
       };
@@ -3196,6 +3316,17 @@ export class SalonDashboard {
             <div class="form-group" id="edit-svc-custom-cat-group" style="${initialCatValue === 'CUSTOM' ? 'display: block;' : 'display: none;'}">
               <label>Custom Category Name *</label>
               <input type="text" class="form-control" id="edit-svc-custom-cat-input" value="${initialCatValue === 'CUSTOM' ? (service.category || '') : ''}" placeholder="e.g. Bridal & Groom Special" />
+            </div>
+
+            <!-- Target Audience / Gender -->
+            <div class="form-group">
+              <label>Target Audience / Gender *</label>
+              <select class="form-control" id="edit-svc-gender" required>
+                <option value="UNISEX" ${(service.targetGender || 'UNISEX') === 'UNISEX' ? 'selected' : ''}>✂️ Unisex (Both Men & Women)</option>
+                <option value="MALE" ${service.targetGender === 'MALE' ? 'selected' : ''}>👨 Men Only</option>
+                <option value="FEMALE" ${service.targetGender === 'FEMALE' ? 'selected' : ''}>👩 Women Only</option>
+                <option value="KIDS" ${service.targetGender === 'KIDS' ? 'selected' : ''}>👶 Kids Only</option>
+              </select>
             </div>
 
             <!-- 2. Service Name -->
@@ -3290,6 +3421,7 @@ export class SalonDashboard {
         price: parseFloat(document.getElementById('edit-svc-price').value),
         durationMinutes: dur,
         category: finalCategory,
+        targetGender: document.getElementById('edit-svc-gender').value || 'UNISEX',
         description: document.getElementById('edit-svc-desc').value.trim(),
         stylistIds: selectedStylistIds,
       };

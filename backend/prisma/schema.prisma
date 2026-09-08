@@ -114,6 +114,7 @@ enum ConversationState {
   SELECT_RESCHEDULE_TIME
   CONFIRM_CANCEL
   SELECT_APPOINTMENT
+  SELECT_CATEGORY
   SELECT_SERVICE
   SELECT_STAFF
   SELECT_DATE
@@ -121,6 +122,13 @@ enum ConversationState {
   COLLECT_NAME
   CONFIRMATION
   COMPLETED
+}
+
+enum ServiceGender {
+  MALE
+  FEMALE
+  UNISEX
+  KIDS
 }
 
 enum ClientEtaStatus {
@@ -191,6 +199,7 @@ model Salon {
   createdByAdmin       Admin       @relation("AdminCreatedSalons", fields: [createdByAdminId], references: [id], onDelete: Restrict)
   admins               Admin[]     @relation("SalonAdmin")
   stylists             Stylist[]
+  serviceCategories    ServiceCategory[]
   services             Service[]
   workingHours         SalonWorkingHours[]
   salonUsers           SalonUser[]
@@ -210,19 +219,39 @@ model Salon {
 // -----------------------------------------------------------------------------
 // 3. SERVICES (Prerequisite before Stylists)
 // -----------------------------------------------------------------------------
+model ServiceCategory {
+  id        String    @id @default(uuid())
+  salonId   String    @map("salon_id")
+  name      String
+  icon      String?   @default("scissors")
+  sortOrder Int       @default(0) @map("sort_order")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  salon     Salon     @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  services  Service[]
+
+  @@unique([salonId, name])
+  @@unique([salonId, id])
+  @@index([salonId, sortOrder])
+  @@map("service_categories")
+}
+
 model Service {
-  id              String        @id @default(uuid())
-  salonId         String        @map("salon_id")
+  id              String           @id @default(uuid())
+  salonId         String           @map("salon_id")
+  categoryId      String?          @map("category_id")
   name            String
   description     String?
   category        String?
-  price           Decimal       @db.Decimal(10, 2)
-  durationMinutes Int           @map("duration_minutes")
-  status          ServiceStatus @default(ACTIVE)
-  createdAt       DateTime      @default(now()) @map("created_at")
-  updatedAt       DateTime      @updatedAt @map("updated_at")
+  targetGender    ServiceGender    @default(UNISEX) @map("target_gender")
+  price           Decimal          @db.Decimal(10, 2)
+  durationMinutes Int              @map("duration_minutes")
+  status          ServiceStatus    @default(ACTIVE)
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
 
-  salon           Salon         @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  salon           Salon            @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  serviceCategory ServiceCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   stylists        StylistService[]
   appointments    Appointment[]
   appointmentServices AppointmentService[]
@@ -344,6 +373,7 @@ model SalonUser {
   yearlyNoShowCount  Int             @default(0) @map("yearly_no_show_count")
   lastNoShowDate     DateTime?       @map("last_no_show_date")
   isBookingBlocked   Boolean         @default(false) @map("is_booking_blocked")
+  gender             ServiceGender?  @default(UNISEX)
 
   createdAt          DateTime        @default(now()) @map("created_at")
   updatedAt    DateTime        @updatedAt @map("updated_at")
@@ -444,6 +474,8 @@ model Conversation {
   customerPhone       String            @map("customer_phone")
   state               ConversationState @default(START)
   selectedServiceId   String?           @map("selected_service_id")
+  selectedCategoryId  String?           @map("selected_category_id")
+  tempBookingGender   ServiceGender?    @map("temp_booking_gender")
   selectedStaffId     String?           @map("selected_staff_id")
   selectedDate        DateTime?         @map("selected_date") @db.Date
   selectedStartTime   DateTime?         @map("selected_start_time") @db.Timestamptz
