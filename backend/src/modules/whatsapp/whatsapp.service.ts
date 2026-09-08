@@ -908,7 +908,7 @@ export class WhatsAppService {
     }
 
     // 2. Ensure link to this salon via SalonUser
-    await this.prisma.salonUser.upsert({
+    const salonUser = await this.prisma.salonUser.upsert({
       where: {
         salonId_userId: { salonId, userId: user.id },
       },
@@ -918,6 +918,37 @@ export class WhatsAppService {
         userId: user.id,
       },
     });
+
+    const input = (interactiveId || messageText || '').trim();
+
+    // Check if customer is blocked from booking due to 3 yearly no-shows
+    if (salonUser?.isBookingBlocked) {
+      const isBookingAttempt =
+        ['btn_book', 'btn_services', 'btn_book_now'].includes(input) ||
+        input.startsWith('svc_') ||
+        input.startsWith('slot_') ||
+        input.startsWith('date_');
+
+      if (isBookingAttempt) {
+        const blockMessage = `⚠️ *BOOKING RESTRICTED*
+
+You have accumulated *3 penalty strikes* this year for missed appointments. Automatic slot booking is currently locked for your account.
+
+📞 *Please contact the Salon Owner* directly at *${salon.phone || 'the salon desk'}* to request access unblock.`;
+
+        await this.sendMetaMessage(
+          cleanNumber,
+          {
+            bodyText: blockMessage,
+            interactiveType: 'button',
+            buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
+          },
+          phoneNumberId,
+          salonId,
+        );
+        return { replyMessage: blockMessage, state: ConversationState.START };
+      }
+    }
 
     let conversation = await this.prisma.conversation.findUnique({
       where: {
@@ -969,7 +1000,6 @@ export class WhatsAppService {
       });
     }
 
-    const input = (interactiveId || messageText).trim();
     const normalized = input.toLowerCase();
 
     this.logger.log(
@@ -1015,7 +1045,7 @@ export class WhatsAppService {
     }
 
     // -------------------------------------------------------------------------
-    // REMINDER & LATE-ARRIVAL RESPONSES
+    // REMINDER & LATE-ARRIVAL RESPONSES & SMART MOVE-UP
     // -------------------------------------------------------------------------
     if (input === 'remind_confirm') {
       const reply = `🎉 *Thank you for confirming!*\n\nWe have your seat reserved and look forward to welcoming you at *${salon.name}*!`;
@@ -1032,24 +1062,16 @@ export class WhatsAppService {
       return { replyMessage: reply, state: ConversationState.START };
     }
 
-    if (input.startsWith('late_on_way')) {
-      const apptId = input.replace('late_on_way_', '');
-      if (apptId && apptId !== 'late_on_way') {
+    if (input === 'remind_10m_on_way' || input.startsWith('late_on_way')) {
+      const activeAppts = await this.findActiveUpcomingAppointments(salonId, cleanNumber);
+      if (activeAppts.length > 0) {
         await this.prisma.appointment.update({
-          where: { id: apptId },
-          data: { clientEtaStatus: ClientEtaStatus.RUNNING_LATE_10M },
+          where: { id: activeAppts[0].id },
+          data: { clientEtaStatus: ClientEtaStatus.ON_THE_WAY },
         }).catch(() => { });
-      } else {
-        const activeAppts = await this.findActiveUpcomingAppointments(salonId, cleanNumber);
-        if (activeAppts.length > 0) {
-          await this.prisma.appointment.update({
-            where: { id: activeAppts[0].id },
-            data: { clientEtaStatus: ClientEtaStatus.RUNNING_LATE_10M },
-          }).catch(() => { });
-        }
       }
 
-      const reply = `🚗 *Thanks for letting us know!*\n\nWe have held your specialist's chair for the next 10 minutes. Please drive safely and see you shortly!`;
+      const reply = `🚗 *Thanks for letting us know!*\n\nWe have notified your stylist that you are on your way. Drive safely and see you shortly!`;
       await this.sendMetaMessage(
         cleanNumber,
         {
@@ -1063,19 +1085,26 @@ export class WhatsAppService {
       return { replyMessage: reply, state: ConversationState.START };
     }
 
-    if (input.startsWith('late_cancel') || input === 'remind_cancel') {
+    if (input === 'remind_10m_cancel' || input.startsWith('late_cancel') || input === 'remind_cancel') {
       const apptId = input.startsWith('late_cancel_') ? input.replace('late_cancel_', '') : null;
-      let targetApptId = apptId;
-      if (!targetApptId) {
+      let targetAppt: any = null;
+      if (apptId) {
+        targetAppt = await this.prisma.appointment.findUnique({ where: { id: apptId } });
+      } else {
         const activeAppts = await this.findActiveUpcomingAppointments(salonId, cleanNumber);
-        if (activeAppts.length > 0) targetApptId = activeAppts[0].id;
+        if (activeAppts.length > 0) targetAppt = activeAppts[0];
       }
 
-      if (targetApptId) {
-        await this.appointmentsService.updateStatus(salonId, targetApptId, {
-          status: AppointmentStatus.CANCELLED,
-          reason: 'Cancelled by client via WhatsApp reminder/late follow-up.',
-        }).catch(() => { });
+      if (targetAppt) {
+        await this.appointmentsService.updateStatus(
+          salonId,
+          targetAppt.id,
+          {
+            status: AppointmentStatus.CANCELLED,
+            reason: 'Cancelled by client via WhatsApp reminder / 10-minute check-in.',
+          },
+          'SYSTEM_WHATSAPP_BOT',
+        ).catch(() => { });
       }
 
       const reply = `✅ *Your chair has been released.*\n\nThank you for informing us in advance so another client could be accommodated. Reply *'Hi'* anytime to book a new slot!`;
@@ -1089,7 +1118,177 @@ export class WhatsAppService {
         phoneNumberId,
         salonId,
       );
+
+      if (targetAppt) {
+        // Trigger Smart Express Move-Up Broadcast for the newly freed slot!
+        await this.appointmentsService.triggerSmartMoveUpBroadcast(targetAppt);
+      }
+
       return { replyMessage: reply, state: ConversationState.START };
+    }
+
+    if (input.startsWith('move_up_accept_')) {
+      const parts = input.replace('move_up_accept_', '').split('_');
+      const candidateApptId = parts[0];
+      const freedApptId = parts[1];
+
+      if (candidateApptId && freedApptId) {
+        const freedAppt = await this.prisma.appointment.findUnique({ where: { id: freedApptId } });
+        const candidateAppt = await this.prisma.appointment.findUnique({
+          where: { id: candidateApptId },
+          include: { stylist: true, service: true },
+        });
+
+        if (freedAppt && candidateAppt && candidateAppt.status === AppointmentStatus.CONFIRMED) {
+          const oldStart = candidateAppt.startAt;
+          const oldEnd = candidateAppt.endAt;
+
+          const tz = salon.timezone || 'Asia/Kolkata';
+          const newTimeStr = DateTime.fromJSDate(freedAppt.startAt, { zone: tz }).toFormat('hh:mm a');
+
+          // Atomically update freed appointment to CANCELLED and shift candidate appointment into freed slot
+          await this.prisma.$transaction([
+            this.prisma.appointment.update({
+              where: { id: freedApptId },
+              data: {
+                status: AppointmentStatus.CANCELLED,
+                notes: 'Replaced by customer via Express Move-Up.',
+              },
+            }),
+            this.prisma.appointment.update({
+              where: { id: candidateApptId },
+              data: {
+                startAt: freedAppt.startAt,
+                endAt: freedAppt.endAt,
+                appointmentDate: freedAppt.appointmentDate,
+                notes: `Moved earlier via Express Move-Up from ${DateTime.fromJSDate(oldStart, { zone: tz }).toFormat('hh:mm a')}`,
+              },
+            }),
+          ]);
+
+          const reply = `⚡ *APPOINTMENT MOVED EARLIER!*
+
+Hi *${conversation.customerName || 'Customer'}*, your appointment with *${candidateAppt.stylist?.name || 'your stylist'}* has been successfully rescheduled to *${newTimeStr}* today!
+
+We look forward to seeing you earlier today.`;
+
+          await this.sendMetaMessage(
+            cleanNumber,
+            {
+              bodyText: reply,
+              interactiveType: 'button',
+              buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
+            },
+            phoneNumberId,
+            salonId,
+          );
+
+          // Now trigger smart move-up broadcast for candidate's OLD freed slot!
+          await this.appointmentsService.triggerSmartMoveUpBroadcast({
+            id: candidateApptId,
+            salonId,
+            stylistId: candidateAppt.stylistId,
+            startAt: oldStart,
+            endAt: oldEnd,
+          });
+
+          return { replyMessage: reply, state: ConversationState.START };
+        }
+      }
+    }
+
+    if (input.startsWith('move_up_decline_')) {
+      const reply = `👍 *No problem!* We've kept your original appointment time as scheduled. See you then!`;
+      await this.sendMetaMessage(
+        cleanNumber,
+        {
+          bodyText: reply,
+          interactiveType: 'button',
+          buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
+        },
+        phoneNumberId,
+        salonId,
+      );
+      return { replyMessage: reply, state: ConversationState.START };
+    }
+
+    if (input.startsWith('propose_accept_')) {
+      const apptId = input.replace('propose_accept_', '');
+      const appt = await this.prisma.appointment.findUnique({
+        where: { id: apptId },
+        include: { service: true, stylist: true },
+      });
+
+      if (appt && appt.proposedStartAt && appt.proposedEndAt) {
+        const newStart = appt.proposedStartAt;
+        const newEnd = appt.proposedEndAt;
+
+        await this.prisma.appointment.update({
+          where: { id: apptId },
+          data: {
+            startAt: newStart,
+            endAt: newEnd,
+            appointmentDate: DateTime.fromJSDate(newStart, { zone: salon.timezone || 'Asia/Kolkata' }).startOf('day').toJSDate(),
+            status: AppointmentStatus.CONFIRMED,
+            proposedStartAt: null,
+            proposedEndAt: null,
+            proposedByAdminId: null,
+            notes: `${appt.notes || ''} [Rescheduled by salon admin and accepted by customer.]`.trim(),
+          },
+        });
+
+        const tz = salon.timezone || 'Asia/Kolkata';
+        const newTimeStr = DateTime.fromJSDate(newStart, { zone: tz }).toFormat('hh:mm a');
+        const reply = `🎉 *RESCHEDULE CONFIRMED!*\n\nThank you for accepting! Your appointment with *${appt.stylist?.name || 'Stylist'}* at *${salon.name}* is now set for *${newTimeStr}*.`;
+
+        await this.sendMetaMessage(
+          cleanNumber,
+          {
+            bodyText: reply,
+            interactiveType: 'button',
+            buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
+          },
+          phoneNumberId,
+          salonId,
+        );
+
+        this.appointmentsService.emitSalonEvent(salonId, 'STATUS_UPDATED', appt);
+        return { replyMessage: reply, state: ConversationState.START };
+      }
+    }
+
+    if (input.startsWith('propose_decline_')) {
+      const apptId = input.replace('propose_decline_', '');
+      const appt = await this.prisma.appointment.findUnique({ where: { id: apptId } });
+
+      if (appt) {
+        const isPast = new Date(appt.startAt).getTime() < Date.now();
+        await this.prisma.appointment.update({
+          where: { id: apptId },
+          data: {
+            status: isPast ? AppointmentStatus.CANCELLED : AppointmentStatus.CONFIRMED,
+            proposedStartAt: null,
+            proposedEndAt: null,
+            proposedByAdminId: null,
+            notes: `${appt.notes || ''} [Proposed reschedule declined by customer.]`.trim(),
+          },
+        });
+
+        const reply = `👍 *No problem!* We have kept your original appointment details. Contact the salon if you need further adjustments!`;
+        await this.sendMetaMessage(
+          cleanNumber,
+          {
+            bodyText: reply,
+            interactiveType: 'button',
+            buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
+          },
+          phoneNumberId,
+          salonId,
+        );
+
+        this.appointmentsService.emitSalonEvent(salonId, 'STATUS_UPDATED', appt);
+        return { replyMessage: reply, state: ConversationState.START };
+      }
     }
 
     if (input === 'remind_reschedule') {
@@ -1185,39 +1384,72 @@ export class WhatsAppService {
     // -------------------------------------------------------------
     // EXPIRED INTERACTIVE BUTTON GUARD (Strict Old Message Button Locking)
     // -------------------------------------------------------------
+    const isGlobalButton =
+      ['btn_menu', 'btn_start', 'btn_book', 'btn_services'].includes(input) ||
+      input.startsWith('remind_') ||
+      input.startsWith('propose_') ||
+      input.startsWith('late_') ||
+      input.startsWith('move_up_');
+
     const isKnownButtonPayload =
+      isGlobalButton ||
       input.startsWith('btn_') ||
       input.startsWith('addon_') ||
       input.startsWith('rdate_') ||
+      input.startsWith('rslot_') ||
+      input.startsWith('date_') ||
+      input.startsWith('slot_') ||
       input.startsWith('staff_') ||
-      input.startsWith('svc_');
+      input.startsWith('svc_') ||
+      input.startsWith('appt_');
 
     if (isKnownButtonPayload) {
-      let isAllowedForState = false;
-      switch (conversation.state) {
-        case ConversationState.ACTIVE_HUB:
-          isAllowedForState = ['btn_add_service', 'btn_add_addon', 'btn_reschedule', 'btn_cancel_appt', 'btn_running_late', 'btn_eta_late_15', 'btn_menu', 'btn_book', 'btn_services', 'btn_start'].includes(input) || input.startsWith('svc_');
-          break;
-        case ConversationState.CONFIRM_CANCEL:
-          isAllowedForState = ['btn_cancel_yes', 'btn_cancel_no'].includes(input);
-          break;
-        case ConversationState.ADDON_CONFLICT:
-          isAllowedForState = ['btn_reschedule', 'btn_change_stylist', 'btn_keep_appt'].includes(input);
-          break;
-        case ConversationState.SELECT_RESCHEDULE_DATE:
-          isAllowedForState = input.startsWith('rdate_') || input === 'btn_menu';
-          break;
-        case ConversationState.SELECT_STAFF:
-          isAllowedForState = input.startsWith('staff_') || input === 'btn_menu';
-          break;
-        case ConversationState.SELECT_ADDON:
-          isAllowedForState = input.startsWith('addon_') || input === 'btn_menu';
-          break;
-        case ConversationState.START:
-          isAllowedForState = ['btn_book', 'btn_services', 'btn_start', 'btn_menu'].includes(input) || input.startsWith('svc_');
-          break;
-        default:
-          isAllowedForState = false;
+      let isAllowedForState = isGlobalButton;
+      if (!isAllowedForState) {
+        switch (conversation.state) {
+          case ConversationState.CONFIRMATION:
+            isAllowedForState = ['btn_confirm_yes', 'btn_confirm_no', 'btn_confirm'].includes(input);
+            break;
+          case ConversationState.ACTIVE_HUB:
+            isAllowedForState = ['btn_add_service', 'btn_add_addon', 'btn_reschedule', 'btn_cancel_appt', 'btn_running_late', 'btn_eta_late_15'].includes(input) || input.startsWith('svc_');
+            break;
+          case ConversationState.CONFIRM_CANCEL:
+            isAllowedForState = ['btn_cancel_yes', 'btn_cancel_no'].includes(input);
+            break;
+          case ConversationState.ADDON_CONFLICT:
+            isAllowedForState = ['btn_reschedule', 'btn_change_stylist', 'btn_keep_appt'].includes(input);
+            break;
+          case ConversationState.SELECT_RESCHEDULE_DATE:
+            isAllowedForState = input.startsWith('rdate_');
+            break;
+          case ConversationState.SELECT_RESCHEDULE_TIME:
+            isAllowedForState = input.startsWith('rslot_');
+            break;
+          case ConversationState.SELECT_SERVICE:
+            isAllowedForState = input.startsWith('svc_');
+            break;
+          case ConversationState.SELECT_STAFF:
+            isAllowedForState = input.startsWith('staff_');
+            break;
+          case ConversationState.SELECT_DATE:
+            isAllowedForState = input.startsWith('date_');
+            break;
+          case ConversationState.SELECT_TIME:
+            isAllowedForState = input.startsWith('slot_');
+            break;
+          case ConversationState.SELECT_ADDON:
+            isAllowedForState = input.startsWith('addon_');
+            break;
+          case ConversationState.SELECT_APPOINTMENT:
+            isAllowedForState = input.startsWith('appt_');
+            break;
+          case ConversationState.START:
+          case ConversationState.COMPLETED:
+            isAllowedForState = true;
+            break;
+          default:
+            isAllowedForState = true;
+        }
       }
 
       if (!isAllowedForState) {
@@ -1231,6 +1463,7 @@ export class WhatsAppService {
         return { replyMessage: reply, state: conversation.state };
       }
     }
+
 
     // -------------------------------------------------------------
     // STATE MACHINE
@@ -2772,6 +3005,105 @@ export class WhatsAppService {
 
     await this.prisma.whatsAppAccount.deleteMany({ where: { salonId } });
     return this.getSalonWhatsAppStatus(salonId);
+  }
+
+  async sendStaffChatMessage(salonId: string, customerPhone: string, messageText: string) {
+    const cleanNumber = this.cleanPhone(customerPhone);
+    const salon = await this.prisma.salon.findUnique({
+      where: { id: salonId },
+      include: { whatsappAccount: true },
+    });
+    if (!salon) {
+      throw new NotFoundException('Salon not found.');
+    }
+
+    const phoneNumberId = salon.whatsappAccount?.phoneNumberId || 'sandbox_whatsapp_phone_id';
+
+    try {
+      await this.sendMetaMessage(
+        cleanNumber,
+        { bodyText: messageText },
+        phoneNumberId,
+        salonId,
+      );
+    } catch (err) {
+      this.logger.warn(`[Staff Chat] Meta API send skipped/simulated: ${err.message}`);
+    }
+
+    // Record outbound log
+    await this.prisma.whatsAppLog.create({
+      data: {
+        salonId,
+        phone: cleanNumber,
+        direction: 'OUTBOUND',
+        messageText,
+        status: 'SENT',
+      },
+    });
+
+    // Pause AI bot auto-replies for 15 minutes when staff sends manual text
+    const botPausedUntil = new Date(Date.now() + 15 * 60 * 1000);
+    await this.prisma.conversation.upsert({
+      where: { salonId_customerPhone: { salonId, customerPhone: cleanNumber } },
+      create: {
+        salonId,
+        customerPhone: cleanNumber,
+        isBotPaused: true,
+        botPausedUntil,
+        state: 'START',
+      },
+      update: {
+        isBotPaused: true,
+        botPausedUntil,
+      },
+    });
+
+    // Emit real-time event for UI update
+    this.appointmentsService.emitSalonEvent(salonId, 'APPOINTMENT_UPDATED', {
+      type: 'STAFF_CHAT_MESSAGE',
+      customerPhone: cleanNumber,
+      messageText,
+      sentAt: new Date().toISOString(),
+    });
+
+    return { success: true, message: 'Message sent cleanly to customer WhatsApp.', botPausedUntil };
+  }
+
+
+  async resumeBot(salonId: string, customerPhone: string) {
+    const cleanNumber = this.cleanPhone(customerPhone);
+    await this.prisma.conversation.updateMany({
+      where: { salonId, customerPhone: cleanNumber },
+      data: {
+        isBotPaused: false,
+        botPausedUntil: null,
+      },
+    });
+
+    return { success: true, message: 'AI Bot auto-replies resumed.' };
+  }
+
+  async getChatHistory(salonId: string, customerPhone: string) {
+    const cleanNumber = this.cleanPhone(customerPhone);
+    const logs = await this.prisma.whatsAppLog.findMany({
+      where: {
+        salonId,
+        phone: { contains: cleanNumber.slice(-10) },
+      },
+
+      orderBy: { createdAt: 'asc' },
+      take: 50,
+    });
+
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { salonId_customerPhone: { salonId, customerPhone: cleanNumber } },
+    });
+
+    return {
+      logs,
+      isBotPaused: conversation?.isBotPaused || false,
+      botPausedUntil: conversation?.botPausedUntil || null,
+    };
   }
 }
 

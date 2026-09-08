@@ -1,8 +1,9 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy, forwardRef, Inject } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { AppointmentsService } from './appointments.service';
 import { DateTime } from 'luxon';
-import { AppointmentStatus } from '@prisma/client';
+import { AppointmentStatus, ClientEtaStatus } from '@prisma/client';
 
 @Injectable()
 export class RemindersService implements OnModuleInit, OnModuleDestroy {
@@ -13,6 +14,8 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
     @Inject(forwardRef(() => WhatsAppService))
     private readonly whatsAppService: WhatsAppService,
+    @Inject(forwardRef(() => AppointmentsService))
+    private readonly appointmentsService: AppointmentsService,
   ) {}
 
   onModuleInit() {
@@ -35,10 +38,10 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
         this.logger.error('Error in periodic appointment reminders job:', err);
       }
     }, 60000);
-    this.logger.log('⏰ Multi-Stage WhatsApp Reminder & Late-Arrival Worker started (60s tick).');
+    this.logger.log('⏰ Multi-Stage WhatsApp Reminder & Auto No-Show Worker started (60s tick).');
   }
 
-  async processReminders(): Promise<{ stage1: number; stage2: number; stage3: number }> {
+  async processReminders(): Promise<{ stage1: number; stage2: number; stage3: number; stage4: number }> {
     const salons = await this.prisma.salon.findMany({
       where: { status: 'ACTIVE' },
       include: { whatsappAccount: true },
@@ -47,6 +50,7 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
     let stage1Count = 0;
     let stage2Count = 0;
     let stage3Count = 0;
+    let stage4Count = 0;
 
     for (const salon of salons) {
       const tz = salon.timezone || 'Asia/Kolkata';
@@ -86,7 +90,7 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
         const timeStr = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('hh:mm a');
         const dateStr = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('dd LLL, EEE');
 
-        const message = `⏰ *APPOINTMENT REMINDER*\n\nHello *${user.name || 'Customer'}*, your upcoming visit at *${salon.name}* is in ~2 hours:\n\n• *Service:* *${appt.serviceNameSnapshot || appt.service?.name}* (₹${appt.price})\n• *Stylist:* *${appt.stylist?.name || 'Stylist'}*\n• *Date:* *${dateStr}*\n• *Time:* *${timeStr}*\n\n📍 *${salon.name}*\n${salon.address || ''}\n\nWe look forward to seeing you!`;
+        const message = `⏰ *APPOINTMENT REMINDER*\n\nHello *${user.name || 'Customer'}*, your upcoming visit at *${salon.name}* is in ~2 hours:\n\n• *Service:* *${appt.serviceNameSnapshot || appt.service?.name}* (₹${appt.price})\n• *Stylist:* *${appt.stylist?.name || 'Stylist'}*\n• *Date:* *${dateStr}*\n• *Time:* *${timeStr}*\n\n📍 *${salon.name}*\n${salon.address || ''}\n\nPlease confirm your arrival so we keep your chair ready!`;
 
         await this.whatsAppService.sendMetaMessage(
           user.phone,
@@ -143,12 +147,17 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
         if (!user?.phone) continue;
         const timeStr = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('hh:mm a');
 
-        const message = `💺 *YOUR CHAIR IS GETTING READY!*\n\nHi *${user.name || 'Customer'}*, your stylist *${appt.stylist?.name || 'Stylist'}* is preparing your station for *${timeStr}*.\n\n📍 *${salon.name}*\n${salon.address || ''}\n\nSee you in 10 minutes!`;
+        const message = `💺 *YOUR CHAIR IS GETTING READY!*\n\nHi *${user.name || 'Customer'}*, your stylist *${appt.stylist?.name || 'Stylist'}* is preparing your station for *${timeStr}*.\n\n📍 *${salon.name}*\n${salon.address || ''}\n\nPlease confirm if you are on your way:`;
 
         await this.whatsAppService.sendMetaMessage(
           user.phone,
           {
             bodyText: message,
+            interactiveType: 'button',
+            buttons: [
+              { id: 'remind_10m_on_way', title: '🚗 On the Way' },
+              { id: 'remind_10m_cancel', title: '❌ Cancel' },
+            ],
           },
           phoneNumberId,
           salon.id,
@@ -218,8 +227,100 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
 
         stage3Count++;
       }
+
+      // -----------------------------------------------------------------------
+      // STAGE 4: Auto-Cancellation & Penalty Strike Worker (+15m Grace Period)
+      // -----------------------------------------------------------------------
+      const todayStart = now.startOf('day').toJSDate();
+      const gracePeriodCutoff = now.minus({ minutes: 15 }).toJSDate();
+
+      const expiredAppointments = await this.prisma.appointment.findMany({
+        where: {
+          salonId: salon.id,
+          status: AppointmentStatus.CONFIRMED,
+          startAt: {
+            gte: todayStart,
+            lte: gracePeriodCutoff,
+          },
+          OR: [
+            { clientEtaStatus: null },
+            { clientEtaStatus: { not: ClientEtaStatus.ON_THE_WAY } },
+          ],
+        },
+        include: {
+          salonUser: {
+            include: {
+              user: true,
+            },
+          },
+          stylist: true,
+          service: true,
+        },
+      });
+
+      for (const appt of expiredAppointments) {
+        const user = appt.salonUser?.user;
+        const timeStr = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('hh:mm a');
+
+        // Mark appointment as NO_SHOW and record auto-cancellation date
+        await this.prisma.appointment.update({
+          where: { id: appt.id },
+          data: {
+            status: AppointmentStatus.NO_SHOW,
+            notes: 'Auto-canceled by system due to no-response after 15-minute grace period.',
+          },
+        });
+
+        // Increment customer yearly no-show count & enforce penalty locking
+        let remainingPenalties = 2;
+        if (appt.salonUserId) {
+          const salonUser = await this.prisma.salonUser.findUnique({
+            where: { id: appt.salonUserId },
+          });
+
+          const currentCount = salonUser?.yearlyNoShowCount || 0;
+          const newCount = currentCount + 1;
+          remainingPenalties = Math.max(0, 3 - newCount);
+          const isBlocked = newCount >= 3;
+
+          await this.prisma.salonUser.update({
+            where: { id: appt.salonUserId },
+            data: {
+              yearlyNoShowCount: newCount,
+              lastNoShowDate: new Date(),
+              isBookingBlocked: isBlocked,
+            },
+          });
+        }
+
+        // Send Penalty WhatsApp Notice to Customer
+        if (user?.phone) {
+          let message = '';
+          if (remainingPenalties > 0) {
+            message = `⚠️ *APPOINTMENT AUTO-CANCELED*\n\nHi *${user.name || 'Customer'}*, your appointment for *${timeStr}* with *${appt.stylist?.name || 'Stylist'}* was auto-canceled because we did not receive an arrival confirmation.\n\n⚠️ *Penalty Strike Recorded:* You have *1 penalty strike* recorded. You have *${remainingPenalties} penalty strike(s) remaining* this year before automatic slot booking is locked.`;
+          } else {
+            message = `⚠️ *ACCOUNT BOOKING LOCKED*\n\nHi *${user.name || 'Customer'}*, you have accumulated *3 penalty strikes* this year for missed appointments. Automatic slot booking is now locked for your account.\n\n📞 *Please contact the Salon Owner* directly to request access unblock.`;
+          }
+
+          await this.whatsAppService.sendMetaMessage(
+            user.phone,
+            {
+              bodyText: message,
+              interactiveType: 'button',
+              buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
+            },
+            phoneNumberId,
+            salon.id,
+          ).catch(() => {});
+        }
+
+        // Trigger Smart Express Move-Up Broadcast for the newly freed slot
+        await this.appointmentsService.triggerSmartMoveUpBroadcast(appt);
+
+        stage4Count++;
+      }
     }
 
-    return { stage1: stage1Count, stage2: stage2Count, stage3: stage3Count };
+    return { stage1: stage1Count, stage2: stage2Count, stage3: stage3Count, stage4: stage4Count };
   }
 }

@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Patch,
   Param,
   Query,
   UseGuards,
@@ -36,5 +37,13 @@ export class CustomersController {
     @Param('id') customerId: string,
   ) {
     return this.customersService.getCustomerById(salonId, customerId);
+  }
+
+  @Patch(':id/unblock')
+  async unblockCustomer(
+    @CurrentSalonId() salonId: string,
+    @Param('id') customerId: string,
+  ) {
+    return this.customersService.unblockCustomer(salonId, customerId);
   }
 }

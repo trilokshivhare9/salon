@@ -118,4 +118,21 @@ export class AppointmentsController {
       user.id,
     );
   }
+
+  @Patch(':id/propose-reschedule')
+  async proposeAdminReschedule(
+    @CurrentSalonId() salonId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') appointmentId: string,
+    @Body('newStartAt') newStartAt: string,
+    @Body('newEndAt') newEndAt: string,
+  ) {
+    return this.appointmentsService.proposeAdminReschedule(
+      salonId,
+      appointmentId,
+      new Date(newStartAt),
+      new Date(newEndAt),
+      user.id,
+    );
+  }
 }

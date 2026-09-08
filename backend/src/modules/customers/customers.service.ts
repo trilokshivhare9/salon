@@ -1,9 +1,14 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
 
 @Injectable()
 export class CustomersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    @Inject(forwardRef(() => WhatsAppService))
+    private whatsAppService: WhatsAppService,
+  ) {}
 
   async getCustomers(
     salonId: string,
@@ -46,6 +51,9 @@ export class CustomersService {
       email: su.user.email,
       status: su.status,
       notes: su.notes,
+      yearlyNoShowCount: su.yearlyNoShowCount,
+      lastNoShowDate: su.lastNoShowDate,
+      isBookingBlocked: su.isBookingBlocked,
       createdAt: su.createdAt,
     }));
 
@@ -93,8 +101,71 @@ export class CustomersService {
       email: salonUser.user.email,
       status: salonUser.status,
       notes: salonUser.notes,
+      yearlyNoShowCount: salonUser.yearlyNoShowCount,
+      lastNoShowDate: salonUser.lastNoShowDate,
+      isBookingBlocked: salonUser.isBookingBlocked,
       appointments: salonUser.appointments,
       createdAt: salonUser.createdAt,
+    };
+  }
+
+  async unblockCustomer(salonId: string, customerId: string) {
+    const salonUser = await this.prisma.salonUser.findFirst({
+      where: {
+        salonId,
+        OR: [{ id: customerId }, { userId: customerId }],
+      },
+      include: {
+        user: true,
+        salon: {
+          include: {
+            whatsappAccount: true,
+          },
+        },
+      },
+    });
+
+    if (!salonUser) {
+      throw new NotFoundException('Customer not found.');
+    }
+
+    const updated = await this.prisma.salonUser.update({
+      where: { id: salonUser.id },
+      data: {
+        yearlyNoShowCount: 0,
+        isBookingBlocked: false,
+      },
+    });
+
+    // Notify customer via WhatsApp that their account has been unblocked by the Salon Owner
+    if (salonUser.user?.phone && salonUser.salon?.whatsappAccount?.phoneNumberId) {
+      const message = `🎉 *ACCOUNT UNBLOCKED!*
+
+Hi *${salonUser.user.name || 'Customer'}*, your appointment booking access has been restored by *${salonUser.salon.name}*!
+
+You can now book appointment slots again anytime via WhatsApp.`;
+
+      await this.whatsAppService.sendMetaMessage(
+        salonUser.user.phone,
+        {
+          bodyText: message,
+          interactiveType: 'button',
+          buttons: [{ id: 'btn_start', title: '📅 Book Appointment' }],
+        },
+        salonUser.salon.whatsappAccount.phoneNumberId,
+        salonId,
+      ).catch(() => {});
+    }
+
+    return {
+      message: 'Customer booking access unblocked successfully.',
+      customer: {
+        id: updated.id,
+        userId: updated.userId,
+        salonId: updated.salonId,
+        yearlyNoShowCount: updated.yearlyNoShowCount,
+        isBookingBlocked: updated.isBookingBlocked,
+      },
     };
   }
 }

@@ -266,5 +266,44 @@ export class WhatsAppController {
   async disconnect(@Body() body: { salonId: string }) {
     return this.whatsappService.disconnectSalonWhatsApp(body.salonId);
   }
+
+  // -------------------------------------------------------------
+  // TWO-WAY STAFF CHAT & AI BOT CONTROL ENDPOINTS
+  // -------------------------------------------------------------
+  @Post('chat/send-message')
+  async sendChatMessage(
+    @Body()
+    body: {
+      salonId: string;
+      customerPhone: string;
+      messageText: string;
+    },
+  ) {
+    return this.whatsappService.sendStaffChatMessage(
+      body.salonId,
+      body.customerPhone,
+      body.messageText,
+    );
+  }
+
+  @Post('chat/resume-bot')
+  async resumeBot(
+    @Body()
+    body: {
+      salonId: string;
+      customerPhone: string;
+    },
+  ) {
+    return this.whatsappService.resumeBot(body.salonId, body.customerPhone);
+  }
+
+  @Get('chat/history')
+  async getChatHistory(
+    @Query('salonId') salonId: string,
+    @Query('customerPhone') customerPhone: string,
+  ) {
+    return this.whatsappService.getChatHistory(salonId, customerPhone);
+  }
 }
+
 

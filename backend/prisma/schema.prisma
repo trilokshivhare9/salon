@@ -57,6 +57,7 @@ enum AppointmentStatus {
   COMPLETED
   CANCELLED
   NO_SHOW
+  PENDING_RESCHEDULE
 }
 
 enum BookingSource {
@@ -123,6 +124,7 @@ enum ConversationState {
 }
 
 enum ClientEtaStatus {
+  ON_THE_WAY
   ON_TIME
   RUNNING_LATE_10M
   RUNNING_LATE_20M
@@ -333,12 +335,17 @@ model User {
 }
 
 model SalonUser {
-  id           String          @id @default(uuid())
-  salonId      String          @map("salon_id")
-  userId       String          @map("user_id")
-  status       SalonUserStatus @default(ACTIVE)
-  notes        String?
-  createdAt    DateTime        @default(now()) @map("created_at")
+  id                 String          @id @default(uuid())
+  salonId            String          @map("salon_id")
+  userId             String          @map("user_id")
+  status             SalonUserStatus @default(ACTIVE)
+  notes              String?
+
+  yearlyNoShowCount  Int             @default(0) @map("yearly_no_show_count")
+  lastNoShowDate     DateTime?       @map("last_no_show_date")
+  isBookingBlocked   Boolean         @default(false) @map("is_booking_blocked")
+
+  createdAt          DateTime        @default(now()) @map("created_at")
   updatedAt    DateTime        @updatedAt @map("updated_at")
 
   salon        Salon           @relation(fields: [salonId], references: [id], onDelete: Cascade)
@@ -379,6 +386,10 @@ model Appointment {
   expiresAt           DateTime?         @map("expires_at") @db.Timestamptz
   notes               String?
   createdByAdminId    String?           @map("created_by_admin_id")
+
+  proposedStartAt     DateTime?         @map("proposed_start_at") @db.Timestamptz
+  proposedEndAt       DateTime?         @map("proposed_end_at") @db.Timestamptz
+  proposedByAdminId   String?           @map("proposed_by_admin_id")
 
   reminder2hSentAt    DateTime?         @map("reminder_2h_sent_at") @db.Timestamptz
   reminder10mSentAt   DateTime?         @map("reminder_10m_sent_at") @db.Timestamptz
@@ -439,6 +450,10 @@ model Conversation {
   customerName        String?           @map("customer_name")
   activeAppointmentId   String?           @map("active_appointment_id")
   pendingAddonServiceId String?           @map("pending_addon_service_id")
+
+  isBotPaused         Boolean           @default(false) @map("is_bot_paused")
+  botPausedUntil      DateTime?         @map("bot_paused_until") @db.Timestamptz
+
   updatedAt             DateTime          @updatedAt @map("updated_at")
 
   salon               Salon             @relation(fields: [salonId], references: [id], onDelete: Cascade)
