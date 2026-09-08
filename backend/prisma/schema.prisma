@@ -108,6 +108,7 @@ enum ConversationState {
   START
   ACTIVE_HUB
   SELECT_ADDON
+  ADDON_CONFLICT
   SELECT_RESCHEDULE_DATE
   SELECT_RESCHEDULE_TIME
   CONFIRM_CANCEL
@@ -436,8 +437,9 @@ model Conversation {
   selectedDate        DateTime?         @map("selected_date") @db.Date
   selectedStartTime   DateTime?         @map("selected_start_time") @db.Timestamptz
   customerName        String?           @map("customer_name")
-  activeAppointmentId String?           @map("active_appointment_id")
-  updatedAt           DateTime          @updatedAt @map("updated_at")
+  activeAppointmentId   String?           @map("active_appointment_id")
+  pendingAddonServiceId String?           @map("pending_addon_service_id")
+  updatedAt             DateTime          @updatedAt @map("updated_at")
 
   salon               Salon             @relation(fields: [salonId], references: [id], onDelete: Cascade)
 

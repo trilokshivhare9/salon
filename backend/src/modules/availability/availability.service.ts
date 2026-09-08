@@ -220,8 +220,20 @@ export class AvailabilityService {
       appointmentDate: new Date(dateStr),
       status: { in: ['CONFIRMED', 'CHECKED_IN', 'IN_SERVICE'] },
     };
+    let excludedStartMin: number | null = null;
+    let excludedDateStr: string | null = null;
+
     if (excludeAppointmentId) {
       apptWhere.id = { not: excludeAppointmentId };
+      const excludedAppt = await this.prisma.appointment.findUnique({
+        where: { id: excludeAppointmentId },
+        select: { startAt: true, appointmentDate: true },
+      });
+      if (excludedAppt) {
+        const apptStartDt = DateTime.fromJSDate(excludedAppt.startAt).setZone(timezone);
+        excludedStartMin = apptStartDt.hour * 60 + apptStartDt.minute;
+        excludedDateStr = DateTime.fromJSDate(excludedAppt.appointmentDate).setZone(timezone).toISODate();
+      }
     }
 
     const existingAppointments = await this.prisma.appointment.findMany({
@@ -356,6 +368,12 @@ export class AvailabilityService {
           candidateStart += stepMinutes;
         }
       }
+    }
+
+    // Same-slot exclusion during rescheduling on the same day
+    if (excludeAppointmentId && excludedDateStr === dateStr && excludedStartMin !== null) {
+      const excludedTimeKey = this.formatMinutesToTime(excludedStartMin);
+      slotsMap.delete(excludedTimeKey);
     }
 
     // Build deterministic sorted stylist ID list reference for stable ordering

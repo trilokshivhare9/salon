@@ -831,6 +831,10 @@ export class AppointmentsService {
 
   async addServiceToAppointment(salonId: string, appointmentId: string, serviceId: string) {
     const appointment = await this.getAppointmentById(salonId, appointmentId);
+    if (![AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN, AppointmentStatus.IN_SERVICE].includes(appointment.status)) {
+      throw new BadRequestException('No active confirmed appointment found for add-on modification.');
+    }
+
     const extraService = await this.prisma.service.findFirst({
       where: { id: serviceId, salonId, status: 'ACTIVE' },
     });
@@ -842,6 +846,57 @@ export class AppointmentsService {
     const newEndAt = DateTime.fromJSDate(appointment.endAt)
       .plus({ minutes: extraService.durationMinutes })
       .toJSDate();
+
+    // Check salon closing time and break window boundaries
+    const salon = await this.prisma.salon.findUnique({
+      where: { id: salonId },
+      include: { workingHours: true },
+    });
+    const tz = salon?.timezone || 'Asia/Kolkata';
+    const apptDt = DateTime.fromJSDate(appointment.startAt).setZone(tz);
+    const dayOfWeek = apptDt.weekdayLong?.toUpperCase() as any;
+
+    const workingHours = salon?.workingHours?.find((wh) => wh.dayOfWeek === dayOfWeek);
+
+    if (workingHours && !workingHours.isClosed) {
+      const [closeHour, closeMin] = workingHours.endTime.split(':').map(Number);
+      const salonClosingAt = apptDt.set({ hour: closeHour, minute: closeMin, second: 0, millisecond: 0 }).toJSDate();
+
+      if (newEndAt > salonClosingAt) {
+        return {
+          success: false,
+          conflict: true,
+          conflictBooking: {
+            stylist: appointment.stylist,
+            staff: appointment.stylist,
+            stylistId: appointment.stylistId,
+            name: 'Salon Closing Time',
+          },
+          extraService,
+        };
+      }
+
+      if (workingHours.breakStartTime && workingHours.breakEndTime) {
+        const [bStartH, bStartM] = workingHours.breakStartTime.split(':').map(Number);
+        const [bEndH, bEndM] = workingHours.breakEndTime.split(':').map(Number);
+        const breakStartAt = apptDt.set({ hour: bStartH, minute: bStartM, second: 0, millisecond: 0 }).toJSDate();
+        const breakEndAt = apptDt.set({ hour: bEndH, minute: bEndM, second: 0, millisecond: 0 }).toJSDate();
+
+        if (newEndAt > breakStartAt && appointment.endAt < breakEndAt) {
+          return {
+            success: false,
+            conflict: true,
+            conflictBooking: {
+              stylist: appointment.stylist,
+              staff: appointment.stylist,
+              stylistId: appointment.stylistId,
+              name: 'Salon Break Time',
+            },
+            extraService,
+          };
+        }
+      }
+    }
 
     // Check if stylist has conflicting appointment
     const conflictBooking = await this.prisma.appointment.findFirst({
