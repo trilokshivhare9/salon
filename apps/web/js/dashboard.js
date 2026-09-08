@@ -1160,7 +1160,7 @@ export class SalonDashboard {
                         const graceMins = Math.floor(Math.abs(remainingMs) / 60000);
                         return `
                           <span class="badge qc__timer-badge" data-reminder-sent="${appt.reminder10mSentAt}" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); font-size: 0.72rem; padding: 4px 8px; border-radius: 6px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
-                            ${Icons.alertTriangle({ size: 13, color: '#f87171' })}
+                            ${Icons.alertTriangle ? Icons.alertTriangle({ size: 13, color: '#f87171' }) : '⚠️'}
                             <span>⚠️ Grace Period (+<strong class="qc__grace-countdown">${graceMins}m</strong>)</span>
                           </span>
                         `;
@@ -2811,22 +2811,24 @@ export class SalonDashboard {
             <button class="close-btn" id="btn-close-modal">&times;</button>
           </div>
           <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 16px;">
-            Cancel booking for <strong>${clientName}</strong>. This will instantly free up the stylist's capacity for new bookings.
+            Cancel booking for <strong>${clientName}</strong>. Select the cancellation reason category below:
           </p>
 
           <form id="cancel-form">
             <div class="form-group">
-              <label>Reason for Cancellation *</label>
-              <select class="form-control" id="cancel-reason-select" required>
-                <option value="Client requested cancellation">Client requested cancellation</option>
-                <option value="Client did not show up (No-Show)">Client did not show up (No-Show)</option>
-                <option value="Staff emergency / unavailability">Staff emergency / unavailability</option>
-                <option value="Duplicate booking">Duplicate booking</option>
-                <option value="Other">Other</option>
+              <label>Cancellation Reason Category *</label>
+              <select class="form-control" id="cancel-category-select" required>
+                <option value="CLIENT_UNRESPONSIVE">🔴 Client Unresponsive / Client Mistake (Apply Penalty if <2h)</option>
+                <option value="SALON_EMERGENCY">🔵 Salon Emergency / Barber Unavailable (No Penalty)</option>
               </select>
             </div>
 
-            <button type="submit" class="btn btn-secondary" style="width: 100%; color: var(--danger); border-color: var(--danger);">
+            <div class="form-group">
+              <label>Specific Note (Optional)</label>
+              <input type="text" class="form-control" id="cancel-reason-note" placeholder="Client didn't answer phone call..." />
+            </div>
+
+            <button type="submit" class="btn btn-secondary" style="width: 100%; color: var(--danger); border-color: var(--danger);" id="btn-submit-cancel">
               Confirm Cancellation
             </button>
           </form>
@@ -2838,20 +2840,27 @@ export class SalonDashboard {
 
     document.getElementById('cancel-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const reason = document.getElementById('cancel-reason-select').value;
-      const isNoShow = reason.includes('No-Show');
-      const status = isNoShow ? 'NO_SHOW' : 'CANCELLED';
+      const submitBtn = document.getElementById('btn-submit-cancel');
+      submitBtn.textContent = 'Processing Cancellation...';
+      submitBtn.setAttribute('disabled', 'true');
+
+      const reasonCategory = document.getElementById('cancel-category-select').value;
+      const reasonNote = document.getElementById('cancel-reason-note').value || '';
+      const status = reasonCategory === 'CLIENT_UNRESPONSIVE' ? 'NO_SHOW' : 'CANCELLED';
 
       try {
-        await ApiClient.updateAppointmentStatus(appointmentId, status, reason);
+        await ApiClient.updateAppointmentStatus(appointmentId, status, reasonNote || reasonCategory, reasonCategory);
         modalContainer.innerHTML = '';
         await this.loadData();
         this.render();
       } catch (err) {
-        alert(`Failed: ${err.message}`);
+        alert(`Failed to cancel: ${err.message}`);
+        submitBtn.textContent = 'Confirm Cancellation';
+        submitBtn.removeAttribute('disabled');
       }
     });
   }
+
 
   async handleToggleStaff(id) {
     if (!id) return;

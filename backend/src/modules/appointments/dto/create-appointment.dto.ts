@@ -60,7 +60,12 @@ export class UpdateAppointmentStatusDto {
   @IsString()
   @IsOptional()
   reason?: string;
+
+  @IsString()
+  @IsOptional()
+  reasonCategory?: string; // 'CLIENT_UNRESPONSIVE' | 'CLIENT_MISTAKE' | 'SALON_EMERGENCY'
 }
+
 
 export class RescheduleAppointmentDto {
   @IsDateString()
