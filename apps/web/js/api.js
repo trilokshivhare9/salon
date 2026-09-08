@@ -418,6 +418,47 @@ export class ApiClient {
     return res;
   }
 
+  // Service Category Management
+  static async getServiceCategories(bypassCache = false) {
+    const url = bypassCache ? `/services/categories?_t=${Date.now()}` : '/services/categories';
+    return this.request(url, {}, bypassCache ? 0 : 180000);
+  }
+
+  static async createServiceCategory(payload) {
+    this.invalidateCache('/services/categories');
+    this.invalidateCache('/services');
+    const res = await this.request('/services/categories', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    this.invalidateCache('/services/categories');
+    this.invalidateCache('/services');
+    return res;
+  }
+
+  static async updateServiceCategory(id, payload) {
+    this.invalidateCache('/services/categories');
+    this.invalidateCache('/services');
+    const res = await this.request(`/services/categories/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+    this.invalidateCache('/services/categories');
+    this.invalidateCache('/services');
+    return res;
+  }
+
+  static async deleteServiceCategory(id) {
+    this.invalidateCache('/services/categories');
+    this.invalidateCache('/services');
+    const res = await this.request(`/services/categories/${id}`, {
+      method: 'DELETE',
+    });
+    this.invalidateCache('/services/categories');
+    this.invalidateCache('/services');
+    return res;
+  }
+
   // Service Management (Cached for 3 mins)
   static async getServices(bypassCache = false) {
     const url = bypassCache ? `/services?_t=${Date.now()}` : '/services';

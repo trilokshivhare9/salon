@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { ServicesService } from './services.service';
 import { CreateServiceDto, UpdateServiceDto } from './dto/create-service.dto';
+import { CreateServiceCategoryDto, UpdateServiceCategoryDto } from './dto/create-service-category.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -21,6 +22,39 @@ import { AdminRole } from '@prisma/client';
 @Controller('services')
 export class ServicesController {
   constructor(private readonly servicesService: ServicesService) {}
+
+  @Get('categories')
+  async getCategories(@CurrentSalonId() salonId: string) {
+    return this.servicesService.getServiceCategories(salonId);
+  }
+
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
+  @Post('categories')
+  async createCategory(
+    @CurrentSalonId() salonId: string,
+    @Body() dto: CreateServiceCategoryDto,
+  ) {
+    return this.servicesService.createServiceCategory(salonId, dto.name, dto.icon, dto.sortOrder);
+  }
+
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
+  @Patch('categories/:id')
+  async updateCategory(
+    @CurrentSalonId() salonId: string,
+    @Param('id') categoryId: string,
+    @Body() dto: UpdateServiceCategoryDto,
+  ) {
+    return this.servicesService.updateServiceCategory(salonId, categoryId, dto.name, dto.icon, dto.sortOrder);
+  }
+
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
+  @Delete('categories/:id')
+  async deleteCategory(
+    @CurrentSalonId() salonId: string,
+    @Param('id') categoryId: string,
+  ) {
+    return this.servicesService.deleteServiceCategory(salonId, categoryId);
+  }
 
   @Get()
   async getServices(@CurrentSalonId() salonId: string) {
