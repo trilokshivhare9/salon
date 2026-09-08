@@ -39,8 +39,10 @@ export interface SalonRealtimeEvent {
 export const VALID_STATUS_TRANSITIONS: Record<AppointmentStatus, AppointmentStatus[]> = {
   [AppointmentStatus.CONFIRMED]: [
     AppointmentStatus.CHECKED_IN,
+    AppointmentStatus.IN_SERVICE,
     AppointmentStatus.CANCELLED,
     AppointmentStatus.NO_SHOW,
+    AppointmentStatus.PENDING_RESCHEDULE,
   ],
   [AppointmentStatus.CHECKED_IN]: [
     AppointmentStatus.IN_SERVICE,
@@ -53,6 +55,10 @@ export const VALID_STATUS_TRANSITIONS: Record<AppointmentStatus, AppointmentStat
   [AppointmentStatus.COMPLETED]: [], // Terminal
   [AppointmentStatus.CANCELLED]: [], // Terminal
   [AppointmentStatus.NO_SHOW]: [],   // Terminal
+  [AppointmentStatus.PENDING_RESCHEDULE]: [
+    AppointmentStatus.CONFIRMED,
+    AppointmentStatus.CANCELLED,
+  ],
 };
 
 const appointmentInclude = {
@@ -572,6 +578,107 @@ export class AppointmentsService {
 
     const formatted = this.formatAppointment(updated);
     this.emitSalonEvent(salonId, 'STATUS_UPDATED', formatted);
+
+    // Dispatch Automated Customer WhatsApp Engagement Messages
+    const salon = await this.prisma.salon.findUnique({
+      where: { id: salonId },
+      include: { whatsappAccount: true },
+    });
+
+    const userPhone = updated.salonUser?.user?.phone;
+    if (salon && userPhone && salon.whatsappAccount?.phoneNumberId) {
+      if (dto.status === AppointmentStatus.CHECKED_IN) {
+        const welcomeMsg = `👋 *WELCOME TO ${salon.name.toUpperCase()}!*\n\nHi *${updated.salonUser?.user?.name || 'Customer'}*, you are checked in! Your stylist *${updated.stylist?.name || 'Stylist'}* will call you to the chair shortly.`;
+        await this.whatsappService.sendMetaMessage(
+          userPhone,
+          {
+            bodyText: welcomeMsg,
+            interactiveType: 'button',
+            buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
+          },
+          salon.whatsappAccount.phoneNumberId,
+          salonId,
+        ).catch(() => {});
+      } else if (dto.status === AppointmentStatus.COMPLETED) {
+        const receiptMsg = `✨ *THANK YOU FOR VISITING ${salon.name.toUpperCase()}!*\n\nHi *${updated.salonUser?.user?.name || 'Customer'}*, thank you for visiting us today!\n\n• *Service:* *${updated.serviceNameSnapshot}*\n• *Stylist:* *${updated.stylist?.name || 'Stylist'}*\n• *Total Paid:* *₹${updated.price}*\n\n⭐ *How was your experience today?*`;
+        await this.whatsappService.sendMetaMessage(
+          userPhone,
+          {
+            bodyText: receiptMsg,
+            interactiveType: 'button',
+            buttons: [
+              { id: 'btn_start', title: '⭐ Great Service!' },
+              { id: 'btn_start', title: '📅 Book Next Visit' },
+            ],
+          },
+          salon.whatsappAccount.phoneNumberId,
+          salonId,
+        ).catch(() => {});
+      }
+    }
+
+    return formatted;
+  }
+
+  async proposeAdminReschedule(
+    salonId: string,
+    appointmentId: string,
+    newStartAt: Date,
+    newEndAt: Date,
+    adminId?: string,
+  ) {
+    const appointment = await this.getAppointmentById(salonId, appointmentId);
+    const salon = await this.prisma.salon.findUnique({
+      where: { id: salonId },
+      include: { whatsappAccount: true },
+    });
+    if (!salon) throw new NotFoundException('Salon not found');
+
+    const updated = await this.prisma.appointment.update({
+      where: { id: appointmentId },
+      data: {
+        status: AppointmentStatus.PENDING_RESCHEDULE,
+        proposedStartAt: newStartAt,
+        proposedEndAt: newEndAt,
+        proposedByAdminId: adminId,
+      },
+      include: appointmentInclude,
+    });
+
+    const formatted = this.formatAppointment(updated);
+    this.emitSalonEvent(salonId, 'STATUS_UPDATED', formatted);
+
+    const tz = salon.timezone || 'Asia/Kolkata';
+    const dateStr = DateTime.fromJSDate(newStartAt, { zone: tz }).toFormat('dd LLL, EEE');
+    const timeStr = DateTime.fromJSDate(newStartAt, { zone: tz }).toFormat('hh:mm a');
+    const userPhone = appointment.salonUser?.user?.phone;
+
+    if (userPhone && salon.whatsappAccount?.phoneNumberId) {
+      const message = `📅 *RESCHEDULE REQUEST FROM SALON*
+
+Hi *${appointment.salonUser?.user?.name || 'Customer'}*, *${salon.name}* requested to move your appointment to:
+
+• *Date:* *${dateStr}*
+• *Time:* *${timeStr}*
+• *Stylist:* *${appointment.stylist?.name || 'Stylist'}*
+
+Does this new time work for you?`;
+
+      await this.whatsappService.sendMetaMessage(
+        userPhone,
+        {
+          bodyText: message,
+          interactiveType: 'button',
+          buttons: [
+            { id: `propose_accept_${appointment.id}`, title: '✅ Accept New Time' },
+            { id: `propose_decline_${appointment.id}`, title: '❌ Decline & Keep' },
+          ],
+        },
+        salon.whatsappAccount.phoneNumberId,
+        salonId,
+      ).catch(() => {});
+    }
+
     return formatted;
   }
 
@@ -981,5 +1088,95 @@ export class AppointmentsService {
       },
       adminId,
     );
+  }
+
+  async triggerSmartMoveUpBroadcast(freedAppointment: any): Promise<number> {
+    try {
+      const salon: any = await this.prisma.salon.findUnique({
+        where: { id: freedAppointment.salonId },
+        include: { whatsappAccount: true },
+      });
+      if (!salon) return 0;
+
+      const tz = salon.timezone || 'Asia/Kolkata';
+      const freedStart = DateTime.fromJSDate(freedAppointment.startAt, { zone: tz });
+      const freedEnd = DateTime.fromJSDate(freedAppointment.endAt, { zone: tz });
+      const freedDurationMin = Math.round(freedEnd.diff(freedStart, 'minutes').minutes);
+
+      if (freedDurationMin <= 0) return 0;
+
+      const dateEnd = freedStart.endOf('day').toJSDate();
+
+      const candidateAppointments = await this.prisma.appointment.findMany({
+        where: {
+          salonId: freedAppointment.salonId,
+          stylistId: freedAppointment.stylistId,
+          status: AppointmentStatus.CONFIRMED,
+          id: { not: freedAppointment.id },
+          startAt: {
+            gt: freedAppointment.endAt,
+            lte: dateEnd,
+          },
+        },
+        include: {
+          salonUser: {
+            include: { user: true },
+          },
+          service: true,
+          stylist: true,
+        },
+        orderBy: { startAt: 'asc' },
+      });
+
+      let broadcastSentCount = 0;
+      const freedSlotTimeStr = freedStart.toFormat('hh:mm a');
+
+      for (const candidate of candidateAppointments) {
+        const candidateDurationMin = candidate.durationMinutes || candidate.service?.durationMinutes || 30;
+
+        // STRICT DURATION FILTER: Only notify if candidate service duration <= freed slot duration
+        if (candidateDurationMin > freedDurationMin) {
+          this.logger.log(
+            `Skipping move-up broadcast for appt ${candidate.id}: candidate duration (${candidateDurationMin}m) exceeds freed slot (${freedDurationMin}m)`,
+          );
+          continue;
+        }
+
+        const candidateUser = candidate.salonUser?.user;
+        if (!candidateUser?.phone) continue;
+
+        const currentSlotTimeStr = DateTime.fromJSDate(candidate.startAt, { zone: tz }).toFormat('hh:mm a');
+
+        const broadcastMessage = `⚡ *EARLY SLOT AVAILABLE TODAY!*
+
+Hi *${candidateUser.name || 'Customer'}*, a *${freedSlotTimeStr}* slot just freed up today with *${candidate.stylist?.name || 'your stylist'}*!
+
+Would you like to move your *${currentSlotTimeStr}* appointment earlier to *${freedSlotTimeStr}*?`;
+
+        await this.whatsappService.sendMetaMessage(
+          candidateUser.phone,
+          {
+            bodyText: broadcastMessage,
+            interactiveType: 'button',
+            buttons: [
+              { id: `move_up_accept_${candidate.id}_${freedAppointment.id}`, title: `⚡ Move to ${freedSlotTimeStr}` },
+              { id: `move_up_decline_${candidate.id}`, title: '⏰ Keep My Time' },
+            ],
+          },
+          salon.whatsappAccount?.phoneNumberId,
+          salon.id,
+        );
+
+        broadcastSentCount++;
+      }
+
+      this.logger.log(
+        `Dispatched Smart Move-Up broadcast to ${broadcastSentCount} candidates for freed slot ${freedAppointment.id}`,
+      );
+      return broadcastSentCount;
+    } catch (err) {
+      this.logger.error('Error in triggerSmartMoveUpBroadcast:', err);
+      return 0;
+    }
   }
 }

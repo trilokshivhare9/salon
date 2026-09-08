@@ -1089,6 +1089,9 @@ export class SalonDashboard {
                     </div>
                     <div class="qc__contacts">
                       ${cleanPhone ? `
+                        <button class="qc__contact-btn qc__contact-btn--chat btn-open-chat-drawer" data-phone="${cleanPhone}" data-name="${customerName}" title="Live WhatsApp Chat">
+                          ${Icons.messageSquare({ size: 16, color: '#38bdf8' })}
+                        </button>
                         <a href="tel:${cleanPhone}" class="qc__contact-btn qc__contact-btn--call" title="Direct Call">
                           ${Icons.phone({ size: 16 })}
                         </a>
@@ -1099,7 +1102,7 @@ export class SalonDashboard {
                     </div>
                   </div>
 
-                  <!-- Row 3: Service Tag + Live Status Badges -->
+                  <!-- Row 3: Service Tag + Live Status Badges + Live 10m Countdown -->
                   <div class="qc__row3" style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
                     <span class="qc__tag qc__tag--service">
                       ${Icons.scissors({ size: 13, color: '#94a3b8' })}
@@ -1111,12 +1114,58 @@ export class SalonDashboard {
                         <span>In Chair · ~${remainingMins}m left</span>
                       </span>
                     ` : ''}
-                    ${appt.clientEtaStatus === 'ON_WAY_10M' || appt.clientEtaStatus === 'ON_WAY_15M' ? `
+
+                    <!-- Customer WhatsApp Action Badges -->
+                    ${appt.status === 'PENDING_RESCHEDULE' ? `
                       <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); font-size: 0.72rem; padding: 4px 8px; border-radius: 6px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
-                        ${Icons.clock({ size: 13, color: '#fbbf24' })}
-                        <span>Arriving in ~15m</span>
+                        ${Icons.calendar({ size: 13, color: '#fbbf24' })}
+                        <span>📅 Pending Reschedule Approval</span>
                       </span>
                     ` : ''}
+
+                    ${appt.customerActionStatus === 'ON_WAY' || appt.clientEtaStatus === 'ON_WAY_10M' || appt.clientEtaStatus === 'ON_WAY_15M' ? `
+                      <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); font-size: 0.72rem; padding: 4px 8px; border-radius: 6px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
+                        🚗 Client On the Way
+                      </span>
+                    ` : ''}
+
+                    ${appt.customerActionStatus === 'WAITING_RESPONSE' || (appt.reminder10mSentAt && !appt.customerActionStatus && appt.status === 'CONFIRMED') ? `
+                      <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); font-size: 0.72rem; padding: 4px 8px; border-radius: 6px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
+                        ${Icons.clock({ size: 13, color: '#fbbf24' })}
+                        <span>⏳ Waiting Response</span>
+                      </span>
+                    ` : ''}
+
+                    ${appt.customerActionStatus === 'CANCELLED' ? `
+                      <span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); font-size: 0.72rem; padding: 4px 8px; border-radius: 6px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
+                        ${Icons.xCircle({ size: 13, color: '#f87171' })}
+                        <span>❌ Canceled via WhatsApp</span>
+                      </span>
+                    ` : ''}
+
+                    <!-- 10-Minute Arrival Ticking Countdown Timer -->
+                    ${appt.reminder10mSentAt ? (() => {
+                      const elapsedMs = Date.now() - new Date(appt.reminder10mSentAt).getTime();
+                      const remainingMs = (10 * 60 * 1000) - elapsedMs;
+                      if (remainingMs > 0) {
+                        const m = Math.floor(remainingMs / 60000);
+                        const s = Math.floor((remainingMs % 60000) / 1000);
+                        return `
+                          <span class="badge qc__timer-badge" data-reminder-sent="${appt.reminder10mSentAt}" style="background: rgba(99, 102, 241, 0.15); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.35); font-size: 0.72rem; padding: 4px 8px; border-radius: 6px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
+                            ${Icons.clock({ size: 13, color: '#818cf8' })}
+                            <span>Arrival Window: <strong class="qc__timer-countdown">${m}:${s.toString().padStart(2, '0')}</strong> left</span>
+                          </span>
+                        `;
+                      } else {
+                        const graceMins = Math.floor(Math.abs(remainingMs) / 60000);
+                        return `
+                          <span class="badge qc__timer-badge" data-reminder-sent="${appt.reminder10mSentAt}" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); font-size: 0.72rem; padding: 4px 8px; border-radius: 6px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
+                            ${Icons.alertTriangle({ size: 13, color: '#f87171' })}
+                            <span>⚠️ Grace Period (+<strong class="qc__grace-countdown">${graceMins}m</strong>)</span>
+                          </span>
+                        `;
+                      }
+                    })() : ''}
                   </div>
 
                   <!-- Row 4: Action Bar -->
@@ -1125,7 +1174,7 @@ export class SalonDashboard {
                       <div class="qc__cta-wrap">
                         <button class="qc__cta qc__cta--checkin btn-status" data-id="${appt.id}" data-status="CHECKED_IN">
                           ${Icons.checkCircle2({ size: 16, color: '#c7d2fe' })}
-                          <span>Check In Client</span>
+                          <span>📍 Check In Client</span>
                         </button>
                       </div>
                       <div class="qc__sec-actions">
@@ -1142,7 +1191,7 @@ export class SalonDashboard {
                       <div class="qc__cta-wrap">
                         <button class="qc__cta qc__cta--seat btn-status" data-id="${appt.id}" data-status="IN_SERVICE">
                           ${Icons.armchair({ size: 16, color: '#fff' })}
-                          <span>Seat in Chair</span>
+                          <span>💺 Seat in Chair</span>
                         </button>
                       </div>
                       <div class="qc__sec-actions">
@@ -1159,7 +1208,16 @@ export class SalonDashboard {
                       <div class="qc__cta-wrap">
                         <button class="qc__cta qc__cta--finish btn-status" data-id="${appt.id}" data-status="COMPLETED">
                           ${Icons.check({ size: 16, color: '#fff' })}
-                          <span>Complete & Free Chair</span>
+                          <span>✅ Complete & Free Chair</span>
+                        </button>
+                      </div>
+                    ` : ''}
+
+                    ${appt.status === 'PENDING_RESCHEDULE' ? `
+                      <div class="qc__cta-wrap">
+                        <button class="qc__cta" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); cursor: default; width: 100%;" disabled>
+                          ${Icons.clock({ size: 16, color: '#fbbf24' })}
+                          <span>Waiting Customer WhatsApp Approval</span>
                         </button>
                       </div>
                     ` : ''}
@@ -2225,6 +2283,18 @@ export class SalonDashboard {
       });
     });
 
+    // Live Chat Drawer Button
+    tabContent.querySelectorAll('.btn-open-chat-drawer').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const phone = e.currentTarget.getAttribute('data-phone');
+        const name = e.currentTarget.getAttribute('data-name');
+        this.showChatDrawer(phone, name);
+      });
+    });
+
+    // Start Live 10-Minute Timer Ticks
+    this.startLiveTimerTicks();
+
     // Cancel Button
     tabContent.querySelectorAll('.btn-open-cancel').forEach((btn) => {
       btn.addEventListener('click', (e) => {
@@ -2233,6 +2303,7 @@ export class SalonDashboard {
         this.showCancelModal(id, clientName);
       });
     });
+
 
     // Quick Onboarding Action Buttons
     document.getElementById('btn-quick-add-staff')?.addEventListener('click', () => this.showAddStaffModal());
@@ -2494,9 +2565,14 @@ export class SalonDashboard {
 
             <div id="reschedule-error" style="color: var(--danger); font-size: 0.85rem; margin-bottom: 12px; display: none;"></div>
 
-            <button type="submit" class="btn btn-primary" style="width: 100%;" id="btn-submit-reschedule">
-              Update Schedule →
-            </button>
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+              <button type="submit" class="btn btn-primary" style="width: 100%;" id="btn-submit-reschedule">
+                ⚡ Update Schedule Immediately
+              </button>
+              <button type="button" class="btn btn-secondary" style="width: 100%; background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35);" id="btn-propose-reschedule">
+                📩 Propose to Client via WhatsApp
+              </button>
+            </div>
           </form>
         </div>
       </div>
@@ -2525,11 +2601,204 @@ export class SalonDashboard {
       } catch (err) {
         errorDiv.textContent = err.message || 'Rescheduling failed.';
         errorDiv.style.display = 'block';
-        submitBtn.textContent = 'Update Schedule →';
+        submitBtn.textContent = '⚡ Update Schedule Immediately';
         submitBtn.removeAttribute('disabled');
       }
     });
+
+    document.getElementById('btn-propose-reschedule')?.addEventListener('click', async () => {
+      const errorDiv = document.getElementById('reschedule-error');
+      const proposeBtn = document.getElementById('btn-propose-reschedule');
+      proposeBtn.textContent = 'Sending WhatsApp Proposal...';
+      proposeBtn.setAttribute('disabled', 'true');
+
+      try {
+        const dateVal = document.getElementById('reschedule-date').value;
+        const timeVal = document.getElementById('reschedule-time').value;
+        const [y, m, d] = dateVal.split('-').map(Number);
+        const [hh, mm] = timeVal.split(':').map(Number);
+        const proposedStartAt = new Date(y, m - 1, d, hh, mm, 0);
+        const proposedEndAt = new Date(proposedStartAt.getTime() + 30 * 60000);
+
+        await ApiClient.proposeAdminReschedule(appointmentId, {
+          newStartAt: proposedStartAt.toISOString(),
+          newEndAt: proposedEndAt.toISOString(),
+        });
+
+        modalContainer.innerHTML = '';
+        await this.loadData();
+        this.render();
+      } catch (err) {
+        errorDiv.textContent = err.message || 'Failed to propose reschedule.';
+        errorDiv.style.display = 'block';
+        proposeBtn.textContent = '📩 Propose to Client via WhatsApp';
+        proposeBtn.removeAttribute('disabled');
+      }
+    });
   }
+
+  startLiveTimerTicks() {
+    if (this.timerInterval) clearInterval(this.timerInterval);
+    this.timerInterval = setInterval(() => {
+      const badges = document.querySelectorAll('.qc__timer-badge[data-reminder-sent]');
+      badges.forEach((badge) => {
+        const sentAt = badge.getAttribute('data-reminder-sent');
+        if (!sentAt) return;
+        const elapsedMs = Date.now() - new Date(sentAt).getTime();
+        const remainingMs = (10 * 60 * 1000) - elapsedMs;
+        const countdownEl = badge.querySelector('.qc__timer-countdown');
+        const graceEl = badge.querySelector('.qc__grace-countdown');
+
+        if (remainingMs > 0) {
+          const mins = Math.floor(remainingMs / 60000);
+          const secs = Math.floor((remainingMs % 60000) / 1000);
+          if (countdownEl) {
+            countdownEl.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+          }
+        } else {
+          const graceMins = Math.floor(Math.abs(remainingMs) / 60000);
+          if (graceEl) {
+            graceEl.textContent = `${graceMins}m`;
+          }
+        }
+      });
+    }, 1000);
+  }
+
+  async showChatDrawer(customerPhone, customerName) {
+    const modalContainer = document.getElementById('modal-container');
+    const cleanPhone = (customerPhone || '').replace(/[^0-9+]/g, '');
+
+    modalContainer.innerHTML = `
+      <div class="modal-backdrop show" style="justify-content: flex-end; padding: 0;">
+        <div class="chat-drawer" style="width: 100%; max-width: 440px; height: 100vh; background: #0f172a; border-left: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column; box-shadow: -10px 0 30px rgba(0,0,0,0.5); animation: slideInRight 0.25s ease-out;">
+          <!-- Header -->
+          <div style="padding: 16px 20px; background: #1e293b; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: space-between;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <div style="width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700;">
+                ${(customerName || '?').charAt(0).toUpperCase()}
+              </div>
+              <div>
+                <div style="font-weight: 700; color: #fff; font-size: 0.95rem;">${customerName}</div>
+                <div style="font-size: 0.75rem; color: #94a3b8;">${cleanPhone}</div>
+              </div>
+            </div>
+            <button class="close-btn" id="btn-close-chat-drawer" style="background: none; border: none; color: #94a3b8; font-size: 1.5rem; cursor: pointer;">&times;</button>
+          </div>
+
+          <!-- Bot Controls Bar -->
+          <div id="chat-bot-status-bar" style="padding: 10px 20px; background: rgba(30, 41, 59, 0.6); border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; align-items: center; justify-content: space-between; font-size: 0.8rem;">
+            <span id="chat-bot-status-text" style="color: #38bdf8;">🤖 AI Bot: Loading...</span>
+            <button id="btn-toggle-bot-pause" class="btn btn-sm btn-secondary" style="padding: 4px 10px; font-size: 0.75rem;">
+              Pause AI Bot (15m)
+            </button>
+          </div>
+
+          <!-- Messages Area -->
+          <div id="chat-messages-container" style="flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; background: #090d16;">
+            <div style="text-align: center; color: #64748b; font-size: 0.8rem;">Loading chat history...</div>
+          </div>
+
+          <!-- Composer -->
+          <div style="padding: 16px; background: #1e293b; border-top: 1px solid rgba(255,255,255,0.1);">
+            <form id="chat-send-form" style="display: flex; gap: 8px;">
+              <input type="text" id="chat-input-text" class="form-control" placeholder="Type WhatsApp message..." style="flex: 1; background: #0f172a; border-color: rgba(255,255,255,0.1); color: #fff;" required />
+              <button type="submit" class="btn btn-primary" id="btn-send-chat" style="padding: 0 16px; gap: 6px;">
+                Send
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('btn-close-chat-drawer')?.addEventListener('click', () => {
+      if (this.chatPollInterval) clearInterval(this.chatPollInterval);
+      modalContainer.innerHTML = '';
+    });
+
+    const loadChat = async () => {
+      try {
+        const salonId = this.salonProfile?.id;
+        if (!salonId) return;
+        const history = await ApiClient.getChatHistory(salonId, cleanPhone);
+        const isBotPaused = history?.isBotPaused;
+        const botStatusText = document.getElementById('chat-bot-status-text');
+        const toggleBtn = document.getElementById('btn-toggle-bot-pause');
+
+        if (botStatusText) {
+          botStatusText.innerHTML = isBotPaused
+            ? `<span style="color: #f59e0b;">⏸️ AI Bot Paused (Staff Active)</span>`
+            : `<span style="color: #38bdf8;">🤖 AI Bot Active</span>`;
+        }
+        if (toggleBtn) {
+          toggleBtn.textContent = isBotPaused ? 'Resume AI Bot' : 'Pause AI Bot (15m)';
+        }
+
+        const msgContainer = document.getElementById('chat-messages-container');
+        if (!msgContainer) return;
+
+        const logs = history?.logs || [];
+        if (logs.length === 0) {
+          msgContainer.innerHTML = `<div style="text-align: center; color: #64748b; font-size: 0.8rem; margin: auto;">No WhatsApp message history found for this client.</div>`;
+          return;
+        }
+
+        msgContainer.innerHTML = logs.map((log) => {
+          const isOutbound = log.direction === 'OUTBOUND';
+          const text = log.messageBody || log.rawPayload || '';
+          const timeStr = log.createdAt ? formatTime12h(new Date(log.createdAt)) : '';
+          return `
+            <div style="align-self: ${isOutbound ? 'flex-end' : 'flex-start'}; max-width: 80%; background: ${isOutbound ? '#1e40af' : '#1e293b'}; color: #fff; padding: 10px 14px; border-radius: 12px; ${isOutbound ? 'border-bottom-right-radius: 2px;' : 'border-bottom-left-radius: 2px;'} box-shadow: 0 2px 8px rgba(0,0,0,0.2);">
+              <div style="font-size: 0.88rem; line-height: 1.4; word-break: break-word;">${text}</div>
+              <div style="font-size: 0.68rem; color: rgba(255,255,255,0.6); text-align: right; margin-top: 4px;">${timeStr}</div>
+            </div>
+          `;
+        }).join('');
+
+        msgContainer.scrollTop = msgContainer.scrollHeight;
+      } catch (err) {
+        console.warn('[Dashboard] Chat load error:', err);
+      }
+    };
+
+    await loadChat();
+
+    if (this.chatPollInterval) clearInterval(this.chatPollInterval);
+    this.chatPollInterval = setInterval(loadChat, 3000);
+
+    document.getElementById('chat-send-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const input = document.getElementById('chat-input-text');
+      const sendBtn = document.getElementById('btn-send-chat');
+      const text = input.value.trim();
+      if (!text) return;
+
+      sendBtn.setAttribute('disabled', 'true');
+      input.value = '';
+
+      try {
+        const salonId = this.salonProfile?.id;
+        await ApiClient.sendStaffChatMessage(salonId, cleanPhone, text);
+        await loadChat();
+      } catch (err) {
+        alert(`Failed to send message: ${err.message}`);
+      } finally {
+        sendBtn.removeAttribute('disabled');
+      }
+    });
+
+    document.getElementById('btn-toggle-bot-pause')?.addEventListener('click', async () => {
+      try {
+        const salonId = this.salonProfile?.id;
+        await ApiClient.resumeBot(salonId, cleanPhone);
+        await loadChat();
+      } catch (err) {
+        alert(`Error toggling bot state: ${err.message}`);
+      }
+    });
+  }
+
 
   showCancelModal(appointmentId, clientName) {
     const modalContainer = document.getElementById('modal-container');

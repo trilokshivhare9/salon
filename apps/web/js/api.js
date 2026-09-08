@@ -294,6 +294,35 @@ export class ApiClient {
     });
   }
 
+  static async proposeAdminReschedule(id, payload) {
+    this.invalidateCache('/reports');
+    this.invalidateCache('/appointments');
+    return this.request(`/appointments/${id}/propose-reschedule`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  static async sendStaffChatMessage(salonId, customerPhone, messageText) {
+    return this.request('/whatsapp/chat/send-message', {
+      method: 'POST',
+      body: JSON.stringify({ salonId, customerPhone, messageText }),
+    });
+  }
+
+  static async resumeBot(salonId, customerPhone) {
+    return this.request('/whatsapp/chat/resume-bot', {
+      method: 'POST',
+      body: JSON.stringify({ salonId, customerPhone }),
+    });
+  }
+
+  static async getChatHistory(salonId, customerPhone) {
+    const params = new URLSearchParams({ salonId, customerPhone });
+    return this.request(`/whatsapp/chat/history?${params.toString()}`);
+  }
+
+
   // Staff Management (Cached for 3 mins)
   static async getStaff(bypassCache = false) {
     const url = bypassCache ? `/staff?_t=${Date.now()}` : '/staff';
