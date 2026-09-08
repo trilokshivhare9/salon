@@ -1384,39 +1384,72 @@ We look forward to seeing you earlier today.`;
     // -------------------------------------------------------------
     // EXPIRED INTERACTIVE BUTTON GUARD (Strict Old Message Button Locking)
     // -------------------------------------------------------------
+    const isGlobalButton =
+      ['btn_menu', 'btn_start', 'btn_book', 'btn_services'].includes(input) ||
+      input.startsWith('remind_') ||
+      input.startsWith('propose_') ||
+      input.startsWith('late_') ||
+      input.startsWith('move_up_');
+
     const isKnownButtonPayload =
+      isGlobalButton ||
       input.startsWith('btn_') ||
       input.startsWith('addon_') ||
       input.startsWith('rdate_') ||
+      input.startsWith('rslot_') ||
+      input.startsWith('date_') ||
+      input.startsWith('slot_') ||
       input.startsWith('staff_') ||
-      input.startsWith('svc_');
+      input.startsWith('svc_') ||
+      input.startsWith('appt_');
 
     if (isKnownButtonPayload) {
-      let isAllowedForState = false;
-      switch (conversation.state) {
-        case ConversationState.ACTIVE_HUB:
-          isAllowedForState = ['btn_add_service', 'btn_add_addon', 'btn_reschedule', 'btn_cancel_appt', 'btn_running_late', 'btn_eta_late_15', 'btn_menu', 'btn_book', 'btn_services', 'btn_start'].includes(input) || input.startsWith('svc_');
-          break;
-        case ConversationState.CONFIRM_CANCEL:
-          isAllowedForState = ['btn_cancel_yes', 'btn_cancel_no'].includes(input);
-          break;
-        case ConversationState.ADDON_CONFLICT:
-          isAllowedForState = ['btn_reschedule', 'btn_change_stylist', 'btn_keep_appt'].includes(input);
-          break;
-        case ConversationState.SELECT_RESCHEDULE_DATE:
-          isAllowedForState = input.startsWith('rdate_') || input === 'btn_menu';
-          break;
-        case ConversationState.SELECT_STAFF:
-          isAllowedForState = input.startsWith('staff_') || input === 'btn_menu';
-          break;
-        case ConversationState.SELECT_ADDON:
-          isAllowedForState = input.startsWith('addon_') || input === 'btn_menu';
-          break;
-        case ConversationState.START:
-          isAllowedForState = ['btn_book', 'btn_services', 'btn_start', 'btn_menu', 'remind_confirm', 'remind_10m_on_way', 'remind_10m_cancel', 'remind_reschedule'].includes(input) || input.startsWith('svc_') || input.startsWith('late_') || input.startsWith('move_up_');
-          break;
-        default:
-          isAllowedForState = false;
+      let isAllowedForState = isGlobalButton;
+      if (!isAllowedForState) {
+        switch (conversation.state) {
+          case ConversationState.CONFIRMATION:
+            isAllowedForState = ['btn_confirm_yes', 'btn_confirm_no', 'btn_confirm'].includes(input);
+            break;
+          case ConversationState.ACTIVE_HUB:
+            isAllowedForState = ['btn_add_service', 'btn_add_addon', 'btn_reschedule', 'btn_cancel_appt', 'btn_running_late', 'btn_eta_late_15'].includes(input) || input.startsWith('svc_');
+            break;
+          case ConversationState.CONFIRM_CANCEL:
+            isAllowedForState = ['btn_cancel_yes', 'btn_cancel_no'].includes(input);
+            break;
+          case ConversationState.ADDON_CONFLICT:
+            isAllowedForState = ['btn_reschedule', 'btn_change_stylist', 'btn_keep_appt'].includes(input);
+            break;
+          case ConversationState.SELECT_RESCHEDULE_DATE:
+            isAllowedForState = input.startsWith('rdate_');
+            break;
+          case ConversationState.SELECT_RESCHEDULE_TIME:
+            isAllowedForState = input.startsWith('rslot_');
+            break;
+          case ConversationState.SELECT_SERVICE:
+            isAllowedForState = input.startsWith('svc_');
+            break;
+          case ConversationState.SELECT_STAFF:
+            isAllowedForState = input.startsWith('staff_');
+            break;
+          case ConversationState.SELECT_DATE:
+            isAllowedForState = input.startsWith('date_');
+            break;
+          case ConversationState.SELECT_TIME:
+            isAllowedForState = input.startsWith('slot_');
+            break;
+          case ConversationState.SELECT_ADDON:
+            isAllowedForState = input.startsWith('addon_');
+            break;
+          case ConversationState.SELECT_APPOINTMENT:
+            isAllowedForState = input.startsWith('appt_');
+            break;
+          case ConversationState.START:
+          case ConversationState.COMPLETED:
+            isAllowedForState = true;
+            break;
+          default:
+            isAllowedForState = true;
+        }
       }
 
       if (!isAllowedForState) {
@@ -1430,6 +1463,7 @@ We look forward to seeing you earlier today.`;
         return { replyMessage: reply, state: conversation.state };
       }
     }
+
 
     // -------------------------------------------------------------
     // STATE MACHINE
