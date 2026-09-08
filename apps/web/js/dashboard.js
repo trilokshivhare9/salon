@@ -1089,9 +1089,6 @@ export class SalonDashboard {
                     </div>
                     <div class="qc__contacts">
                       ${cleanPhone ? `
-                        <button class="qc__contact-btn qc__contact-btn--chat btn-open-chat-drawer" data-phone="${cleanPhone}" data-name="${customerName}" title="Live WhatsApp Chat">
-                          ${Icons.messageSquare({ size: 16, color: '#38bdf8' })}
-                        </button>
                         <a href="tel:${cleanPhone}" class="qc__contact-btn qc__contact-btn--call" title="Direct Call">
                           ${Icons.phone({ size: 16 })}
                         </a>
@@ -2283,15 +2280,6 @@ export class SalonDashboard {
       });
     });
 
-    // Live Chat Drawer Button
-    tabContent.querySelectorAll('.btn-open-chat-drawer').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        const phone = e.currentTarget.getAttribute('data-phone');
-        const name = e.currentTarget.getAttribute('data-name');
-        this.showChatDrawer(phone, name);
-      });
-    });
-
     // Start Live 10-Minute Timer Ticks
     this.startLiveTimerTicks();
 
@@ -2665,139 +2653,7 @@ export class SalonDashboard {
     }, 1000);
   }
 
-  async showChatDrawer(customerPhone, customerName) {
-    const modalContainer = document.getElementById('modal-container');
-    const cleanPhone = (customerPhone || '').replace(/[^0-9+]/g, '');
 
-    modalContainer.innerHTML = `
-      <div class="modal-backdrop show" style="justify-content: flex-end; padding: 0;">
-        <div class="chat-drawer" style="width: 100%; max-width: 440px; height: 100vh; background: #0f172a; border-left: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column; box-shadow: -10px 0 30px rgba(0,0,0,0.5); animation: slideInRight 0.25s ease-out;">
-          <!-- Header -->
-          <div style="padding: 16px 20px; background: #1e293b; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: space-between;">
-            <div style="display: flex; align-items: center; gap: 12px;">
-              <div style="width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700;">
-                ${(customerName || '?').charAt(0).toUpperCase()}
-              </div>
-              <div>
-                <div style="font-weight: 700; color: #fff; font-size: 0.95rem;">${customerName}</div>
-                <div style="font-size: 0.75rem; color: #94a3b8;">${cleanPhone}</div>
-              </div>
-            </div>
-            <button class="close-btn" id="btn-close-chat-drawer" style="background: none; border: none; color: #94a3b8; font-size: 1.5rem; cursor: pointer;">&times;</button>
-          </div>
-
-          <!-- Bot Controls Bar -->
-          <div id="chat-bot-status-bar" style="padding: 10px 20px; background: rgba(30, 41, 59, 0.6); border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; align-items: center; justify-content: space-between; font-size: 0.8rem;">
-            <span id="chat-bot-status-text" style="color: #38bdf8;">🤖 AI Bot: Loading...</span>
-            <button id="btn-toggle-bot-pause" class="btn btn-sm btn-secondary" style="padding: 4px 10px; font-size: 0.75rem;">
-              Pause AI Bot (15m)
-            </button>
-          </div>
-
-          <!-- Messages Area -->
-          <div id="chat-messages-container" style="flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; background: #090d16;">
-            <div style="text-align: center; color: #64748b; font-size: 0.8rem;">Loading chat history...</div>
-          </div>
-
-          <!-- Composer -->
-          <div style="padding: 16px; background: #1e293b; border-top: 1px solid rgba(255,255,255,0.1);">
-            <form id="chat-send-form" style="display: flex; gap: 8px;">
-              <input type="text" id="chat-input-text" class="form-control" placeholder="Type WhatsApp message..." style="flex: 1; background: #0f172a; border-color: rgba(255,255,255,0.1); color: #fff;" required />
-              <button type="submit" class="btn btn-primary" id="btn-send-chat" style="padding: 0 16px; gap: 6px;">
-                Send
-              </button>
-            </form>
-          </div>
-        </div>
-      </div>
-    `;
-
-    document.getElementById('btn-close-chat-drawer')?.addEventListener('click', () => {
-      if (this.chatPollInterval) clearInterval(this.chatPollInterval);
-      modalContainer.innerHTML = '';
-    });
-
-    const loadChat = async () => {
-      try {
-        const salonId = this.salonProfile?.id;
-        if (!salonId) return;
-        const history = await ApiClient.getChatHistory(salonId, cleanPhone);
-        const isBotPaused = history?.isBotPaused;
-        const botStatusText = document.getElementById('chat-bot-status-text');
-        const toggleBtn = document.getElementById('btn-toggle-bot-pause');
-
-        if (botStatusText) {
-          botStatusText.innerHTML = isBotPaused
-            ? `<span style="color: #f59e0b;">⏸️ AI Bot Paused (Staff Active)</span>`
-            : `<span style="color: #38bdf8;">🤖 AI Bot Active</span>`;
-        }
-        if (toggleBtn) {
-          toggleBtn.textContent = isBotPaused ? 'Resume AI Bot' : 'Pause AI Bot (15m)';
-        }
-
-        const msgContainer = document.getElementById('chat-messages-container');
-        if (!msgContainer) return;
-
-        const logs = history?.logs || [];
-        if (logs.length === 0) {
-          msgContainer.innerHTML = `<div style="text-align: center; color: #64748b; font-size: 0.8rem; margin: auto;">No WhatsApp message history found for this client.</div>`;
-          return;
-        }
-
-        msgContainer.innerHTML = logs.map((log) => {
-          const isOutbound = log.direction === 'OUTBOUND';
-          const text = log.messageBody || log.rawPayload || '';
-          const timeStr = log.createdAt ? formatTime12h(new Date(log.createdAt)) : '';
-          return `
-            <div style="align-self: ${isOutbound ? 'flex-end' : 'flex-start'}; max-width: 80%; background: ${isOutbound ? '#1e40af' : '#1e293b'}; color: #fff; padding: 10px 14px; border-radius: 12px; ${isOutbound ? 'border-bottom-right-radius: 2px;' : 'border-bottom-left-radius: 2px;'} box-shadow: 0 2px 8px rgba(0,0,0,0.2);">
-              <div style="font-size: 0.88rem; line-height: 1.4; word-break: break-word;">${text}</div>
-              <div style="font-size: 0.68rem; color: rgba(255,255,255,0.6); text-align: right; margin-top: 4px;">${timeStr}</div>
-            </div>
-          `;
-        }).join('');
-
-        msgContainer.scrollTop = msgContainer.scrollHeight;
-      } catch (err) {
-        console.warn('[Dashboard] Chat load error:', err);
-      }
-    };
-
-    await loadChat();
-
-    if (this.chatPollInterval) clearInterval(this.chatPollInterval);
-    this.chatPollInterval = setInterval(loadChat, 3000);
-
-    document.getElementById('chat-send-form')?.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const input = document.getElementById('chat-input-text');
-      const sendBtn = document.getElementById('btn-send-chat');
-      const text = input.value.trim();
-      if (!text) return;
-
-      sendBtn.setAttribute('disabled', 'true');
-      input.value = '';
-
-      try {
-        const salonId = this.salonProfile?.id;
-        await ApiClient.sendStaffChatMessage(salonId, cleanPhone, text);
-        await loadChat();
-      } catch (err) {
-        alert(`Failed to send message: ${err.message}`);
-      } finally {
-        sendBtn.removeAttribute('disabled');
-      }
-    });
-
-    document.getElementById('btn-toggle-bot-pause')?.addEventListener('click', async () => {
-      try {
-        const salonId = this.salonProfile?.id;
-        await ApiClient.resumeBot(salonId, cleanPhone);
-        await loadChat();
-      } catch (err) {
-        alert(`Error toggling bot state: ${err.message}`);
-      }
-    });
-  }
 
 
   showCancelModal(appointmentId, clientName) {
