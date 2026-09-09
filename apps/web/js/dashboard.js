@@ -48,6 +48,16 @@ export class SalonDashboard {
     return this.getLocalDateString(dt);
   }
 
+  getModalContainer() {
+    let modalContainer = document.getElementById('modal-container');
+    if (!modalContainer) {
+      modalContainer = document.createElement('div');
+      modalContainer.id = 'modal-container';
+      document.body.appendChild(modalContainer);
+    }
+    return modalContainer;
+  }
+
   async init() {
     this.renderLoading();
     try {
@@ -1836,6 +1846,15 @@ export class SalonDashboard {
       this.switchTab('staff');
     });
 
+    // Global Event Delegation for Add Service Triggers
+    this.container?.addEventListener('click', (e) => {
+      const addSvcBtn = e.target.closest('#btn-add-service, #btn-quick-add-service, #btn-empty-add-service, .btn-trigger-add-service');
+      if (addSvcBtn) {
+        e.preventDefault();
+        this.showAddServiceModal();
+      }
+    });
+
     // Navigation Tabs (Desktop & Mobile Bottom Nav)
     this.container.querySelectorAll('.nav-tab, .bottom-nav-item').forEach((tab) => {
       tab.onclick = (e) => {
@@ -3102,7 +3121,7 @@ export class SalonDashboard {
   }
 
   showAddServiceModal() {
-    const modalContainer = document.getElementById('modal-container');
+    const modalContainer = this.getModalContainer();
     const activeStaff = (this.staffList || []).filter((st) => st.status === 'ACTIVE' || !st.status);
 
     modalContainer.innerHTML = `
@@ -3119,7 +3138,7 @@ export class SalonDashboard {
               <label>Service Category *</label>
               <select class="form-control" id="svc-category-select" required>
                 ${(this.categoriesList && this.categoriesList.length > 0
-                  ? this.categoriesList.map((c) => `<option value="${c.name}">${c.icon || '✂️'} ${c.name}</option>`)
+                  ? this.categoriesList.map((c) => `<option value="${c.name}" data-id="${c.id}">${c.icon || '✂️'} ${c.name}</option>`)
                   : '<option value="">-- Select Category --</option>'
                 ).join('')}
                 <option value="CUSTOM">➕ Other / Custom Category...</option>
@@ -3224,6 +3243,11 @@ export class SalonDashboard {
       e.preventDefault();
       const rawCat = categorySelect.value;
       const finalCategory = rawCat === 'CUSTOM' ? (customCatInput.value.trim() || 'General') : rawCat;
+      const selectedOpt = categorySelect.options[categorySelect.selectedIndex];
+      const categoryId = selectedOpt ? selectedOpt.getAttribute('data-id') : null;
+      const matchedCat = categoryId ? null : (this.categoriesList || []).find((c) => c.name === finalCategory);
+      const finalCategoryId = categoryId || (matchedCat ? matchedCat.id : undefined);
+
       const dur = parseInt(durationSelect.value, 10);
       if (isNaN(dur) || dur < 30 || dur % 15 !== 0) {
         alert('Service duration must be at least 30 minutes and a multiple of 15 (e.g. 30, 45, 60, 75, 90 mins).');
@@ -3237,6 +3261,7 @@ export class SalonDashboard {
         price: parseFloat(priceInput.value),
         durationMinutes: dur,
         category: finalCategory,
+        categoryId: finalCategoryId,
         targetGender: document.getElementById('svc-gender').value || 'UNISEX',
         description: descInput.value.trim(),
         stylistIds: selectedStylistIds,
@@ -3261,7 +3286,7 @@ export class SalonDashboard {
   }
 
   showEditServiceModal(service) {
-    const modalContainer = document.getElementById('modal-container');
+    const modalContainer = this.getModalContainer();
     const matchedCat = (this.categoriesList || []).find((c) => c.name === service.category);
     const initialCatValue = matchedCat ? service.category : 'CUSTOM';
     const activeStaff = (this.staffList || []).filter((st) => st.status === 'ACTIVE' || !st.status);
