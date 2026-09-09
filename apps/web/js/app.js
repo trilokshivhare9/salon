@@ -196,9 +196,9 @@ class App {
                   ${Icons.phone ? Icons.phone({ size: 14, color: '#94a3b8' }) : Icons.user({ size: 14, color: '#94a3b8' })}
                   <span>Owner Mobile Number / WhatsApp</span>
                 </label>
-                <input type="text" class="form-control" id="salon-email" placeholder="e.g. 7999817743 or +91 79998 17743" autocomplete="tel" required />
+                <input type="text" class="form-control" id="salon-email" placeholder="e.g. 98XXXXXX00 or owner@example.com" autocomplete="tel" required />
                 <div style="font-size: 0.73rem; color: var(--text-muted); margin-top: 4px;">
-                  Enter the WhatsApp registered mobile number linked to your salon.
+                  Enter the WhatsApp registered 10-digit mobile number or email address.
                 </div>
               </div>
 
@@ -253,14 +253,33 @@ class App {
 
     document.getElementById('salon-login-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const email = document.getElementById('salon-email').value;
+      const rawInput = (document.getElementById('salon-email').value || '').trim();
       const password = document.getElementById('salon-password').value;
       const errorDiv = document.getElementById('salon-login-error');
       const submitBtn = document.getElementById('btn-salon-submit');
 
+      errorDiv.style.display = 'none';
+
+      // Frontend Mobile / Email Validation
+      const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawInput);
+      const digitsOnly = rawInput.replace(/\D/g, '');
+
+      if (!isEmail) {
+        if (!digitsOnly || digitsOnly.length < 10 || digitsOnly.length > 12) {
+          errorDiv.textContent = 'Please enter a valid 10-digit mobile number or email address.';
+          errorDiv.style.display = 'block';
+          return;
+        }
+      }
+
+      if (!password) {
+        errorDiv.textContent = 'Please enter your password.';
+        errorDiv.style.display = 'block';
+        return;
+      }
+
       submitBtn.innerHTML = `<span>Authenticating Store...</span>`;
       submitBtn.setAttribute('disabled', 'true');
-      errorDiv.style.display = 'none';
 
       // Inform user if cloud server is spinning up from cold sleep (>2.5s)
       const wakeUpTimer = setTimeout(() => {
@@ -268,14 +287,14 @@ class App {
       }, 2500);
 
       try {
-        const res = await ApiClient.login(email, password);
+        const res = await ApiClient.login(rawInput, password);
         clearTimeout(wakeUpTimer);
         this.currentUser = res.user;
         window.location.hash = '#admin';
         this.handleRoute();
       } catch (err) {
         clearTimeout(wakeUpTimer);
-        errorDiv.textContent = err.message || 'Login failed. Please check your mobile number and password.';
+        errorDiv.textContent = err.message || 'Login failed. Please check your credentials.';
         errorDiv.style.display = 'block';
         submitBtn.innerHTML = `<span>Access Operations Hub</span> ${Icons.arrowRight({ size: 16 })}`;
         submitBtn.removeAttribute('disabled');

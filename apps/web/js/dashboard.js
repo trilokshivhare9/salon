@@ -1752,7 +1752,7 @@ export class SalonDashboard {
             <p style="color: var(--text-secondary); font-size: 0.85rem;">Direct audit trail from PostgreSQL <code>whatsapp_logs</code> table.</p>
           </div>
           <div style="display: flex; gap: 10px;">
-            <input type="text" class="form-control" id="whatsapp-log-phone-filter" placeholder="Filter by phone (e.g. 7999817743)..." style="max-width: 260px;" />
+            <input type="text" class="form-control" id="whatsapp-log-phone-filter" placeholder="Filter by phone (e.g. 98XXXXXX00)..." style="max-width: 260px;" />
             <button class="btn btn-secondary btn-sm" id="btn-fetch-wa-logs">🔄 Query DB</button>
           </div>
         </div>
@@ -2453,7 +2453,7 @@ export class SalonDashboard {
               </div>
               <div class="form-group">
                 <label>Client WhatsApp Phone *</label>
-                <input type="tel" class="form-control" id="walkin-phone" placeholder="+91 98765 43210" required />
+                <input type="tel" class="form-control" id="walkin-phone" placeholder="+91 98XXXXXX00" required />
               </div>
             </div>
 
@@ -2771,7 +2771,7 @@ export class SalonDashboard {
 
             <div class="form-group">
               <label>Phone Number *</label>
-              <input type="tel" class="form-control" id="new-staff-phone" placeholder="+91 98111 22334" required />
+              <input type="tel" class="form-control" id="new-staff-phone" placeholder="+91 98XXXXXX00" required />
             </div>
 
             <div class="form-group">

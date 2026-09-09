@@ -233,7 +233,7 @@ export class ApiClient {
       if (!document.getElementById('cold-start-banner')) {
         const banner = document.createElement('div');
         banner.id = 'cold-start-banner';
-        banner.style.cssText = 'position:fixed; top:16px; right:16px; z-index:999999; display:flex; align-items:center; gap:10px; padding:12px 18px; background:#1e1b4b; border:1px solid #6366f1; border-radius:12px; color:#e0e7ff; font-family:sans-serif; font-size:13px; font-weight:500; box-shadow:0 12px 32px rgba(0,0,0,0.6); backdrop-filter:blur(8px); animation: fadeIn 0.3s ease-out;';
+        banner.style.cssText = 'position:fixed; top:calc(env(safe-area-inset-top, 0px) + 12px); left:50%; transform:translateX(-50%); width:calc(100% - 24px); max-width:440px; z-index:999999; display:flex; align-items:center; justify-content:center; gap:10px; padding:10px 16px; background:rgba(30, 27, 75, 0.96); border:1px solid rgba(99, 102, 241, 0.6); border-radius:999px; color:#e0e7ff; font-family:var(--font-body, system-ui, sans-serif); font-size:13px; font-weight:600; box-shadow:0 12px 32px rgba(0,0,0,0.7), 0 0 16px rgba(99,102,241,0.25); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); text-align:center; box-sizing:border-box; animation: fadeIn 0.3s ease-out;';
         banner.innerHTML = `<span style="font-size:16px;">⚡</span> Waking up server after inactivity (~15s cold start)... Please wait!`;
         document.body.appendChild(banner);
       }

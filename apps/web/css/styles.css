@@ -101,6 +101,19 @@ body {
   overflow-x: hidden;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   font-variant-numeric: tabular-nums;
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* Prevent iOS Safari & Android Webview auto-zoom on input focus */
+@media screen and (max-width: 768px) {
+  input,
+  select,
+  textarea,
+  .form-control {
+    font-size: 16px !important;
+  }
 }
 
 /* Custom Sleek Scrollbar */

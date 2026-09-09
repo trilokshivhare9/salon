@@ -69,18 +69,14 @@ export class AuthService {
     if (!admin) {
       throw new UnauthorizedException(
         isEmail
-          ? 'Invalid email or password.'
-          : 'Invalid mobile number or password. Please check your credentials.',
+          ? 'Email address is not registered. Please check your email or create an account.'
+          : 'Mobile number is not registered. Please check your mobile number or create an account.',
       );
     }
 
     const isPasswordValid = await this.passwordService.compare(loginDto.password, admin.passwordHash);
     if (!isPasswordValid) {
-      throw new UnauthorizedException(
-        isEmail
-          ? 'Invalid email or password.'
-          : 'Invalid mobile number or password. Please check your credentials.',
-      );
+      throw new UnauthorizedException('Incorrect password. Please check your password and try again.');
     }
 
     if (admin.status !== 'ACTIVE') {
