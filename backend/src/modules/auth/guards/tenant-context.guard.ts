@@ -27,7 +27,7 @@ export class TenantContextGuard implements CanActivate {
     }
 
     const headerSalonId = (request.headers['x-salon-id'] as string || '').trim();
-    const paramSalonId = (request.params?.salonId || request.params?.id as string || '').trim();
+    const paramSalonId = (request.params?.salonId as string || '').trim();
 
     if (user.role === AdminRole.SALON_OWNER) {
       const userSalonId = user.salonId;
