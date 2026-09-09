@@ -196,9 +196,9 @@ class App {
                   ${Icons.phone ? Icons.phone({ size: 14, color: '#94a3b8' }) : Icons.user({ size: 14, color: '#94a3b8' })}
                   <span>Owner Mobile Number / WhatsApp</span>
                 </label>
-                <input type="text" class="form-control" id="salon-email" placeholder="e.g. 98XXXXXX00 or owner@example.com" autocomplete="tel" required />
+                <input type="tel" class="form-control" id="salon-mobile" placeholder="e.g. 98XXXXXX00" autocomplete="tel" required />
                 <div style="font-size: 0.73rem; color: var(--text-muted); margin-top: 4px;">
-                  Enter the WhatsApp registered 10-digit mobile number or email address.
+                  Enter your WhatsApp registered 10-digit mobile number.
                 </div>
               </div>
 
@@ -237,6 +237,19 @@ class App {
       </div>
     `;
 
+    // Real-time numeric filtering for Salon Owner Mobile field (strip letters/symbols as user types)
+    const mobileInput = document.getElementById('salon-mobile');
+    mobileInput?.addEventListener('input', (e) => {
+      let val = e.target.value;
+      if (val.startsWith('+')) {
+        val = '+' + val.slice(1).replace(/\D/g, '');
+      } else {
+        val = val.replace(/\D/g, '');
+      }
+      if (val.length > 13) val = val.slice(0, 13);
+      e.target.value = val;
+    });
+
     // Password Visibility Toggle
     document.getElementById('toggle-salon-pass')?.addEventListener('click', (e) => {
       e.preventDefault();
@@ -253,23 +266,21 @@ class App {
 
     document.getElementById('salon-login-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const rawInput = (document.getElementById('salon-email').value || '').trim();
+      const rawInput = (document.getElementById('salon-mobile').value || '').trim();
       const password = document.getElementById('salon-password').value;
       const errorDiv = document.getElementById('salon-login-error');
       const submitBtn = document.getElementById('btn-salon-submit');
 
       errorDiv.style.display = 'none';
 
-      // Frontend Mobile / Email Validation
-      const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawInput);
+      // Strict Mobile Number Validation (Digits only, 10 to 12 digits, no alphabets/symbols)
       const digitsOnly = rawInput.replace(/\D/g, '');
+      const isValidMobileFormat = /^\+?[0-9]{10,12}$/.test(rawInput) && (digitsOnly.length >= 10 && digitsOnly.length <= 12);
 
-      if (!isEmail) {
-        if (!digitsOnly || digitsOnly.length < 10 || digitsOnly.length > 12) {
-          errorDiv.textContent = 'Please enter a valid 10-digit mobile number or email address.';
-          errorDiv.style.display = 'block';
-          return;
-        }
+      if (!isValidMobileFormat) {
+        errorDiv.textContent = 'Please enter a valid 10-digit mobile number.';
+        errorDiv.style.display = 'block';
+        return;
       }
 
       if (!password) {
