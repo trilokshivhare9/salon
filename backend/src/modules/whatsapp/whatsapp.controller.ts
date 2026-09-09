@@ -110,19 +110,33 @@ export class WhatsAppController {
 
         // 1. Direct Phone ID Routing: Resolve target salon by the WhatsApp Phone ID the customer messaged
         if (phoneNumberId) {
-          salon = await this.prisma.salon.findFirst({
+          const linkedSalon = await this.prisma.salon.findFirst({
             where: {
-              status: 'ACTIVE',
               whatsappAccount: { phoneNumberId },
             },
           });
 
-          if (!salon) {
+          if (!linkedSalon) {
             this.logger.warn(
-              `[Meta Webhook] ⚠️ Received message for WhatsApp Phone ID "${phoneNumberId}", but no active salon is linked to this phone ID in DB. Request dropped to prevent cross-tenant routing.`,
+              `[Meta Webhook] ⚠️ Received message for WhatsApp Phone ID "${phoneNumberId}", but no salon is linked to this phone ID in DB. Request dropped to prevent cross-tenant routing.`,
             );
             return { status: 'unmapped_phone_id', phoneNumberId };
           }
+
+          if (linkedSalon.status !== 'ACTIVE') {
+            this.logger.warn(
+              `[Meta Webhook] ⚠️ Message received for WhatsApp Phone ID "${phoneNumberId}", but linked salon "${linkedSalon.name}" is ${linkedSalon.status}. Sending inactive warning response.`,
+            );
+            await this.whatsappService.sendMetaMessage(
+              fromPhone,
+              { textBody: `⚠️ *${linkedSalon.name} Status Update*\n\nThank you for reaching out! Our salon is currently undergoing maintenance/setup and is temporarily inactive for automated WhatsApp bookings.\n\nPlease contact the salon directly or try again later.` },
+              phoneNumberId,
+              linkedSalon.id,
+            ).catch((err) => this.logger.error(`Failed to send inactive warning message: ${err.message}`));
+            return { status: 'salon_inactive', salonId: linkedSalon.id };
+          }
+
+          salon = linkedSalon;
         } else {
           // Fallback routing ONLY when phoneNumberId is NOT provided (e.g. simulator/internal test callers)
 

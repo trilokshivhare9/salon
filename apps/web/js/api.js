@@ -135,7 +135,11 @@ export class ApiClient {
   }
 
   static setUser(user) {
-    if (user) localStorage.setItem('salon_user_data', JSON.stringify(user));
+    if (user) {
+      localStorage.setItem('salon_user_data', JSON.stringify(user));
+      const identifier = user.phone || user.email;
+      if (identifier) localStorage.setItem('last_user_identifier', identifier);
+    }
   }
 
   static removeUser() {
@@ -353,6 +357,7 @@ export class ApiClient {
 
   // Auth
   static async login(email, password) {
+    if (email) localStorage.setItem('last_user_identifier', email);
     this.clearSession(false);
 
     const data = await this.request('/auth/login', {
@@ -360,11 +365,14 @@ export class ApiClient {
       body: JSON.stringify({ email, password }),
     });
 
-    if (data.accessToken) {
-      this.setAccessToken(data.accessToken);
+    const accessToken = data.accessToken || data.tokens?.accessToken;
+    const refreshToken = data.refreshToken || data.tokens?.refreshToken;
+
+    if (accessToken) {
+      this.setAccessToken(accessToken);
     }
-    if (data.refreshToken) {
-      RefreshTransport.setRefreshToken(data.refreshToken);
+    if (refreshToken) {
+      RefreshTransport.setRefreshToken(refreshToken);
     }
     if (data.user) {
       this.setUser(data.user);
@@ -813,9 +821,14 @@ export class ApiClient {
     });
   }
 
-  static async toggleSalonStatusPlatform(salonId) {
-    return this.request(`/salons/platform/${salonId}/toggle-status`, {
+  static async getDeactivationPreview(salonId) {
+    return this.request(`/salons/platform/${salonId}/deactivation-preview`);
+  }
+
+  static async toggleSalonStatusPlatform(salonId, forceCancel = false) {
+    return this.request(`/salons/platform/${salonId}/toggle-status?forceCancel=${forceCancel ? 'true' : 'false'}`, {
       method: 'PATCH',
+      body: JSON.stringify({ forceCancelBookings: forceCancel }),
     });
   }
 

@@ -468,16 +468,128 @@ Here are your salon owner login credentials:
     };
   }
 
-  async toggleSalonStatus(salonId: string) {
+  async getDeactivationPreview(salonId: string) {
     const salon = await this.prisma.salon.findUnique({ where: { id: salonId } });
     if (!salon) throw new NotFoundException('Salon not found.');
 
-    const newStatus = salon.status === SalonStatus.ACTIVE ? SalonStatus.DEACTIVATED : SalonStatus.ACTIVE;
+    const todayISO = DateTime.now().setZone(salon.timezone || 'Asia/Kolkata').toISODate();
+    const startOfToday = DateTime.fromISO(todayISO, { zone: salon.timezone || 'Asia/Kolkata' }).toJSDate();
 
-    return this.prisma.salon.update({
-      where: { id: salonId },
-      data: { status: newStatus },
+    const activeBookings = await this.prisma.appointment.findMany({
+      where: {
+        salonId,
+        status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN, AppointmentStatus.IN_SERVICE] },
+        appointmentDate: { gte: startOfToday },
+      },
+      include: {
+        salonUser: { include: { user: { select: { id: true, name: true, phone: true } } } },
+        service: { select: { id: true, name: true } },
+        stylist: { select: { id: true, name: true } },
+      },
+      orderBy: { appointmentDate: 'asc' },
     });
+
+    const inServiceCount = activeBookings.filter((b) => b.status === AppointmentStatus.IN_SERVICE).length;
+
+    return {
+      salonId,
+      salonName: salon.name,
+      currentStatus: salon.status,
+      activeBookingsCount: activeBookings.length,
+      inServiceCount,
+      activeBookings,
+    };
+  }
+
+  async toggleSalonStatus(salonId: string, forceCancel = false) {
+    const salon = await this.prisma.salon.findUnique({
+      where: { id: salonId },
+      include: { whatsappAccount: true },
+    });
+    if (!salon) throw new NotFoundException('Salon not found.');
+
+    // If salon is currently ACTIVE and Super Admin is attempting to DEACTIVATE it
+    if (salon.status === SalonStatus.ACTIVE) {
+      const todayISO = DateTime.now().setZone(salon.timezone || 'Asia/Kolkata').toISODate();
+      const startOfToday = DateTime.fromISO(todayISO, { zone: salon.timezone || 'Asia/Kolkata' }).toJSDate();
+
+      const activeBookings = await this.prisma.appointment.findMany({
+        where: {
+          salonId,
+          status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN, AppointmentStatus.IN_SERVICE] },
+          appointmentDate: { gte: startOfToday },
+        },
+        include: {
+          salonUser: { include: { user: true } },
+          service: true,
+        },
+      });
+
+      if (activeBookings.length > 0) {
+        if (!forceCancel) {
+          throw new ConflictException({
+            message: `Salon "${salon.name}" has ${activeBookings.length} active/future booking(s). All future bookings must be cancelled before deactivation.`,
+            activeBookingsCount: activeBookings.length,
+            requiresConfirmation: true,
+          });
+        }
+
+        // Execute bulk cancellation for all active/future bookings
+        this.logger.warn(
+          `[SalonsService] Executing bulk deactivation cancellation for ${activeBookings.length} booking(s) on salon "${salon.name}" (${salon.id})...`,
+        );
+
+        for (const booking of activeBookings) {
+          // Update appointment status to CANCELLED in DB
+          await this.prisma.appointment.update({
+            where: { id: booking.id },
+            data: {
+              status: AppointmentStatus.CANCELLED,
+              notes: 'Salon Account Deactivated by Platform Super Admin',
+            },
+          });
+
+          // Dispatch cancellation WhatsApp message to customer if phone exists
+          const customerPhone = booking.salonUser?.user?.phone;
+          if (customerPhone) {
+            const dateFormatted = DateTime.fromJSDate(booking.appointmentDate)
+              .setZone(salon.timezone || 'Asia/Kolkata')
+              .toFormat('dd LLL yyyy');
+            const timeFormatted = booking.startAt
+              ? DateTime.fromJSDate(booking.startAt).setZone(salon.timezone || 'Asia/Kolkata').toFormat('hh:mm a')
+              : 'Scheduled Time';
+
+            const cancellationMsg =
+              `⚠️ *APPOINTMENT CANCELLED*\n\n` +
+              `Hi *${booking.salonUser?.user?.name || 'Valued Customer'}*, your appointment for *${dateFormatted} at ${timeFormatted}* at *${salon.name}* has been cancelled because the salon account was temporarily deactivated for platform maintenance.\n\n` +
+              `We apologize for any inconvenience. Please contact the salon directly or visit another location for bookings.`;
+
+            await this.whatsAppService.sendMetaMessage(
+              customerPhone,
+              { textBody: cancellationMsg },
+              salon.whatsappAccount?.phoneNumberId || undefined,
+              salon.id,
+            ).catch((err: any) =>
+              this.logger.error(
+                `Failed to dispatch WhatsApp cancellation for booking ${booking.id}: ${err.message}`,
+              ),
+            );
+          }
+        }
+      }
+
+      // Transition status to DEACTIVATED
+      return this.prisma.salon.update({
+        where: { id: salonId },
+        data: { status: SalonStatus.DEACTIVATED },
+      });
+    } else {
+      // Re-activating salon: transition to ACTIVE
+      return this.prisma.salon.update({
+        where: { id: salonId },
+        data: { status: SalonStatus.ACTIVE },
+      });
+    }
   }
 
   async deleteSalonBySuperAdmin(salonId: string) {

@@ -12,6 +12,14 @@ export {
   renderServiceDurationOptions,
 };
 
+function showNotification(msg, type = 'info') {
+  const toast = document.createElement('div');
+  toast.style.cssText = `position:fixed; bottom:24px; right:24px; z-index:999999; padding:12px 20px; background:${type === 'error' ? '#ef4444' : '#10b981'}; color:#fff; font-weight:600; font-size:0.9rem; border-radius:10px; box-shadow:0 10px 25px rgba(0,0,0,0.4); font-family:sans-serif;`;
+  toast.textContent = msg;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 3500);
+}
+
 export class SalonDashboard {
   constructor(containerId, currentUser = null) {
     this.container = document.getElementById(containerId);
@@ -486,6 +494,21 @@ export class SalonDashboard {
     }
 
     return `
+      ${(profile.status === 'INACTIVE' || summary.status === 'INACTIVE') ? `
+        <div style="background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; border-radius: 14px; padding: 16px 20px; margin-bottom: 24px; color: #fca5a5; display: flex; align-items: center; justify-content: space-between; gap: 16px; box-shadow: 0 10px 25px rgba(239, 68, 68, 0.15);">
+          <div style="display: flex; align-items: center; gap: 14px;">
+            <span style="font-size: 1.6rem;">⚠️</span>
+            <div>
+              <div style="font-weight: 700; font-size: 1rem; color: #fee2e2; margin-bottom: 2px;">Salon Account is INACTIVE</div>
+              <div style="font-size: 0.85rem; color: #fca5a5; line-height: 1.4;">
+                Automated WhatsApp booking response is paused. To activate your account, ensure your salon catalog has at least <strong>1 Active Stylist</strong> and <strong>1 Active Service</strong>.
+              </div>
+            </div>
+          </div>
+          <button type="button" class="btn btn-primary btn-sm" id="btn-goto-services-banner" style="white-space: nowrap; font-size: 0.85rem; padding: 8px 16px;">Set Up Catalog →</button>
+        </div>
+      ` : ''}
+
       <!-- Grand Executive Cockpit Hero Banner -->
       <div class="dashboard-hero-banner">
         <div class="hero-main-row">
@@ -2142,11 +2165,6 @@ export class SalonDashboard {
       });
     });
 
-    // Add Service Modal
-    document.getElementById('btn-add-service')?.addEventListener('click', () => {
-      this.showAddServiceModal();
-    });
-
     // Edit Service Modal
     this.container.querySelectorAll('.btn-edit-service').forEach((btn) => {
       btn.addEventListener('click', (e) => {
@@ -2212,6 +2230,7 @@ export class SalonDashboard {
     if (!tabContent) return;
 
     // Dashboard Quick Action Cards
+    document.getElementById('btn-goto-services-banner')?.addEventListener('click', () => this.switchTab('services'));
     document.getElementById('card-action-walkin')?.addEventListener('click', () => this.showWalkInModal());
     document.getElementById('card-action-qr')?.addEventListener('click', () => this.showQRCodeModal());
     document.getElementById('card-action-queue')?.addEventListener('click', () => {
@@ -2302,8 +2321,6 @@ export class SalonDashboard {
     // Quick Onboarding Action Buttons
     document.getElementById('btn-quick-add-staff')?.addEventListener('click', () => this.showAddStaffModal());
     document.getElementById('btn-empty-add-staff')?.addEventListener('click', () => this.showAddStaffModal());
-    document.getElementById('btn-quick-add-service')?.addEventListener('click', () => this.showAddServiceModal());
-    document.getElementById('btn-empty-add-service')?.addEventListener('click', () => this.showAddServiceModal());
 
     // Staff Tab Buttons
     document.getElementById('btn-add-staff')?.addEventListener('click', () => this.showAddStaffModal());
@@ -2347,7 +2364,6 @@ export class SalonDashboard {
 
     // Services Tab Buttons
     document.getElementById('btn-manage-categories')?.addEventListener('click', () => this.showManageCategoriesModal());
-    document.getElementById('btn-add-service')?.addEventListener('click', () => this.showAddServiceModal());
     tabContent.querySelectorAll('.btn-edit-service').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         const id = e.currentTarget.getAttribute('data-id');
@@ -3095,8 +3111,9 @@ export class SalonDashboard {
       try {
         await ApiClient.createServiceCategory({ name, icon });
         showNotification(`Category "${name}" created!`, 'success');
-        this.showManageCategoriesModal();
-        this.refreshData();
+        this.categoriesList = await ApiClient.getServiceCategories(true);
+        await this.showManageCategoriesModal();
+        await this.loadData(true);
       } catch (err) {
         showNotification(err.message || 'Failed to create category', 'error');
       }
@@ -3110,8 +3127,9 @@ export class SalonDashboard {
           try {
             await ApiClient.deleteServiceCategory(id);
             showNotification(`Category "${name}" deleted`, 'success');
-            this.showManageCategoriesModal();
-            this.refreshData();
+            this.categoriesList = await ApiClient.getServiceCategories(true);
+            await this.showManageCategoriesModal();
+            await this.loadData(true);
           } catch (err) {
             showNotification(err.message || 'Failed to delete category', 'error');
           }
@@ -3121,6 +3139,7 @@ export class SalonDashboard {
   }
 
   showAddServiceModal() {
+    if (document.getElementById('add-service-form')) return;
     const modalContainer = this.getModalContainer();
     const activeStaff = (this.staffList || []).filter((st) => st.status === 'ACTIVE' || !st.status);
 
@@ -3137,16 +3156,15 @@ export class SalonDashboard {
             <div class="form-group">
               <label>Service Category *</label>
               <select class="form-control" id="svc-category-select" required>
-                ${(this.categoriesList && this.categoriesList.length > 0
-                  ? this.categoriesList.map((c) => `<option value="${c.name}" data-id="${c.id}">${c.icon || '✂️'} ${c.name}</option>`)
-                  : '<option value="">-- Select Category --</option>'
-                ).join('')}
-                <option value="CUSTOM">➕ Other / Custom Category...</option>
+                ${this.categoriesList && this.categoriesList.length > 0
+                  ? this.categoriesList.map((c) => `<option value="${c.name}" data-id="${c.id}">${c.icon || '✂️'} ${c.name}</option>`).join('') + '<option value="CUSTOM">➕ Other / Custom Category...</option>'
+                  : '<option value="CUSTOM" selected>➕ Create Custom Category...</option>'
+                }
               </select>
             </div>
 
             <!-- Custom Category Input (Revealed if Other is picked) -->
-            <div class="form-group" id="svc-custom-cat-group" style="display: none;">
+            <div class="form-group" id="svc-custom-cat-group" style="${this.categoriesList && this.categoriesList.length > 0 ? 'display: none;' : 'display: block;'}">
               <label>Custom Category Name *</label>
               <input type="text" class="form-control" id="svc-custom-cat-input" placeholder="e.g. Bridal Special, Pedicure, Tattoo" />
             </div>
@@ -3242,7 +3260,12 @@ export class SalonDashboard {
     document.getElementById('add-service-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       const rawCat = categorySelect.value;
-      const finalCategory = rawCat === 'CUSTOM' ? (customCatInput.value.trim() || 'General') : rawCat;
+      if (rawCat === 'CUSTOM' && !customCatInput.value.trim()) {
+        alert('Please enter a custom category name.');
+        customCatInput.focus();
+        return;
+      }
+      const finalCategory = rawCat === 'CUSTOM' ? customCatInput.value.trim() : rawCat;
       const selectedOpt = categorySelect.options[categorySelect.selectedIndex];
       const categoryId = selectedOpt ? selectedOpt.getAttribute('data-id') : null;
       const matchedCat = categoryId ? null : (this.categoriesList || []).find((c) => c.name === finalCategory);
@@ -3304,10 +3327,10 @@ export class SalonDashboard {
             <div class="form-group">
               <label>Service Category *</label>
               <select class="form-control" id="edit-svc-category-select" required>
-                ${(this.categoriesList && this.categoriesList.length > 0
-                  ? this.categoriesList.map((c) => `<option value="${c.name}" ${c.name === service.category ? 'selected' : ''}>${c.icon || '✂️'} ${c.name}</option>`)
-                  : '<option value="">-- Select Category --</option>'
-                ).join('')}
+                ${this.categoriesList && this.categoriesList.length > 0
+                  ? this.categoriesList.map((c) => `<option value="${c.name}" ${c.name === service.category ? 'selected' : ''}>${c.icon || '✂️'} ${c.name}</option>`).join('')
+                  : '<option value="General" selected>✂️ General Services</option>'
+                }
                 <option value="CUSTOM" ${initialCatValue === 'CUSTOM' ? 'selected' : ''}>➕ Other / Custom Category...</option>
               </select>
             </div>
