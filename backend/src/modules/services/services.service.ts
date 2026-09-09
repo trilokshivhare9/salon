@@ -354,17 +354,25 @@ export class ServicesService {
   async deleteService(salonId: string, serviceId: string) {
     await this.getServiceById(salonId, serviceId);
 
-    // Guard: Prevent deletion if ANY appointment (historical or active) is tied to this service
-    const totalAppointmentsCount = await this.prisma.appointment.count({
+    // Guard: Prevent deletion ONLY if there are ACTIVE / UPCOMING / IN-PROGRESS appointments
+    const activeAppointmentsCount = await this.prisma.appointment.count({
       where: {
         salonId,
         serviceId,
+        status: {
+          in: [
+            AppointmentStatus.CONFIRMED,
+            AppointmentStatus.CHECKED_IN,
+            AppointmentStatus.IN_SERVICE,
+            AppointmentStatus.PENDING_RESCHEDULE,
+          ],
+        },
       },
     });
 
-    if (totalAppointmentsCount > 0) {
+    if (activeAppointmentsCount > 0) {
       throw new BadRequestException(
-        `Cannot delete service: There are ${totalAppointmentsCount} appointment(s) (historical or active) booked for this service. Please deactivate the service instead to preserve business records and customer visit history.`,
+        `Cannot delete service: There are ${activeAppointmentsCount} active appointment(s) currently booked or in service. Please complete or cancel these active appointments before deleting the service.`,
       );
     }
 
@@ -375,7 +383,18 @@ export class ServicesService {
         data: { selectedServiceId: null },
       });
 
-      // 2. Delete the service record (Prisma cascades stylist_services)
+      // 2. Disassociate cancelled/historical appointment service references (preserving immutable snapshots)
+      await tx.appointment.updateMany({
+        where: { salonId, serviceId },
+        data: { serviceId: null },
+      });
+
+      await tx.appointmentService.updateMany({
+        where: { salonId, serviceId },
+        data: { serviceId: null },
+      });
+
+      // 3. Delete the service record (Prisma cascades stylist_services)
       const deleted = await tx.service.delete({
         where: { id: serviceId },
       });
