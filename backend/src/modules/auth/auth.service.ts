@@ -4,9 +4,10 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
-import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../database/prisma.service';
+import { PasswordService } from './services/password.service';
+import { TokenService } from './services/token.service';
+import { SessionService } from './services/session.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterSalonDto } from './dto/register.dto';
 import { AdminRole, DayOfWeek } from '@prisma/client';
@@ -15,10 +16,12 @@ import { AdminRole, DayOfWeek } from '@prisma/client';
 export class AuthService {
   constructor(
     private prisma: PrismaService,
-    private jwtService: JwtService,
+    private passwordService: PasswordService,
+    private tokenService: TokenService,
+    private sessionService: SessionService,
   ) {}
 
-  async login(loginDto: LoginDto) {
+  async login(loginDto: LoginDto, userAgent?: string, ipAddress?: string) {
     const rawInput = (loginDto.email || '').trim();
     const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawInput);
 
@@ -30,7 +33,7 @@ export class AuthService {
         include: { salon: true },
       });
     } else {
-      // Lookup by Mobile / WhatsApp Number
+      // Lookup by Mobile / WhatsApp Number with Indian formatting candidates
       const digitsOnly = rawInput.replace(/\D/g, '');
       const candidates = new Set<string>();
       candidates.add(rawInput);
@@ -52,7 +55,6 @@ export class AuthService {
       }
       const candidateList = Array.from(candidates);
 
-      // Search by admin's phone or associated salon's phone
       admin = await this.prisma.admin.findFirst({
         where: {
           OR: [
@@ -72,7 +74,7 @@ export class AuthService {
       );
     }
 
-    const isPasswordValid = await bcrypt.compare(loginDto.password, admin.passwordHash);
+    const isPasswordValid = await this.passwordService.compare(loginDto.password, admin.passwordHash);
     if (!isPasswordValid) {
       throw new UnauthorizedException(
         isEmail
@@ -85,17 +87,28 @@ export class AuthService {
       throw new UnauthorizedException('Account has been deactivated.');
     }
 
+    // Delegate Session Creation to SessionService
+    const { session, rawRefreshToken } = await this.sessionService.createSession(
+      admin.id,
+      userAgent,
+      ipAddress,
+    );
+
+    // Delegate JWT Generation to TokenService
     const payload = {
       sub: admin.id,
+      sessionId: session.id,
       email: admin.email,
       role: admin.role,
       salonId: admin.salonId,
     };
 
-    const token = this.jwtService.sign(payload);
+    const accessToken = this.tokenService.generateAccessToken(payload);
 
     return {
-      accessToken: token,
+      accessToken,
+      refreshToken: rawRefreshToken,
+      expiresIn: 900,
       user: {
         id: admin.id,
         name: admin.name,
@@ -115,6 +128,73 @@ export class AuthService {
     };
   }
 
+  async refresh(rawRefreshToken: string, userAgent?: string, ipAddress?: string) {
+    if (!rawRefreshToken || typeof rawRefreshToken !== 'string') {
+      throw new UnauthorizedException('Refresh token is required.');
+    }
+
+    const existingSession = await this.sessionService.findSessionByToken(rawRefreshToken);
+
+    // Reuse Detection & Revocation Protocol
+    if (!existingSession) {
+      throw new UnauthorizedException('Invalid refresh token.');
+    }
+
+    if (existingSession.isRevoked) {
+      // Security Event: Revoked token presented again -> revoke entire family via SessionService!
+      await this.sessionService.revokeFamily(existingSession.familyId);
+      throw new UnauthorizedException('Security Breach Alert: Token reuse detected. All active family sessions revoked.');
+    }
+
+    if (new Date() > existingSession.expiresAt) {
+      await this.sessionService.revokeSessionByToken(rawRefreshToken);
+      throw new UnauthorizedException('Refresh token has expired. Please log in again.');
+    }
+
+    if (!existingSession.admin || existingSession.admin.status !== 'ACTIVE') {
+      await this.sessionService.revokeSessionByToken(rawRefreshToken);
+      throw new UnauthorizedException('User account deactivated or suspended.');
+    }
+
+    // Refresh Token Rotation (RTR): Delegate rotation to SessionService
+    const { session: newSession, rawRefreshToken: newRawRefreshToken } =
+      await this.sessionService.rotateSession(existingSession, userAgent, ipAddress);
+
+    const payload = {
+      sub: existingSession.admin.id,
+      sessionId: newSession.id,
+      email: existingSession.admin.email,
+      role: existingSession.admin.role,
+      salonId: existingSession.admin.salonId,
+    };
+
+    const newAccessToken = this.tokenService.generateAccessToken(payload);
+
+    return {
+      accessToken: newAccessToken,
+      refreshToken: newRawRefreshToken,
+      expiresIn: 900,
+      user: {
+        id: existingSession.admin.id,
+        name: existingSession.admin.name,
+        email: existingSession.admin.email,
+        role: existingSession.admin.role,
+        salonId: existingSession.admin.salonId,
+        salon: existingSession.admin.salon,
+      },
+    };
+  }
+
+  async logout(rawRefreshToken: string) {
+    await this.sessionService.revokeSessionByToken(rawRefreshToken);
+    return { success: true, message: 'Logged out successfully.' };
+  }
+
+  async logoutAllDevices(adminId: string) {
+    await this.sessionService.revokeAllUserSessions(adminId);
+    return { success: true, message: 'Logged out from all devices.' };
+  }
+
   async registerSalon(registerDto: RegisterSalonDto) {
     const email = registerDto.email.toLowerCase().trim();
     const existingAdmin = await this.prisma.admin.findUnique({
@@ -125,7 +205,6 @@ export class AuthService {
       throw new ConflictException('An account with this email already exists.');
     }
 
-    // Generate unique slug from salon name
     let baseSlug = registerDto.salonName
       .toLowerCase()
       .trim()
@@ -139,11 +218,9 @@ export class AuthService {
       slugIndex++;
     }
 
-    const salt = await bcrypt.genSalt(10);
-    const passwordHash = await bcrypt.hash(registerDto.password, salt);
+    const passwordHash = await this.passwordService.hash(registerDto.password);
 
     return this.prisma.$transaction(async (tx) => {
-      // 1. Create a placeholder/creator admin first or create owner directly
       const ownerAdmin = await tx.admin.create({
         data: {
           name: registerDto.ownerName,
@@ -154,7 +231,6 @@ export class AuthService {
         },
       });
 
-      // 2. Create Salon with createdByAdminId
       const salon = await tx.salon.create({
         data: {
           createdByAdminId: ownerAdmin.id,
@@ -169,13 +245,11 @@ export class AuthService {
         },
       });
 
-      // 3. Link ownerAdmin to this salon
       await tx.admin.update({
         where: { id: ownerAdmin.id },
         data: { salonId: salon.id },
       });
 
-      // 4. Automatically populate 7-Day Default Working Hours
       const days: DayOfWeek[] = [
         DayOfWeek.SUNDAY,
         DayOfWeek.MONDAY,
@@ -198,17 +272,29 @@ export class AuthService {
         });
       }
 
+      // Create initial session inside transaction via SessionService
+      const { session, rawRefreshToken } = await this.sessionService.createSession(
+        ownerAdmin.id,
+        undefined,
+        undefined,
+        undefined,
+        tx,
+      );
+
       const payload = {
         sub: ownerAdmin.id,
+        sessionId: session.id,
         email: ownerAdmin.email,
         role: ownerAdmin.role,
         salonId: salon.id,
       };
 
-      const token = this.jwtService.sign(payload);
+      const accessToken = this.tokenService.generateAccessToken(payload);
 
       return {
-        accessToken: token,
+        accessToken,
+        refreshToken: rawRefreshToken,
+        expiresIn: 900,
         user: {
           id: ownerAdmin.id,
           name: ownerAdmin.name,

@@ -5,6 +5,10 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
+import { PasswordService } from './services/password.service';
+import { TokenService } from './services/token.service';
+import { SessionService } from './services/session.service';
+import { TenantContextGuard } from './guards/tenant-context.guard';
 
 @Module({
   imports: [
@@ -21,7 +25,7 @@ import { JwtStrategy } from './jwt.strategy';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
-  exports: [AuthService, JwtStrategy, PassportModule],
+  providers: [AuthService, JwtStrategy, PasswordService, TokenService, SessionService, TenantContextGuard],
+  exports: [AuthService, JwtStrategy, PasswordService, TokenService, SessionService, TenantContextGuard, PassportModule],
 })
 export class AuthModule {}

@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Get, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Body, Get, UseGuards, HttpCode, HttpStatus, Req } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterSalonDto } from './dto/register.dto';
@@ -13,8 +13,33 @@ export class AuthController {
   @Public()
   @HttpCode(HttpStatus.OK)
   @Post('login')
-  async login(@Body() loginDto: LoginDto) {
-    return this.authService.login(loginDto);
+  async login(@Body() loginDto: LoginDto, @Req() req: any) {
+    const userAgent = req.headers['user-agent'];
+    const ipAddress = req.ip || req.connection?.remoteAddress;
+    return this.authService.login(loginDto, userAgent, ipAddress);
+  }
+
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Post('refresh')
+  async refresh(@Body('refreshToken') refreshToken: string, @Req() req: any) {
+    const userAgent = req.headers['user-agent'];
+    const ipAddress = req.ip || req.connection?.remoteAddress;
+    return this.authService.refresh(refreshToken, userAgent, ipAddress);
+  }
+
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Post('logout')
+  async logout(@Body('refreshToken') refreshToken: string) {
+    return this.authService.logout(refreshToken);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @Post('logout-all')
+  async logoutAll(@CurrentUser() user: AuthenticatedUser) {
+    return this.authService.logoutAllDevices(user.id);
   }
 
   @Public()

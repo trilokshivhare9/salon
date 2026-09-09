@@ -1,4 +1,4 @@
-import { ApiClient } from './api.js';
+import { ApiClient, RefreshTransport } from './api.js';
 import { BookingWizard } from './booking.js';
 import { SalonDashboard } from './dashboard.js';
 import { PlatformAdminPortal } from './platform-admin.js';
@@ -15,27 +15,31 @@ class App {
     PwaManager.init();
     window.addEventListener('hashchange', () => this.handleRoute());
 
-    // Restore cached session instantly (prevents accidental logout on phone sleep)
-    if (ApiClient.getToken()) {
-      this.currentUser = ApiClient.getUser();
-      // Validate in background without logging out on temporary network drops
-      ApiClient.getMe().then((freshUser) => {
-        if (freshUser) {
-          this.currentUser = freshUser;
-          ApiClient.setUser(freshUser);
-        }
-      }).catch((err) => {
-        if (err?.message?.includes('expired') || err?.message?.includes('unauthorized')) {
-          ApiClient.clearSession();
+    // Register global auth failure handler for In-Place Re-Authentication
+    window.onAuthFailure = () => this.showInPlaceReAuthModal();
+
+    // Multi-Tab Synchronization via BroadcastChannel
+    if (typeof BroadcastChannel !== 'undefined') {
+      const authChannel = new BroadcastChannel('salon_auth_sync');
+      authChannel.onmessage = (event) => {
+        if (event.data?.type === 'LOGOUT') {
+          console.warn('[BroadcastChannel] Logout event received from another tab');
+          ApiClient.clearSession(false);
           this.currentUser = null;
           this.handleRoute();
+        } else if (event.data?.type === 'LOGIN') {
+          console.log('[BroadcastChannel] Login event received from another tab — syncing');
+          this.initSession();
         }
-      });
+      };
     }
+
+    // Initialize session and hydrate authentication state
+    await this.initSession();
 
     // Handle mobile wake-up from screen lock gracefully
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible' && ApiClient.getToken()) {
+      if (document.visibilityState === 'visible' && ApiClient.getAccessToken()) {
         ApiClient.getMe().then((user) => {
           if (user) this.currentUser = user;
         }).catch(() => {});
@@ -50,6 +54,72 @@ class App {
     } else {
       this.handleRoute();
     }
+  }
+
+  async initSession() {
+    const rawRefreshToken = RefreshTransport.getRefreshToken();
+    if (!rawRefreshToken) {
+      this.currentUser = null;
+      return;
+    }
+
+    try {
+      const refreshRes = await ApiClient.refreshSession();
+      if (refreshRes?.user) {
+        this.currentUser = refreshRes.user;
+        ApiClient.setUser(refreshRes.user);
+      }
+    } catch (err) {
+      console.warn('[App] Startup session refresh failed:', err.message);
+      this.currentUser = null;
+      ApiClient.clearSession(false);
+    }
+  }
+
+  showInPlaceReAuthModal() {
+    if (document.getElementById('reauth-modal')) return;
+
+    const modal = document.createElement('div');
+    modal.id = 'reauth-modal';
+    modal.style.cssText = 'position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.85); backdrop-filter:blur(10px); z-index:9999999; display:flex; align-items:center; justify-content:center; padding:20px;';
+    
+    const userEmail = this.currentUser?.email || 'Admin';
+    modal.innerHTML = `
+      <div style="background:#131927; border:1px solid rgba(99,102,241,0.3); border-radius:20px; width:100%; max-width:420px; padding:32px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.7); text-align:center; color:#fff; font-family:sans-serif;">
+        <div style="font-size:2.5rem; margin-bottom:12px;">🔒</div>
+        <h3 style="margin:0 0 8px 0; font-size:1.25rem; font-weight:700;">Session Expired</h3>
+        <p style="color:#94a3b8; font-size:0.85rem; margin-bottom:24px; line-height:1.4;">
+          Your session timed out. Re-enter password for <strong>${userEmail}</strong> to resume without losing your unsaved work.
+        </p>
+        <form id="reauth-form">
+          <input type="password" id="reauth-password" placeholder="Enter password" required style="width:100%; padding:12px 16px; background:#1e293b; border:1px solid #334155; border-radius:10px; color:#fff; font-size:0.95rem; margin-bottom:16px; box-sizing:border-box; outline:none;" />
+          <div id="reauth-error" style="color:#f87171; font-size:0.8rem; margin-bottom:12px; display:none;"></div>
+          <button type="submit" style="width:100%; padding:12px; background:#4f46e5; border:none; border-radius:10px; color:#fff; font-weight:600; font-size:0.95rem; cursor:pointer;">Resume Session</button>
+        </form>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const form = document.getElementById('reauth-form');
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const password = document.getElementById('reauth-password').value;
+      const errEl = document.getElementById('reauth-error');
+      errEl.style.display = 'none';
+
+      try {
+        const loginRes = await ApiClient.login(userEmail, password);
+        if (loginRes?.user) {
+          this.currentUser = loginRes.user;
+          modal.remove();
+          console.log('✅ In-Place Re-Authentication successful!');
+        }
+      } catch (err) {
+        errEl.textContent = err.message || 'Invalid password. Please try again.';
+        errEl.style.display = 'block';
+      }
+    });
   }
 
   startKeepAlive() {

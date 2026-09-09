@@ -7,6 +7,8 @@ import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
+import { TenantContextGuard } from './modules/auth/guards/tenant-context.guard';
+import { PrismaService } from './database/prisma.service';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -38,9 +40,14 @@ async function bootstrap() {
   app.useGlobalFilters(new AllExceptionsFilter());
   app.useGlobalInterceptors(new TransformInterceptor());
 
-  // Global Auth & RBAC Guards
+  // Global Auth, RBAC & Tenant Context Guards
   const reflector = app.get(Reflector);
-  app.useGlobalGuards(new JwtAuthGuard(reflector), new RolesGuard(reflector));
+  const prisma = app.get(PrismaService);
+  app.useGlobalGuards(
+    new JwtAuthGuard(reflector),
+    new RolesGuard(reflector),
+    new TenantContextGuard(prisma, reflector),
+  );
 
   // Swagger Documentation Setup
   const config = new DocumentBuilder()

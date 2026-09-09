@@ -8,12 +8,90 @@ export const API_BASE = useLocal
 
 const memoryCache = new Map();
 
+/**
+ * REFRESH TRANSPORT ABSTRACTION
+ * Encapsulates refresh token storage.
+ * To migrate to HttpOnly Cookies in the future, these 3 methods become no-ops.
+ * Security Trade-off Note: Storing refresh tokens in browser storage carries XSS trade-offs, 
+ * which is why Access Tokens are strictly kept in-memory.
+ */
+export class RefreshTransport {
+  static getRefreshToken() {
+    return localStorage.getItem('salon_refresh_token');
+  }
+
+  static setRefreshToken(token) {
+    if (token) localStorage.setItem('salon_refresh_token', token);
+  }
+
+  static clearRefreshToken() {
+    localStorage.removeItem('salon_refresh_token');
+  }
+}
+
+// Global In-Memory Access Token & Refresh Mutex Queue
+let inMemoryAccessToken = null;
+let isRefreshing = false;
+let refreshSubscribers = [];
+
+function subscribeTokenRefresh(cb) {
+  refreshSubscribers.push(cb);
+}
+
+function onRefreshed(token) {
+  refreshSubscribers.forEach((cb) => cb(token));
+  refreshSubscribers = [];
+}
+
+const authChannel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('salon_auth_sync') : null;
+
 export class ApiClient {
+  static parseJwt(token) {
+    try {
+      if (!token || typeof token !== 'string') return null;
+      const parts = token.split('.');
+      if (parts.length !== 3) return null;
+      const base64Url = parts[1];
+      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+      const jsonPayload = decodeURIComponent(
+        atob(base64)
+          .split('')
+          .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+          .join('')
+      );
+      return JSON.parse(jsonPayload);
+    } catch {
+      return null;
+    }
+  }
+
+  static isTokenExpired(token) {
+    const payload = this.parseJwt(token);
+    if (!payload || !payload.exp) return true;
+    return Date.now() >= payload.exp * 1000 - 15000; // 15s buffer
+  }
+
+  static getAccessToken() {
+    return inMemoryAccessToken;
+  }
+
+  static setAccessToken(token) {
+    inMemoryAccessToken = token || null;
+  }
+
+  static getTenantContext() {
+    const token = this.getAccessToken();
+    const payload = this.parseJwt(token);
+    const user = this.getUser();
+    return user?.salonId || payload?.salonId || payload?.sub || 'public';
+  }
+
   static getSuperAdminToken() {
-    return localStorage.getItem('super_admin_token');
+    return inMemoryAccessToken || localStorage.getItem('super_admin_token');
   }
 
   static setSuperAdminToken(token) {
+    inMemoryAccessToken = token;
     if (token) localStorage.setItem('super_admin_token', token);
   }
 
@@ -36,15 +114,15 @@ export class ApiClient {
   }
 
   static getToken() {
-    return localStorage.getItem('salon_saas_token');
+    return inMemoryAccessToken;
   }
 
   static setToken(token) {
-    if (token) localStorage.setItem('salon_saas_token', token);
+    inMemoryAccessToken = token || null;
   }
 
   static removeToken() {
-    localStorage.removeItem('salon_saas_token');
+    inMemoryAccessToken = null;
   }
 
   static getUser() {
@@ -64,10 +142,15 @@ export class ApiClient {
     localStorage.removeItem('salon_user_data');
   }
 
-  static clearSession() {
+  static clearSession(broadcast = true) {
     this.removeToken();
     this.removeUser();
+    RefreshTransport.clearRefreshToken();
+    this.removeSuperAdminToken();
     this.invalidateCache();
+    if (broadcast && authChannel) {
+      authChannel.postMessage({ type: 'LOGOUT', timestamp: Date.now() });
+    }
   }
 
   static invalidateCache(pattern = '') {
@@ -82,17 +165,162 @@ export class ApiClient {
     }
   }
 
+  static async refreshSession() {
+    const rawRefreshToken = RefreshTransport.getRefreshToken();
+    if (!rawRefreshToken) {
+      throw new Error('No refresh token available');
+    }
+
+    const response = await fetch(`${API_BASE}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: rawRefreshToken }),
+    });
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      RefreshTransport.clearRefreshToken();
+      this.clearSession(false);
+      throw new Error(errData.message || 'Session expired or refresh failed');
+    }
+
+    const data = await response.json();
+    const result = data.data !== undefined ? data.data : data;
+
+    if (result.accessToken) {
+      this.setAccessToken(result.accessToken);
+    }
+    if (result.refreshToken) {
+      RefreshTransport.setRefreshToken(result.refreshToken);
+    }
+    if (result.user) {
+      this.setUser(result.user);
+    }
+
+    return result;
+  }
+
   static async request(endpoint, options = {}, ttlMs = 0) {
     const isGet = !options.method || options.method === 'GET';
-    const cacheKey = `${endpoint}`;
+    const tenantContext = this.getTenantContext();
+    const cacheKey = `${tenantContext}:${endpoint}`;
 
-    // Cache hit — return immediately (SWR: caller gets instant data)
+    // Tenant-Scoped Cache hit — return immediately
     if (isGet && ttlMs > 0) {
       const cached = memoryCache.get(cacheKey);
       if (cached && Date.now() - cached.timestamp < ttlMs) {
         return cached.data;
       }
     }
+
+    const token = this.getToken();
+
+    const headers = {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      ...options.headers,
+    };
+
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), options.timeoutMs || 45000);
+
+    let coldStartTimer = setTimeout(() => {
+      if (!document.getElementById('cold-start-banner')) {
+        const banner = document.createElement('div');
+        banner.id = 'cold-start-banner';
+        banner.style.cssText = 'position:fixed; top:16px; right:16px; z-index:999999; display:flex; align-items:center; gap:10px; padding:12px 18px; background:#1e1b4b; border:1px solid #6366f1; border-radius:12px; color:#e0e7ff; font-family:sans-serif; font-size:13px; font-weight:500; box-shadow:0 12px 32px rgba(0,0,0,0.6); backdrop-filter:blur(8px); animation: fadeIn 0.3s ease-out;';
+        banner.innerHTML = `<span style="font-size:16px;">⚡</span> Waking up server after inactivity (~15s cold start)... Please wait!`;
+        document.body.appendChild(banner);
+      }
+    }, 2500);
+
+    try {
+      const response = await fetch(`${API_BASE}${endpoint}`, {
+        ...options,
+        cache: 'no-store',
+        headers,
+        signal: options.signal || controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+      clearTimeout(coldStartTimer);
+      document.getElementById('cold-start-banner')?.remove();
+
+      let data;
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        data = await response.json();
+      } else {
+        const text = await response.text();
+        data = { message: text || `Server error (${response.status}: ${response.statusText})` };
+      }
+
+      // Handle 401 Unauthorized with Mutex Refresh Retry Queue
+      if (response.status === 401 && !endpoint.includes('/auth/login') && !endpoint.includes('/auth/refresh')) {
+        if (!isRefreshing) {
+          isRefreshing = true;
+          try {
+            const refreshRes = await this.refreshSession();
+            isRefreshing = false;
+            onRefreshed(refreshRes.accessToken);
+
+            // Retry original request with new token
+            options.headers = { ...options.headers, Authorization: `Bearer ${refreshRes.accessToken}` };
+            return this.request(endpoint, options, ttlMs);
+          } catch (refreshErr) {
+            isRefreshing = false;
+            refreshSubscribers = [];
+            this.clearSession();
+            if (typeof window.onAuthFailure === 'function') {
+              window.onAuthFailure();
+            }
+            throw new Error(data.message || 'Session expired. Please log in again.');
+          }
+        } else {
+          // Queue request during ongoing refresh mutex lock
+          return new Promise((resolve, reject) => {
+            subscribeTokenRefresh((newToken) => {
+              options.headers = { ...options.headers, Authorization: `Bearer ${newToken}` };
+              this.request(endpoint, options, ttlMs).then(resolve).catch(reject);
+            });
+          });
+        }
+      }
+
+      if (!response.ok) {
+        throw new Error(data.message || `Request failed with status ${response.status}`);
+      }
+
+      const result = data.data !== undefined ? data.data : data;
+
+      if (isGet && ttlMs > 0) {
+        memoryCache.set(cacheKey, { data: result, timestamp: Date.now() });
+      }
+
+      return result;
+    } catch (err) {
+      clearTimeout(timeoutId);
+      clearTimeout(coldStartTimer);
+      document.getElementById('cold-start-banner')?.remove();
+
+      if (isGet && ttlMs > 0) {
+        const stale = memoryCache.get(cacheKey);
+        if (stale) {
+          return stale.data;
+        }
+      }
+
+      if (err.name === 'AbortError') {
+        throw new Error('Request timed out. The cloud server may be waking up from sleep, please try again.');
+      }
+      throw err;
+    }
+  }
 
     const isPlatformAdmin = endpoint.includes('/salons/platform') || endpoint.includes('/platform') || window.location.hash.startsWith('#super-admin');
     const token = isPlatformAdmin
@@ -113,6 +341,17 @@ export class ApiClient {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), options.timeoutMs || 45000);
 
+    // Cold start detector: if request takes > 2.5s, notify user that backend is waking up
+    let coldStartTimer = setTimeout(() => {
+      if (!document.getElementById('cold-start-banner')) {
+        const banner = document.createElement('div');
+        banner.id = 'cold-start-banner';
+        banner.style.cssText = 'position:fixed; top:16px; right:16px; z-index:999999; display:flex; align-items:center; gap:10px; padding:12px 18px; background:#1e1b4b; border:1px solid #6366f1; border-radius:12px; color:#e0e7ff; font-family:sans-serif; font-size:13px; font-weight:500; box-shadow:0 12px 32px rgba(0,0,0,0.6); backdrop-filter:blur(8px); animation: fadeIn 0.3s ease-out;';
+        banner.innerHTML = `<span style="font-size:16px;">⚡</span> Waking up server after inactivity (~15s cold start)... Please wait!`;
+        document.body.appendChild(banner);
+      }
+    }, 2500);
+
     try {
       const response = await fetch(`${API_BASE}${endpoint}`, {
         ...options,
@@ -122,6 +361,8 @@ export class ApiClient {
       });
 
       clearTimeout(timeoutId);
+      clearTimeout(coldStartTimer);
+      document.getElementById('cold-start-banner')?.remove();
 
       let data;
       const contentType = response.headers.get('content-type') || '';
@@ -154,6 +395,8 @@ export class ApiClient {
       return result;
     } catch (err) {
       clearTimeout(timeoutId);
+      clearTimeout(coldStartTimer);
+      document.getElementById('cold-start-banner')?.remove();
 
       // SWR Fallback: if network fails but we have stale cache, return it
       if (isGet && ttlMs > 0) {
@@ -183,7 +426,8 @@ export class ApiClient {
    * @returns {Promise<{data: any, isStale: boolean}>}
    */
   static async requestSWR(endpoint, ttlMs, onFreshData) {
-    const cacheKey = `${endpoint}`;
+    const tenantContext = this.getTenantContext();
+    const cacheKey = `${tenantContext}:${endpoint}`;
     const cached = memoryCache.get(cacheKey);
 
     if (cached) {
@@ -205,21 +449,50 @@ export class ApiClient {
 
   // Auth
   static async login(email, password) {
+    this.clearSession(false);
+
     const data = await this.request('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
+
     if (data.accessToken) {
-      if (data.user?.role === 'SUPER_ADMIN' || data.user?.role === 'PLATFORM_ADMIN') {
-        this.setSuperAdminToken(data.accessToken);
-        this.setSuperAdminUser(data.user);
-      } else {
-        this.setToken(data.accessToken);
-        this.setUser(data.user);
-      }
+      this.setAccessToken(data.accessToken);
     }
+    if (data.refreshToken) {
+      RefreshTransport.setRefreshToken(data.refreshToken);
+    }
+    if (data.user) {
+      this.setUser(data.user);
+    }
+
     this.invalidateCache();
+    if (authChannel) {
+      authChannel.postMessage({ type: 'LOGIN', timestamp: Date.now() });
+    }
     return data;
+  }
+
+  static async logout() {
+    const rawRefreshToken = RefreshTransport.getRefreshToken();
+    try {
+      if (rawRefreshToken) {
+        await this.request('/auth/logout', {
+          method: 'POST',
+          body: JSON.stringify({ refreshToken: rawRefreshToken }),
+        }).catch(() => {});
+      }
+    } finally {
+      this.clearSession(true);
+    }
+  }
+
+  static async logoutAllDevices() {
+    try {
+      await this.request('/auth/logout-all', { method: 'POST' }).catch(() => {});
+    } finally {
+      this.clearSession(true);
+    }
   }
 
   static async getMe() {

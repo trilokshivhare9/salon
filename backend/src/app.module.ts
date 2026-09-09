@@ -18,6 +18,12 @@ import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      envFilePath: [
+        `.env.${process.env.NODE_ENV || 'development'}`,
+        '.env.development',
+        '.env.local',
+        '.env',
+      ],
       load: [configuration],
     }),
     DatabaseModule,
