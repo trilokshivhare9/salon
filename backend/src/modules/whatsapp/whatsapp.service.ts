@@ -2021,21 +2021,26 @@ We look forward to seeing you earlier today.`;
               const cancelWindowHours = salon.cancelWindowHours ?? 2;
 
               if (hoursUntilAppt < cancelWindowHours && hoursUntilAppt > -1) {
-                // Critical Window (< 2 hours): Protect salon chair from last-minute cancellation
-                const reply = `⚠️ *Appointment is in less than ${cancelWindowHours} hours!*\n\nSpecialist *${activeAppt.stylist?.name || 'Your specialist'}* has already reserved your chair for *${activeAppt.serviceNameSnapshot || activeAppt.service?.name}*.\n\nAppointments cannot be cancelled online within ${cancelWindowHours} hours of your scheduled time.\n\n• If you are delayed in traffic, tap *'Running 15m Late'* to hold your station.\n• For emergency changes, please call our front desk directly at *${salon.phone || 'our desk'}*.`;
+                // Late Cancellation Window (< 2 hours): Prompt explicit penalty warning with choice
+                const reply = `⚠️ *Late Cancellation Warning*\n\nSpecialist *${activeAppt.stylist?.name || 'Your specialist'}* has already reserved your chair for *${activeAppt.serviceNameSnapshot || activeAppt.service?.name}* in less than ${cancelWindowHours} hours.\n\nCancelling now is considered a *late cancellation* and will record **1 Penalty Strike** to your account (3 strikes lock online self-booking).\n\nHow would you like to proceed?`;
                 await this.sendMetaMessage(
                   cleanNumber,
                   {
                     bodyText: reply,
                     interactiveType: 'button',
                     buttons: [
+                      { id: 'btn_cancel_yes', title: '⚠️ Cancel (1 Strike)' },
                       { id: 'btn_eta_late_15', title: '🚗 Running 15m Late' },
-                      { id: 'btn_menu', title: '📋 Main Menu' },
+                      { id: 'btn_cancel_no', title: '🔙 Keep Slot' },
                     ],
                   },
                   phoneNumberId,
                 );
-                return { replyMessage: reply, state: ConversationState.START };
+                await this.prisma.conversation.update({
+                  where: { id: conversation.id },
+                  data: { state: ConversationState.CONFIRM_CANCEL },
+                });
+                return { replyMessage: reply, state: ConversationState.CONFIRM_CANCEL };
               }
             }
           }
@@ -2592,6 +2597,26 @@ We look forward to seeing you earlier today.`;
       }
 
       case ConversationState.CONFIRM_CANCEL: {
+        if (input === 'btn_eta_late_15' || normalized.includes('late')) {
+          await this.prisma.conversation.update({
+            where: { id: conversation.id },
+            data: { state: ConversationState.START },
+          });
+
+          const reply = `🚗 *Front Desk Notified!*\n\nWe've notified your specialist that you're running 15 minutes late. Your chair is held!`;
+          await this.sendMetaMessage(
+            cleanNumber,
+            {
+              bodyText: reply,
+              interactiveType: 'button',
+              buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
+            },
+            phoneNumberId,
+          );
+
+          return { replyMessage: reply, state: ConversationState.START };
+        }
+
         if (input === 'btn_cancel_yes' || normalized.includes('yes') || normalized === '1') {
           if (conversation.activeAppointmentId) {
             await this.appointmentsService.updateStatus(
