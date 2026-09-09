@@ -24,9 +24,10 @@ export class PlatformAdminPortal {
           </div>
         </div>
       `;
-      document.getElementById('btn-admin-login')?.addEventListener('click', () => {
-        ApiClient.removeToken();
-        window.location.hash = '#superadmin-login';
+      document.getElementById('btn-admin-login')?.addEventListener('click', async () => {
+        await ApiClient.logout();
+        window.location.hash = '#super-admin';
+        window.location.reload();
       });
     }
   }
@@ -673,9 +674,9 @@ export class PlatformAdminPortal {
   }
 
   attachEventListeners() {
-    document.getElementById('btn-super-logout')?.addEventListener('click', () => {
-      ApiClient.removeToken();
-      window.location.hash = '#superadmin-login';
+    document.getElementById('btn-super-logout')?.addEventListener('click', async () => {
+      await ApiClient.logout();
+      window.location.hash = '#super-admin';
       window.location.reload();
     });
 
