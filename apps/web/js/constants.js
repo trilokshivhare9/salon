@@ -2,16 +2,6 @@
  * Centralized Application Constants for Salon SaaS Frontend
  */
 
-export const SERVICE_CATEGORIES = [
-  { category: 'Hair & Beard Services', icon: '✂️' },
-  { category: 'Skin & Facial Care', icon: '✨' },
-  { category: 'Hair Color & Treatments', icon: '🎨' },
-  { category: 'Hands & Feet Care', icon: '💅' },
-  { category: 'Spa & Wellness', icon: '💆' },
-  { category: 'Beauty & Grooming', icon: '💄' },
-  { category: 'Combos & Packages', icon: '🎁' },
-];
-
 export const SERVICE_DURATION_OPTIONS = [
   { value: 30, label: '30 mins' },
   { value: 45, label: '45 mins' },

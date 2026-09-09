@@ -3,13 +3,11 @@ import { RealtimeNotifier } from './realtime.js';
 import { SoundManager } from './sound.js';
 import { Icons } from './icons.js';
 import {
-  SERVICE_CATEGORIES,
   SERVICE_DURATION_OPTIONS,
   renderServiceDurationOptions,
 } from './constants.js';
 
 export {
-  SERVICE_CATEGORIES,
   SERVICE_DURATION_OPTIONS,
   renderServiceDurationOptions,
 };
@@ -3122,7 +3120,7 @@ export class SalonDashboard {
               <select class="form-control" id="svc-category-select" required>
                 ${(this.categoriesList && this.categoriesList.length > 0
                   ? this.categoriesList.map((c) => `<option value="${c.name}">${c.icon || '✂️'} ${c.name}</option>`)
-                  : SERVICE_CATEGORIES.map((c) => `<option value="${c.category}">${c.icon} ${c.category}</option>`)
+                  : '<option value="">-- Select Category --</option>'
                 ).join('')}
                 <option value="CUSTOM">➕ Other / Custom Category...</option>
               </select>
@@ -3264,7 +3262,7 @@ export class SalonDashboard {
 
   showEditServiceModal(service) {
     const modalContainer = document.getElementById('modal-container');
-    const matchedCat = SERVICE_CATEGORIES.find((c) => c.category === service.category);
+    const matchedCat = (this.categoriesList || []).find((c) => c.name === service.category);
     const initialCatValue = matchedCat ? service.category : 'CUSTOM';
     const activeStaff = (this.staffList || []).filter((st) => st.status === 'ACTIVE' || !st.status);
 
@@ -3283,7 +3281,7 @@ export class SalonDashboard {
               <select class="form-control" id="edit-svc-category-select" required>
                 ${(this.categoriesList && this.categoriesList.length > 0
                   ? this.categoriesList.map((c) => `<option value="${c.name}" ${c.name === service.category ? 'selected' : ''}>${c.icon || '✂️'} ${c.name}</option>`)
-                  : SERVICE_CATEGORIES.map((c) => `<option value="${c.category}" ${c.category === service.category ? 'selected' : ''}>${c.icon} ${c.category}</option>`)
+                  : '<option value="">-- Select Category --</option>'
                 ).join('')}
                 <option value="CUSTOM" ${initialCatValue === 'CUSTOM' ? 'selected' : ''}>➕ Other / Custom Category...</option>
               </select>
