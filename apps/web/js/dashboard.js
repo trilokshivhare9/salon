@@ -2,49 +2,15 @@ import { ApiClient, formatTime12h } from './api.js';
 import { RealtimeNotifier } from './realtime.js';
 import { SoundManager } from './sound.js';
 import { Icons } from './icons.js';
+import {
+  SERVICE_DURATION_OPTIONS,
+  renderServiceDurationOptions,
+} from './constants.js';
 
-export const SERVICE_CATEGORIES = [
-  { category: 'Hair Care & Styling', icon: '✂️' },
-  { category: 'Beard & Shaving', icon: '🧔' },
-  { category: 'Combos & Packages', icon: '🔥' },
-  { category: 'Head Massage & Champy', icon: '💆' },
-  { category: 'Facial, Bleach & D-Tan', icon: '✨' },
-  { category: 'Hair Color & Highlights', icon: '🎨' },
-  { category: 'Hair Spa & Keratin', icon: '🧖' },
-];
-
-export const SERVICE_DURATION_OPTIONS = [
-  { value: 30, label: '30 mins' },
-  { value: 45, label: '45 mins' },
-  { value: 60, label: '60 mins (1 hr)' },
-  { value: 75, label: '75 mins (1 hr 15m)' },
-  { value: 90, label: '90 mins (1 hr 30m)' },
-  { value: 105, label: '105 mins (1 hr 45m)' },
-  { value: 120, label: '120 mins (2 hrs)' },
-  { value: 135, label: '135 mins (2 hrs 15m)' },
-  { value: 150, label: '150 mins (2 hrs 30m)' },
-  { value: 165, label: '165 mins (2 hrs 45m)' },
-  { value: 180, label: '180 mins (3 hrs)' },
-  { value: 195, label: '195 mins (3 hrs 15m)' },
-  { value: 210, label: '210 mins (3 hrs 30m)' },
-  { value: 225, label: '225 mins (3 hrs 45m)' },
-  { value: 240, label: '240 mins (4 hrs)' },
-];
-
-export function renderServiceDurationOptions(selectedDuration = 30) {
-  const selectedNum = parseInt(selectedDuration, 10) || 30;
-  let hasMatch = false;
-  const optionsHtml = SERVICE_DURATION_OPTIONS.map((opt) => {
-    const isSel = opt.value === selectedNum;
-    if (isSel) hasMatch = true;
-    return `<option value="${opt.value}" ${isSel ? 'selected' : ''}>${opt.label}</option>`;
-  }).join('');
-
-  if (!hasMatch && selectedNum > 0) {
-    return `<option value="${selectedNum}" selected>${selectedNum} mins (Legacy - select multiple of 15)</option>` + optionsHtml;
-  }
-  return optionsHtml;
-}
+export {
+  SERVICE_DURATION_OPTIONS,
+  renderServiceDurationOptions,
+};
 
 export class SalonDashboard {
   constructor(containerId, currentUser = null) {
@@ -62,6 +28,7 @@ export class SalonDashboard {
     };
     this.staffList = [];
     this.servicesList = [];
+    this.categoriesList = [];
     this.salonProfile = {};
     this.searchQuery = '';
   }
@@ -207,7 +174,7 @@ export class SalonDashboard {
 
     if (fullReload) {
       try {
-        const [summary, staff, services, profile] = await Promise.all([
+        const [summary, staff, services, profile, categories] = await Promise.all([
           ApiClient.getDashboardSummary(this.selectedDate, true).catch((err) => {
             console.warn('[Dashboard] Summary fetch error:', err);
             return this.summaryData || fallbackSummary;
@@ -224,11 +191,16 @@ export class SalonDashboard {
             console.warn('[Dashboard] Profile fetch error:', err);
             return this.salonProfile || {};
           }),
+          ApiClient.getServiceCategories(true).catch((err) => {
+            console.warn('[Dashboard] Categories fetch error:', err);
+            return this.categoriesList || [];
+          }),
         ]);
 
         this.summaryData = summary || fallbackSummary;
         this.staffList = Array.isArray(staff) ? staff : [];
         this.servicesList = Array.isArray(services) ? services : [];
+        this.categoriesList = Array.isArray(categories) ? categories : [];
         this.salonProfile = profile || {};
       } catch (err) {
         console.warn('[Dashboard] loadData batch error:', err);
@@ -3146,9 +3118,10 @@ export class SalonDashboard {
             <div class="form-group">
               <label>Service Category *</label>
               <select class="form-control" id="svc-category-select" required>
-                ${SERVICE_CATEGORIES.map((c) => `
-                  <option value="${c.category}">${c.icon} ${c.category}</option>
-                `).join('')}
+                ${(this.categoriesList && this.categoriesList.length > 0
+                  ? this.categoriesList.map((c) => `<option value="${c.name}">${c.icon || '✂️'} ${c.name}</option>`)
+                  : '<option value="">-- Select Category --</option>'
+                ).join('')}
                 <option value="CUSTOM">➕ Other / Custom Category...</option>
               </select>
             </div>
@@ -3289,7 +3262,7 @@ export class SalonDashboard {
 
   showEditServiceModal(service) {
     const modalContainer = document.getElementById('modal-container');
-    const matchedCat = SERVICE_CATEGORIES.find((c) => c.category === service.category);
+    const matchedCat = (this.categoriesList || []).find((c) => c.name === service.category);
     const initialCatValue = matchedCat ? service.category : 'CUSTOM';
     const activeStaff = (this.staffList || []).filter((st) => st.status === 'ACTIVE' || !st.status);
 
@@ -3306,9 +3279,10 @@ export class SalonDashboard {
             <div class="form-group">
               <label>Service Category *</label>
               <select class="form-control" id="edit-svc-category-select" required>
-                ${SERVICE_CATEGORIES.map((c) => `
-                  <option value="${c.category}" ${c.category === service.category ? 'selected' : ''}>${c.icon} ${c.category}</option>
-                `).join('')}
+                ${(this.categoriesList && this.categoriesList.length > 0
+                  ? this.categoriesList.map((c) => `<option value="${c.name}" ${c.name === service.category ? 'selected' : ''}>${c.icon || '✂️'} ${c.name}</option>`)
+                  : '<option value="">-- Select Category --</option>'
+                ).join('')}
                 <option value="CUSTOM" ${initialCatValue === 'CUSTOM' ? 'selected' : ''}>➕ Other / Custom Category...</option>
               </select>
             </div>

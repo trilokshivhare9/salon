@@ -116,40 +116,49 @@ export class WhatsAppController {
               whatsappAccount: { phoneNumberId },
             },
           });
-        }
 
-        // 2. Keyword/Slug Routing: If customer sends "BOOK <slug>" or "Hi <slug>"
-        if (!salon && (normalizedText.startsWith('book ') || normalizedText.startsWith('hi '))) {
-          const requestedSlug = normalizedText.replace(/^(book|hi)\s+/i, '').trim();
-          salon = await this.prisma.salon.findFirst({
-            where: {
-              OR: [
-                { slug: requestedSlug },
-                { name: { contains: requestedSlug, mode: 'insensitive' } },
-              ],
-            },
-          });
-        }
-
-        // 3. Ongoing Active Conversation fallback
-        if (!salon || salon.status !== 'ACTIVE') {
-          const cleanFrom = fromPhone.replace(/[^\d+]/g, '');
-          const existingConv = await this.prisma.conversation.findFirst({
-            where: {
-              customerPhone: { in: [cleanFrom, fromPhone, cleanFrom.replace('+', '')] },
-            },
-            orderBy: { updatedAt: 'desc' },
-            include: { salon: true },
-          });
-
-          if (existingConv && existingConv.salon?.status === 'ACTIVE') {
-            salon = existingConv.salon;
+          if (!salon) {
+            this.logger.warn(
+              `[Meta Webhook] ⚠️ Received message for WhatsApp Phone ID "${phoneNumberId}", but no active salon is linked to this phone ID in DB. Request dropped to prevent cross-tenant routing.`,
+            );
+            return { status: 'unmapped_phone_id', phoneNumberId };
           }
-        }
+        } else {
+          // Fallback routing ONLY when phoneNumberId is NOT provided (e.g. simulator/internal test callers)
 
-        // 4. Default Fallback to active salon
-        if (!salon || salon.status !== 'ACTIVE') {
-          salon = await this.prisma.salon.findFirst({ where: { status: 'ACTIVE' } });
+          // 2. Keyword/Slug Routing: If customer sends "BOOK <slug>" or "Hi <slug>"
+          if (!salon && (normalizedText.startsWith('book ') || normalizedText.startsWith('hi '))) {
+            const requestedSlug = normalizedText.replace(/^(book|hi)\s+/i, '').trim();
+            salon = await this.prisma.salon.findFirst({
+              where: {
+                OR: [
+                  { slug: requestedSlug },
+                  { name: { contains: requestedSlug, mode: 'insensitive' } },
+                ],
+              },
+            });
+          }
+
+          // 3. Ongoing Active Conversation fallback (simulator only)
+          if (!salon || salon.status !== 'ACTIVE') {
+            const cleanFrom = fromPhone.replace(/[^\d+]/g, '');
+            const existingConv = await this.prisma.conversation.findFirst({
+              where: {
+                customerPhone: { in: [cleanFrom, fromPhone, cleanFrom.replace('+', '')] },
+              },
+              orderBy: { updatedAt: 'desc' },
+              include: { salon: true },
+            });
+
+            if (existingConv && existingConv.salon?.status === 'ACTIVE') {
+              salon = existingConv.salon;
+            }
+          }
+
+          // 4. Default Fallback to active salon (simulator only)
+          if (!salon || salon.status !== 'ACTIVE') {
+            salon = await this.prisma.salon.findFirst({ where: { status: 'ACTIVE' } });
+          }
         }
 
         // Process asynchronously so Meta Webhook receives immediate 200 OK (<20ms)

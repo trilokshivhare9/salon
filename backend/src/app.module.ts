@@ -13,6 +13,7 @@ import { CustomersModule } from './modules/customers/customers.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { HealthModule } from './modules/health/health.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
+import { MasterCategoriesModule } from './modules/master-categories/master-categories.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
     ReportsModule,
     HealthModule,
     WhatsAppModule,
+    MasterCategoriesModule,
   ],
 })
 export class AppModule {}

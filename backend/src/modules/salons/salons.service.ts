@@ -354,6 +354,22 @@ export class SalonsService {
         });
       }
 
+      // 5. Inherit Master Categories from Super Admin into newly provisioned Salon
+      const masterCategories = await tx.masterCategory.findMany({
+        orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+      });
+
+      if (masterCategories.length > 0) {
+        await tx.serviceCategory.createMany({
+          data: masterCategories.map((mc) => ({
+            salonId: salon.id,
+            name: mc.name,
+            icon: mc.icon || 'scissors',
+            sortOrder: mc.sortOrder,
+          })),
+        });
+      }
+
       return {
         id: salon.id,
         name: salon.name,

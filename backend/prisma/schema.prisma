@@ -261,6 +261,17 @@ model ServiceCategory {
   @@map("service_categories")
 }
 
+model MasterCategory {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  icon      String?  @default("scissors")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("master_categories")
+}
+
 model Service {
   id              String           @id @default(uuid())
   salonId         String           @map("salon_id")

@@ -730,6 +730,27 @@ export class WhatsAppService {
     const effectiveGender = this.getEffectiveGender(conversation, salonUser);
     const genderLabel = this.getGenderLabel(effectiveGender);
 
+    const totalSalonServices = (salon.services || []).length;
+    if (totalSalonServices === 0) {
+      const reply = `⚠️ *NO SERVICES AVAILABLE*\n\n*${salon.name}* currently has no active services available for booking.\n\n📞 Please contact the salon desk directly at *${salon.phone || 'the salon'}* for more details.`;
+      await this.sendMetaMessage(
+        cleanNumber,
+        {
+          bodyText: reply,
+          interactiveType: 'button',
+          buttons: [
+            { id: 'btn_info', title: '📍 Salon Info' },
+          ],
+        },
+        phoneNumberId,
+      );
+      await this.prisma.conversation.update({
+        where: { id: conversation.id },
+        data: { state: ConversationState.START, selectedCategoryId: null },
+      });
+      return { replyMessage: reply, state: ConversationState.START };
+    }
+
     const activeServices = this.filterServicesByGender(salon.services || [], effectiveGender);
 
     if (activeServices.length === 0) {
@@ -846,6 +867,27 @@ export class WhatsAppService {
     phoneNumberId?: string,
     categoryId?: string | null,
   ): Promise<{ replyMessage: string; state: ConversationState; metadata?: any }> {
+    const totalSalonServices = (salon.services || []).length;
+    if (totalSalonServices === 0) {
+      const reply = `⚠️ *NO SERVICES AVAILABLE*\n\n*${salon.name}* currently has no active services available for booking.\n\n📞 Please contact the salon desk directly at *${salon.phone || 'the salon'}* for more details.`;
+      await this.sendMetaMessage(
+        cleanNumber,
+        {
+          bodyText: reply,
+          interactiveType: 'button',
+          buttons: [
+            { id: 'btn_info', title: '📍 Salon Info' },
+          ],
+        },
+        phoneNumberId,
+      );
+      await this.prisma.conversation.update({
+        where: { id: conversation.id },
+        data: { state: ConversationState.START, selectedCategoryId: null },
+      });
+      return { replyMessage: reply, state: ConversationState.START };
+    }
+
     const effectiveGender = this.getEffectiveGender(conversation, salonUser);
     const genderLabel = this.getGenderLabel(effectiveGender);
 
@@ -867,6 +909,27 @@ export class WhatsAppService {
     }
 
     if (targetServices.length === 0) {
+      if (activeGenderServices.length === 0) {
+        const reply = `⚠️ No active services found for *${genderLabel}*. Tap *Switch Gender* to view services for other genders:`;
+        await this.sendMetaMessage(
+          cleanNumber,
+          {
+            bodyText: reply,
+            interactiveType: 'button',
+            buttons: [
+              { id: 'btn_switch_gender', title: '🔄 Switch Gender' },
+              { id: 'btn_start', title: '🏠 Main Menu' },
+            ],
+          },
+          phoneNumberId,
+        );
+        await this.prisma.conversation.update({
+          where: { id: conversation.id },
+          data: { state: ConversationState.SELECT_SERVICE },
+        });
+        return { replyMessage: reply, state: ConversationState.SELECT_SERVICE };
+      }
+
       const reply = `⚠️ No services available in this category for *${genderLabel}*.`;
       await this.sendMetaMessage(
         cleanNumber,
@@ -2195,7 +2258,7 @@ We look forward to seeing you earlier today.`;
         // Build service ID(s) — if pending add-on exists, use both for combined duration
         const rescheduleServiceIds = conversation.pendingAddonServiceId
           ? [conversation.selectedServiceId, conversation.pendingAddonServiceId].filter(Boolean)
-          : conversation.selectedServiceId || salon.services[0].id;
+          : conversation.selectedServiceId || salon.services[0]?.id || '';
 
         const availability = await this.availabilityService.getAvailableSlots(
           salonId,
@@ -2305,7 +2368,7 @@ We look forward to seeing you earlier today.`;
 
         const availability = await this.availabilityService.getAvailableSlots(
           salonId,
-          conversation.selectedServiceId || salon.services[0].id,
+          conversation.selectedServiceId || salon.services[0]?.id || '',
           dateStr,
           conversation.selectedStaffId || undefined,
           conversation.activeAppointmentId || undefined,
