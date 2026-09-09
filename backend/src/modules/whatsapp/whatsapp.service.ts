@@ -746,18 +746,22 @@ export class WhatsAppService {
     salon: any,
     phoneNumberId?: string,
   ): Promise<{ replyMessage: string; state: ConversationState }> {
-    const reply = `👤 *Who are we booking for today?*\n\nSelect a section to explore our available services:`;
+    const reply = `👤 *Who are we booking for today?*\n\nSelect a section below to explore matching services:`;
+    const listRows: InteractiveListRow[] = [
+      { id: 'gender_select_MALE', title: '👨 Men', description: 'Services for Men & Gentlemen' },
+      { id: 'gender_select_FEMALE', title: '👩 Women', description: 'Services for Women & Ladies' },
+      { id: 'gender_select_KIDS', title: '👶 Kids', description: 'Services for Children & Kids' },
+      { id: 'gender_select_UNISEX', title: '✂️ Show All', description: 'View all services across all sections' },
+    ];
     await this.sendMetaMessage(
       cleanNumber,
       {
         headerText: `${salon.name}`,
         bodyText: reply,
-        interactiveType: 'button',
-        buttons: [
-          { id: 'gender_select_MALE', title: '👨 Men' },
-          { id: 'gender_select_FEMALE', title: '👩 Women' },
-          { id: 'gender_select_UNISEX', title: '✂️ Show All' },
-        ],
+        footerText: 'Tap below to choose section',
+        buttonText: '👤 Choose Section',
+        interactiveType: 'list',
+        listRows,
       },
       phoneNumberId,
     );
