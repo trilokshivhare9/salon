@@ -423,7 +423,7 @@ model Appointment {
   salonId             String            @map("salon_id")
   salonUserId         String            @map("salon_user_id")
   stylistId           String            @map("stylist_id")
-  serviceId           String            @map("service_id")
+  serviceId           String?           @map("service_id")
 
   // Snapshots for immutability
   serviceNameSnapshot String            @map("service_name_snapshot")
@@ -457,7 +457,7 @@ model Appointment {
   salon               Salon             @relation(fields: [salonId], references: [id], onDelete: Restrict)
   salonUser           SalonUser         @relation(fields: [salonId, salonUserId], references: [salonId, id], onDelete: Restrict)
   stylist             Stylist           @relation(fields: [salonId, stylistId], references: [salonId, id], onDelete: Restrict)
-  service             Service           @relation(fields: [salonId, serviceId], references: [salonId, id], onDelete: Restrict)
+  service             Service?          @relation(fields: [salonId, serviceId], references: [salonId, id], onDelete: SetNull)
   services            AppointmentService[]
   createdByAdmin      Admin?            @relation("AdminCreatedAppointments", fields: [createdByAdminId], references: [id], onDelete: SetNull)
   notifications       Notification[]
@@ -475,7 +475,7 @@ model AppointmentService {
   id                  String      @id @default(uuid())
   salonId             String      @map("salon_id")
   appointmentId       String      @map("appointment_id")
-  serviceId           String      @map("service_id")
+  serviceId           String?     @map("service_id")
   serviceNameSnapshot String      @map("service_name_snapshot")
   durationMinutes     Int         @map("duration_minutes")
   price               Decimal     @db.Decimal(10, 2)
@@ -483,7 +483,7 @@ model AppointmentService {
   createdAt           DateTime    @default(now()) @map("created_at")
 
   appointment         Appointment @relation(fields: [salonId, appointmentId], references: [salonId, id], onDelete: Cascade)
-  service             Service     @relation(fields: [salonId, serviceId], references: [salonId, id], onDelete: Restrict)
+  service             Service?    @relation(fields: [salonId, serviceId], references: [salonId, id], onDelete: SetNull)
 
   @@index([salonId, appointmentId])
   @@index([salonId, serviceId])

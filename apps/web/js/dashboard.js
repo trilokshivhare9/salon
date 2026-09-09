@@ -119,9 +119,10 @@ export class SalonDashboard {
           </div>
         </div>
       `;
-      document.getElementById('btn-goto-login')?.addEventListener('click', () => {
-        ApiClient.removeToken();
+      document.getElementById('btn-goto-login')?.addEventListener('click', async () => {
+        await ApiClient.logout();
         window.location.hash = '#login';
+        window.location.reload();
       });
     }
   }
@@ -1820,8 +1821,8 @@ export class SalonDashboard {
   // =========================================================================
   attachEventListeners() {
     // Logout
-    const handleLogout = () => {
-      ApiClient.removeToken();
+    const handleLogout = async () => {
+      await ApiClient.logout();
       window.location.hash = '#login';
       window.location.reload();
     };
@@ -2399,8 +2400,8 @@ export class SalonDashboard {
     document.getElementById('card-feature-shifts')?.addEventListener('click', () => {
       this.switchTab('staff');
     });
-    document.getElementById('card-feature-logout')?.addEventListener('click', () => {
-      ApiClient.removeToken();
+    document.getElementById('card-feature-logout')?.addEventListener('click', async () => {
+      await ApiClient.logout();
       window.location.hash = '#login';
       window.location.reload();
     });
