@@ -65,20 +65,52 @@ export class WhatsAppService {
     phoneNumberId?: string,
     salonId?: string,
   ) {
-    const accessToken =
+    let accessToken =
       this.configService.get<string>('whatsapp.accessToken') ||
       process.env.WHATSAPP_ACCESS_TOKEN;
-    const phoneId =
+    let phoneId =
       phoneNumberId ||
       this.configService.get<string>('whatsapp.phoneNumberId') ||
-      process.env.WHATSAPP_PHONE_NUMBER_ID ||
-      '1266237649907696';
+      process.env.WHATSAPP_PHONE_NUMBER_ID;
+
+    // Strict Multi-Tenant DB Resolution: Use salon's own linked WhatsApp account from DB
+    if (salonId) {
+      const acc = await this.prisma.whatsAppAccount.findFirst({
+        where: { salonId, isActive: true },
+      });
+      if (acc) {
+        if (acc.phoneNumberId) phoneId = acc.phoneNumberId;
+        if (acc.accessTokenEncrypted && acc.accessTokenEncrypted !== 'system_managed') {
+          accessToken = acc.accessTokenEncrypted;
+        }
+      }
+    }
 
     const cleanTo = this.cleanPhone(toPhone);
 
+    if (!phoneId) {
+      this.logger.warn(
+        `[WhatsAppService] ⚠️ Cannot send outbound WhatsApp message to ${toPhone}: No WhatsApp Phone ID registered for salon (${salonId || 'unspecified'}).`,
+      );
+      await this.prisma.whatsAppLog
+        .create({
+          data: {
+            salonId: salonId || null,
+            phone: cleanTo,
+            direction: WhatsAppMessageDirection.OUTBOUND,
+            messageText: payload.bodyText || payload.textBody || '',
+            interactiveId: payload.interactiveType || null,
+            status: 'FAILED',
+            errorMessage: 'No WhatsApp Phone ID registered for this salon.',
+          },
+        })
+        .catch(() => { });
+      return;
+    }
+
     if (!accessToken) {
       this.logger.warn(
-        `[WhatsAppService] ⚠️ Cannot send outbound WhatsApp message to ${toPhone}: WHATSAPP_ACCESS_TOKEN is missing or not configured in environment variables.`,
+        `[WhatsAppService] ⚠️ Cannot send outbound WhatsApp message to ${toPhone}: WHATSAPP_ACCESS_TOKEN is missing or not configured.`,
       );
       await this.prisma.whatsAppLog
         .create({
@@ -380,7 +412,7 @@ export class WhatsAppService {
     const tomorrow = today.plus({ days: 1 });
     const dayAfter = today.plus({ days: 2 });
 
-    const reply = `✅ Service: *${selectedService.name}* (₹${selectedService.price})\n👤 Specialist: *${selectedStaffName}*\n\n📅 *Select Date for your appointment:*`;
+    const reply = `📅 *Choose Appointment Date*\n\n✂️ Service: *${selectedService.name}* (₹${selectedService.price})\n👤 Specialist: *${selectedStaffName}*\n\nSelect a date for your visit below:`;
     await this.sendMetaMessage(
       cleanNumber,
       {
@@ -421,7 +453,7 @@ export class WhatsAppService {
         ...qualifiedStaff.map((st) => ({ id: `staff_${st.id}`, title: st.name })),
       ];
 
-      const reply = `✅ Selected: *${selectedService.name}* (₹${selectedService.price})\n\nWho would you like as your specialist?`;
+      const reply = `👤 *Choose Your Specialist*\n\n✂️ Service: *${selectedService.name}* (₹${selectedService.price})\n\nChoose your preferred specialist, or select *✨ Any Specialist* for the earliest available time:`;
       await this.sendMetaMessage(
         cleanNumber,
         {
@@ -434,22 +466,22 @@ export class WhatsAppService {
       return { replyMessage: reply, state: ConversationState.SELECT_STAFF, metadata: { qualifiedStaff } };
     } else {
       const listRows: InteractiveListRow[] = [
-        { id: 'staff_any', title: '✨ Any Specialist', description: 'Fastest available slot' },
+        { id: 'staff_any', title: '✨ Any Specialist', description: 'Fastest available appointment' },
         ...qualifiedStaff.map((st) => ({
           id: `staff_${st.id}`,
           title: st.name,
-          description: 'Specialist Stylist',
+          description: 'Salon Specialist',
         })),
       ];
 
-      const reply = `✅ Selected: *${selectedService.name}* (₹${selectedService.price})\n\nChoose your preferred specialist:`;
+      const reply = `👤 *Choose Your Specialist*\n\n✂️ Service: *${selectedService.name}* (₹${selectedService.price})\n\nChoose your preferred specialist, or tap *✨ Any Specialist* for the earliest available time:`;
       await this.sendMetaMessage(
         cleanNumber,
         {
-          headerText: `${salon.name} Specialists`,
+          headerText: `${salon.name}`,
           bodyText: reply,
-          footerText: 'Tap below to select',
-          buttonText: '👤 Select Specialist',
+          footerText: 'Tap below to select specialist',
+          buttonText: '👤 Choose Specialist',
           interactiveType: 'list',
           listRows,
         },
@@ -469,16 +501,16 @@ export class WhatsAppService {
         startAt: { gte: cutoff },
       },
       include: {
-        salonUser: { include: { user: true } },
-        stylist: true,
         service: true,
+        stylist: true,
+        salonUser: { include: { user: true } },
       },
       orderBy: { startAt: 'asc' },
     });
   }
 
-  // Helper: Present the Active Booking Hub
-  private async showActiveBookingHub(
+  // Helper: Prompt Active Appointment Hub for returning customer
+  private async promptCustomerHub(
     conversationId: string,
     cleanNumber: string,
     salon: any,
@@ -490,8 +522,6 @@ export class WhatsAppService {
       data: {
         state: ConversationState.ACTIVE_HUB,
         activeAppointmentId: activeAppt.id,
-        selectedServiceId: activeAppt.serviceId,
-        selectedStaffId: activeAppt.stylistId || activeAppt.staffId,
       },
     });
 
@@ -501,9 +531,9 @@ export class WhatsAppService {
     const dateFormatted = DateTime.fromJSDate(apptTime, { zone: tz }).toFormat('dd LLL, EEE');
 
     const customerName = activeAppt.salonUser?.user?.name || activeAppt.user?.name || activeAppt.customer?.name || 'Customer';
-    const stylistName = activeAppt.stylist?.name || activeAppt.staff?.name || 'Stylist';
+    const stylistName = activeAppt.stylist?.name || activeAppt.staff?.name || 'Specialist';
 
-    const reply = `👋 Welcome back, *${customerName}*!\n\n📅 *Your Upcoming Appointment:*\n• Service: *${activeAppt.service.name}* (₹${activeAppt.price})\n• Specialist: *${stylistName}*\n• Date: *${dateFormatted}*\n• Time: *${timeFormatted}*\n• Status: *${activeAppt.status}* (Ref: *#${activeAppt.appointmentNumber}*)\n\nWhat would you like to do?`;
+    const reply = `👋 Welcome back, *${customerName}*!\n\nYou have an active upcoming appointment at *${salon.name}*:\n\n✂️ Service: *${activeAppt.service.name}* (₹${activeAppt.price})\n👤 Specialist: *${stylistName}*\n📅 Date: *${dateFormatted}*\n⏰ Time: *${timeFormatted}*\n📌 Status: *${activeAppt.status}* (Ref: *#${activeAppt.appointmentNumber}*)\n\nWhat would you like to do with your appointment?`;
 
     await this.sendMetaMessage(
       cleanNumber,
@@ -513,7 +543,7 @@ export class WhatsAppService {
         buttons: [
           { id: 'btn_add_service', title: '➕ Add Service' },
           { id: 'btn_reschedule', title: '🔄 Reschedule' },
-          { id: 'btn_cancel_appt', title: '✕ Cancel Slot' },
+          { id: 'btn_cancel_appt', title: '✕ Cancel Booking' },
         ],
       },
       phoneNumberId,
@@ -538,7 +568,7 @@ export class WhatsAppService {
     const tz = salon.timezone || 'Asia/Kolkata';
     const today = DateTime.now().setZone(tz);
     const dateStr = today.toISODate()!;
-    const stylistName = conflictBooking?.staff?.name || conflictBooking?.stylist?.name || 'Stylist';
+    const stylistName = conflictBooking?.staff?.name || conflictBooking?.stylist?.name || 'Specialist';
 
     // Save pending add-on and transition to ADDON_CONFLICT state
     await this.prisma.conversation.update({
@@ -566,7 +596,7 @@ export class WhatsAppService {
       return hasOriginal && hasAddon;
     }) || [];
 
-    const reply = `⚠️ Specialist *${stylistName}* has another client booked right after your slot.\n\nHow would you like to proceed?`;
+    const reply = `⌛ *Time Adjustment Needed*\n\nSpecialist *${stylistName}* has a back-to-back appointment after your current slot. We need a bit more time to fit both services comfortably.\n\nHow would you like to proceed?`;
 
     const buttons = [
       { id: 'btn_reschedule', title: '🔄 Reschedule Both' },
@@ -662,7 +692,7 @@ export class WhatsAppService {
         return tgt === ServiceGender.FEMALE || tgt === ServiceGender.UNISEX;
       }
       if (effectiveGender === ServiceGender.KIDS) {
-        return tgt === ServiceGender.KIDS || tgt === ServiceGender.UNISEX;
+        return tgt === ServiceGender.KIDS;
       }
       return true;
     });
@@ -696,17 +726,31 @@ export class WhatsAppService {
     }
   }
 
+  public getShortGenderLabel(gender: ServiceGender): string {
+    switch (gender) {
+      case ServiceGender.MALE:
+        return 'Men';
+      case ServiceGender.FEMALE:
+        return 'Women';
+      case ServiceGender.KIDS:
+        return 'Kids';
+      case ServiceGender.UNISEX:
+      default:
+        return 'All';
+    }
+  }
+
   async promptGenderSelection(
     conversationId: string,
     cleanNumber: string,
     salon: any,
     phoneNumberId?: string,
   ): Promise<{ replyMessage: string; state: ConversationState }> {
-    const reply = `👤 *Choose Booking Audience*\n\nWho are you booking this appointment for?`;
+    const reply = `👤 *Who are we booking for today?*\n\nSelect a section to explore our available services:`;
     await this.sendMetaMessage(
       cleanNumber,
       {
-        headerText: `${salon.name} Gender Filter`,
+        headerText: `${salon.name}`,
         bodyText: reply,
         interactiveType: 'button',
         buttons: [
@@ -732,7 +776,7 @@ export class WhatsAppService {
 
     const totalSalonServices = (salon.services || []).length;
     if (totalSalonServices === 0) {
-      const reply = `⚠️ *NO SERVICES AVAILABLE*\n\n*${salon.name}* currently has no active services available for booking.\n\n📞 Please contact the salon desk directly at *${salon.phone || 'the salon'}* for more details.`;
+      const reply = `🌿 *No Active Services Available*\n\n*${salon.name}* currently has no active services listed for online booking.\n\n📞 Please contact the salon desk directly at *${salon.phone || 'the salon'}* for direct assistance.`;
       await this.sendMetaMessage(
         cleanNumber,
         {
@@ -753,15 +797,17 @@ export class WhatsAppService {
 
     const activeServices = this.filterServicesByGender(salon.services || [], effectiveGender);
 
+    const shortLabel = this.getShortGenderLabel(effectiveGender);
+
     if (activeServices.length === 0) {
-      const reply = `⚠️ No services found for *${genderLabel}*. Tap *Switch Gender* to view other services:`;
+      const reply = `⚠️ *No Services Found*\n\nWe couldn't find any active services for *${genderLabel}*. Tap *Change Section* below to view other options:`;
       await this.sendMetaMessage(
         cleanNumber,
         {
           bodyText: reply,
           interactiveType: 'button',
           buttons: [
-            { id: 'btn_switch_gender', title: '🔄 Switch Gender' },
+            { id: 'btn_switch_gender', title: `🔄 Change (${shortLabel})`.slice(0, 20) },
             { id: 'btn_start', title: '🏠 Main Menu' },
           ],
         },
@@ -806,14 +852,14 @@ export class WhatsAppService {
       }
 
       if (buttons.length < 3) {
-        buttons.push({ id: 'btn_switch_gender', title: '🔄 Switch Gender'.slice(0, 20) });
+        buttons.push({ id: 'btn_switch_gender', title: `🔄 Change (${shortLabel})`.slice(0, 20) });
       }
 
-      const reply = `📂 *Select Category*\nFilter: *${genderLabel}*\n\nPlease choose a category:`;
+      const reply = `📂 *Explore Service Categories*\nSection: *${genderLabel}*\n\nPlease select a category below to explore services:`;
       await this.sendMetaMessage(
         cleanNumber,
         {
-          headerText: `${salon.name} Menu`,
+          headerText: `${salon.name}`,
           bodyText: reply,
           interactiveType: 'button',
           buttons,
@@ -838,15 +884,15 @@ export class WhatsAppService {
 
       listRows.push({
         id: 'btn_switch_gender',
-        title: '🔄 Switch Gender Filter',
+        title: `🔄 Change Section (${shortLabel})`.slice(0, 24),
         description: `Currently showing: ${genderLabel}`,
       });
 
-      const reply = `📂 *Service Categories*\nFilter: *${genderLabel}*\n\nPlease tap below to choose a category:`;
+      const reply = `📂 *Explore Service Categories*\nSection: *${genderLabel}*\n\nTap below to view available categories for this section:`;
       await this.sendMetaMessage(
         cleanNumber,
         {
-          headerText: `${salon.name} Menu`,
+          headerText: `${salon.name}`,
           bodyText: reply,
           footerText: 'Tap below to select category',
           buttonText: '📂 View Categories',
@@ -869,7 +915,7 @@ export class WhatsAppService {
   ): Promise<{ replyMessage: string; state: ConversationState; metadata?: any }> {
     const totalSalonServices = (salon.services || []).length;
     if (totalSalonServices === 0) {
-      const reply = `⚠️ *NO SERVICES AVAILABLE*\n\n*${salon.name}* currently has no active services available for booking.\n\n📞 Please contact the salon desk directly at *${salon.phone || 'the salon'}* for more details.`;
+      const reply = `🌿 *No Active Services Available*\n\n*${salon.name}* currently has no active services listed for online booking.\n\n📞 Please contact the salon desk directly at *${salon.phone || 'the salon'}* for direct assistance.`;
       await this.sendMetaMessage(
         cleanNumber,
         {
@@ -908,16 +954,18 @@ export class WhatsAppService {
       }
     }
 
+    const shortLabel = this.getShortGenderLabel(effectiveGender);
+
     if (targetServices.length === 0) {
       if (activeGenderServices.length === 0) {
-        const reply = `⚠️ No active services found for *${genderLabel}*. Tap *Switch Gender* to view services for other genders:`;
+        const reply = `⚠️ *No Services Found*\n\nWe couldn't find any active services for *${genderLabel}*. Tap *Change Section* below to view other options:`;
         await this.sendMetaMessage(
           cleanNumber,
           {
             bodyText: reply,
             interactiveType: 'button',
             buttons: [
-              { id: 'btn_switch_gender', title: '🔄 Switch Gender' },
+              { id: 'btn_switch_gender', title: `🔄 Change (${shortLabel})`.slice(0, 20) },
               { id: 'btn_start', title: '🏠 Main Menu' },
             ],
           },
@@ -930,7 +978,7 @@ export class WhatsAppService {
         return { replyMessage: reply, state: ConversationState.SELECT_SERVICE };
       }
 
-      const reply = `⚠️ No services available in this category for *${genderLabel}*.`;
+      const reply = `⚠️ *No Services in Category*\n\nNo active services are available in this category for *${genderLabel}*. Please select another category or change section:`;
       await this.sendMetaMessage(
         cleanNumber,
         {
@@ -938,7 +986,7 @@ export class WhatsAppService {
           interactiveType: 'button',
           buttons: [
             { id: 'cat_back', title: '⬅️ Categories' },
-            { id: 'btn_switch_gender', title: '🔄 Switch Gender' },
+            { id: 'btn_switch_gender', title: `🔄 Change (${shortLabel})`.slice(0, 20) },
           ],
         },
         phoneNumberId,
@@ -982,20 +1030,20 @@ export class WhatsAppService {
 
     listRows.push({
       id: 'btn_switch_gender',
-      title: '🔄 Switch Gender Filter',
-      description: `Current filter: ${genderLabel}`,
+      title: `🔄 Change Section (${shortLabel})`.slice(0, 24),
+      description: `Current section: ${genderLabel}`,
     });
 
-    const catHeader = categoryName ? ` (${categoryName})` : '';
-    const reply = `✂️ *Select a Service${catHeader}*\nFilter: *${genderLabel}*\n\nPlease choose a service below:`;
+    const catContext = categoryName ? ` • Category: *${categoryName}*` : '';
+    const reply = `✂️ *Choose Your Service*\nSection: *${genderLabel}*${catContext}\n\nSelect a service below to choose your specialist and time:`;
 
     await this.sendMetaMessage(
       cleanNumber,
       {
-        headerText: `${salon.name} Services`,
+        headerText: `${salon.name}`,
         bodyText: reply,
-        footerText: 'Tap below to select',
-        buttonText: '✂️ Select Service',
+        footerText: 'Tap below to select service',
+        buttonText: '✂️ Choose Service',
         interactiveType: 'list',
         listRows,
       },
@@ -1361,7 +1409,7 @@ You have accumulated *3 penalty strikes* this year for missed appointments. Auto
       this.logger.log(`[WhatsAppService] ⏳ Session for ${cleanNumber} expired (idle > 2h). Resetting to fresh state.`);
       const activeAppts = await this.findActiveUpcomingAppointments(salonId, cleanNumber);
       if (activeAppts.length > 0) {
-        return this.showActiveBookingHub(conversation.id, cleanNumber, salon, activeAppts[0], phoneNumberId);
+        return this.promptCustomerHub(conversation.id, cleanNumber, salon, activeAppts[0], phoneNumberId);
       }
       conversation = await this.prisma.conversation.update({
         where: { id: conversation.id },
@@ -1387,7 +1435,7 @@ You have accumulated *3 penalty strikes* this year for missed appointments. Auto
       // Check if client has an active upcoming appointment
       const activeAppts = await this.findActiveUpcomingAppointments(salonId, cleanNumber);
       if (activeAppts.length > 0) {
-        return this.showActiveBookingHub(conversation.id, cleanNumber, salon, activeAppts[0], phoneNumberId);
+        return this.promptCustomerHub(conversation.id, cleanNumber, salon, activeAppts[0], phoneNumberId);
       }
 
       await this.prisma.conversation.update({
@@ -2615,16 +2663,17 @@ We look forward to seeing you earlier today.`;
           );
           return { replyMessage: reply, state: ConversationState.START };
         } else {
+          const reply = `👋 *Welcome to ${salon.name}!*\n\nWe're delighted to assist you with your salon reservation.\n\nHow can we help you today?`;
           await this.sendMetaMessage(
             cleanNumber,
             {
-              bodyText: `Welcome to ${salon.name}! Tap a button below to get started:`,
+              bodyText: reply,
               interactiveType: 'button',
-              buttons: [{ id: 'btn_book', title: '📅 Book Slot' }, { id: 'btn_services', title: '✂️ Services' }],
+              buttons: [{ id: 'btn_book', title: '📅 Book Slot' }, { id: 'btn_services', title: '✂️ Browse Services' }],
             },
             phoneNumberId,
           );
-          return { replyMessage: 'Please tap Book Slot', state: ConversationState.START };
+          return { replyMessage: reply, state: ConversationState.START };
         }
       }
 
@@ -2935,7 +2984,7 @@ We look forward to seeing you earlier today.`;
           if (afternoonSlots.length > 0) periodButtons.push({ id: 'period_afternoon', title: `☀️ Afternoon (${afternoonSlots.length})` });
           if (eveningSlots.length > 0) periodButtons.push({ id: 'period_evening', title: `🌙 Evening (${eveningSlots.length})` });
 
-          const reply = `📅 Date: *${targetDate.toFormat('dd LLL, EEEE')}*\n⏰ Salon Hours: *${this.formatTime12h(allSlots[0].startTime)} – ${this.formatTime12h(allSlots[allSlots.length - 1].endTime)}* (${allSlots.length} slots all day)\n\nChoose an appointment time slot period below, or type any time directly (e.g. *2:30 PM* or *6 PM*):`;
+          const reply = `⏰ *Choose Appointment Time*\n\n📅 Date: *${targetDate.toFormat('dd LLL, EEEE')}*\n⏰ Salon Hours: *${this.formatTime12h(allSlots[0].startTime)} – ${this.formatTime12h(allSlots[allSlots.length - 1].endTime)}* (${allSlots.length} open slots)\n\nSelect a time period below to view available slots, or type your preferred time directly (e.g. *2:30 PM*):`;
           await this.sendMetaMessage(
             cleanNumber,
             {
@@ -2964,15 +3013,15 @@ We look forward to seeing you earlier today.`;
         );
 
         if (availability.availableSlots.length === 0) {
-          let reply = `⚠️ Sorry, no slots are currently available on *${targetDate}*. Please choose another date:`;
+          let reply = `📅 *No Slots Available*\n\nAll appointment times for *${targetDate}* are currently booked. Please choose another date to find an available slot:`;
           if (availability.status === 'SALON_CLOSED') {
-            reply = `📅 The salon is closed on this day. Please choose another date:`;
+            reply = `📅 *Salon Closed*\n\nThe salon is closed on *${targetDate}*. Please choose another date for your visit:`;
           } else if (availability.status === 'FULLY_BOOKED') {
-            reply = `⚠️ All slots on *${targetDate}* are fully booked! Please choose another date:`;
+            reply = `📅 *Fully Booked*\n\nAll time slots for *${targetDate}* have been reserved. Please choose another date below:`;
           } else if (availability.status === 'STAFF_UNAVAILABLE') {
-            reply = `⚠️ Our specialists are not available on *${targetDate}*. Please choose another date:`;
+            reply = `⚠️ *Specialist Unavailable*\n\nOur specialists are not available on *${targetDate}*. Please choose another date below:`;
           } else if (availability.status === 'NO_QUALIFIED_STAFF') {
-            reply = `⚠️ This service is currently unavailable for booking. Please choose another service:`;
+            reply = `⚠️ *Service Unavailable*\n\nThis service is currently unavailable for online booking. Please choose another service:`;
           }
 
           await this.sendMetaMessage(
@@ -3081,12 +3130,12 @@ We look forward to seeing you earlier today.`;
             const listRows = allSlots.map((s) => ({
               id: `slot_${s.startTime}`,
               title: `⏰ ${this.formatTime12h(s.startTime)}`,
-              description: `Available with ${s.availableStaffCount} stylist(s)`,
+              description: `Available slot`,
             }));
             await this.sendMetaMessage(
               cleanNumber,
               {
-                bodyText: '❌ Please select an available time slot from the list:',
+                bodyText: '⚠️ Time slot not recognized. Please tap below to choose an available time:',
                 buttonText: '⏰ Select Slot',
                 interactiveType: 'list',
                 listRows,
@@ -3102,7 +3151,7 @@ We look forward to seeing you earlier today.`;
             await this.sendMetaMessage(
               cleanNumber,
               {
-                bodyText: `❌ That time is not available. Please choose a time window below, or type an exact time (e.g. *2:30 PM* or *6 PM*):`,
+                bodyText: `⚠️ That time slot is unavailable. Please select a time window below, or type your preferred time (e.g. *2:30 PM*):`,
                 interactiveType: 'button',
                 buttons: periodButtons.slice(0, 3),
               },
@@ -3131,7 +3180,7 @@ We look forward to seeing you earlier today.`;
             },
           });
 
-          const reply = `📋 *Booking Summary:*\n\n• Salon: *${salon.name}*\n• Service: *${selectedService?.name}* (₹${selectedService?.price})\n• Specialist: *${selectedStaff ? selectedStaff.name : 'Any Specialist'}*\n• Date: *${targetDate}*\n• Time: *${this.formatTime12h(selectedSlot.startTime)}*\n• Client: *${existingCustomer.name}*`;
+          const reply = `✨ *Review Your Appointment Summary*\n\n📍 *Salon:* ${salon.name}\n✂️ *Service:* ${selectedService?.name} (₹${selectedService?.price})\n👤 *Specialist:* ${selectedStaff ? selectedStaff.name : 'Any Specialist'}\n📅 *Date:* ${targetDate}\n⏰ *Time:* ${this.formatTime12h(selectedSlot.startTime)}\n👤 *Guest:* ${existingCustomer.name}\n\nPlease review your details above. Tap *✅ Confirm Booking* to lock in your appointment!`;
           await this.sendMetaMessage(
             cleanNumber,
             {
@@ -3154,7 +3203,7 @@ We look forward to seeing you earlier today.`;
             },
           });
 
-          const reply = `⏰ Selected Time: *${this.formatTime12h(selectedSlot.startTime)}*\n\nPlease reply with your *Full Name* to complete the reservation:`;
+          const reply = `👤 *Almost Done! Please Share Your Name*\n\n⏰ Selected Slot: *${this.formatTime12h(selectedSlot.startTime)}*\n✂️ Service: *${selectedService?.name || 'Service'}* (₹${selectedService?.price || 0})\n\nPlease reply with your *Full Name* to complete your appointment reservation:`;
           await this.sendMetaMessage(cleanNumber, { textBody: reply }, phoneNumberId);
           return { replyMessage: reply, state: ConversationState.COLLECT_NAME };
         }
@@ -3163,7 +3212,7 @@ We look forward to seeing you earlier today.`;
       case ConversationState.COLLECT_NAME: {
         const customerName = input.trim();
         if (customerName.length < 2) {
-          const reply = `Please reply with your valid Full Name.`;
+          const reply = `Please reply with a valid Full Name to complete your reservation summary:`;
           await this.sendMetaMessage(cleanNumber, { textBody: reply }, phoneNumberId);
           return { replyMessage: reply, state: ConversationState.COLLECT_NAME };
         }
@@ -3184,7 +3233,7 @@ We look forward to seeing you earlier today.`;
         const selectedService = salon.services.find((s) => s.id === conversation.selectedServiceId);
         const selectedStaff = salon.staff.find((st) => st.id === conversation.selectedStaffId);
 
-        const reply = `📋 *Please Confirm Your Appointment:*\n\n• Salon: *${salon.name}*\n• Service: *${selectedService?.name}* (₹${selectedService?.price})\n• Specialist: *${selectedStaff ? selectedStaff.name : 'Any Specialist'}*\n• Date: *${dateStr}*\n• Time: *${timeStr}*\n• Client: *${customerName}*`;
+        const reply = `✨ *Review Your Appointment Summary*\n\n📍 *Salon:* ${salon.name}\n✂️ *Service:* ${selectedService?.name} (₹${selectedService?.price})\n👤 *Specialist:* ${selectedStaff ? selectedStaff.name : 'Any Specialist'}\n📅 *Date:* ${dateStr}\n⏰ *Time:* ${timeStr}\n👤 *Guest:* ${customerName}\n\nPlease review your details above. Tap *✅ Confirm Booking* to lock in your appointment!`;
         await this.sendMetaMessage(
           cleanNumber,
           {
@@ -3232,7 +3281,7 @@ We look forward to seeing you earlier today.`;
               data: { state: ConversationState.COMPLETED, activeAppointmentId: appointment.id },
             });
 
-            const reply = `🎉 *APPOINTMENT CONFIRMED!*\n\n• Booking ID: *${appointment.appointmentNumber}*\n• Service: *${appointment.service.name}*\n• Specialist: *${appointment.stylist.name}*\n• Date: *${dateStr}*\n• Time: *${time12hStr}*\n• Amount: *₹${appointment.price}*\n\n📍 *${salon.name}*\n${salon.address || ''}\n\nWe look forward to seeing you!`;
+            const reply = `🎉 *Appointment Confirmed!*\n\n• Reference ID: *#${appointment.appointmentNumber}*\n• Service: *${appointment.service.name}*\n• Specialist: *${appointment.stylist.name}*\n• Date & Time: *${dateStr}* at *${time12hStr}*\n• Amount: *₹${appointment.price}*\n\n📍 *${salon.name}*\n${salon.address || ''}\n\nWe look forward to welcoming you!`;
             await this.sendMetaMessage(
               cleanNumber,
               {
@@ -3245,7 +3294,7 @@ We look forward to seeing you earlier today.`;
             return { replyMessage: reply, state: ConversationState.COMPLETED, metadata: { appointment } };
           } catch (err) {
             this.logger.error('WhatsApp booking confirmation error:', err);
-            const reply = `⚠️ ${err.message || 'Sorry, this slot was just taken.'}`;
+            const reply = `⚠️ ${err.message || 'Sorry, this slot was just taken by another client. Please select another time.'}`;
             await this.sendMetaMessage(
               cleanNumber,
               {

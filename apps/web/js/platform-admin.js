@@ -713,14 +713,41 @@ export class PlatformAdminPortal {
         btn.setAttribute('disabled', 'true');
 
         try {
-          await ApiClient.toggleSalonStatusPlatform(salonId);
+          await ApiClient.toggleSalonStatusPlatform(salonId, false);
           this.data = await ApiClient.getAllSalonsPlatform();
           this.render();
           this.showToast('Salon status updated successfully.', 'success');
         } catch (err) {
           btn.textContent = originalText;
           btn.removeAttribute('disabled');
-          this.showToast(err.message, 'error');
+
+          // Active/Future Bookings Deactivation Protection Protocol
+          if (err.message && (err.message.includes('active/future booking') || err.message.includes('cancelled before deactivation'))) {
+            const preview = await ApiClient.getDeactivationPreview(salonId).catch(() => null);
+            const count = preview?.activeBookingsCount || 1;
+            const inChair = preview?.inServiceCount || 0;
+
+            let warnMsg = `⚠️ DEACTIVATION WARNING: Salon "${salonName}" has ${count} active/future booking(s)`;
+            if (inChair > 0) warnMsg += ` (${inChair} currently in chair)`;
+            warnMsg += `.\n\nDeactivating this salon will AUTOMATICALLY CANCEL all ${count} active booking(s) and dispatch WhatsApp cancellation notifications to customers.\n\nDo you want to cancel all active bookings and deactivate this salon?`;
+
+            if (window.confirm(warnMsg)) {
+              try {
+                btn.textContent = 'Cancelling & Deactivating...';
+                btn.setAttribute('disabled', 'true');
+                await ApiClient.toggleSalonStatusPlatform(salonId, true);
+                this.data = await ApiClient.getAllSalonsPlatform();
+                this.render();
+                this.showToast(`Salon "${salonName}" deactivated successfully. ${count} active booking(s) were cancelled.`, 'success');
+              } catch (forceErr) {
+                btn.textContent = originalText;
+                btn.removeAttribute('disabled');
+                this.showToast(forceErr.message, 'error');
+              }
+            }
+          } else {
+            this.showToast(err.message, 'error');
+          }
         }
       });
     });

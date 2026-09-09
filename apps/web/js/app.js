@@ -83,18 +83,25 @@ class App {
     modal.id = 'reauth-modal';
     modal.style.cssText = 'position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.85); backdrop-filter:blur(10px); z-index:9999999; display:flex; align-items:center; justify-content:center; padding:20px;';
     
-    const userEmail = this.currentUser?.email || 'Admin';
+    const initialIdentifier = this.currentUser?.phone || this.currentUser?.email || localStorage.getItem('last_user_identifier') || '';
+
     modal.innerHTML = `
       <div style="background:#131927; border:1px solid rgba(99,102,241,0.3); border-radius:20px; width:100%; max-width:420px; padding:32px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.7); text-align:center; color:#fff; font-family:sans-serif;">
         <div style="font-size:2.5rem; margin-bottom:12px;">🔒</div>
         <h3 style="margin:0 0 8px 0; font-size:1.25rem; font-weight:700;">Session Expired</h3>
-        <p style="color:#94a3b8; font-size:0.85rem; margin-bottom:24px; line-height:1.4;">
-          Your session timed out. Re-enter password for <strong>${userEmail}</strong> to resume without losing your unsaved work.
+        <p style="color:#94a3b8; font-size:0.85rem; margin-bottom:20px; line-height:1.4;">
+          Your session timed out. Re-enter your password to resume without losing your work.
         </p>
-        <form id="reauth-form">
+        <form id="reauth-form" style="text-align:left;">
+          <label style="display:block; font-size:0.75rem; color:#94a3b8; margin-bottom:6px; font-weight:600;">Mobile Number or Email</label>
+          <input type="text" id="reauth-identifier" value="${initialIdentifier}" placeholder="Mobile number or email" required style="width:100%; padding:12px 16px; background:#1e293b; border:1px solid #334155; border-radius:10px; color:#fff; font-size:0.95rem; margin-bottom:14px; box-sizing:border-box; outline:none;" />
+          
+          <label style="display:block; font-size:0.75rem; color:#94a3b8; margin-bottom:6px; font-weight:600;">Password</label>
           <input type="password" id="reauth-password" placeholder="Enter password" required style="width:100%; padding:12px 16px; background:#1e293b; border:1px solid #334155; border-radius:10px; color:#fff; font-size:0.95rem; margin-bottom:16px; box-sizing:border-box; outline:none;" />
-          <div id="reauth-error" style="color:#f87171; font-size:0.8rem; margin-bottom:12px; display:none;"></div>
-          <button type="submit" style="width:100%; padding:12px; background:#4f46e5; border:none; border-radius:10px; color:#fff; font-weight:600; font-size:0.95rem; cursor:pointer;">Resume Session</button>
+          
+          <div id="reauth-error" style="color:#f87171; font-size:0.8rem; margin-bottom:12px; display:none; text-align:center;"></div>
+          <button type="submit" id="reauth-submit-btn" style="width:100%; padding:12px; background:#4f46e5; border:none; border-radius:10px; color:#fff; font-weight:600; font-size:0.95rem; cursor:pointer;">Resume Session</button>
+          <button type="button" id="reauth-full-login-btn" style="width:100%; margin-top:10px; padding:10px; background:transparent; border:1px solid #475569; border-radius:10px; color:#94a3b8; font-weight:500; font-size:0.85rem; cursor:pointer;">Log In with Different Account</button>
         </form>
       </div>
     `;
@@ -102,21 +109,38 @@ class App {
     document.body.appendChild(modal);
 
     const form = document.getElementById('reauth-form');
+    const fullLoginBtn = document.getElementById('reauth-full-login-btn');
+
+    fullLoginBtn.addEventListener('click', () => {
+      ApiClient.clearSession(true);
+      modal.remove();
+      window.location.hash = '#admin';
+      location.reload();
+    });
+
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
+      const identifier = document.getElementById('reauth-identifier').value.trim();
       const password = document.getElementById('reauth-password').value;
       const errEl = document.getElementById('reauth-error');
+      const submitBtn = document.getElementById('reauth-submit-btn');
+      
       errEl.style.display = 'none';
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Resuming...';
 
       try {
-        const loginRes = await ApiClient.login(userEmail, password);
+        const loginRes = await ApiClient.login(identifier, password);
         if (loginRes?.user) {
           this.currentUser = loginRes.user;
           modal.remove();
-          console.log('✅ In-Place Re-Authentication successful!');
+          console.log('✅ In-Place Re-Authentication successful! Re-hydrating view...');
+          await this.handleRoute();
         }
       } catch (err) {
-        errEl.textContent = err.message || 'Invalid password. Please try again.';
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Resume Session';
+        errEl.textContent = err.message || 'Invalid credentials. Please try again.';
         errEl.style.display = 'block';
       }
     });

@@ -183,12 +183,35 @@ export class ServicesService {
       targetStylistIds = activeStylists.map((s) => s.id);
     }
 
-    // Validate categoryId if provided
+    // Validate or auto-resolve categoryId / category name strictly
+    let resolvedCategoryId: string | null = null;
+    let finalCategoryName = dto.category?.trim();
+
     if (dto.categoryId) {
       const cat = await this.prisma.serviceCategory.findFirst({
         where: { id: dto.categoryId, salonId },
       });
       if (!cat) throw new BadRequestException('Selected Service Category does not exist in this salon.');
+      resolvedCategoryId = cat.id;
+      finalCategoryName = cat.name;
+    } else if (finalCategoryName) {
+      let cat = await this.prisma.serviceCategory.findFirst({
+        where: { salonId, name: { equals: finalCategoryName, mode: 'insensitive' } },
+      });
+      if (!cat) {
+        cat = await this.prisma.serviceCategory.create({
+          data: {
+            salonId,
+            name: finalCategoryName,
+            icon: '✂️',
+            sortOrder: 0,
+          },
+        });
+      }
+      resolvedCategoryId = cat.id;
+      finalCategoryName = cat.name;
+    } else {
+      throw new BadRequestException('Service Category is required. Please select or specify a category.');
     }
 
     const service = await this.prisma.$transaction(async (tx) => {
@@ -199,8 +222,8 @@ export class ServicesService {
           description: dto.description?.trim(),
           price: dto.price,
           durationMinutes: dto.durationMinutes,
-          category: dto.category?.trim(),
-          categoryId: dto.categoryId || null,
+          category: finalCategoryName,
+          categoryId: resolvedCategoryId,
           targetGender: dto.targetGender || 'UNISEX',
           status: ServiceStatus.ACTIVE,
         },
@@ -259,11 +282,32 @@ export class ServicesService {
       throw new BadRequestException('Service duration must be at least 30 minutes and a multiple of 15.');
     }
 
+    let resolvedCategoryId: string | undefined = dto.categoryId;
+    let finalCategoryName = dto.category?.trim();
+
     if (dto.categoryId) {
       const cat = await this.prisma.serviceCategory.findFirst({
         where: { id: dto.categoryId, salonId },
       });
       if (!cat) throw new BadRequestException('Selected Service Category does not exist in this salon.');
+      resolvedCategoryId = cat.id;
+      finalCategoryName = cat.name;
+    } else if (finalCategoryName) {
+      let cat = await this.prisma.serviceCategory.findFirst({
+        where: { salonId, name: { equals: finalCategoryName, mode: 'insensitive' } },
+      });
+      if (!cat) {
+        cat = await this.prisma.serviceCategory.create({
+          data: {
+            salonId,
+            name: finalCategoryName,
+            icon: '✂️',
+            sortOrder: 0,
+          },
+        });
+      }
+      resolvedCategoryId = cat.id;
+      finalCategoryName = cat.name;
     }
 
     const { stylistIds, ...serviceData } = dto;
@@ -289,7 +333,10 @@ export class ServicesService {
     const updated = await this.prisma.$transaction(async (tx) => {
       await tx.service.update({
         where: { id: serviceId },
-        data: serviceData,
+        data: {
+          ...serviceData,
+          ...(resolvedCategoryId !== undefined ? { categoryId: resolvedCategoryId } : {}),
+        },
       });
 
       // If stylistIds was provided, update stylist_services mapping

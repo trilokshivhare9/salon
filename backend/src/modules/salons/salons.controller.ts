@@ -7,6 +7,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   UseGuards,
   Request,
 } from '@nestjs/common';
@@ -42,9 +43,20 @@ export class SalonsController {
   }
 
   @Roles(AdminRole.SUPER_ADMIN)
+  @Get('platform/:id/deactivation-preview')
+  async getDeactivationPreview(@Param('id') salonId: string) {
+    return this.salonsService.getDeactivationPreview(salonId);
+  }
+
+  @Roles(AdminRole.SUPER_ADMIN)
   @Patch('platform/:id/toggle-status')
-  async toggleSalonStatus(@Param('id') salonId: string) {
-    return this.salonsService.toggleSalonStatus(salonId);
+  async toggleSalonStatus(
+    @Param('id') salonId: string,
+    @Body('forceCancelBookings') forceCancelBookings?: boolean,
+    @Query('forceCancel') forceCancelQuery?: string,
+  ) {
+    const forceCancel = forceCancelBookings === true || forceCancelQuery === 'true';
+    return this.salonsService.toggleSalonStatus(salonId, forceCancel);
   }
 
   @Roles(AdminRole.SUPER_ADMIN)
