@@ -636,6 +636,41 @@ export class ApiClient {
     return res;
   }
 
+  // Super Admin Master Categories
+  static async getMasterCategories(bypassCache = false) {
+    const url = bypassCache ? `/super-admin/categories?_t=${Date.now()}` : '/super-admin/categories';
+    return this.request(url, {}, bypassCache ? 0 : 60000);
+  }
+
+  static async createMasterCategory(payload) {
+    this.invalidateCache('/super-admin/categories');
+    const res = await this.request('/super-admin/categories', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    this.invalidateCache('/super-admin/categories');
+    return res;
+  }
+
+  static async updateMasterCategory(id, payload) {
+    this.invalidateCache('/super-admin/categories');
+    const res = await this.request(`/super-admin/categories/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+    this.invalidateCache('/super-admin/categories');
+    return res;
+  }
+
+  static async deleteMasterCategory(id) {
+    this.invalidateCache('/super-admin/categories');
+    const res = await this.request(`/super-admin/categories/${id}`, {
+      method: 'DELETE',
+    });
+    this.invalidateCache('/super-admin/categories');
+    return res;
+  }
+
   // Service Management (Cached for 3 mins)
   static async getServices(bypassCache = false) {
     const url = bypassCache ? `/services?_t=${Date.now()}` : '/services';

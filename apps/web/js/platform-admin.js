@@ -106,7 +106,10 @@ export class PlatformAdminPortal {
               <h3 style="font-size: 1.25rem;">Registered Salon Tenants (${salons.length})</h3>
               <p style="color: var(--text-secondary); font-size: 0.85rem;">Manage tenant lifecycle, inspect real staff/service counts, and toggle active status.</p>
             </div>
-            <button class="btn btn-secondary btn-sm" id="btn-refresh-platform">🔄 Refresh List</button>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-secondary btn-sm" id="btn-manage-master-categories" style="background: rgba(99,102,241,0.15); border-color: rgba(99,102,241,0.3); color: #a5b4fc;">🏷️ Master Categories</button>
+              <button class="btn btn-secondary btn-sm" id="btn-refresh-platform">🔄 Refresh List</button>
+            </div>
           </div>
 
           <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 20px;">
@@ -690,6 +693,10 @@ export class PlatformAdminPortal {
       this.showCreateSalonModal();
     });
 
+    document.getElementById('btn-manage-master-categories')?.addEventListener('click', () => {
+      this.showMasterCategoriesModal();
+    });
+
     this.container.querySelectorAll('.btn-toggle-salon-status').forEach((btn) => {
       btn.addEventListener('click', async (e) => {
         const salonId = e.currentTarget.getAttribute('data-id');
@@ -744,6 +751,152 @@ export class PlatformAdminPortal {
           this.showToast('Error deleting salon: ' + err.message, 'error');
         }
       });
+    });
+  }
+
+  async showMasterCategoriesModal() {
+    const modalContainer = document.getElementById('superadmin-modal-container');
+    modalContainer.innerHTML = `
+      <div class="modal-backdrop show">
+        <div class="modal-content" style="max-width: 620px; max-height: 90vh; overflow-y: auto;">
+          <div class="modal-header">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <div class="brand-icon-box" style="width: 38px; height: 38px; font-size: 1.2rem; background: linear-gradient(135deg, rgba(99,102,241,0.3), rgba(236,72,153,0.3));">🏷️</div>
+              <div>
+                <h3 style="font-size: 1.25rem; font-weight: 800; color: #fff;">Super Admin Master Categories</h3>
+                <p style="font-size: 0.78rem; color: var(--text-muted);">Global categories inherited by every newly created salon upon provisioning.</p>
+              </div>
+            </div>
+            <button class="close-btn" id="btn-close-cat-modal">&times;</button>
+          </div>
+
+          <!-- Add New Master Category Form -->
+          <form id="create-master-cat-form" style="background: rgba(255,255,255,0.03); padding: 16px; border-radius: var(--radius-sm); margin-bottom: 20px; border: 1px solid var(--border-subtle);">
+            <div style="font-size: 0.85rem; font-weight: 700; color: #fff; margin-bottom: 10px;">➕ Add Master Category</div>
+            <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 10px; align-items: flex-end;">
+              <div class="form-group" style="margin: 0;">
+                <label style="font-size: 0.75rem;">Category Name *</label>
+                <input type="text" class="form-control" id="mc-name-input" placeholder="e.g. Hair & Beard Services" required />
+              </div>
+              <div class="form-group" style="margin: 0;">
+                <label style="font-size: 0.75rem;">Icon (Emoji)</label>
+                <input type="text" class="form-control" id="mc-icon-input" placeholder="✂️" value="✂️" />
+              </div>
+              <div class="form-group" style="margin: 0;">
+                <label style="font-size: 0.75rem;">Sort Order</label>
+                <input type="number" class="form-control" id="mc-sort-input" placeholder="0" value="0" min="0" />
+              </div>
+            </div>
+            <button type="submit" class="btn btn-primary btn-sm" style="margin-top: 12px; width: 100%; font-size: 0.82rem;">Create Master Category →</button>
+          </form>
+
+          <!-- Active Master Categories List -->
+          <div id="master-cats-list-container">
+            <div style="text-align: center; color: var(--text-muted); padding: 20px;">Loading master categories...</div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('btn-close-cat-modal')?.addEventListener('click', () => {
+      modalContainer.innerHTML = '';
+    });
+
+    const loadMasterCategoriesList = async () => {
+      const container = document.getElementById('master-cats-list-container');
+      try {
+        const categories = await ApiClient.getMasterCategories(true);
+        if (!categories || categories.length === 0) {
+          container.innerHTML = `<div style="text-align: center; color: var(--text-muted); padding: 20px;">No master categories found. Create one above!</div>`;
+          return;
+        }
+
+        container.innerHTML = `
+          <div style="font-size: 0.85rem; font-weight: 700; color: #fff; margin-bottom: 10px;">Master Categories (${categories.length})</div>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            ${categories.map((c) => `
+              <div style="display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.02); border: 1px solid var(--border-subtle); padding: 10px 14px; border-radius: var(--radius-sm);">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <span style="font-size: 1.2rem;">${c.icon || '✂️'}</span>
+                  <div>
+                    <div style="font-weight: 700; color: #fff; font-size: 0.9rem;">${c.name}</div>
+                    <div style="font-size: 0.72rem; color: var(--text-muted);">Sort Order: ${c.sortOrder}</div>
+                  </div>
+                </div>
+                <div style="display: flex; gap: 6px;">
+                  <button class="btn btn-secondary btn-sm btn-edit-mc" data-id="${c.id}" data-name="${c.name}" data-icon="${c.icon}" data-sort="${c.sortOrder}" style="padding: 4px 10px; font-size: 0.75rem;">✏️ Edit</button>
+                  <button class="btn btn-danger-outline btn-sm btn-delete-mc" data-id="${c.id}" data-name="${c.name}" style="padding: 4px 10px; font-size: 0.75rem;">🗑️</button>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        `;
+
+        container.querySelectorAll('.btn-delete-mc').forEach((btn) => {
+          btn.addEventListener('click', async (e) => {
+            const id = e.currentTarget.getAttribute('data-id');
+            const name = e.currentTarget.getAttribute('data-name');
+            if (confirm(`Delete master category "${name}"? Future new salons will not receive this category.`)) {
+              try {
+                await ApiClient.deleteMasterCategory(id);
+                this.showToast(`Master category "${name}" deleted`, 'success');
+                await loadMasterCategoriesList();
+              } catch (err) {
+                this.showToast(err.message, 'error');
+              }
+            }
+          });
+        });
+
+        container.querySelectorAll('.btn-edit-mc').forEach((btn) => {
+          btn.addEventListener('click', async (e) => {
+            const id = e.currentTarget.getAttribute('data-id');
+            const name = e.currentTarget.getAttribute('data-name');
+            const icon = e.currentTarget.getAttribute('data-icon');
+            const sort = e.currentTarget.getAttribute('data-sort');
+
+            const newName = prompt('Enter new master category name:', name);
+            if (newName === null) return;
+            const newIcon = prompt('Enter icon (emoji):', icon || '✂️');
+            if (newIcon === null) return;
+            const newSortStr = prompt('Enter sort order (number):', sort || '0');
+            if (newSortStr === null) return;
+
+            try {
+              await ApiClient.updateMasterCategory(id, {
+                name: newName.trim(),
+                icon: newIcon.trim(),
+                sortOrder: parseInt(newSortStr, 10) || 0,
+              });
+              this.showToast(`Master category updated successfully`, 'success');
+              await loadMasterCategoriesList();
+            } catch (err) {
+              this.showToast(err.message, 'error');
+            }
+          });
+        });
+      } catch (err) {
+        container.innerHTML = `<div style="color: var(--danger); padding: 14px;">Error loading master categories: ${err.message}</div>`;
+      }
+    };
+
+    await loadMasterCategoriesList();
+
+    document.getElementById('create-master-cat-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const name = document.getElementById('mc-name-input').value.trim();
+      const icon = document.getElementById('mc-icon-input').value.trim() || '✂️';
+      const sortOrder = parseInt(document.getElementById('mc-sort-input').value, 10) || 0;
+      if (!name) return;
+
+      try {
+        await ApiClient.createMasterCategory({ name, icon, sortOrder });
+        this.showToast(`Master category "${name}" created!`, 'success');
+        document.getElementById('mc-name-input').value = '';
+        await loadMasterCategoriesList();
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
     });
   }
 
