@@ -239,7 +239,7 @@ export class BookingWizard {
 
       <div class="form-group">
         <label>Phone Number (WhatsApp) *</label>
-        <input type="tel" class="form-control" id="cust-phone" placeholder="e.g. +91 98765 43210" value="${this.state.customerPhone}" required />
+        <input type="tel" class="form-control" id="cust-phone" placeholder="e.g. +91 98XXXXXX00" value="${this.state.customerPhone}" required />
       </div>
 
       <div class="form-group">

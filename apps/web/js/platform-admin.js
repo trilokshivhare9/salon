@@ -229,7 +229,7 @@ export class PlatformAdminPortal {
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px;">
               <div class="form-group">
                 <label>Owner Full Name *</label>
-                <input type="text" class="form-control" id="prov-owner-name" placeholder="e.g. Trilok Shivhare" minlength="2" required />
+                <input type="text" class="form-control" id="prov-owner-name" placeholder="e.g. Rahul Sharma" minlength="2" required />
               </div>
 
               <div class="form-group">
@@ -242,7 +242,7 @@ export class PlatformAdminPortal {
             <div class="form-group" style="margin-bottom: 14px;">
               <label for="prov-whatsapp-phone-id">Meta WhatsApp Phone Number ID *</label>
               <div style="display: flex; gap: 8px; align-items: stretch;">
-                <input type="text" class="form-control" id="prov-whatsapp-phone-id" placeholder="Enter 15-17 digit Phone Number ID (e.g. 1266237649907696)" style="flex: 1; min-width: 0;" required />
+                <input type="text" class="form-control" id="prov-whatsapp-phone-id" placeholder="Enter 15-17 digit Phone Number ID (e.g. 109876543210987)" style="flex: 1; min-width: 0;" required />
                 <button type="button" id="btn-verify-meta-phone" class="btn btn-secondary btn-sm" style="flex-shrink: 0; white-space: nowrap; font-size: 0.8rem; padding: 8px 14px; background: rgba(99,102,241,0.18); border: 1px solid rgba(99,102,241,0.4); color: #a5b4fc; cursor: pointer; border-radius: var(--radius-sm); font-weight: 600;">
                   🔍 Verify & Fetch Phone
                 </button>
@@ -530,7 +530,7 @@ export class PlatformAdminPortal {
             <div class="form-group" style="margin-bottom: 16px;">
               <label for="link-phone-id-input" style="margin-bottom: 6px;">WhatsApp Phone Number or Phone ID *</label>
               <div style="display: flex; gap: 8px; align-items: stretch;">
-                <input type="text" class="form-control" id="link-phone-id-input" placeholder="e.g. +1 555-674-9314 or 1266237649907696" style="flex: 1; min-width: 0;" required />
+                <input type="text" class="form-control" id="link-phone-id-input" placeholder="e.g. +91 98XXXXXX00 or 109876543210987" style="flex: 1; min-width: 0;" required />
                 <button type="button" id="btn-verify-link-meta" class="btn btn-secondary btn-sm" style="flex-shrink: 0; white-space: nowrap; font-size: 0.8rem; padding: 8px 14px; background: rgba(99,102,241,0.18); border: 1px solid rgba(99,102,241,0.4); color: #a5b4fc; cursor: pointer;">
                   Verify
                 </button>
@@ -751,7 +751,7 @@ export class PlatformAdminPortal {
     if (!toastContainer) {
       toastContainer = document.createElement('div');
       toastContainer.id = 'platform-toast-container';
-      toastContainer.style.cssText = 'position: fixed; top: 24px; right: 24px; z-index: 99999; display: flex; flex-direction: column; gap: 10px; max-width: 400px; pointer-events: none;';
+      toastContainer.style.cssText = 'position: fixed; top: calc(env(safe-area-inset-top, 0px) + 16px); right: 16px; left: 16px; max-width: 440px; margin: 0 auto; z-index: 99999; display: flex; flex-direction: column; gap: 10px; pointer-events: none;';
       document.body.appendChild(toastContainer);
     }
 
