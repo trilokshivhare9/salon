@@ -41,7 +41,7 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
     this.logger.log('⏰ Multi-Stage WhatsApp Reminder & Auto No-Show Worker started (60s tick).');
   }
 
-  async processReminders(): Promise<{ stage1: number; stage2: number; stage3: number; stage4: number }> {
+  async processReminders(): Promise<{ stage1: number; stage2: number; stage4: number }> {
     const salons = await this.prisma.salon.findMany({
       where: { status: 'ACTIVE' },
       include: { whatsappAccount: true },
@@ -49,7 +49,6 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
 
     let stage1Count = 0;
     let stage2Count = 0;
-    let stage3Count = 0;
     let stage4Count = 0;
 
     for (const salon of salons) {
@@ -116,10 +115,9 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
       }
 
       // -----------------------------------------------------------------------
-      // STAGE 2: Imminent 10-Minute Arrival Alert
+      // STAGE 2: Imminent 15-Minute Arrival Alert & Warning
       // -----------------------------------------------------------------------
-      const stage2Min = now.minus({ minutes: 5 }).toJSDate();
-      const stage2Max = now.plus({ minutes: 15 }).toJSDate();
+      const stage2Max = now.plus({ minutes: 20 }).toJSDate();
 
       const stage2Appointments = await this.prisma.appointment.findMany({
         where: {
@@ -127,7 +125,7 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
           status: AppointmentStatus.CONFIRMED,
           reminder10mSentAt: null,
           startAt: {
-            gte: stage2Min,
+            gte: now.toJSDate(),
             lte: stage2Max,
           },
         },
@@ -146,8 +144,11 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
         const user = appt.salonUser?.user;
         if (!user?.phone) continue;
         const timeStr = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('hh:mm a');
+        const autoCancelTime = DateTime.fromJSDate(appt.startAt, { zone: tz })
+          .plus({ minutes: 5 })
+          .toFormat('hh:mm a');
 
-        const message = `💺 *YOUR CHAIR IS GETTING READY!*\n\nHi *${user.name || 'Customer'}*, your stylist *${appt.stylist?.name || 'Stylist'}* is preparing your station for *${timeStr}*.\n\n📍 *${salon.name}*\n${salon.address || ''}\n\nPlease confirm if you are on your way:`;
+        const message = `💺 *YOUR CHAIR IS GETTING READY!*\n\nHi *${user.name || 'Customer'}*, your stylist *${appt.stylist?.name || 'Stylist'}* is preparing your station for *${timeStr}*.\n\n📍 *${salon.name}*\n${salon.address || ''}\n\n⚠️ *Important:* If you do not confirm by *${autoCancelTime}*, your booking will be *auto-canceled* with *1 penalty strike*.\n\nPlease confirm if you are on your way:`;
 
         await this.whatsAppService.sendMetaMessage(
           user.phone,
@@ -172,67 +173,10 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
       }
 
       // -----------------------------------------------------------------------
-      // STAGE 3: Late-Arrival Follow-Up
-      // -----------------------------------------------------------------------
-      const stage3Min = now.minus({ minutes: 30 }).toJSDate();
-      const stage3Max = now.minus({ minutes: 10 }).toJSDate();
-
-      const stage3Appointments = await this.prisma.appointment.findMany({
-        where: {
-          salonId: salon.id,
-          status: AppointmentStatus.CONFIRMED,
-          lateFollowUpSentAt: null,
-          startAt: {
-            gte: stage3Min,
-            lte: stage3Max,
-          },
-        },
-        include: {
-          salonUser: {
-            include: {
-              user: true,
-            },
-          },
-          stylist: true,
-          service: true,
-        },
-      });
-
-      for (const appt of stage3Appointments) {
-        const user = appt.salonUser?.user;
-        if (!user?.phone) continue;
-        const timeStr = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('hh:mm a');
-
-        const message = `👋 Hi *${user.name || 'Customer'}*, we noticed you haven't checked in for your *${timeStr}* appointment with *${appt.stylist?.name || 'Stylist'}* yet.\n\nAre you on your way or running a few minutes late?`;
-
-        await this.whatsAppService.sendMetaMessage(
-          user.phone,
-          {
-            bodyText: message,
-            interactiveType: 'button',
-            buttons: [
-              { id: `late_on_way_${appt.id}`, title: '🚗 On My Way (10m)' },
-              { id: 'remind_reschedule', title: '🔄 Reschedule' },
-              { id: `late_cancel_${appt.id}`, title: '❌ Release Chair' },
-            ],
-          },
-          phoneNumberId,
-          salon.id,
-        );
-
-        await this.prisma.appointment.update({
-          where: { id: appt.id },
-          data: { lateFollowUpSentAt: new Date() },
-        });
-
-        stage3Count++;
-      }
-
-      // -----------------------------------------------------------------------
-      // STAGE 4: Auto-Cancellation & Penalty Strike Worker (+15m Grace Period)
+      // STAGE 4: Auto-Cancellation & Penalty Strike Worker (+5m Grace Period)
       // -----------------------------------------------------------------------
       const todayStart = now.startOf('day').toJSDate();
-      const gracePeriodCutoff = now.minus({ minutes: 15 }).toJSDate();
+      const gracePeriodCutoff = now.minus({ minutes: 5 }).toJSDate();
 
       const expiredAppointments = await this.prisma.appointment.findMany({
         where: {
@@ -267,7 +211,7 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
           where: { id: appt.id },
           data: {
             status: AppointmentStatus.NO_SHOW,
-            notes: 'Auto-canceled by system due to no-response after 15-minute grace period.',
+            notes: 'Auto-canceled by system due to no-response after 5-minute grace period.',
           },
         });
 
@@ -321,7 +265,7 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    return { stage1: stage1Count, stage2: stage2Count, stage3: stage3Count, stage4: stage4Count };
+    return { stage1: stage1Count, stage2: stage2Count, stage4: stage4Count };
   }
 
   async recordPenaltyStrike(
