@@ -11,6 +11,7 @@ import {
 import { Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { WhatsAppService } from './whatsapp.service';
+import { WhatsAppWebhookQueue } from './queues/whatsapp-webhook.queue';
 import { Public } from '../../common/decorators/public.decorator';
 import { PrismaService } from '../../database/prisma.service';
 
@@ -23,6 +24,7 @@ export class WhatsAppController {
     private readonly whatsappService: WhatsAppService,
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
+    private readonly webhookQueue: WhatsAppWebhookQueue,
   ) {}
 
   // Meta Cloud API Webhook Verification
@@ -175,9 +177,11 @@ export class WhatsAppController {
           }
         }
 
-        // Process asynchronously so Meta Webhook receives immediate 200 OK (<20ms)
-        (async () => {
-          try {
+        // Enqueue asynchronously to queue worker so Meta Webhook receives immediate 200 OK (<10ms)
+        this.webhookQueue.enqueue(
+          salon?.id || 'unmapped',
+          payload,
+          async () => {
             await this.whatsappService.recordInboundLog(
               salon?.id || null,
               fromPhone,
@@ -199,10 +203,8 @@ export class WhatsAppController {
             } else {
               this.logger.warn(`[Meta Webhook] ⚠️ No active salon found to process incoming message from ${fromPhone}`);
             }
-          } catch (asyncErr) {
-            this.logger.error('[Meta Webhook] Async error processing incoming message:', asyncErr);
-          }
-        })();
+          },
+        );
       }
 
       return res.status(HttpStatus.OK).send('EVENT_RECEIVED');

@@ -16,7 +16,7 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
     private readonly whatsAppService: WhatsAppService,
     @Inject(forwardRef(() => AppointmentsService))
     private readonly appointmentsService: AppointmentsService,
-  ) {}
+  ) { }
 
   onModuleInit() {
     this.startReminderJob();
@@ -52,9 +52,10 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
     let stage4Count = 0;
 
     for (const salon of salons) {
-      const tz = salon.timezone || 'Asia/Kolkata';
-      const now = DateTime.now().setZone(tz);
-      const phoneNumberId = salon.whatsappAccount?.phoneNumberId;
+      try {
+        const tz = salon.timezone || 'Asia/Kolkata';
+        const now = DateTime.now().setZone(tz);
+        const phoneNumberId = salon.whatsappAccount?.phoneNumberId;
 
       // -----------------------------------------------------------------------
       // STAGE 1: Advance 2-Hour Reminder
@@ -255,13 +256,19 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
             },
             phoneNumberId,
             salon.id,
-          ).catch(() => {});
+          ).catch(() => { });
         }
 
         // Trigger Smart Express Move-Up Broadcast for the newly freed slot
         await this.appointmentsService.triggerSmartMoveUpBroadcast(appt);
 
         stage4Count++;
+      }
+      } catch (salonErr: any) {
+        this.logger.error(
+          `[Reminders Worker] Error processing reminders for salon "${salon.name}" (${salon.id}):`,
+          salonErr?.stack || salonErr,
+        );
       }
     }
 
@@ -316,7 +323,7 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
         },
         phoneNumberId,
         salonId,
-      ).catch(() => {});
+      ).catch(() => { });
     }
 
     return { newCount, remainingPenalties };
