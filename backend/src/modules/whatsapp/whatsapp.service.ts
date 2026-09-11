@@ -1476,6 +1476,25 @@ You have accumulated *3 penalty strikes* this year for missed appointments. Auto
     // REMINDER & LATE-ARRIVAL RESPONSES & SMART MOVE-UP
     // -------------------------------------------------------------------------
     if (input === 'remind_confirm') {
+      const activeAppts = await this.findActiveUpcomingAppointments(salonId, cleanNumber);
+      if (activeAppts.length === 0) {
+        const reply = `This option has expired. You can check your last booking or start a new one.`;
+        await this.sendMetaMessage(
+          cleanNumber,
+          {
+            bodyText: reply,
+            interactiveType: 'button',
+            buttons: [
+              { id: 'btn_book', title: '📋 Check Last Booking' },
+              { id: 'btn_start', title: '📅 New Booking' },
+            ],
+          },
+          phoneNumberId,
+          salonId,
+        );
+        return { replyMessage: reply, state: ConversationState.START };
+      }
+
       const reply = `🎉 *Thank you for confirming!*\n\nWe have your seat reserved and look forward to welcoming you at *${salon.name}*!`;
       await this.sendMetaMessage(
         cleanNumber,
@@ -1492,12 +1511,28 @@ You have accumulated *3 penalty strikes* this year for missed appointments. Auto
 
     if (input === 'remind_10m_on_way' || input.startsWith('late_on_way')) {
       const activeAppts = await this.findActiveUpcomingAppointments(salonId, cleanNumber);
-      if (activeAppts.length > 0) {
-        await this.prisma.appointment.update({
-          where: { id: activeAppts[0].id },
-          data: { clientEtaStatus: ClientEtaStatus.ON_THE_WAY },
-        }).catch(() => { });
+      if (activeAppts.length === 0) {
+        const reply = `This option has expired. You can check your last booking or start a new one.`;
+        await this.sendMetaMessage(
+          cleanNumber,
+          {
+            bodyText: reply,
+            interactiveType: 'button',
+            buttons: [
+              { id: 'btn_book', title: '📋 Check Last Booking' },
+              { id: 'btn_start', title: '📅 New Booking' },
+            ],
+          },
+          phoneNumberId,
+          salonId,
+        );
+        return { replyMessage: reply, state: ConversationState.START };
       }
+
+      await this.prisma.appointment.update({
+        where: { id: activeAppts[0].id },
+        data: { clientEtaStatus: ClientEtaStatus.ON_THE_WAY },
+      }).catch(() => { });
 
       const reply = `🚗 *Thanks for letting us know!*\n\nWe have notified your stylist that you are on your way. Drive safely and see you shortly!`;
       await this.sendMetaMessage(
@@ -1518,22 +1553,41 @@ You have accumulated *3 penalty strikes* this year for missed appointments. Auto
       let targetAppt: any = null;
       if (apptId) {
         targetAppt = await this.prisma.appointment.findUnique({ where: { id: apptId } });
+        if (targetAppt && targetAppt.status !== AppointmentStatus.CONFIRMED && targetAppt.status !== AppointmentStatus.CHECKED_IN) {
+          targetAppt = null;
+        }
       } else {
         const activeAppts = await this.findActiveUpcomingAppointments(salonId, cleanNumber);
         if (activeAppts.length > 0) targetAppt = activeAppts[0];
       }
 
-      if (targetAppt) {
-        await this.appointmentsService.updateStatus(
-          salonId,
-          targetAppt.id,
+      if (!targetAppt) {
+        const reply = `This option has expired. You can check your last booking or start a new one.`;
+        await this.sendMetaMessage(
+          cleanNumber,
           {
-            status: AppointmentStatus.CANCELLED,
-            reason: 'Cancelled by client via WhatsApp reminder / 10-minute check-in.',
+            bodyText: reply,
+            interactiveType: 'button',
+            buttons: [
+              { id: 'btn_book', title: '📋 Check Last Booking' },
+              { id: 'btn_start', title: '📅 New Booking' },
+            ],
           },
-          'SYSTEM_WHATSAPP_BOT',
-        ).catch(() => { });
+          phoneNumberId,
+          salonId,
+        );
+        return { replyMessage: reply, state: ConversationState.START };
       }
+
+      await this.appointmentsService.updateStatus(
+        salonId,
+        targetAppt.id,
+        {
+          status: AppointmentStatus.CANCELLED,
+          reason: 'Cancelled by client via WhatsApp reminder / 10-minute check-in.',
+        },
+        'SYSTEM_WHATSAPP_BOT',
+      ).catch(() => { });
 
       const reply = `✅ *Your chair has been released.*\n\nThank you for informing us in advance so another client could be accommodated. Reply *'Hi'* anytime to book a new slot!`;
       await this.sendMetaMessage(
@@ -1886,14 +1940,50 @@ We look forward to seeing you earlier today.`;
       }
 
       if (!isAllowedForState) {
-        const reply = `⚠️ *That button option has expired.*\n\nPlease use the action buttons on the latest message below to continue.`;
-        await this.sendMetaMessage(
-          cleanNumber,
-          { bodyText: reply },
-          phoneNumberId,
-          salonId,
-        );
-        return { replyMessage: reply, state: conversation.state };
+        const bookingStates: ConversationState[] = [
+          ConversationState.SELECT_CATEGORY,
+          ConversationState.SELECT_SERVICE,
+          ConversationState.SELECT_STAFF,
+          ConversationState.SELECT_DATE,
+          ConversationState.SELECT_TIME,
+          ConversationState.CONFIRMATION,
+          ConversationState.COLLECT_NAME,
+        ];
+        const isInBookingFlow = bookingStates.includes(conversation.state as ConversationState);
+
+        if (isInBookingFlow) {
+          const reply = `This option has expired. Would you like to continue your current booking or start a new one?`;
+          await this.sendMetaMessage(
+            cleanNumber,
+            {
+              bodyText: reply,
+              interactiveType: 'button',
+              buttons: [
+                { id: 'btn_book', title: '▶️ Continue Booking' },
+                { id: 'btn_start', title: '📅 New Booking' },
+              ],
+            },
+            phoneNumberId,
+            salonId,
+          );
+          return { replyMessage: reply, state: conversation.state };
+        } else {
+          const reply = `This option has expired. You can check your last booking or start a new one.`;
+          await this.sendMetaMessage(
+            cleanNumber,
+            {
+              bodyText: reply,
+              interactiveType: 'button',
+              buttons: [
+                { id: 'btn_book', title: '📋 Check Last Booking' },
+                { id: 'btn_start', title: '📅 New Booking' },
+              ],
+            },
+            phoneNumberId,
+            salonId,
+          );
+          return { replyMessage: reply, state: conversation.state };
+        }
       }
     }
 
