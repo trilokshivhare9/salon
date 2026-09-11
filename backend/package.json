@@ -36,7 +36,9 @@
     "@nestjs/swagger": "^7.3.1",
     "@nestjs/throttler": "^5.1.2",
     "@prisma/client": "^5.14.0",
+    "@types/bcryptjs": "^3.0.0",
     "bcrypt": "^5.1.1",
+    "bcryptjs": "^3.0.3",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "compression": "^1.8.1",
@@ -88,5 +90,14 @@
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@nestjs/core",
+      "@prisma/client",
+      "@prisma/engines",
+      "bcrypt",
+      "prisma"
+    ]
   }
 }

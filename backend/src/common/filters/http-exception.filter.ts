@@ -5,12 +5,18 @@ import {
   HttpException,
   HttpStatus,
   Logger,
+  Injectable,
+  Optional,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { ErrorLogService } from '../../modules/error-logs/error-log.service';
 
+@Injectable()
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name);
+
+  constructor(@Optional() private errorLogService?: ErrorLogService) {}
 
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
@@ -34,12 +40,21 @@ export class AllExceptionsFilter implements ExceptionFilter {
       }
     } else if (exception instanceof Error) {
       this.logger.error(`Unhandled Exception: ${exception.message}`, exception.stack);
-      // Clean error description without leaking stack details to client
       message = process.env.NODE_ENV === 'development' ? exception.message : 'An unexpected error occurred.';
     }
 
     // Format readable message string if it's an array (e.g. from class-validator)
     const formattedMessage = Array.isArray(message) ? message.join(', ') : message;
+
+    // Fail-safe automatic recording for unexpected application/system errors (HTTP status >= 500 or non-HttpExceptions)
+    const isUnexpectedError = status >= 500 || !(exception instanceof HttpException);
+    if (isUnexpectedError && this.errorLogService) {
+      Promise.resolve()
+        .then(() => this.errorLogService?.logError({ error: exception, request }))
+        .catch((logErr) => {
+          this.logger.error(`Failed to record error log in filter: ${logErr.message}`);
+        });
+    }
 
     response.status(status).json({
       statusCode: status,

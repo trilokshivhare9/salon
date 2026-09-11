@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import configuration from './config/configuration';
 import { DatabaseModule } from './database/database.module';
@@ -14,6 +14,8 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { HealthModule } from './modules/health/health.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
 import { MasterCategoriesModule } from './modules/master-categories/master-categories.module';
+import { ErrorLogModule } from './modules/error-logs/error-log.module';
+import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
 
 @Module({
   imports: [
@@ -28,6 +30,7 @@ import { MasterCategoriesModule } from './modules/master-categories/master-categ
       load: [configuration],
     }),
     DatabaseModule,
+    ErrorLogModule,
     AuthModule,
     SalonsModule,
     StaffModule,
@@ -42,4 +45,8 @@ import { MasterCategoriesModule } from './modules/master-categories/master-categ
     MasterCategoriesModule,
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(CorrelationIdMiddleware).forRoutes('*');
+  }
+}
