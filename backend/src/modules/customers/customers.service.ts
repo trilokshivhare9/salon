@@ -168,4 +168,73 @@ You can now book appointment slots again anytime via WhatsApp.`;
       },
     };
   }
+
+  async updateCustomerStrikes(
+    salonId: string,
+    customerId: string,
+    yearlyNoShowCount: number,
+    isBookingBlocked?: boolean,
+  ) {
+    const salonUser = await this.prisma.salonUser.findFirst({
+      where: {
+        salonId,
+        OR: [{ id: customerId }, { userId: customerId }],
+      },
+      include: {
+        user: true,
+        salon: {
+          include: {
+            whatsappAccount: true,
+          },
+        },
+      },
+    });
+
+    if (!salonUser) {
+      throw new NotFoundException('Customer not found.');
+    }
+
+    const cleanCount = Math.max(0, Math.min(3, Number(yearlyNoShowCount) || 0));
+    const autoBlocked = isBookingBlocked !== undefined ? Boolean(isBookingBlocked) : cleanCount >= 3;
+
+    const updated = await this.prisma.salonUser.update({
+      where: { id: salonUser.id },
+      data: {
+        yearlyNoShowCount: cleanCount,
+        isBookingBlocked: autoBlocked,
+      },
+    });
+
+    // Notify customer via WhatsApp if they were previously blocked and are now unblocked
+    if (
+      salonUser.isBookingBlocked &&
+      !updated.isBookingBlocked &&
+      salonUser.user?.phone &&
+      salonUser.salon?.whatsappAccount?.phoneNumberId
+    ) {
+      const message = `🎉 *ACCOUNT UNBLOCKED!*\n\nHi *${salonUser.user.name || 'Customer'}*, your appointment booking access has been restored by *${salonUser.salon.name}*!\n\nYou can now book appointment slots again anytime via WhatsApp.`;
+      await this.whatsAppService.sendMetaMessage(
+        salonUser.user.phone,
+        {
+          bodyText: message,
+          interactiveType: 'button',
+          buttons: [{ id: 'btn_start', title: '📅 Book Appointment' }],
+        },
+        salonUser.salon.whatsappAccount.phoneNumberId,
+        salonId,
+      ).catch(() => {});
+    }
+
+    return {
+      message: `Customer strikes updated to ${cleanCount}/3 (${updated.isBookingBlocked ? 'BLOCKED' : 'ACTIVE'}).`,
+      customer: {
+        id: updated.id,
+        userId: updated.userId,
+        salonId: updated.salonId,
+        yearlyNoShowCount: updated.yearlyNoShowCount,
+        isBookingBlocked: updated.isBookingBlocked,
+      },
+    };
+  }
 }
+

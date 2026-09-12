@@ -9,6 +9,7 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { TenantContextGuard } from './modules/auth/guards/tenant-context.guard';
 import { PrismaService } from './database/prisma.service';
+import { ErrorLogService } from './modules/error-logs/error-log.service';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -37,7 +38,8 @@ async function bootstrap() {
     }),
   );
 
-  app.useGlobalFilters(new AllExceptionsFilter());
+  const errorLogService = app.get(ErrorLogService);
+  app.useGlobalFilters(new AllExceptionsFilter(errorLogService));
   app.useGlobalInterceptors(new TransformInterceptor());
 
   // Global Auth, RBAC & Tenant Context Guards
@@ -52,7 +54,7 @@ async function bootstrap() {
   // Swagger Documentation Setup
   const config = new DocumentBuilder()
     .setTitle('Salon SaaS Operations & Booking API')
-    .setDescription('Multi-tenant salon appointment, customer management, and availability engine API.')
+    .setDescription('Multi-tenant salon appointment, customer management, availability engine, and centralized error logging API.')
     .setVersion('1.0.0')
     .addBearerAuth()
     .build();

@@ -1,3 +1,4 @@
+
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
@@ -140,6 +141,18 @@ enum ClientEtaStatus {
   ARRIVED
 }
 
+enum ErrorStatus {
+  UNRESOLVED
+  RESOLVED
+}
+
+enum ErrorSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
 // -----------------------------------------------------------------------------
 // 1. ADMINS (Super Admin & Salon Owners)
 // -----------------------------------------------------------------------------
@@ -234,6 +247,7 @@ model Salon {
   whatsappLogs         WhatsAppLog[]
   notifications        Notification[]
   auditLogs            AuditLog[]
+  errorLogs            ErrorLog[]
 
   @@index([createdByAdminId])
   @@index([slug])
@@ -618,4 +632,62 @@ model AuditLog {
   @@index([entityType, entityId])
   @@index([adminId])
   @@map("audit_logs")
+}
+
+// -----------------------------------------------------------------------------
+// 10. ERROR LOGGING & CENTRAL MANAGEMENT
+// -----------------------------------------------------------------------------
+model ErrorLog {
+  id               String        @id @default(uuid())
+  fingerprint      String        @map("fingerprint")
+  status           ErrorStatus   @default(UNRESOLVED)
+  severity         ErrorSeverity @default(HIGH)
+  errorType        String        @map("error_type")
+  message          String        @db.Text
+  stackTrace       String?       @map("stack_trace") @db.Text
+
+  // Context: Code & Origin
+  controller       String?
+  handler          String?
+  module           String?
+  originFile       String?       @map("origin_file")
+
+  // Context: HTTP & Request
+  httpMethod       String        @map("http_method")
+  endpoint         String
+  statusCode       Int           @map("status_code")
+  correlationId    String?       @map("correlation_id")
+  headers          Json?
+  queryParams      Json?         @map("query_params")
+  requestBody      Json?         @map("request_body")
+
+  // Context: User & Multi-Tenant
+  userId           String?       @map("user_id")
+  userRole         String?       @map("user_role")
+  userEmail        String?       @map("user_email")
+  salonId          String?       @map("salon_id")
+  salonName        String?       @map("salon_name")
+  isSuperAdmin     Boolean       @default(false) @map("is_super_admin")
+
+  // Duplicate / Frequency Tracking
+  occurrenceCount  Int           @default(1) @map("occurrence_count")
+  firstSeenAt      DateTime      @default(now()) @map("first_seen_at")
+  lastSeenAt       DateTime      @default(now()) @map("last_seen_at")
+
+  // Resolution Audit
+  resolvedAt       DateTime?     @map("resolved_at")
+  resolvedById     String?       @map("resolved_by_id")
+  resolvedByName   String?       @map("resolved_by_name")
+  resolutionNotes  String?       @map("resolution_notes") @db.Text
+
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
+
+  salon            Salon?        @relation(fields: [salonId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([severity, status])
+  @@index([salonId, status])
+  @@index([fingerprint, status])
+  @@map("error_logs")
 }

@@ -72,11 +72,16 @@ export class ApiClient {
   }
 
   static getAccessToken() {
-    return inMemoryAccessToken;
+    return inMemoryAccessToken || localStorage.getItem('salon_access_token');
   }
 
   static setAccessToken(token) {
     inMemoryAccessToken = token || null;
+    if (token) {
+      localStorage.setItem('salon_access_token', token);
+    } else {
+      localStorage.removeItem('salon_access_token');
+    }
   }
 
   static getTenantContext() {
@@ -114,15 +119,16 @@ export class ApiClient {
   }
 
   static getToken() {
-    return inMemoryAccessToken;
+    return this.getAccessToken();
   }
 
   static setToken(token) {
-    inMemoryAccessToken = token || null;
+    this.setAccessToken(token);
   }
 
   static removeToken() {
     inMemoryAccessToken = null;
+    localStorage.removeItem('salon_access_token');
   }
 
   static getUser() {
@@ -791,6 +797,22 @@ export class ApiClient {
     return this.request(`/customers/${id}`);
   }
 
+  static async unblockCustomer(id) {
+    this.invalidateCache('/customers');
+    return this.request(`/customers/${id}/unblock`, {
+      method: 'PATCH',
+    });
+  }
+
+  static async updateCustomerStrikes(id, yearlyNoShowCount, isBookingBlocked) {
+    this.invalidateCache('/customers');
+    return this.request(`/customers/${id}/strikes`, {
+      method: 'PATCH',
+      body: JSON.stringify({ yearlyNoShowCount, isBookingBlocked }),
+    });
+  }
+
+
   // WhatsApp Logs & Simulator
   static async getWhatsAppLogs(filters = {}) {
     const params = new URLSearchParams(filters);
@@ -853,6 +875,30 @@ export class ApiClient {
   static async deleteSalonPlatform(salonId) {
     return this.request(`/salons/platform/${salonId}`, {
       method: 'DELETE',
+    });
+  }
+
+  // Super Admin Error Management APIs
+  static async getErrorLogs(params = {}) {
+    const query = new URLSearchParams();
+    if (params.status) query.append('status', params.status);
+    if (params.severity) query.append('severity', params.severity);
+    if (params.salonId) query.append('salonId', params.salonId);
+    if (params.search) query.append('search', params.search);
+    if (params.page) query.append('page', params.page);
+    if (params.limit) query.append('limit', params.limit);
+    const queryString = query.toString() ? `?${query.toString()}` : '';
+    return this.request(`/super-admin/errors${queryString}`);
+  }
+
+  static async getErrorLogById(id) {
+    return this.request(`/super-admin/errors/${id}`);
+  }
+
+  static async resolveErrorLog(id, resolutionNotes = '') {
+    return this.request(`/super-admin/errors/${id}/resolve`, {
+      method: 'PATCH',
+      body: JSON.stringify({ resolutionNotes }),
     });
   }
 }

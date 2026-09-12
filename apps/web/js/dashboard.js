@@ -25,6 +25,7 @@ export class SalonDashboard {
     this.container = document.getElementById(containerId);
     this.currentUser = currentUser;
     this.activeTab = 'dashboard';
+    this.previousTab = 'queue';
     this.selectedDate = this.getLocalDateString();
     this.queueFilter = 'ALL';
     this.summaryData = {
@@ -154,6 +155,9 @@ export class SalonDashboard {
    */
   switchTab(targetTab) {
     if (!targetTab) return;
+    if (this.activeTab && this.activeTab !== targetTab) {
+      this.previousTab = this.activeTab;
+    }
     this.activeTab = targetTab;
 
     // Update active state on desktop tab buttons
@@ -1517,75 +1521,288 @@ export class SalonDashboard {
 
 
   // =========================================================================
-  // TAB 4: VIP CLIENT CRM
+  // TAB 4: CUSTOMER MANAGEMENT & STRIKE HUB
   // =========================================================================
   renderCustomersTab() {
+    const activeFilter = this.activeCustomerFilter || 'ALL';
     return `
       <div class="glass-panel">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
-          <div>
-            <h3 style="font-size: 1.25rem;">VIP Client CRM & Lifetime Intelligence</h3>
-            <p style="color: var(--text-secondary); font-size: 0.85rem;">Client visit records, contact details, and historical revenue contributions.</p>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+          <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+            <button class="btn-back-nav" id="btn-cust-back" title="Back to Live Queue Overview">
+              ← Back
+            </button>
+            <div>
+              <h3 style="font-size: 1.25rem; font-family: var(--font-heading); font-weight: 800;">Customer Management & Strike Hub</h3>
+              <p style="color: var(--text-secondary); font-size: 0.85rem;">Manage customer accounts, penalty strikes (0–3), booking restrictions, and visit history.</p>
+            </div>
           </div>
-          <input type="text" class="form-control" id="customer-search-input" placeholder="Search by name or phone..." value="${this.searchQuery}" style="max-width: 280px;" />
+          <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; width: 100%; max-width: 380px;">
+            <input type="text" class="form-control" id="customer-search-input" placeholder="Search customer by name or phone..." value="${this.searchQuery || ''}" style="flex: 1;" />
+          </div>
+        </div>
+
+        <!-- Strike Status Filter Chips -->
+        <div style="display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap;" id="customer-strike-filters">
+          <button class="cust-filter-btn ${activeFilter === 'ALL' ? 'active' : ''}" data-filter="ALL">All Customers <span class="cust-filter-count">0</span></button>
+          <button class="cust-filter-btn ${activeFilter === 'BLOCKED' ? 'active' : ''}" data-filter="BLOCKED">🔴 Blocked <span class="cust-filter-count">0</span></button>
+          <button class="cust-filter-btn ${activeFilter === 'WARNING' ? 'active' : ''}" data-filter="WARNING">⚠️ Warnings <span class="cust-filter-count">0</span></button>
+          <button class="cust-filter-btn ${activeFilter === 'CLEAN' ? 'active' : ''}" data-filter="CLEAN">✅ Clean <span class="cust-filter-count">0</span></button>
         </div>
 
         <div id="customers-table-container">
-          <div style="text-align: center; padding: 30px; color: var(--text-muted);">Loading client records...</div>
+          <div style="text-align: center; padding: 40px; color: var(--text-muted);">Loading customer records...</div>
         </div>
       </div>
     `;
   }
 
-  async loadCustomersTable(searchTerm = '') {
+  renderStrikeBadge(c) {
+    const strikes = c.yearlyNoShowCount || 0;
+    if (c.isBookingBlocked || strikes >= 3) {
+      return `<span class="strike-badge strike-blocked" title="Customer is blocked from booking new slots via WhatsApp due to 3 penalty no-shows">🔴 3/3 BLOCKED</span>`;
+    }
+    if (strikes === 2) {
+      return `<span class="strike-badge strike-2" title="2 Penalty strikes incurred. 1 more no-show will block customer.">⚠️ 2/3 Strikes</span>`;
+    }
+    if (strikes === 1) {
+      return `<span class="strike-badge strike-1" title="1 Penalty strike incurred.">⚡ 1/3 Strike</span>`;
+    }
+    return `<span class="strike-badge strike-0" title="Clean record. 0 Penalty strikes.">✅ 0/3 Clean</span>`;
+  }
+
+  async loadCustomersTable(searchTerm = this.searchQuery || '', filterCategory = this.activeCustomerFilter || 'ALL') {
     const tableContainer = document.getElementById('customers-table-container');
     if (!tableContainer) return;
 
     try {
       const res = await ApiClient.getCustomers(searchTerm);
-      const customers = Array.isArray(res) ? res : res.data || [];
+      const allCustomers = Array.isArray(res) ? res : res.data || [];
+
+      // Dynamically update actual user count badges on filter buttons
+      const filterContainer = document.getElementById('customer-strike-filters');
+      if (filterContainer) {
+        const totalCount = allCustomers.length;
+        const blockedCount = allCustomers.filter((c) => c.isBookingBlocked || (c.yearlyNoShowCount || 0) >= 3).length;
+        const warningCount = allCustomers.filter((c) => !c.isBookingBlocked && (c.yearlyNoShowCount || 0) > 0 && (c.yearlyNoShowCount || 0) < 3).length;
+        const cleanCount = allCustomers.filter((c) => !c.isBookingBlocked && (c.yearlyNoShowCount || 0) === 0).length;
+
+        const countAll = filterContainer.querySelector('[data-filter="ALL"] .cust-filter-count');
+        const countBlocked = filterContainer.querySelector('[data-filter="BLOCKED"] .cust-filter-count');
+        const countWarning = filterContainer.querySelector('[data-filter="WARNING"] .cust-filter-count');
+        const countClean = filterContainer.querySelector('[data-filter="CLEAN"] .cust-filter-count');
+
+        if (countAll) countAll.textContent = totalCount;
+        if (countBlocked) countBlocked.textContent = blockedCount;
+        if (countWarning) countWarning.textContent = warningCount;
+        if (countClean) countClean.textContent = cleanCount;
+      }
+
+      let customers = [...allCustomers];
+
+      // Sort by Penalty Strike Priority:
+      // 1. Blocked (3/3 strikes or isBookingBlocked = true) -> TOP
+      // 2. 2 Strikes (2/3)
+      // 3. 1 Strike (1/3)
+      // 4. 0 Strikes (0/3 Clean)
+      customers.sort((a, b) => {
+        const scoreA = (a.isBookingBlocked || (a.yearlyNoShowCount || 0) >= 3) ? 99 : (a.yearlyNoShowCount || 0);
+        const scoreB = (b.isBookingBlocked || (b.yearlyNoShowCount || 0) >= 3) ? 99 : (b.yearlyNoShowCount || 0);
+        if (scoreB !== scoreA) {
+          return scoreB - scoreA;
+        }
+        return (a.name || '').localeCompare(b.name || '');
+      });
+
+      // Filter by selected category chip
+      if (filterCategory === 'BLOCKED') {
+        customers = customers.filter((c) => c.isBookingBlocked || (c.yearlyNoShowCount || 0) >= 3);
+      } else if (filterCategory === 'WARNING') {
+        customers = customers.filter((c) => !c.isBookingBlocked && (c.yearlyNoShowCount || 0) > 0 && (c.yearlyNoShowCount || 0) < 3);
+      } else if (filterCategory === 'CLEAN') {
+        customers = customers.filter((c) => !c.isBookingBlocked && (c.yearlyNoShowCount || 0) === 0);
+      }
 
       if (customers.length === 0) {
-        tableContainer.innerHTML = `<div style="text-align: center; padding: 40px; color: var(--text-muted);">No client records found matching search.</div>`;
+        tableContainer.innerHTML = `<div style="text-align: center; padding: 40px; color: var(--text-muted);">No customer records found matching filter.</div>`;
         return;
       }
 
       tableContainer.innerHTML = `
-        <div style="overflow-x: auto;">
+        <!-- Desktop Table Layout (Screens ≥ 768px) -->
+        <div class="desktop-only" style="overflow-x: auto;">
           <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem;">
             <thead>
-              <tr style="border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary);">
-                <th style="padding: 12px;">CLIENT</th>
+              <tr style="border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary); text-transform: uppercase; font-size: 0.72rem; letter-spacing: 0.05em;">
+                <th style="padding: 12px;">CUSTOMER</th>
                 <th style="padding: 12px;">PHONE</th>
-                <th style="padding: 12px;">TOTAL VISITS</th>
+                <th style="padding: 12px;">STRIKE STATUS</th>
+                <th style="padding: 12px;">VISITS</th>
                 <th style="padding: 12px;">LIFETIME SPEND</th>
                 <th style="padding: 12px;">LAST VISIT</th>
-                <th style="padding: 12px; text-align: right;">ACTION</th>
+                <th style="padding: 12px; text-align: right;">ACTIONS</th>
               </tr>
             </thead>
             <tbody>
-              ${customers.map((c) => `
-                <tr style="border-bottom: 1px solid rgba(255,255,255,0.03);">
-                  <td style="padding: 12px; font-weight: 700; color: #fff;">${c.name}</td>
-                  <td style="padding: 12px; color: var(--text-secondary);">${c.phone}</td>
-                  <td style="padding: 12px;"><span class="badge" style="background: rgba(99,102,241,0.15); color: #818cf8;">${c.totalVisits} visits</span></td>
-                  <td style="padding: 12px; font-weight: 700; color: #10b981; font-family: var(--font-heading);">₹${Number(c.totalSpend).toLocaleString()}</td>
-                  <td style="padding: 12px; color: var(--text-muted);">${c.lastVisitAt ? new Date(c.lastVisitAt).toLocaleDateString() : 'New Client'}</td>
+              ${customers.map((c) => {
+                const isBlocked = c.isBookingBlocked || (c.yearlyNoShowCount || 0) >= 3;
+                const hasStrikes = (c.yearlyNoShowCount || 0) > 0 || isBlocked;
+                return `
+                <tr class="clickable-customer-row" data-id="${c.id}" data-name="${c.name}" style="border-bottom: 1px solid rgba(255,255,255,0.03);">
+                  <td style="padding: 12px;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                      <div class="customer-avatar">${(c.name || 'C').charAt(0).toUpperCase()}</div>
+                      <div>
+                        <div style="font-weight: 700; color: #fff;">${c.name || 'Customer'}</div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted);">${c.email || 'No email'}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td style="padding: 12px; color: var(--text-secondary); font-family: monospace; font-weight: 600;">${c.phone || 'N/A'}</td>
+                  <td style="padding: 12px;">${this.renderStrikeBadge(c)}</td>
+                  <td style="padding: 12px;"><span class="badge" style="background: rgba(99,102,241,0.15); color: #818cf8; font-weight: 700;">${c.totalVisits || 0} visits</span></td>
+                  <td style="padding: 12px; font-weight: 700; color: #10b981; font-family: var(--font-heading);">₹${Number(c.totalSpend || 0).toLocaleString()}</td>
+                  <td style="padding: 12px; color: var(--text-muted); font-size: 0.8rem;">${c.lastVisitAt ? new Date(c.lastVisitAt).toLocaleDateString() : 'New Customer'}</td>
                   <td style="padding: 12px; text-align: right;">
-                    <button class="btn btn-secondary btn-sm btn-view-customer-history" data-id="${c.id}" data-name="${c.name}">
-                      📜 History
-                    </button>
+                    <div style="display: flex; gap: 6px; justify-content: flex-end;">
+                      <button class="btn btn-secondary btn-sm btn-view-customer-history" data-id="${c.id}" data-name="${c.name}">
+                        📜 History
+                      </button>
+                      ${hasStrikes ? `
+                        <button class="btn btn-success btn-sm btn-adjust-strikes" data-id="${c.id}" data-name="${c.name}" title="Adjust or reset penalty strikes">
+                          🔓 Adjust / Reset
+                        </button>
+                      ` : `
+                        <button class="btn btn-outline-danger btn-sm btn-block-customer" data-id="${c.id}" data-name="${c.name}" title="Manually block customer from booking">
+                          🔒 Block
+                        </button>
+                      `}
+                    </div>
                   </td>
                 </tr>
-              `).join('')}
+              `;}).join('')}
             </tbody>
           </table>
         </div>
+
+        <!-- Mobile Card Grid Layout (Screens < 768px) -->
+        <div class="mobile-only customer-cards-grid">
+          ${customers.map((c) => {
+            const isBlocked = c.isBookingBlocked || (c.yearlyNoShowCount || 0) >= 3;
+            const hasStrikes = (c.yearlyNoShowCount || 0) > 0 || isBlocked;
+            return `
+              <div class="customer-card clickable-customer-card" data-id="${c.id}" data-name="${c.name}">
+                <div class="customer-card-header">
+                  <div style="display: flex; align-items: center; gap: 10px;">
+                    <div class="customer-avatar">${(c.name || 'C').charAt(0).toUpperCase()}</div>
+                    <div>
+                      <div style="font-weight: 800; color: #fff; font-size: 1rem;">${c.name || 'Customer'}</div>
+                      <div style="font-size: 0.8rem; color: var(--text-secondary); font-family: monospace;">${c.phone || 'N/A'}</div>
+                    </div>
+                  </div>
+                  <div>${this.renderStrikeBadge(c)}</div>
+                </div>
+
+                <div class="customer-card-body">
+                  <div>
+                    <div class="customer-stat-label">Visits</div>
+                    <div class="customer-stat-val">${c.totalVisits || 0} visits</div>
+                  </div>
+                  <div>
+                    <div class="customer-stat-label">Total Spend</div>
+                    <div class="customer-stat-val" style="color: #10b981;">₹${Number(c.totalSpend || 0).toLocaleString()}</div>
+                  </div>
+                  <div>
+                    <div class="customer-stat-label">Last Visit</div>
+                    <div class="customer-stat-val" style="font-size: 0.8rem; color: var(--text-muted);">${c.lastVisitAt ? new Date(c.lastVisitAt).toLocaleDateString() : 'New'}</div>
+                  </div>
+                  <div>
+                    <div class="customer-stat-label">Penalty Strikes</div>
+                    <div class="customer-stat-val">${c.yearlyNoShowCount || 0} / 3</div>
+                  </div>
+                </div>
+
+                <div style="display: flex; gap: 8px; margin-top: 4px;">
+                  <button class="btn btn-secondary btn-sm btn-view-customer-history" data-id="${c.id}" data-name="${c.name}" style="flex: 1; justify-content: center;">
+                    📜 History
+                  </button>
+                  ${hasStrikes ? `
+                    <button class="btn btn-success btn-sm btn-adjust-strikes" data-id="${c.id}" data-name="${c.name}" style="flex: 1; justify-content: center;">
+                      🔓 Adjust / Reset
+                    </button>
+                  ` : `
+                    <button class="btn btn-outline-danger btn-sm btn-block-customer" data-id="${c.id}" data-name="${c.name}" style="flex: 1; justify-content: center;">
+                      🔒 Block
+                    </button>
+                  `}
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
       `;
+
+      this.currentCustomerList = customers;
+
+      // Re-attach customer action button handlers
+      this.attachCustomerTableListeners();
     } catch (err) {
       tableContainer.innerHTML = `<div style="color: var(--danger); padding: 20px;">${err.message}</div>`;
     }
   }
+
+  attachCustomerTableListeners() {
+    const container = document.getElementById('customers-table-container');
+    if (!container) return;
+
+    // Clickable Row / Card handler to open Customer Details modal
+    container.querySelectorAll('.clickable-customer-row, .clickable-customer-card').forEach((el) => {
+      el.addEventListener('click', (e) => {
+        if (e.target.closest('button')) return;
+        const id = el.getAttribute('data-id');
+        const name = el.getAttribute('data-name');
+        if (id) {
+          this.showCustomerHistoryModal(id, name);
+        }
+      });
+    });
+
+    // View History Buttons
+    container.querySelectorAll('.btn-view-customer-history').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const name = e.currentTarget.getAttribute('data-name');
+        this.showCustomerHistoryModal(id, name);
+      });
+    });
+
+    // Adjust / Reset Strikes Modal Opener
+    container.querySelectorAll('.btn-adjust-strikes').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const customer = (this.currentCustomerList || []).find((c) => c.id === id) || { id, name: e.currentTarget.getAttribute('data-name') };
+        this.showAdjustStrikesModal(customer);
+      });
+    });
+
+    // Block Buttons
+    container.querySelectorAll('.btn-block-customer').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const name = e.currentTarget.getAttribute('data-name');
+        if (confirm(`Are you sure you want to block ${name} from booking new appointment slots?`)) {
+          try {
+            await ApiClient.updateCustomerStrikes(id, 3, true);
+            alert(`🔒 ${name} has been blocked from booking.`);
+            this.loadCustomersTable(this.searchQuery);
+          } catch (err) {
+            alert(`Error blocking customer: ${err.message}`);
+          }
+        }
+      });
+    });
+  }
+
 
   // =========================================================================
   // TAB 5: PROFILE & SALON HUB
@@ -1682,14 +1899,14 @@ export class SalonDashboard {
         </div>
 
         <div class="profile-hub-grid">
-          <!-- 1. VIP Client CRM -->
+          <!-- 1. Customer Management & Strike Hub -->
           <div class="profile-tool-card" id="card-feature-crm">
             <div class="profile-tool-icon" style="background: rgba(99,102,241,0.15); border: 1px solid rgba(99,102,241,0.3);">
               ${Icons.users({ size: 22, color: '#818cf8' })}
             </div>
             <div style="flex: 1;">
-              <div style="font-weight: 700; color: #fff; font-size: 0.98rem;">VIP Client Intelligence & CRM</div>
-              <div style="font-size: 0.78rem; color: var(--text-secondary); margin-top: 3px;">Track client visit frequency, phone contacts, and lifetime spend.</div>
+              <div style="font-weight: 700; color: #fff; font-size: 0.98rem;">Customer Management & Strike Hub</div>
+              <div style="font-size: 0.78rem; color: var(--text-secondary); margin-top: 3px;">Track customer visit history, penalty strikes (0–3), and block/unblock controls.</div>
             </div>
             <div style="color: var(--text-muted);">${Icons.chevronRight({ size: 16 })}</div>
           </div>
@@ -2197,8 +2414,21 @@ export class SalonDashboard {
       this.searchQuery = e.target.value;
       clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
-        this.loadCustomersTable(this.searchQuery);
+        this.loadCustomersTable(this.searchQuery, this.activeCustomerFilter || 'ALL');
       }, 300);
+    });
+
+    // Customer Strike Filter Chips
+    this.container.querySelectorAll('.cust-filter-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        this.container.querySelectorAll('.cust-filter-btn').forEach((b) => {
+          b.style.background = 'rgba(255,255,255,0.05)';
+        });
+        e.currentTarget.style.background = 'rgba(99,102,241,0.3)';
+        const filter = e.currentTarget.getAttribute('data-filter');
+        this.activeCustomerFilter = filter;
+        this.loadCustomersTable(this.searchQuery, filter);
+      });
     });
 
     // View Customer History
@@ -2414,14 +2644,33 @@ export class SalonDashboard {
     });
 
 
-    // CRM Search
+    // Back button listener for Customer Management Tab (Navigates to previously active tab)
+    document.getElementById('btn-cust-back')?.addEventListener('click', () => {
+      const target = this.previousTab || 'queue';
+      this.switchTab(target);
+    });
+
+    // CRM Search & Customer Filter Chips
     const searchInput = document.getElementById('customer-search-input');
     let debounceTimer;
     searchInput?.addEventListener('input', (e) => {
       this.searchQuery = e.target.value;
       clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => this.loadCustomersTable(this.searchQuery), 300);
+      debounceTimer = setTimeout(() => this.loadCustomersTable(this.searchQuery, this.activeCustomerFilter || 'ALL'), 300);
     });
+
+    const custFilterBtns = tabContent.querySelectorAll('.cust-filter-btn');
+    custFilterBtns.forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const filter = e.currentTarget.getAttribute('data-filter');
+        this.activeCustomerFilter = filter;
+        custFilterBtns.forEach((b) => {
+          b.classList.toggle('active', b.getAttribute('data-filter') === filter);
+        });
+        this.loadCustomersTable(this.searchQuery || '', filter);
+      });
+    });
+
     tabContent.querySelectorAll('.btn-view-customer-history').forEach((btn) => {
       btn.addEventListener('click', async (e) => {
         this.showCustomerHistoryModal(e.currentTarget.getAttribute('data-id'), e.currentTarget.getAttribute('data-name'));
@@ -2435,7 +2684,7 @@ export class SalonDashboard {
     });
 
     // Load table on tab switch
-    if (this.activeTab === 'customers') this.loadCustomersTable();
+    if (this.activeTab === 'customers') this.loadCustomersTable(this.searchQuery || '', this.activeCustomerFilter || 'ALL');
     if (this.activeTab === 'whatsapp-logs') this.loadWhatsAppLogs();
   }
 
@@ -3767,57 +4016,306 @@ export class SalonDashboard {
 
     modalContainer.innerHTML = `
       <div class="modal-backdrop show">
-        <div class="modal-content modal-content-lg">
-          <div class="modal-header">
-            <h3>📜 Visit History: ${customerName}</h3>
+        <div class="modal-content modal-content-lg" style="max-width: 780px;">
+          <div class="modal-header" style="display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 14px;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <button class="btn-back-nav" id="btn-back-to-customers">← Back to Customers</button>
+              <h3 style="font-size: 1.15rem; font-family: var(--font-heading); margin: 0;">Customer Profile & Booking History</h3>
+            </div>
             <button class="close-btn" id="btn-close-modal">&times;</button>
           </div>
           <div id="cust-history-body" style="padding: 20px; text-align: center; color: var(--text-muted);">
-            Loading client visit history...
+            Loading customer details & booking history...
           </div>
         </div>
       </div>
     `;
 
-    document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+    const closeModal = () => (modalContainer.innerHTML = '');
+    document.getElementById('btn-close-modal')?.addEventListener('click', closeModal);
+    document.getElementById('btn-back-to-customers')?.addEventListener('click', closeModal);
 
     try {
       const customer = await ApiClient.getCustomerById(customerId);
       const historyBody = document.getElementById('cust-history-body');
+      if (!historyBody) return;
 
-      if (!customer.appointments || customer.appointments.length === 0) {
-        historyBody.innerHTML = `<div style="padding: 30px;">No previous appointments recorded for this client.</div>`;
-        return;
-      }
+      const appts = customer.appointments || [];
+      const strikes = customer.yearlyNoShowCount || 0;
+      const isBlocked = customer.isBookingBlocked || strikes >= 3;
+      const totalSpend = appts.reduce((acc, a) => acc + (Number(a.price) || 0), 0);
 
+      historyBody.style.textAlign = 'left';
       historyBody.innerHTML = `
-        <div style="max-height: 340px; overflow-y: auto;">
-          <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.88rem;">
-            <thead>
-              <tr style="border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary);">
-                <th style="padding: 8px;">DATE</th>
-                <th style="padding: 8px;">SERVICE</th>
-                <th style="padding: 8px;">SPECIALIST</th>
-                <th style="padding: 8px;">AMOUNT</th>
-                <th style="padding: 8px;">STATUS</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${customer.appointments.map((a) => `
-                <tr style="border-bottom: 1px solid rgba(255,255,255,0.04);">
-                  <td style="padding: 8px;">${new Date(a.date).toLocaleDateString()}</td>
-                  <td style="padding: 8px; font-weight: 600; color: #fff;">${a.service?.name}</td>
-                  <td style="padding: 8px; color: var(--text-secondary);">${a.staff?.name}</td>
-                  <td style="padding: 8px; font-weight: 700; color: #10b981; font-family: var(--font-heading);">₹${a.price}</td>
-                  <td style="padding: 8px;"><span class="badge badge-${a.status.toLowerCase()}">${a.status}</span></td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
+        <!-- Customer Summary Header Card -->
+        <div style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; padding: 16px; margin-bottom: 18px; display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px;">
+          <div>
+            <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase;">Customer Name</div>
+            <div style="font-size: 1.1rem; font-weight: 800; color: #fff;">${customer.name || customerName}</div>
+          </div>
+          <div>
+            <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase;">Phone / WhatsApp</div>
+            <div style="font-size: 0.95rem; font-weight: 700; color: #c7d2fe; font-family: monospace;">${customer.phone || 'N/A'}</div>
+          </div>
+          <div>
+            <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase;">Total Appointments</div>
+            <div style="font-size: 0.95rem; font-weight: 700; color: #fff;">${appts.length} Bookings</div>
+          </div>
+          <div>
+            <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase;">Total Spend</div>
+            <div style="font-size: 0.95rem; font-weight: 800; color: #10b981; font-family: var(--font-heading);">₹${totalSpend.toLocaleString()}</div>
+          </div>
         </div>
+
+        <!-- Penalty Strike & Booking Access Control Panel -->
+        <div style="background: rgba(99, 102, 241, 0.06); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 12px; padding: 16px; margin-bottom: 20px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 12px;">
+            <div>
+              <div style="font-size: 0.75rem; font-weight: 800; color: #a5b4fc; text-transform: uppercase; letter-spacing: 0.04em;">⚡ PENALTY STRIKES & BOOKING STATUS</div>
+              <div style="display: flex; align-items: center; gap: 10px; margin-top: 4px;">
+                <span style="font-size: 1.2rem; font-weight: 800; color: #fff;">${strikes} / 3 Strikes</span>
+                ${this.renderStrikeBadge(customer)}
+              </div>
+            </div>
+
+            <!-- Quick Action Buttons -->
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button class="btn btn-success btn-sm" id="btn-modal-unblock" style="font-weight: 700;">
+                🔓 Reset All Strikes (0/3)
+              </button>
+              <button class="btn btn-outline-danger btn-sm" id="btn-modal-block" style="font-weight: 700;">
+                🔒 Block Customer (3/3)
+              </button>
+            </div>
+          </div>
+
+          <!-- Direct Strike Adjuster Pills -->
+          <div style="display: flex; align-items: center; gap: 8px; font-size: 0.8rem; color: var(--text-secondary); flex-wrap: wrap;">
+            <span>Adjust Strikes Manually:</span>
+            <button class="btn btn-secondary btn-sm btn-strike-set" data-count="0" style="${strikes === 0 ? 'background: #10b981; color: #fff;' : ''}">0 Clean</button>
+            <button class="btn btn-secondary btn-sm btn-strike-set" data-count="1" style="${strikes === 1 ? 'background: #f59e0b; color: #fff;' : ''}">1 Warning</button>
+            <button class="btn btn-secondary btn-sm btn-strike-set" data-count="2" style="${strikes === 2 ? 'background: #f97316; color: #fff;' : ''}">2 Critical</button>
+            <button class="btn btn-secondary btn-sm btn-strike-set" data-count="3" style="${strikes >= 3 ? 'background: #ef4444; color: #fff;' : ''}">3 Blocked</button>
+          </div>
+        </div>
+
+        <!-- Booking History Timeline -->
+        <h4 style="font-size: 0.95rem; font-weight: 800; color: #fff; margin-bottom: 12px; font-family: var(--font-heading);">📜 Booking History Timeline</h4>
+        ${appts.length === 0 ? `
+          <div style="text-align: center; padding: 30px; color: var(--text-muted); background: rgba(0,0,0,0.2); border-radius: 10px;">
+            No past appointment records found for this customer.
+          </div>
+        ` : `
+          <div style="max-height: 280px; overflow-y: auto; border: 1px solid rgba(255,255,255,0.06); border-radius: 10px;">
+            <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.86rem;">
+              <thead>
+                <tr style="border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary); background: rgba(0,0,0,0.3); font-size: 0.72rem; text-transform: uppercase;">
+                  <th style="padding: 10px;">DATE & TIME</th>
+                  <th style="padding: 10px;">SERVICE</th>
+                  <th style="padding: 10px;">STYLIST</th>
+                  <th style="padding: 10px;">PRICE</th>
+                  <th style="padding: 10px;">STATUS</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${appts.map((a) => {
+                  const dateStr = a.startAt ? new Date(a.startAt).toLocaleDateString() : 'N/A';
+                  const timeStr = a.startAt ? new Date(a.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+                  const statusColors = {
+                    CONFIRMED: 'rgba(99,102,241,0.2); color: #818cf8',
+                    COMPLETED: 'rgba(16,185,129,0.2); color: #34d399',
+                    CANCELLED: 'rgba(239,68,68,0.2); color: #f87171',
+                    NO_SHOW: 'rgba(245,158,11,0.2); color: #fbbf24',
+                    IN_SERVICE: 'rgba(168,85,247,0.2); color: #c084fc',
+                  };
+                  const badgeStyle = statusColors[a.status] || 'rgba(255,255,255,0.1); color: #fff';
+                  return `
+                    <tr style="border-bottom: 1px solid rgba(255,255,255,0.03);">
+                      <td style="padding: 10px;">
+                        <div style="font-weight: 700; color: #fff;">${dateStr}</div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted);">${timeStr}</div>
+                      </td>
+                      <td style="padding: 10px; font-weight: 700; color: #c7d2fe;">${a.serviceNameSnapshot || a.service?.name || 'Service'}</td>
+                      <td style="padding: 10px; color: var(--text-secondary);">${a.stylist?.name || 'Any Staff'}</td>
+                      <td style="padding: 10px; font-weight: 700; color: #10b981;">₹${a.price || 0}</td>
+                      <td style="padding: 10px;">
+                        <span class="badge" style="background: ${badgeStyle}; font-weight: 800; font-size: 0.72rem; padding: 3px 8px; border-radius: 6px;">${a.status}</span>
+                      </td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+        `}
       `;
+
+      // Event Listener: Unblock (Reset to 0)
+      document.getElementById('btn-modal-unblock')?.addEventListener('click', async () => {
+        if (confirm(`Reset strikes to 0 and unblock WhatsApp booking access for ${customer.name || customerName}?`)) {
+          try {
+            await ApiClient.unblockCustomer(customerId);
+            alert(`🎉 Successfully reset strikes to 0. Customer unblocked!`);
+            this.showCustomerHistoryModal(customerId, customerName);
+            this.loadCustomersTable(this.searchQuery);
+          } catch (err) {
+            alert(`Error resetting strikes: ${err.message}`);
+          }
+        }
+      });
+
+      // Event Listener: Block (Set to 3)
+      document.getElementById('btn-modal-block')?.addEventListener('click', async () => {
+        if (confirm(`Are you sure you want to block ${customer.name || customerName} from booking?`)) {
+          try {
+            await ApiClient.updateCustomerStrikes(customerId, 3, true);
+            alert(`🔒 Customer has been blocked.`);
+            this.showCustomerHistoryModal(customerId, customerName);
+            this.loadCustomersTable(this.searchQuery);
+          } catch (err) {
+            alert(`Error blocking customer: ${err.message}`);
+          }
+        }
+      });
+
+      // Event Listener: Manual Strike Adjuster Pills (0, 1, 2, 3)
+      historyBody.querySelectorAll('.btn-strike-set').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+          const count = parseInt(e.currentTarget.getAttribute('data-count'), 10);
+          const blockState = count >= 3;
+          try {
+            await ApiClient.updateCustomerStrikes(customerId, count, blockState);
+            this.showCustomerHistoryModal(customerId, customerName);
+            this.loadCustomersTable(this.searchQuery);
+          } catch (err) {
+            alert(`Error updating strikes: ${err.message}`);
+          }
+        });
+      });
+
     } catch (err) {
-      document.getElementById('cust-history-body').innerHTML = `<div style="color: var(--danger);">${err.message}</div>`;
+      const historyBody = document.getElementById('cust-history-body');
+      if (historyBody) {
+        historyBody.innerHTML = `<div style="color: var(--danger); padding: 20px;">Failed to load customer details: ${err.message}</div>`;
+      }
     }
   }
+
+  showAdjustStrikesModal(customer) {
+    const modalContainer = document.getElementById('modal-container');
+    const currentStrikes = customer.yearlyNoShowCount || 0;
+
+    modalContainer.innerHTML = `
+      <div class="modal-backdrop show">
+        <div class="modal-content" style="max-width: 480px;">
+          <div class="modal-header" style="display: flex; align-items: center; justify-content: space-between;">
+            <h3 style="font-size: 1.15rem; font-family: var(--font-heading); margin: 0;">⚙️ Adjust Penalty Strikes</h3>
+            <button class="close-btn" id="btn-close-modal">&times;</button>
+          </div>
+
+          <div style="padding: 16px 0;">
+            <div style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.06); padding: 12px 16px; border-radius: 10px; margin-bottom: 18px; display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase;">Customer</div>
+                <div style="font-size: 1.05rem; font-weight: 800; color: #fff; margin-top: 2px;">
+                  ${customer.name || 'Customer'}
+                </div>
+                <div style="font-size: 0.78rem; color: var(--text-secondary); font-family: monospace;">${customer.phone || ''}</div>
+              </div>
+              <div>${this.renderStrikeBadge(customer)}</div>
+            </div>
+
+            <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 16px;">
+              Select how many strikes to adjust or reset for <strong>${customer.name || 'this customer'}</strong>:
+            </p>
+
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+              <!-- Option 1: Reset All to 0 -->
+              <button class="btn btn-success" id="btn-opt-reset-all" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; font-weight: 700;">
+                <span>🧹 Reset All Strikes (Set to 0/3 Clean)</span>
+                <span style="font-size: 0.75rem; background: rgba(0,0,0,0.2); padding: 2px 8px; border-radius: 6px;">Clear 100%</span>
+              </button>
+
+              ${currentStrikes > 0 ? `
+                <!-- Option 2: Remove 1 Strike -->
+                <button class="btn btn-secondary" id="btn-opt-remove-1" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; font-weight: 700; background: rgba(99,102,241,0.15); border-color: rgba(99,102,241,0.4); color: #c7d2fe;">
+                  <span>➖ Remove 1 Strike (Set to ${Math.max(0, currentStrikes - 1)}/3)</span>
+                  <span style="font-size: 0.75rem; background: rgba(0,0,0,0.3); padding: 2px 8px; border-radius: 6px;">-1 Strike</span>
+                </button>
+              ` : ''}
+
+              ${currentStrikes >= 2 ? `
+                <!-- Option 3: Remove 2 Strikes -->
+                <button class="btn btn-secondary" id="btn-opt-remove-2" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; font-weight: 700; background: rgba(99,102,241,0.15); border-color: rgba(99,102,241,0.4); color: #c7d2fe;">
+                  <span>➖ Remove 2 Strikes (Set to ${Math.max(0, currentStrikes - 2)}/3)</span>
+                  <span style="font-size: 0.75rem; background: rgba(0,0,0,0.3); padding: 2px 8px; border-radius: 6px;">-2 Strikes</span>
+                </button>
+              ` : ''}
+
+              <!-- Option 4: Block Customer (Set to 3) -->
+              <button class="btn btn-outline-danger" id="btn-opt-block" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; font-weight: 700;">
+                <span>🔒 Block Customer (Set to 3/3 Blocked)</span>
+                <span style="font-size: 0.75rem; background: rgba(0,0,0,0.3); padding: 2px 8px; border-radius: 6px;">3 Strikes</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const closeModal = () => (modalContainer.innerHTML = '');
+    document.getElementById('btn-close-modal')?.addEventListener('click', closeModal);
+
+    // Handler: Reset All (Set to 0)
+    document.getElementById('btn-opt-reset-all')?.addEventListener('click', async () => {
+      try {
+        await ApiClient.unblockCustomer(customer.id);
+        alert(`🎉 Reset all strikes to 0 for ${customer.name || 'Customer'}. Account unblocked & WhatsApp notification sent!`);
+        closeModal();
+        this.loadCustomersTable(this.searchQuery);
+      } catch (err) {
+        alert(`Error resetting strikes: ${err.message}`);
+      }
+    });
+
+    // Handler: Remove 1 Strike
+    document.getElementById('btn-opt-remove-1')?.addEventListener('click', async () => {
+      const newCount = Math.max(0, currentStrikes - 1);
+      try {
+        await ApiClient.updateCustomerStrikes(customer.id, newCount, newCount >= 3);
+        alert(`⚡ Reduced penalty strikes to ${newCount}/3 for ${customer.name || 'Customer'}.`);
+        closeModal();
+        this.loadCustomersTable(this.searchQuery);
+      } catch (err) {
+        alert(`Error updating strikes: ${err.message}`);
+      }
+    });
+
+    // Handler: Remove 2 Strikes
+    document.getElementById('btn-opt-remove-2')?.addEventListener('click', async () => {
+      const newCount = Math.max(0, currentStrikes - 2);
+      try {
+        await ApiClient.updateCustomerStrikes(customer.id, newCount, newCount >= 3);
+        alert(`⚡ Reduced penalty strikes to ${newCount}/3 for ${customer.name || 'Customer'}.`);
+        closeModal();
+        this.loadCustomersTable(this.searchQuery);
+      } catch (err) {
+        alert(`Error updating strikes: ${err.message}`);
+      }
+    });
+
+    // Handler: Block Customer (Set to 3)
+    document.getElementById('btn-opt-block')?.addEventListener('click', async () => {
+      try {
+        await ApiClient.updateCustomerStrikes(customer.id, 3, true);
+        alert(`🔒 ${customer.name || 'Customer'} has been blocked (3/3 strikes).`);
+        closeModal();
+        this.loadCustomersTable(this.searchQuery);
+      } catch (err) {
+        alert(`Error blocking customer: ${err.message}`);
+      }
+    });
+  }
 }
+
+

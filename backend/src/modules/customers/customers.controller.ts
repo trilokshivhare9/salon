@@ -3,6 +3,7 @@ import {
   Get,
   Patch,
   Param,
+  Body,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -46,4 +47,20 @@ export class CustomersController {
   ) {
     return this.customersService.unblockCustomer(salonId, customerId);
   }
+
+  @Patch(':id/strikes')
+  async updateCustomerStrikes(
+    @CurrentSalonId() salonId: string,
+    @Param('id') customerId: string,
+    @Body('yearlyNoShowCount') yearlyNoShowCount: number,
+    @Body('isBookingBlocked') isBookingBlocked?: boolean,
+  ) {
+    return this.customersService.updateCustomerStrikes(
+      salonId,
+      customerId,
+      yearlyNoShowCount,
+      isBookingBlocked,
+    );
+  }
 }
+

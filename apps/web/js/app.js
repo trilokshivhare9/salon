@@ -25,11 +25,14 @@ class App {
         if (event.data?.type === 'LOGOUT') {
           console.warn('[BroadcastChannel] Logout event received from another tab');
           ApiClient.clearSession(false);
-          this.currentUser = null;
-          this.handleRoute();
+          if (this.currentUser) {
+            this.currentUser = null;
+            this.handleRoute();
+          }
         } else if (event.data?.type === 'LOGIN') {
-          console.log('[BroadcastChannel] Login event received from another tab — syncing');
-          this.initSession();
+          if (!this.currentUser) {
+            this.initSession();
+          }
         }
       };
     }
@@ -57,9 +60,27 @@ class App {
   }
 
   async initSession() {
+    const token = ApiClient.getAccessToken();
     const rawRefreshToken = RefreshTransport.getRefreshToken();
+
+    // 1. If valid unexpired access token exists, hydrate session directly via getMe()
+    if (token && !ApiClient.isTokenExpired(token)) {
+      try {
+        const user = await ApiClient.getMe();
+        if (user) {
+          this.currentUser = user;
+          ApiClient.setUser(user);
+          return;
+        }
+      } catch (err) {
+        console.warn('[App] getMe failed with active access token:', err.message);
+      }
+    }
+
+    // 2. If access token is missing or expired, attempt refresh ONCE
     if (!rawRefreshToken) {
       this.currentUser = null;
+      ApiClient.clearSession(false);
       return;
     }
 
@@ -68,22 +89,34 @@ class App {
       if (refreshRes?.user) {
         this.currentUser = refreshRes.user;
         ApiClient.setUser(refreshRes.user);
+      } else {
+        throw new Error('Invalid refresh response');
       }
     } catch (err) {
       console.warn('[App] Startup session refresh failed:', err.message);
       this.currentUser = null;
       ApiClient.clearSession(false);
+      const oldModal = document.getElementById('reauth-modal');
+      if (oldModal) oldModal.remove();
     }
   }
 
   showInPlaceReAuthModal() {
+    // If not currently logged into an active dashboard session, do NOT disrupt the login page
+    if (!this.currentUser) {
+      ApiClient.clearSession(false);
+      const oldModal = document.getElementById('reauth-modal');
+      if (oldModal) oldModal.remove();
+      return;
+    }
+
     if (document.getElementById('reauth-modal')) return;
 
     const modal = document.createElement('div');
     modal.id = 'reauth-modal';
     modal.style.cssText = 'position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.85); backdrop-filter:blur(10px); z-index:9999999; display:flex; align-items:center; justify-content:center; padding:20px;';
     
-    const initialIdentifier = this.currentUser?.phone || this.currentUser?.email || localStorage.getItem('last_user_identifier') || '';
+    const initialIdentifier = this.currentUser?.phone || localStorage.getItem('last_user_identifier') || '';
 
     modal.innerHTML = `
       <div style="background:#131927; border:1px solid rgba(99,102,241,0.3); border-radius:20px; width:100%; max-width:420px; padding:32px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.7); text-align:center; color:#fff; font-family:sans-serif;">
@@ -93,8 +126,8 @@ class App {
           Your session timed out. Re-enter your password to resume without losing your work.
         </p>
         <form id="reauth-form" style="text-align:left;">
-          <label style="display:block; font-size:0.75rem; color:#94a3b8; margin-bottom:6px; font-weight:600;">Mobile Number or Email</label>
-          <input type="text" id="reauth-identifier" value="${initialIdentifier}" placeholder="Mobile number or email" required style="width:100%; padding:12px 16px; background:#1e293b; border:1px solid #334155; border-radius:10px; color:#fff; font-size:0.95rem; margin-bottom:14px; box-sizing:border-box; outline:none;" />
+          <label style="display:block; font-size:0.75rem; color:#94a3b8; margin-bottom:6px; font-weight:600;">OWNER MOBILE NUMBER / WHATSAPP</label>
+          <input type="tel" id="reauth-identifier" value="${initialIdentifier}" placeholder="Enter 10-digit mobile number" required style="width:100%; padding:12px 16px; background:#1e293b; border:1px solid #334155; border-radius:10px; color:#fff; font-size:0.95rem; margin-bottom:14px; box-sizing:border-box; outline:none;" />
           
           <label style="display:block; font-size:0.75rem; color:#94a3b8; margin-bottom:6px; font-weight:600;">Password</label>
           <input type="password" id="reauth-password" placeholder="Enter password" required style="width:100%; padding:12px 16px; background:#1e293b; border:1px solid #334155; border-radius:10px; color:#fff; font-size:0.95rem; margin-bottom:16px; box-sizing:border-box; outline:none;" />
@@ -114,8 +147,9 @@ class App {
     fullLoginBtn.addEventListener('click', () => {
       ApiClient.clearSession(true);
       modal.remove();
+      this.currentUser = null;
       window.location.hash = '#admin';
-      location.reload();
+      this.handleRoute();
     });
 
     form.addEventListener('submit', async (e) => {
