@@ -42,6 +42,8 @@ export async function cleanAllTestData() {
     await tx.notification.deleteMany({});
     await tx.whatsAppLog.deleteMany({});
     await tx.conversation.deleteMany({});
+    await tx.bookingReassignment.deleteMany({});
+    await tx.stylistAbsence.deleteMany({});
     await tx.appointmentService.deleteMany({});
     await tx.appointment.deleteMany({});
     await tx.stylistWorkingHours.deleteMany({});

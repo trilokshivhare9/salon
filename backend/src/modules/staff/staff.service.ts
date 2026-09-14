@@ -55,6 +55,9 @@ export class StaffService {
         workingHours: {
           orderBy: { dayOfWeek: 'asc' },
         },
+        absences: {
+          where: { status: 'ACTIVE' },
+        },
       },
       orderBy: { createdAt: 'asc' },
     });
@@ -69,6 +72,9 @@ export class StaffService {
         },
         workingHours: {
           orderBy: { dayOfWeek: 'asc' },
+        },
+        absences: {
+          where: { status: 'ACTIVE' },
         },
       },
     });

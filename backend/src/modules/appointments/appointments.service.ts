@@ -16,7 +16,7 @@ import {
   RescheduleAppointmentDto,
 } from './dto/create-appointment.dto';
 import { DateTime } from 'luxon';
-import { AppointmentStatus, BookingSource, ClientEtaStatus, DayOfWeek, StylistStatus, ServiceStatus } from '@prisma/client';
+import { AppointmentStatus, BookingSource, ClientEtaStatus, DayOfWeek, StylistStatus, ServiceStatus, AbsenceStatus } from '@prisma/client';
 import { Subject, Observable } from 'rxjs';
 import { filter } from 'rxjs/operators';
 import * as crypto from 'crypto';
@@ -382,8 +382,20 @@ export class AppointmentsService {
                 });
 
                 if (!overlap) {
-                  assignedStylistId = candidateId;
-                  break;
+                  // Re-verify candidate has no active absence on this date
+                  const candidateAbsence = await tx.stylistAbsence.findFirst({
+                    where: {
+                      salonId,
+                      stylistId: candidateId,
+                      absenceDate: new Date(`${dto.date}T00:00:00.000Z`),
+                      status: AbsenceStatus.ACTIVE,
+                    },
+                  });
+
+                  if (!candidateAbsence) {
+                    assignedStylistId = candidateId;
+                    break;
+                  }
                 }
               }
             }
@@ -406,6 +418,19 @@ export class AppointmentsService {
 
           if (!assignedStylist || assignedStylist.status !== StylistStatus.ACTIVE) {
             throw new ConflictException('Selected specialist is inactive or no longer available.');
+          }
+
+          // Re-verify stylist absence status under lock
+          const activeAbsence = await tx.stylistAbsence.findFirst({
+            where: {
+              salonId,
+              stylistId: assignedStylistId!,
+              absenceDate: new Date(`${dto.date}T00:00:00.000Z`),
+              status: AbsenceStatus.ACTIVE,
+            },
+          });
+          if (activeAbsence) {
+            throw new ConflictException('Selected specialist is marked absent on this date.');
           }
 
           // Re-verify services status under lock

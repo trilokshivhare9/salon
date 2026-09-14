@@ -1320,9 +1320,20 @@ export class SalonDashboard {
         const confirmedCount = todayAppts.filter((a) => ['CONFIRMED', 'CHECKED_IN', 'IN_SERVICE'].includes(a.status)).length;
         const completedCount = todayAppts.filter((a) => a.status === 'COMPLETED').length;
 
+        const todayIso = (this.selectedDate || new Date().toISOString().split('T')[0]);
+        const activeAbsence = (st.absences || []).find((ab) => {
+          const abDate = (ab.absenceDate || '').split('T')[0];
+          return abDate === todayIso && ab.status === 'ACTIVE';
+        });
+        const isAbsentToday = !!activeAbsence;
+        const isSelectedDateToday = todayIso === new Date().toISOString().split('T')[0];
+
         let statusDot = 'status-dot-free';
         let statusText = 'Available / Free for Walk-ins';
-        if (st.status !== 'ACTIVE') {
+        if (isAbsentToday) {
+          statusDot = 'status-dot-busy';
+          statusText = isSelectedDateToday ? '🚫 Absent Today' : `🚫 Absent (${todayIso})`;
+        } else if (st.status !== 'ACTIVE') {
           statusDot = 'status-dot-off';
           statusText = 'Inactive / Off-Duty';
         } else if (inService) {
@@ -1341,9 +1352,16 @@ export class SalonDashboard {
                             <div style="font-size: 0.8rem; color: var(--text-secondary);">${st.phone || 'No phone'}</div>
                           </div>
                         </div>
-                        <span class="badge ${st.status === 'ACTIVE' ? 'badge-completed' : 'badge-cancelled'}" style="font-size: 0.65rem;">
-                          ${st.status || 'ACTIVE'}
-                        </span>
+                        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
+                          <span class="badge ${st.status === 'ACTIVE' ? 'badge-completed' : 'badge-cancelled'}" style="font-size: 0.65rem;">
+                            ${st.status || 'ACTIVE'}
+                          </span>
+                          ${isAbsentToday ? `
+                            <span class="badge" style="background: rgba(251, 113, 133, 0.15); color: #fb7185; border: 1px solid rgba(251,113,133,0.3); font-size: 0.62rem; font-weight: 700;">
+                              🚫 ABSENT
+                            </span>
+                          ` : ''}
+                        </div>
                       </div>
 
                       <div style="background: rgba(0,0,0,0.3); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 14px;">
@@ -1382,7 +1400,7 @@ export class SalonDashboard {
                         </button>
                       </div>
                       <!-- Secondary Controls -->
-                      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; border-top: 1px solid var(--border-subtle); padding-top: 10px;">
+                      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 6px; border-top: 1px solid var(--border-subtle); padding-top: 10px;">
                         <button class="btn btn-secondary btn-sm btn-edit-hours" data-id="${st.id}" data-name="${st.name || ''}" style="font-size: 0.72rem; gap: 3px;" title="Shift Working Hours">
                           ${Icons.clock({ size: 12 })}
                           <span>Hours</span>
@@ -1391,6 +1409,16 @@ export class SalonDashboard {
                           ${Icons.coffee({ size: 12 })}
                           <span>Break</span>
                         </button>
+                        ${isAbsentToday ? `
+                          <button class="btn btn-warning-outline btn-sm btn-cancel-absent" data-id="${st.id}" data-absence-id="${activeAbsence.id}" data-name="${st.name || ''}" style="font-size: 0.72rem; gap: 3px; color: #f59e0b; border-color: rgba(245,158,11,0.3);" title="Cancel / Reopen Absence">
+                            <span>Unmark</span>
+                          </button>
+                        ` : `
+                          <button class="btn btn-secondary btn-sm btn-mark-absent" data-id="${st.id}" data-name="${st.name || ''}" style="font-size: 0.72rem; gap: 3px; color: #fb7185; border-color: rgba(251,113,133,0.3);" title="Mark Absent & Reassign Bookings">
+                            <span style="font-size: 11px;">🚫</span>
+                            <span>Absent</span>
+                          </button>
+                        `}
                         <button class="btn btn-danger-outline btn-sm btn-delete-staff" data-id="${st.id}" data-name="${st.name || ''}" style="font-size: 0.72rem; gap: 3px;" title="Delete Stylist">
                           ${Icons.trash({ size: 12 })}
                           <span>Delete</span>
@@ -2382,6 +2410,40 @@ export class SalonDashboard {
       });
     });
 
+    // Mark Staff Absent
+    this.container.querySelectorAll('.btn-mark-absent').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const name = e.currentTarget.getAttribute('data-name');
+        this.showMarkAbsentModal(id, name);
+      });
+    });
+
+    // Cancel / Reopen Staff Absence
+    const handleCancelAbsent = async (e) => {
+      const id = e.currentTarget.getAttribute('data-id');
+      const absenceId = e.currentTarget.getAttribute('data-absence-id');
+      const name = e.currentTarget.getAttribute('data-name') || 'Specialist';
+      if (!absenceId) {
+        this.showToast('No active absence record found for this specialist on this date', 'error');
+        return;
+      }
+      if (confirm(`Are you sure you want to cancel the absence for ${name}? The specialist will be marked available again.`)) {
+        try {
+          await Api.cancelStaffAbsence(id, absenceId);
+          this.showToast(`Absence cancelled for ${name}. Specialist is available again.`, 'success');
+          await this.loadStaff();
+          this.render();
+        } catch (err) {
+          this.showToast(err.message || 'Failed to cancel absence', 'error');
+        }
+      }
+    };
+
+    this.container.querySelectorAll('.btn-cancel-absent').forEach((btn) => {
+      btn.addEventListener('click', handleCancelAbsent);
+    });
+
     // Edit Service Modal
     this.container.querySelectorAll('.btn-edit-service').forEach((btn) => {
       btn.addEventListener('click', (e) => {
@@ -2590,6 +2652,14 @@ export class SalonDashboard {
       btn.addEventListener('click', (e) => {
         this.showAddBreakModal(e.currentTarget.getAttribute('data-id'), e.currentTarget.getAttribute('data-name'));
       });
+    });
+    tabContent.querySelectorAll('.btn-mark-absent').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        this.showMarkAbsentModal(e.currentTarget.getAttribute('data-id'), e.currentTarget.getAttribute('data-name'));
+      });
+    });
+    tabContent.querySelectorAll('.btn-cancel-absent').forEach((btn) => {
+      btn.addEventListener('click', handleCancelAbsent);
     });
 
     // Services Tab Buttons
@@ -3215,6 +3285,257 @@ export class SalonDashboard {
         alert(err.message);
       }
     });
+  }
+
+  showMarkAbsentModal(staffId, staffName) {
+    const modalContainer = document.getElementById('modal-container');
+    const defaultDate = this.selectedDate || new Date().toISOString().split('T')[0];
+
+    modalContainer.innerHTML = `
+      <div class="modal-backdrop show">
+        <div class="modal-content" style="max-width: 540px;">
+          <div class="modal-header">
+            <h3 style="display: flex; align-items: center; gap: 8px;">
+              <span>🚫</span>
+              <span>Mark Stylist Absent</span>
+            </h3>
+            <button class="close-btn" id="btn-close-modal">&times;</button>
+          </div>
+          <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 16px;">
+            Record absence for <strong>${staffName}</strong>. The system will automatically check affected bookings and reassign them to qualified available specialists.
+          </p>
+
+          <form id="mark-absent-form">
+            <div class="form-group">
+              <label>Absence Date *</label>
+              <input type="date" class="form-control" id="absence-date" value="${defaultDate}" required />
+            </div>
+
+            <div class="form-group">
+              <label>Reason *</label>
+              <select class="form-control" id="absence-reason" required>
+                <option value="Sick Leave">🤒 Sick Leave</option>
+                <option value="Personal Emergency">🚨 Personal Emergency</option>
+                <option value="Family / Personal">🏠 Family / Personal Leave</option>
+                <option value="Off-Duty / Vacation">✈️ Off-Duty / Vacation</option>
+                <option value="Other">📝 Other</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label>Internal Notes (Optional)</label>
+              <input type="text" class="form-control" id="absence-notes" placeholder="e.g. Informed via WhatsApp in the morning" />
+            </div>
+
+            <!-- Live Impact Preview Box -->
+            <div id="absence-preview-box" style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
+              <div style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text-secondary);">
+                <div class="spinner-small" style="display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.2); border-top-color: #818cf8; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+                <span>Checking affected bookings for this date...</span>
+              </div>
+            </div>
+
+            <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: var(--radius-sm); padding: 10px 14px; margin-bottom: 16px; font-size: 0.78rem; color: #fca5a5;">
+              ⚠️ <strong>Auto-Reassignment & Notification:</strong> Reassigned bookings will keep their scheduled time slots with newly assigned stylists. Customers will immediately receive an interactive WhatsApp update to accept, reschedule, or cancel.
+            </div>
+
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+              <button type="button" class="btn btn-secondary" id="btn-cancel-absence">Cancel</button>
+              <button type="submit" class="btn btn-danger" id="btn-confirm-absence" style="gap: 6px;">
+                <span>🚫 Confirm Mark Absent & Reassign</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+    document.getElementById('btn-cancel-absence')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+
+    // Preview loader function
+    const loadPreview = async (dateVal) => {
+      const previewBox = document.getElementById('absence-preview-box');
+      if (!previewBox) return;
+      previewBox.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text-secondary);">
+          <div class="spinner-small" style="display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.2); border-top-color: #818cf8; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+          <span>Checking affected bookings for ${dateVal}...</span>
+        </div>
+      `;
+
+      try {
+        const preview = await ApiClient.previewStaffAbsence(staffId, dateVal);
+        if (!previewBox) return;
+
+        if (preview.affectedBookingsCount === 0) {
+          previewBox.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 8px; color: #34d399; font-size: 0.82rem;">
+              <span>✅</span>
+              <span><strong>0 active bookings</strong> on this date. Stylist will be marked absent and prevented from receiving new bookings.</span>
+            </div>
+          `;
+        } else {
+          const reassignCount = preview.canAutoReassignCount || 0;
+          const unresolvableCount = preview.unresolvableCount || 0;
+          previewBox.innerHTML = `
+            <div>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <span style="font-weight: 600; font-size: 0.85rem; color: #fff;">
+                  ${preview.affectedBookingsCount} Booking(s) Affected:
+                </span>
+                <div style="display: flex; gap: 6px;">
+                  <span class="badge" style="background: rgba(52, 211, 153, 0.15); color: #34d399; font-size: 0.7rem;">
+                    ${reassignCount} Can Reassign
+                  </span>
+                  ${unresolvableCount > 0 ? `
+                    <span class="badge" style="background: rgba(251, 113, 133, 0.15); color: #fb7185; font-size: 0.7rem;">
+                      ${unresolvableCount} No Replacement
+                    </span>
+                  ` : ''}
+                </div>
+              </div>
+              <div style="max-height: 120px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; font-size: 0.78rem;">
+                ${(preview.details || []).map((d) => `
+                  <div style="display: flex; justify-content: space-between; padding: 4px 8px; background: rgba(255,255,255,0.04); border-radius: 4px;">
+                    <span><strong>#${d.appointmentNumber}</strong> (${d.serviceName || 'Service'}) - ${d.customerName}</span>
+                    <span style="color: ${d.willReassign ? '#34d399' : '#fb7185'};">
+                      ${d.willReassign ? `→ ${d.potentialReplacement?.name || 'Available Specialist'}` : 'No Match'}
+                    </span>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          `;
+        }
+      } catch (err) {
+        if (previewBox) {
+          previewBox.innerHTML = `
+            <div style="font-size: 0.8rem; color: #fca5a5;">
+              ⚠️ Could not preview bookings: ${err.message}
+            </div>
+          `;
+        }
+      }
+    };
+
+    // Load initial preview
+    loadPreview(defaultDate);
+
+    // Reload preview when date changes
+    document.getElementById('absence-date')?.addEventListener('change', (e) => {
+      loadPreview(e.target.value);
+    });
+
+    // Form Submit
+    document.getElementById('mark-absent-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('btn-confirm-absence');
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span>⏳ Processing Absence...</span>';
+      }
+
+      try {
+        const payload = {
+          date: document.getElementById('absence-date').value,
+          reason: document.getElementById('absence-reason').value,
+          notes: document.getElementById('absence-notes').value || undefined,
+        };
+
+        const result = await ApiClient.markStaffAbsent(staffId, payload);
+        modalContainer.innerHTML = '';
+
+        // Show result summary modal
+        this.showAbsenceResultModal(staffName, result);
+
+        // Refresh data
+        await this.loadData(true);
+        this.refreshActiveTab();
+      } catch (err) {
+        alert(err.message || 'Failed to mark stylist absent.');
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '<span>🚫 Confirm Mark Absent & Reassign</span>';
+        }
+      }
+    });
+  }
+
+  showAbsenceResultModal(staffName, result) {
+    const modalContainer = document.getElementById('modal-container');
+    const summary = result?.reassignmentSummary || { total: 0, reassigned: 0, unresolvable: 0, details: [] };
+    const absence = result?.absence || {};
+
+    modalContainer.innerHTML = `
+      <div class="modal-backdrop show">
+        <div class="modal-content" style="max-width: 520px;">
+          <div class="modal-header">
+            <h3 style="display: flex; align-items: center; gap: 8px;">
+              <span>✅</span>
+              <span>Absence Recorded</span>
+            </h3>
+            <button class="close-btn" id="btn-close-modal">&times;</button>
+          </div>
+          <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 16px;">
+            <strong>${staffName}</strong> has been marked absent for <strong>${(absence.absenceDate || '').split('T')[0]}</strong>.
+          </p>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 18px;">
+            <div style="background: rgba(255,255,255,0.05); padding: 12px; border-radius: var(--radius-sm); text-align: center;">
+              <div style="font-size: 1.3rem; font-weight: 700; color: #fff;">${summary.total || 0}</div>
+              <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase;">Affected</div>
+            </div>
+            <div style="background: rgba(52, 211, 153, 0.1); border: 1px solid rgba(52, 211, 153, 0.2); padding: 12px; border-radius: var(--radius-sm); text-align: center;">
+              <div style="font-size: 1.3rem; font-weight: 700; color: #34d399;">${summary.reassigned || 0}</div>
+              <div style="font-size: 0.72rem; color: #34d399; text-transform: uppercase;">Reassigned</div>
+            </div>
+            <div style="background: rgba(251, 113, 133, 0.1); border: 1px solid rgba(251, 113, 133, 0.2); padding: 12px; border-radius: var(--radius-sm); text-align: center;">
+              <div style="font-size: 1.3rem; font-weight: 700; color: #fb7185;">${summary.unresolvable || 0}</div>
+              <div style="font-size: 0.72rem; color: #fb7185; text-transform: uppercase;">Unresolvable</div>
+            </div>
+          </div>
+
+          ${(summary.details && summary.details.length > 0) ? `
+            <div style="margin-bottom: 18px;">
+              <div style="font-size: 0.8rem; font-weight: 600; color: #fff; margin-bottom: 8px;">Reassignment Details:</div>
+              <div style="max-height: 180px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; font-size: 0.8rem;">
+                ${summary.details.map((d) => `
+                  <div style="padding: 8px 12px; background: rgba(0,0,0,0.25); border-radius: 6px; display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                      <div style="font-weight: 600; color: #fff;">#${d.appointmentNumber} • ${d.customerName}</div>
+                      <div style="font-size: 0.72rem; color: var(--text-secondary);">${d.customerPhone || 'WhatsApp notified'}</div>
+                    </div>
+                    <div>
+                      ${d.outcome === 'AUTO_ASSIGNED' ? `
+                        <span class="badge badge-completed" style="font-size: 0.7rem;">Reassigned</span>
+                      ` : `
+                        <span class="badge badge-cancelled" style="font-size: 0.7rem;">Customer Notified</span>
+                      `}
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          ` : `
+            <div style="padding: 14px; background: rgba(52, 211, 153, 0.08); border-radius: 6px; color: #34d399; font-size: 0.85rem; margin-bottom: 18px; text-align: center;">
+              🎉 No customer appointments were scheduled for this date.
+            </div>
+          `}
+
+          <div style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 16px;">
+            ℹ️ WhatsApp notifications have been dispatched to all affected customers with options to confirm, reschedule, or cancel.
+          </div>
+
+          <button type="button" class="btn btn-primary" id="btn-close-result" style="width: 100%;">
+            Done / Close
+          </button>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+    document.getElementById('btn-close-result')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
   }
 
   showBlockTimeModal() {

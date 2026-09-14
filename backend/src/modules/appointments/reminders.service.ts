@@ -3,7 +3,7 @@ import { PrismaService } from '../../database/prisma.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { AppointmentsService } from './appointments.service';
 import { DateTime } from 'luxon';
-import { AppointmentStatus, ClientEtaStatus } from '@prisma/client';
+import { AppointmentStatus, ClientEtaStatus, ReassignmentOutcome, AbsenceStatus } from '@prisma/client';
 
 @Injectable()
 export class RemindersService implements OnModuleInit, OnModuleDestroy {
@@ -34,8 +34,8 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
     this.timer = setInterval(async () => {
       try {
         await this.processReminders();
-      } catch (err) {
-        this.logger.error('Error in periodic appointment reminders job:', err);
+      } catch (err: any) {
+        this.logger.error(`Error in reminder cron tick: ${err.message}`, err.stack);
       }
     }, 60000);
     this.logger.log('⏰ Multi-Stage WhatsApp Reminder & Auto No-Show Worker started (60s tick).');
@@ -71,6 +71,12 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
           startAt: {
             gte: stage1Min,
             lte: stage1Max,
+          },
+          reassignments: {
+            none: {
+              outcome: ReassignmentOutcome.NO_REPLACEMENT,
+              absence: { status: AbsenceStatus.ACTIVE },
+            },
           },
         },
         include: {
@@ -129,6 +135,12 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
             gte: now.toJSDate(),
             lte: stage2Max,
           },
+          reassignments: {
+            none: {
+              outcome: ReassignmentOutcome.NO_REPLACEMENT,
+              absence: { status: AbsenceStatus.ACTIVE },
+            },
+          },
         },
         include: {
           salonUser: {
@@ -145,11 +157,8 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
         const user = appt.salonUser?.user;
         if (!user?.phone) continue;
         const timeStr = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('hh:mm a');
-        const autoCancelTime = DateTime.fromJSDate(appt.startAt, { zone: tz })
-          .plus({ minutes: 5 })
-          .toFormat('hh:mm a');
 
-        const message = `💺 *YOUR CHAIR IS GETTING READY!*\n\nHi *${user.name || 'Customer'}*, your stylist *${appt.stylist?.name || 'Stylist'}* is preparing your station for *${timeStr}*.\n\n📍 *${salon.name}*\n${salon.address || ''}\n\n⚠️ *Important:* If you do not confirm by *${autoCancelTime}*, your booking will be *auto-canceled* with *1 penalty strike*.\n\nPlease confirm if you are on your way:`;
+        const message = `🚨 *URGENT: ARRIVAL CHECK-IN REQUIRED*\n\nHi *${user.name || 'Customer'}*, your appointment at *${salon.name}* with *${appt.stylist?.name || 'Stylist'}* starts in ~15 mins (*${timeStr}*).\n\n⚠️ *Arrival Notice:* We hold your chair strictly for 5 minutes after start time before automatic slot cancellation.\n\nPlease update your status below:`;
 
         await this.whatsAppService.sendMetaMessage(
           user.phone,
@@ -157,8 +166,9 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
             bodyText: message,
             interactiveType: 'button',
             buttons: [
-              { id: 'remind_10m_on_way', title: '🚗 On the Way' },
-              { id: 'remind_10m_cancel', title: '❌ Cancel' },
+              { id: 'btn_eta_arrived', title: "📍 I'm Arrived" },
+              { id: 'btn_eta_on_the_way', title: '🚗 On My Way' },
+              { id: 'btn_eta_cancel', title: '❌ Cancel Visit' },
             ],
           },
           phoneNumberId,
@@ -200,12 +210,36 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
           },
           stylist: true,
           service: true,
+          reassignments: {
+            where: {
+              outcome: ReassignmentOutcome.NO_REPLACEMENT,
+              absence: { status: AbsenceStatus.ACTIVE },
+            },
+          },
         },
       });
 
       for (const appt of expiredAppointments) {
         const user = appt.salonUser?.user;
         const timeStr = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('hh:mm a');
+
+        // Check if appointment is unresolvable due to active stylist absence
+        const hasUnresolvedAbsence = (appt.reassignments && appt.reassignments.length > 0);
+        if (hasUnresolvedAbsence) {
+          // Salon Emergency cancellation: ZERO customer penalty
+          await this.appointmentsService.updateStatus(
+            salon.id,
+            appt.id,
+            {
+              status: AppointmentStatus.CANCELLED,
+              reasonCategory: 'SALON_EMERGENCY',
+              reason: 'Auto-cancelled: specialist absent and no replacement available',
+            },
+            'SYSTEM_REMINDERS_WORKER',
+          );
+          stage4Count++;
+          continue;
+        }
 
         // Mark appointment as NO_SHOW and record auto-cancellation date
         await this.prisma.appointment.update({

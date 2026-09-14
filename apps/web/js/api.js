@@ -609,6 +609,39 @@ export class ApiClient {
     return res;
   }
 
+  static async markStaffAbsent(staffId, payload) {
+    this.invalidateCache('/staff');
+    const res = await this.request(`/staff/${staffId}/absence`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    this.invalidateCache('/staff');
+    return res;
+  }
+
+  static async previewStaffAbsence(staffId, date) {
+    return this.request(`/staff/${staffId}/absence/preview?date=${encodeURIComponent(date)}`);
+  }
+
+  static async getStaffAbsences(staffId, queryParams = {}) {
+    let url = `/staff/${staffId}/absences`;
+    const params = new URLSearchParams();
+    if (queryParams.startDate) params.append('startDate', queryParams.startDate);
+    if (queryParams.endDate) params.append('endDate', queryParams.endDate);
+    const queryString = params.toString();
+    if (queryString) url += `?${queryString}`;
+    return this.request(url);
+  }
+
+  static async cancelStaffAbsence(staffId, absenceId) {
+    this.invalidateCache('/staff');
+    const res = await this.request(`/staff/${staffId}/absence/${absenceId}`, {
+      method: 'DELETE',
+    });
+    this.invalidateCache('/staff');
+    return res;
+  }
+
   // Service Category Management
   static async getServiceCategories(bypassCache = false) {
     const url = bypassCache ? `/services/categories?_t=${Date.now()}` : '/services/categories';

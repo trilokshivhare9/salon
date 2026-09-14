@@ -14,6 +14,7 @@ import { WhatsAppService } from './whatsapp.service';
 import { WhatsAppWebhookQueue } from './queues/whatsapp-webhook.queue';
 import { Public } from '../../common/decorators/public.decorator';
 import { PrismaService } from '../../database/prisma.service';
+import { WhatsAppMessageDirection } from '@prisma/client';
 
 @Public()
 @Controller('whatsapp')
@@ -122,20 +123,62 @@ export class WhatsAppController {
             this.logger.warn(
               `[Meta Webhook] ⚠️ Received message for WhatsApp Phone ID "${phoneNumberId}", but no salon is linked to this phone ID in DB. Request dropped to prevent cross-tenant routing.`,
             );
-            return { status: 'unmapped_phone_id', phoneNumberId };
+            if (messageId) {
+              await this.whatsappService.recordInboundLog(
+                null,
+                fromPhone,
+                text,
+                interactiveId,
+                payload,
+                messageId,
+              );
+            }
+            return res.status(HttpStatus.OK).send('EVENT_RECEIVED');
           }
 
           if (linkedSalon.status !== 'ACTIVE') {
             this.logger.warn(
               `[Meta Webhook] ⚠️ Message received for WhatsApp Phone ID "${phoneNumberId}", but linked salon "${linkedSalon.name}" is ${linkedSalon.status}. Sending inactive warning response.`,
             );
-            await this.whatsappService.sendMetaMessage(
-              fromPhone,
-              { textBody: `⚠️ *${linkedSalon.name} Status Update*\n\nThank you for reaching out! Our salon is currently undergoing maintenance/setup and is temporarily inactive for automated WhatsApp bookings.\n\nPlease contact the salon directly or try again later.` },
-              phoneNumberId,
+
+            // 1. Record inbound message log for Meta idempotency / deduplication
+            await this.whatsappService.recordInboundLog(
               linkedSalon.id,
-            ).catch((err) => this.logger.error(`Failed to send inactive warning message: ${err.message}`));
-            return { status: 'salon_inactive', salonId: linkedSalon.id };
+              fromPhone,
+              text,
+              interactiveId,
+              payload,
+              messageId,
+            );
+
+            // 2. 24-Hour Cooldown Guard: Prevent spamming customer if they send multiple inquiries while salon is inactive
+            const cleanFrom = fromPhone.replace(/[^\d+]/g, '');
+            const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+            const recentWarning = await this.prisma.whatsAppLog.findFirst({
+              where: {
+                salonId: linkedSalon.id,
+                phone: { in: [cleanFrom, fromPhone, cleanFrom.replace('+', '')] },
+                direction: WhatsAppMessageDirection.OUTBOUND,
+                messageText: { contains: 'Status Update' },
+                createdAt: { gte: oneDayAgo },
+              },
+            });
+
+            if (!recentWarning) {
+              await this.whatsappService.sendMetaMessage(
+                fromPhone,
+                { textBody: `⚠️ *${linkedSalon.name} Status Update*\n\nThank you for reaching out! Our salon is currently undergoing maintenance/setup and is temporarily inactive for automated WhatsApp bookings.\n\nPlease contact the salon directly or try again later.` },
+                phoneNumberId,
+                linkedSalon.id,
+              ).catch((err) => this.logger.error(`Failed to send inactive warning message: ${err.message}`));
+            } else {
+              this.logger.log(
+                `[Meta Webhook] ℹ️ Inactive status notice suppressed for ${fromPhone} (already notified within 24h cooldown window).`,
+              );
+            }
+
+            // 3. Immediately acknowledge Meta with 200 OK so Meta does NOT retry
+            return res.status(HttpStatus.OK).send('EVENT_RECEIVED');
           }
 
           salon = linkedSalon;

@@ -153,6 +153,31 @@ enum ErrorSeverity {
   CRITICAL
 }
 
+enum AbsenceStatus {
+  ACTIVE
+  CANCELLED
+}
+
+enum ReassignmentOutcome {
+  PENDING
+  AUTO_ASSIGNED
+  CUSTOMER_ACCEPTED
+  CUSTOMER_DECLINED
+  CUSTOMER_RESCHEDULED
+  CUSTOMER_CANCELLED
+  NO_REPLACEMENT
+  ADMIN_RESOLVED
+  EXPIRED
+}
+
+enum CustomerResponse {
+  ACCEPTED
+  DECLINED
+  RESCHEDULED
+  CANCELLED
+  NO_RESPONSE
+}
+
 // -----------------------------------------------------------------------------
 // 1. ADMINS (Super Admin & Salon Owners)
 // -----------------------------------------------------------------------------
@@ -173,6 +198,7 @@ model Admin {
   createdAppointments Appointment[] @relation("AdminCreatedAppointments")
   auditLogs           AuditLog[]
   sessions            UserSession[]
+  createdAbsences     StylistAbsence[] @relation("AdminCreatedAbsences")
 
   @@index([email])
   @@index([salonId])
@@ -248,6 +274,7 @@ model Salon {
   notifications        Notification[]
   auditLogs            AuditLog[]
   errorLogs            ErrorLog[]
+  stylistAbsences      StylistAbsence[]
 
   @@index([createdByAdminId])
   @@index([slug])
@@ -334,6 +361,7 @@ model Stylist {
   services             StylistService[]
   workingHours         StylistWorkingHours[]
   appointments         Appointment[]
+  absences             StylistAbsence[]
 
   @@unique([salonId, id])
   @@index([salonId, status])
@@ -486,6 +514,7 @@ model Appointment {
   services            AppointmentService[]
   createdByAdmin      Admin?            @relation("AdminCreatedAppointments", fields: [createdByAdminId], references: [id], onDelete: SetNull)
   notifications       Notification[]
+  reassignments       BookingReassignment[]
 
   @@unique([salonId, id])
   @@index([salonId, appointmentDate])
@@ -690,4 +719,70 @@ model ErrorLog {
   @@index([salonId, status])
   @@index([fingerprint, status])
   @@map("error_logs")
+}
+
+// -----------------------------------------------------------------------------
+// STYLIST ABSENCE MANAGEMENT
+// -----------------------------------------------------------------------------
+model StylistAbsence {
+  id                    String         @id @default(uuid())
+  salonId               String         @map("salon_id")
+  stylistId             String         @map("stylist_id")
+  absenceDate           DateTime       @map("absence_date") @db.Date
+  reason                String?
+  notes                 String?
+  status                AbsenceStatus  @default(ACTIVE)
+
+  createdByAdminId      String?        @map("created_by_admin_id")
+
+  affectedBookingsCount Int            @default(0) @map("affected_bookings_count")
+  reassignedCount       Int            @default(0) @map("reassigned_count")
+  unresolvableCount     Int            @default(0) @map("unresolvable_count")
+
+  createdAt             DateTime       @default(now()) @map("created_at")
+  updatedAt             DateTime       @updatedAt @map("updated_at")
+
+  salon                 Salon          @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  stylist               Stylist        @relation(fields: [stylistId], references: [id], onDelete: Cascade)
+  createdByAdmin        Admin?         @relation("AdminCreatedAbsences", fields: [createdByAdminId], references: [id], onDelete: SetNull)
+  reassignments         BookingReassignment[]
+
+  @@unique([salonId, stylistId, absenceDate])
+  @@index([salonId, absenceDate])
+  @@index([stylistId, absenceDate])
+  @@map("stylist_absences")
+}
+
+model BookingReassignment {
+  id                    String              @id @default(uuid())
+  salonId               String              @map("salon_id")
+  appointmentId         String              @map("appointment_id")
+  absenceId             String              @map("absence_id")
+
+  originalStylistId     String              @map("original_stylist_id")
+  newStylistId          String?             @map("new_stylist_id")
+
+  originalStartAt       DateTime            @map("original_start_at") @db.Timestamptz
+  originalEndAt         DateTime            @map("original_end_at") @db.Timestamptz
+  newStartAt            DateTime?           @map("new_start_at") @db.Timestamptz
+  newEndAt              DateTime?           @map("new_end_at") @db.Timestamptz
+
+  outcome               ReassignmentOutcome @default(PENDING)
+  customerResponse      CustomerResponse?   @map("customer_response")
+
+  processedAt           DateTime?           @map("processed_at") @db.Timestamptz
+  customerRespondedAt   DateTime?           @map("customer_responded_at") @db.Timestamptz
+  notificationSentAt    DateTime?           @map("notification_sent_at") @db.Timestamptz
+  notificationFailed    Boolean             @default(false) @map("notification_failed")
+
+  createdAt             DateTime            @default(now()) @map("created_at")
+  updatedAt             DateTime            @updatedAt @map("updated_at")
+
+  absence               StylistAbsence      @relation(fields: [absenceId], references: [id], onDelete: Cascade)
+  appointment           Appointment         @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@unique([appointmentId, absenceId])
+  @@index([salonId, absenceId])
+  @@index([appointmentId])
+  @@map("booking_reassignments")
 }
