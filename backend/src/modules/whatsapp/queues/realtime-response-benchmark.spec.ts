@@ -74,7 +74,7 @@ describe('⚡ REAL-TIME SYSTEM RESPONSE TIME & BENCHMARK SUITE', () => {
     // Enqueue webhook
     let replyPayload: any = null;
     const tEnqueueStart = performance.now();
-    
+
     webhookQueue.enqueue(testSalon.id, { text: 'Hi' }, async () => {
       replyPayload = await whatsAppService.handleIncomingMessage(
         testSalon.id,

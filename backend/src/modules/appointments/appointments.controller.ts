@@ -21,7 +21,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { CurrentSalonId } from '../../common/decorators/tenant.decorator';
 import { CurrentUser, AuthenticatedUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
-import { AppointmentStatus } from '@prisma/client';
+import { AppointmentStatus, AdminRole } from '@prisma/client';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { RemindersService } from './reminders.service';
@@ -35,27 +35,22 @@ export class AppointmentsController {
   ) { }
 
   @Public()
-  @Post('trigger-reminders')
-  async triggerReminders() {
+  @Post('reminders/tick')
+  async triggerReminderTick() {
     return this.remindersService.processReminders();
   }
 
-  @Patch(':id/eta-status')
-  async updateEtaStatus(
-    @CurrentSalonId() salonId: string,
-    @Param('id') appointmentId: string,
-    @Body('etaStatus') etaStatus: string,
-  ) {
-    return this.appointmentsService.updateEtaStatus(salonId, appointmentId, etaStatus);
-  }
-
   @Public()
-  @Sse('stream/:salonId')
-  streamAppointments(@Param('salonId') salonId: string): Observable<MessageEvent> {
-    return this.appointmentsService.getSalonEvents(salonId).pipe(
+  @Get('sse')
+  sse(
+    @CurrentSalonId() salonId: string,
+    @Query('salonId') querySalonId?: string,
+  ): Observable<MessageEvent> {
+    const effectiveSalonId = salonId || querySalonId;
+    return this.appointmentsService.getSalonEvents(effectiveSalonId).pipe(
       map((event) => ({
-        data: JSON.stringify(event),
-      } as MessageEvent)),
+        data: event,
+      })),
     );
   }
 
@@ -64,14 +59,17 @@ export class AppointmentsController {
     @CurrentSalonId() salonId: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
+    @Query('date') date?: string,
     @Query('staffId') staffId?: string,
+    @Query('stylistId') stylistId?: string,
     @Query('status') status?: AppointmentStatus,
     @Query('customerId') customerId?: string,
   ) {
     return this.appointmentsService.getAppointments(salonId, {
-      startDate,
-      endDate,
-      staffId,
+      startDate: startDate || date,
+      endDate: endDate || date,
+      staffId: staffId || stylistId,
+      stylistId: stylistId || staffId,
       status,
       customerId,
     });
@@ -101,7 +99,10 @@ export class AppointmentsController {
     @Param('id') appointmentId: string,
     @Body() dto: UpdateAppointmentStatusDto,
   ) {
-    return this.appointmentsService.updateStatus(salonId, appointmentId, dto, user.id);
+    const adminId = (user?.role === AdminRole.SALON_OWNER || user?.role === AdminRole.SUPER_ADMIN)
+      ? user.id
+      : undefined;
+    return this.appointmentsService.updateStatus(salonId, appointmentId, dto, adminId);
   }
 
   @Post(':id/reschedule')

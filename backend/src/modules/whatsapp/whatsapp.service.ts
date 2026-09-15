@@ -10,7 +10,17 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../database/prisma.service';
 import { AvailabilityService, AvailableSlotResponse } from '../availability/availability.service';
 import { AppointmentsService } from '../appointments/appointments.service';
-import { ConversationState, BookingSource, WhatsAppMessageDirection, AppointmentStatus, ClientEtaStatus, WhatsAppMessageStatus, ServiceGender } from '@prisma/client';
+import {
+  ConversationState,
+  BookingSource,
+  WhatsAppMessageDirection,
+  AppointmentStatus,
+  ClientEtaStatus,
+  WhatsAppMessageStatus,
+  ServiceGender,
+  ReassignmentOutcome,
+  CustomerResponse,
+} from '@prisma/client';
 import { DateTime } from 'luxon';
 
 export interface InteractiveButton {
@@ -1773,6 +1783,281 @@ We look forward to seeing you earlier today.`;
       }
     }
 
+    // Absence Reassignment Handlers
+    if (input.startsWith('absence_accept_')) {
+      const reassignmentId = input.replace('absence_accept_', '');
+      const reassignment = await this.prisma.bookingReassignment.findFirst({
+        where: { id: reassignmentId, salonId },
+        include: {
+          appointment: {
+            include: {
+              stylist: true,
+              salonUser: { include: { user: true } },
+            },
+          },
+          absence: { include: { stylist: true } },
+        },
+      });
+
+      if (!reassignment || !reassignment.appointment) {
+        const reply = `⚠️ Reassignment record not found. Please contact the salon directly.`;
+        await this.sendMetaMessage(cleanNumber, { bodyText: reply }, phoneNumberId, salonId);
+        return { replyMessage: reply, state: ConversationState.START };
+      }
+
+      // Security check: caller phone must match customer phone
+      const custPhone = reassignment.appointment.salonUser?.user?.phone || '';
+      if (!custPhone.endsWith(cleanNumber.slice(-10))) {
+        this.logger.warn(`Unauthorized absence_accept attempt from ${cleanNumber} for appointment ${reassignment.appointment.id}`);
+        const reply = `⚠️ You are not authorized to update this appointment.`;
+        await this.sendMetaMessage(cleanNumber, { bodyText: reply }, phoneNumberId, salonId);
+        return { replyMessage: reply, state: ConversationState.START };
+      }
+
+      // State check: appointment must still be CONFIRMED
+      if (reassignment.appointment.status !== AppointmentStatus.CONFIRMED) {
+        const reply = `⚠️ This appointment is no longer active (current status: ${reassignment.appointment.status}). Reply *'Hi'* to book a new visit.`;
+        await this.sendMetaMessage(cleanNumber, { bodyText: reply }, phoneNumberId, salonId);
+        return { replyMessage: reply, state: ConversationState.START };
+      }
+
+      await this.prisma.bookingReassignment.update({
+        where: { id: reassignmentId },
+        data: {
+          outcome: ReassignmentOutcome.CUSTOMER_ACCEPTED,
+          customerResponse: CustomerResponse.ACCEPTED,
+          customerRespondedAt: new Date(),
+        },
+      });
+
+      let newStylistName = reassignment.appointment.stylist?.name || 'Stylist';
+      if (reassignment.newStylistId && !reassignment.appointment.stylist) {
+        const st = await this.prisma.stylist.findUnique({ where: { id: reassignment.newStylistId } });
+        if (st) newStylistName = st.name;
+      }
+
+      const tz = salon.timezone || 'Asia/Kolkata';
+      const timeStr = DateTime.fromJSDate(new Date(reassignment.appointment.startAt), { zone: tz }).toFormat('hh:mm a');
+      const reply = `🎉 *APPOINTMENT CONFIRMED!*\n\nThank you for confirming! Your appointment with *${newStylistName}* at *${salon.name}* is set for *${timeStr}*.`;
+
+      await this.sendMetaMessage(
+        cleanNumber,
+        {
+          bodyText: reply,
+          interactiveType: 'button',
+          buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
+        },
+        phoneNumberId,
+        salonId,
+      );
+
+      this.appointmentsService.emitSalonEvent(salonId, 'APPOINTMENT_UPDATED', reassignment.appointment);
+      return { replyMessage: reply, state: ConversationState.START };
+    }
+
+    if (input.startsWith('absence_reschedule_')) {
+      const apptId = input.replace('absence_reschedule_', '');
+      const appt = await this.prisma.appointment.findFirst({
+        where: { id: apptId, salonId },
+        include: { salonUser: { include: { user: true } } },
+      });
+
+      if (!appt) {
+        const reply = `⚠️ Appointment not found. Please contact the salon directly.`;
+        await this.sendMetaMessage(cleanNumber, { bodyText: reply }, phoneNumberId, salonId);
+        return { replyMessage: reply, state: ConversationState.START };
+      }
+
+      // Security check: caller phone must match customer phone
+      const custPhone = appt.salonUser?.user?.phone || '';
+      if (!custPhone.endsWith(cleanNumber.slice(-10))) {
+        this.logger.warn(`Unauthorized absence_reschedule attempt from ${cleanNumber} for appointment ${appt.id}`);
+        const reply = `⚠️ You are not authorized to update this appointment.`;
+        await this.sendMetaMessage(cleanNumber, { bodyText: reply }, phoneNumberId, salonId);
+        return { replyMessage: reply, state: ConversationState.START };
+      }
+
+      // State check: appointment must still be CONFIRMED
+      if (appt.status !== AppointmentStatus.CONFIRMED) {
+        const reply = `⚠️ This appointment is no longer active (current status: ${appt.status}). Reply *'Hi'* to book a new visit.`;
+        await this.sendMetaMessage(cleanNumber, { bodyText: reply }, phoneNumberId, salonId);
+        return { replyMessage: reply, state: ConversationState.START };
+      }
+
+      await this.prisma.conversation.update({
+        where: { id: conversation.id },
+        data: {
+          state: ConversationState.SELECT_RESCHEDULE_DATE,
+          activeAppointmentId: apptId,
+          selectedServiceId: appt.serviceId,
+          selectedStaffId: null,
+        },
+      });
+
+      await this.prisma.bookingReassignment.updateMany({
+        where: { appointmentId: apptId },
+        data: {
+          customerResponse: CustomerResponse.RESCHEDULED,
+          customerRespondedAt: new Date(),
+        },
+      });
+
+      const tz = salon.timezone || 'Asia/Kolkata';
+      const today = DateTime.now().setZone(tz);
+      const tomorrow = today.plus({ days: 1 });
+      const dayAfter = today.plus({ days: 2 });
+
+      const reply = `📅 *Select a new Date to Reschedule:*`;
+      await this.sendMetaMessage(
+        cleanNumber,
+        {
+          bodyText: reply,
+          interactiveType: 'button',
+          buttons: [
+            { id: 'rdate_1', title: `Today (${today.toFormat('dd LLL')})` },
+            { id: 'rdate_2', title: `Tmrw (${tomorrow.toFormat('dd LLL')})` },
+            { id: 'rdate_3', title: dayAfter.toFormat('EEE dd LLL') },
+          ],
+        },
+        phoneNumberId,
+        salonId,
+      );
+
+      return { replyMessage: reply, state: ConversationState.SELECT_RESCHEDULE_DATE };
+    }
+
+    if (input.startsWith('absence_cancel_nofault_')) {
+      const apptId = input.replace('absence_cancel_nofault_', '');
+      const appt = await this.prisma.appointment.findFirst({
+        where: { id: apptId, salonId },
+        include: { salonUser: { include: { user: true } } },
+      });
+
+      if (!appt) {
+        const reply = `⚠️ Appointment not found. Please contact the salon directly.`;
+        await this.sendMetaMessage(cleanNumber, { bodyText: reply }, phoneNumberId, salonId);
+        return { replyMessage: reply, state: ConversationState.START };
+      }
+
+      // Security check: caller phone must match customer phone
+      const custPhone = appt.salonUser?.user?.phone || '';
+      if (!custPhone.endsWith(cleanNumber.slice(-10))) {
+        this.logger.warn(`Unauthorized absence_cancel attempt from ${cleanNumber} for appointment ${appt.id}`);
+        const reply = `⚠️ You are not authorized to update this appointment.`;
+        await this.sendMetaMessage(cleanNumber, { bodyText: reply }, phoneNumberId, salonId);
+        return { replyMessage: reply, state: ConversationState.START };
+      }
+
+      // State check: appointment must still be CONFIRMED
+      if (appt.status !== AppointmentStatus.CONFIRMED) {
+        const reply = `⚠️ This appointment is no longer active (current status: ${appt.status}). Reply *'Hi'* to book a new visit.`;
+        await this.sendMetaMessage(cleanNumber, { bodyText: reply }, phoneNumberId, salonId);
+        return { replyMessage: reply, state: ConversationState.START };
+      }
+
+      await this.appointmentsService.updateStatus(
+        salonId,
+        apptId,
+        {
+          status: AppointmentStatus.CANCELLED,
+          reasonCategory: 'SALON_EMERGENCY',
+          reason: 'Stylist absent and no replacement specialist available',
+        },
+        'SYSTEM_WHATSAPP_BOT',
+      ).catch((err) => {
+        this.logger.error(`Failed to cancel appointment ${apptId} via absence_cancel_nofault: ${err.message}`, err.stack);
+      });
+
+      await this.prisma.bookingReassignment.updateMany({
+        where: { appointmentId: apptId },
+        data: {
+          outcome: ReassignmentOutcome.CUSTOMER_CANCELLED,
+          customerResponse: CustomerResponse.CANCELLED,
+          customerRespondedAt: new Date(),
+        },
+      });
+
+      const reply = `✅ *Appointment Cancelled (Zero Penalty)*\n\nWe sincerely apologize that we couldn't accommodate you today due to specialist unavailability. *Zero penalty* was applied to your account. We hope to serve you soon!`;
+      await this.sendMetaMessage(
+        cleanNumber,
+        {
+          bodyText: reply,
+          interactiveType: 'button',
+          buttons: [{ id: 'btn_book', title: '📅 Book New Visit' }],
+        },
+        phoneNumberId,
+        salonId,
+      );
+
+      return { replyMessage: reply, state: ConversationState.START };
+    }
+
+    if (input.startsWith('absence_cancel_')) {
+      const apptId = input.replace('absence_cancel_', '');
+      const appt = await this.prisma.appointment.findFirst({
+        where: { id: apptId, salonId },
+        include: { salonUser: { include: { user: true } } },
+      });
+
+      if (!appt) {
+        const reply = `⚠️ Appointment not found. Please contact the salon directly.`;
+        await this.sendMetaMessage(cleanNumber, { bodyText: reply }, phoneNumberId, salonId);
+        return { replyMessage: reply, state: ConversationState.START };
+      }
+
+      // Security check: caller phone must match customer phone
+      const custPhone = appt.salonUser?.user?.phone || '';
+      if (!custPhone.endsWith(cleanNumber.slice(-10))) {
+        this.logger.warn(`Unauthorized absence_cancel attempt from ${cleanNumber} for appointment ${appt.id}`);
+        const reply = `⚠️ You are not authorized to update this appointment.`;
+        await this.sendMetaMessage(cleanNumber, { bodyText: reply }, phoneNumberId, salonId);
+        return { replyMessage: reply, state: ConversationState.START };
+      }
+
+      // State check: appointment must still be CONFIRMED
+      if (appt.status !== AppointmentStatus.CONFIRMED) {
+        const reply = `⚠️ This appointment is no longer active (current status: ${appt.status}). Reply *'Hi'* to book a new visit.`;
+        await this.sendMetaMessage(cleanNumber, { bodyText: reply }, phoneNumberId, salonId);
+        return { replyMessage: reply, state: ConversationState.START };
+      }
+
+      await this.appointmentsService.updateStatus(
+        salonId,
+        apptId,
+        {
+          status: AppointmentStatus.CANCELLED,
+          reasonCategory: 'SALON_EMERGENCY',
+          reason: 'Cancelled by client following stylist absence notification',
+        },
+        'SYSTEM_WHATSAPP_BOT',
+      ).catch((err) => {
+        this.logger.error(`Failed to cancel appointment ${apptId} via absence_cancel: ${err.message}`, err.stack);
+      });
+
+      await this.prisma.bookingReassignment.updateMany({
+        where: { appointmentId: apptId },
+        data: {
+          outcome: ReassignmentOutcome.CUSTOMER_CANCELLED,
+          customerResponse: CustomerResponse.CANCELLED,
+          customerRespondedAt: new Date(),
+        },
+      });
+
+      const reply = `✅ *Your appointment has been cancelled (Zero Penalty).*\n\nWe apologize for the inconvenience caused by the specialist's absence. *Zero penalty* was applied to your account. You are welcome to book again whenever you are ready!`;
+      await this.sendMetaMessage(
+        cleanNumber,
+        {
+          bodyText: reply,
+          interactiveType: 'button',
+          buttons: [{ id: 'btn_book', title: '📅 Book New Visit' }],
+        },
+        phoneNumberId,
+        salonId,
+      );
+
+      return { replyMessage: reply, state: ConversationState.START };
+    }
+
     if (input === 'remind_reschedule') {
       const activeAppts = await this.findActiveUpcomingAppointments(salonId, cleanNumber);
       if (activeAppts.length > 0) {
@@ -2403,9 +2688,20 @@ We look forward to seeing you earlier today.`;
 
         const dateStr = targetDate.toISODate()!;
         // Build service ID(s) — if pending add-on exists, use both for combined duration
+        let effectiveServiceId = conversation.selectedServiceId;
+        if (!effectiveServiceId && conversation.activeAppointmentId) {
+          const origAppt = await this.prisma.appointment.findUnique({
+            where: { id: conversation.activeAppointmentId },
+            select: { serviceId: true },
+          });
+          if (origAppt?.serviceId) {
+            effectiveServiceId = origAppt.serviceId;
+          }
+        }
+
         const rescheduleServiceIds = conversation.pendingAddonServiceId
-          ? [conversation.selectedServiceId, conversation.pendingAddonServiceId].filter(Boolean)
-          : conversation.selectedServiceId || salon.services[0]?.id || '';
+          ? [effectiveServiceId, conversation.pendingAddonServiceId].filter(Boolean)
+          : effectiveServiceId || salon.services[0]?.id || '';
 
         const availability = await this.availabilityService.getAvailableSlots(
           salonId,

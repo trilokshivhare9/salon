@@ -7,9 +7,11 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { StaffService } from './staff.service';
+import { AbsenceService } from './absence.service';
 import {
   CreateStaffDto,
   UpdateStaffDto,
@@ -17,16 +19,25 @@ import {
   UpdateStaffWorkingHoursDto,
   CreateStaffBreakDto,
 } from './dto/create-staff.dto';
+import {
+  MarkAbsentDto,
+  PreviewAbsenceQueryDto,
+  GetAbsencesQueryDto,
+} from './dto/absence.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentSalonId } from '../../common/decorators/tenant.decorator';
+import { CurrentUser, AuthenticatedUser } from '../../common/decorators/current-user.decorator';
 import { AdminRole } from '@prisma/client';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('staff')
 export class StaffController {
-  constructor(private readonly staffService: StaffService) {}
+  constructor(
+    private readonly staffService: StaffService,
+    private readonly absenceService: AbsenceService,
+  ) {}
 
   @Get()
   async getStaff(@CurrentSalonId() salonId: string) {
@@ -125,6 +136,52 @@ export class StaffController {
     @Param('breakId') breakId: string,
   ) {
     return this.staffService.deleteStaffBreak(salonId, staffId, breakId);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Stylist Absence Management
+  // ---------------------------------------------------------------------------
+
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
+  @Post(':id/absence')
+  async markAbsent(
+    @CurrentSalonId() salonId: string,
+    @Param('id') staffId: string,
+    @Body() dto: MarkAbsentDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.absenceService.markStylistAbsent(salonId, staffId, dto, user?.id);
+  }
+
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
+  @Get(':id/absence/preview')
+  async previewAbsence(
+    @CurrentSalonId() salonId: string,
+    @Param('id') staffId: string,
+    @Query() query: PreviewAbsenceQueryDto,
+  ) {
+    return this.absenceService.previewAbsenceImpact(salonId, staffId, query.date);
+  }
+
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
+  @Get(':id/absences')
+  async getAbsences(
+    @CurrentSalonId() salonId: string,
+    @Param('id') staffId: string,
+    @Query() query: GetAbsencesQueryDto,
+  ) {
+    return this.absenceService.getStylistAbsences(salonId, staffId, query);
+  }
+
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
+  @Delete(':id/absence/:absenceId')
+  async cancelAbsence(
+    @CurrentSalonId() salonId: string,
+    @Param('id') staffId: string,
+    @Param('absenceId') absenceId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.absenceService.cancelAbsence(salonId, staffId, absenceId, user?.id);
   }
 }
 

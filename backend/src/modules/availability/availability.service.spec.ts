@@ -352,5 +352,30 @@ describe('AvailabilityService (Unit Tests)', () => {
       expect(result.availableSlots).toEqual([]);
       expect(result.status).toBe('PAST_DATE');
     });
+
+    it('should exclude absent stylists and query with absence filter', async () => {
+      jest.spyOn(prisma.salon, 'findUnique').mockResolvedValue(mockSalon as any);
+      jest.spyOn(prisma.service, 'findMany').mockResolvedValue([mockService1] as any);
+      jest.spyOn(prisma.salonWorkingHours, 'findUnique').mockResolvedValue(mockSalonWorkingHours as any);
+      const findManySpy = jest.spyOn(prisma.stylist, 'findMany').mockResolvedValue([]);
+      jest.spyOn(prisma.stylist, 'count').mockResolvedValue(1);
+
+      const dateStr = '2026-09-14';
+      const result = await service.getAvailableSlots(mockSalonId, mockService1.id, dateStr);
+
+      expect(findManySpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            absences: {
+              none: {
+                absenceDate: new Date(dateStr),
+                status: 'ACTIVE',
+              },
+            },
+          }),
+        }),
+      );
+      expect(result.status).toBe('STAFF_UNAVAILABLE');
+    });
   });
 });

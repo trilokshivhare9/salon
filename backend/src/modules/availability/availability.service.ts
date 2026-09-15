@@ -166,11 +166,18 @@ export class AvailabilityService {
           }
         : null;
 
-    // 3. Query eligible active stylists assigned to ALL requested services
+    // 3. Query eligible active stylists assigned to ALL requested services (excluding absent stylists)
+    const absenceDateObj = new Date(dateStr);
     const stylistQueryWhere: any = {
       salonId,
       status: 'ACTIVE',
       AND: serviceIds.map((sId) => ({ services: { some: { serviceId: sId } } })),
+      absences: {
+        none: {
+          absenceDate: absenceDateObj,
+          status: 'ACTIVE',
+        },
+      },
     };
     if (preferredStylistId) {
       stylistQueryWhere.id = preferredStylistId;

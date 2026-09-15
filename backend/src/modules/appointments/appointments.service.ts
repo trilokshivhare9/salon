@@ -16,7 +16,7 @@ import {
   RescheduleAppointmentDto,
 } from './dto/create-appointment.dto';
 import { DateTime } from 'luxon';
-import { AppointmentStatus, BookingSource, ClientEtaStatus, DayOfWeek, StylistStatus, ServiceStatus } from '@prisma/client';
+import { AppointmentStatus, BookingSource, ClientEtaStatus, DayOfWeek, StylistStatus, ServiceStatus, AbsenceStatus } from '@prisma/client';
 import { Subject, Observable } from 'rxjs';
 import { filter } from 'rxjs/operators';
 import * as crypto from 'crypto';
@@ -24,14 +24,14 @@ import * as crypto from 'crypto';
 export interface SalonRealtimeEvent {
   salonId: string;
   type:
-    | 'NEW_BOOKING'
-    | 'STATUS_UPDATED'
-    | 'RESCHEDULED'
-    | 'CANCELLED'
-    | 'BOOKING_CANCELLED'
-    | 'APPOINTMENT_UPDATED'
-    | 'STAFF_UPDATED'
-    | 'SERVICE_UPDATED';
+  | 'NEW_BOOKING'
+  | 'STATUS_UPDATED'
+  | 'RESCHEDULED'
+  | 'CANCELLED'
+  | 'BOOKING_CANCELLED'
+  | 'APPOINTMENT_UPDATED'
+  | 'STAFF_UPDATED'
+  | 'SERVICE_UPDATED';
   data: any;
   timestamp: string;
 }
@@ -87,7 +87,7 @@ export class AppointmentsService {
     private availabilityService: AvailabilityService,
     @Inject(forwardRef(() => WhatsAppService))
     private whatsappService: WhatsAppService,
-  ) {}
+  ) { }
 
   getSalonEvents(salonId: string): Observable<SalonRealtimeEvent> {
     return this.events$.asObservable().pipe(
@@ -204,8 +204,8 @@ export class AppointmentsService {
       dto.serviceIds && dto.serviceIds.length > 0
         ? dto.serviceIds
         : dto.serviceId
-        ? [dto.serviceId]
-        : [];
+          ? [dto.serviceId]
+          : [];
 
     if (serviceIds.length === 0) {
       throw new BadRequestException('At least one service must be selected.');
@@ -382,8 +382,20 @@ export class AppointmentsService {
                 });
 
                 if (!overlap) {
-                  assignedStylistId = candidateId;
-                  break;
+                  // Re-verify candidate has no active absence on this date
+                  const candidateAbsence = await tx.stylistAbsence.findFirst({
+                    where: {
+                      salonId,
+                      stylistId: candidateId,
+                      absenceDate: new Date(`${dto.date}T00:00:00.000Z`),
+                      status: AbsenceStatus.ACTIVE,
+                    },
+                  });
+
+                  if (!candidateAbsence) {
+                    assignedStylistId = candidateId;
+                    break;
+                  }
                 }
               }
             }
@@ -406,6 +418,19 @@ export class AppointmentsService {
 
           if (!assignedStylist || assignedStylist.status !== StylistStatus.ACTIVE) {
             throw new ConflictException('Selected specialist is inactive or no longer available.');
+          }
+
+          // Re-verify stylist absence status under lock
+          const activeAbsence = await tx.stylistAbsence.findFirst({
+            where: {
+              salonId,
+              stylistId: assignedStylistId!,
+              absenceDate: new Date(`${dto.date}T00:00:00.000Z`),
+              status: AbsenceStatus.ACTIVE,
+            },
+          });
+          if (activeAbsence) {
+            throw new ConflictException('Selected specialist is marked absent on this date.');
           }
 
           // Re-verify services status under lock
@@ -640,7 +665,7 @@ export class AppointmentsService {
             },
             phoneNumberId,
             salonId,
-          ).catch(() => {});
+          ).catch(() => { });
         } else if (isPenaltyApplied) {
           // Penalty Strike Notice
           let message = '';
@@ -658,7 +683,7 @@ export class AppointmentsService {
             },
             phoneNumberId,
             salonId,
-          ).catch(() => {});
+          ).catch(() => { });
         }
       } else if (dto.status === AppointmentStatus.CHECKED_IN) {
         const welcomeMsg = `👋 *WELCOME TO ${salon.name.toUpperCase()}!*\n\nHi *${userName}*, you are checked in! Your stylist *${updated.stylist?.name || 'Stylist'}* will call you to the chair shortly.`;
@@ -671,7 +696,7 @@ export class AppointmentsService {
           },
           phoneNumberId,
           salonId,
-        ).catch(() => {});
+        ).catch(() => { });
       } else if (dto.status === AppointmentStatus.COMPLETED) {
         const receiptMsg = `✨ *THANK YOU FOR VISITING ${salon.name.toUpperCase()}!*\n\nHi *${userName}*, thank you for visiting us today!\n\n• *Service:* *${updated.serviceNameSnapshot}*\n• *Stylist:* *${updated.stylist?.name || 'Stylist'}*\n• *Total Paid:* *₹${updated.price}*\n\n⭐ *How was your experience today?*`;
         await this.whatsappService.sendMetaMessage(
@@ -686,7 +711,7 @@ export class AppointmentsService {
           },
           phoneNumberId,
           salonId,
-        ).catch(() => {});
+        ).catch(() => { });
       }
     }
 
@@ -757,7 +782,7 @@ Does this new time work for you?`;
         },
         salon.whatsappAccount.phoneNumberId,
         salonId,
-      ).catch(() => {});
+      ).catch(() => { });
     }
 
     return formatted;
@@ -923,6 +948,19 @@ Does this new time work for you?`;
 
           if (!targetStylist || targetStylist.status !== StylistStatus.ACTIVE) {
             throw new ConflictException('Selected specialist is inactive or no longer available.');
+          }
+
+          // Re-verify stylist absence status on new date under lock
+          const rescheduleAbsence = await tx.stylistAbsence.findFirst({
+            where: {
+              salonId,
+              stylistId: targetStylistId,
+              absenceDate: new Date(`${dto.newDate}T00:00:00.000Z`),
+              status: AbsenceStatus.ACTIVE,
+            },
+          });
+          if (rescheduleAbsence) {
+            throw new ConflictException('Selected specialist is marked absent on the new date.');
           }
 
           // Re-verify service status under lock
