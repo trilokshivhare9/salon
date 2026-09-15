@@ -31,6 +31,7 @@ describe('AppointmentsService (Unit Tests)', () => {
             user: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
             salonUser: { upsert: jest.fn(), findFirst: jest.fn() },
             notification: { create: jest.fn() },
+            stylistAbsence: { findFirst: jest.fn().mockResolvedValue(null) },
             $transaction: jest.fn(async (cb) => {
               if (typeof cb === 'function') {
                 return cb(prisma);

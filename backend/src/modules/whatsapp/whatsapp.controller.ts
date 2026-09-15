@@ -26,7 +26,7 @@ export class WhatsAppController {
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
     private readonly webhookQueue: WhatsAppWebhookQueue,
-  ) {}
+  ) { }
 
   // Meta Cloud API Webhook Verification
   @Get('webhook')

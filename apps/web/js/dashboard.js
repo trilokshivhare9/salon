@@ -133,7 +133,9 @@ export class SalonDashboard {
       // Live update desktop tab labels with current counts
       const staffTabSpan = this.container.querySelector('.nav-tab[data-tab="staff"] span');
       if (staffTabSpan && this.staffList) {
-        staffTabSpan.textContent = `Stylists (${this.staffList.length})`;
+        const _tabDateIso = (this.selectedDate || new Date().toISOString().split('T')[0]);
+        const _tabAvailCount = this.staffList.filter(s => s.status === 'ACTIVE' && !(s.absences || []).some(ab => (ab.absenceDate || '').split('T')[0] === _tabDateIso && ab.status === 'ACTIVE')).length;
+        staffTabSpan.textContent = `Stylists (${this.staffList.length}) \u2022 ${_tabAvailCount} Available`;
       }
       const servicesTabSpan = this.container.querySelector('.nav-tab[data-tab="services"] span');
       if (servicesTabSpan && this.servicesList) {
@@ -385,7 +387,7 @@ export class SalonDashboard {
           </button>
           <button class="nav-tab ${this.activeTab === 'staff' ? 'active' : ''}" data-tab="staff">
             ${Icons.users({ size: 16 })}
-            <span>Stylists (${this.staffList.length})</span>
+            <span>Stylists (${this.staffList.length}) \u2022 ${((sl, d) => sl.filter(s => s.status === 'ACTIVE' && !(s.absences || []).some(ab => (ab.absenceDate || '').split('T')[0] === d && ab.status === 'ACTIVE')).length)(this.staffList, this.selectedDate || new Date().toISOString().split('T')[0])} Available</span>
           </button>
           <button class="nav-tab ${this.activeTab === 'queue' ? 'active' : ''}" data-tab="queue">
             ${Icons.queue({ size: 16 })}
@@ -562,15 +564,19 @@ export class SalonDashboard {
           const todayAppts = (todayAppointments || []).filter((a) => (a.staff?.id || a.staffId) === st.id);
           const inService = todayAppts.find((a) => a.status === 'IN_SERVICE');
           const isOccupied = !!inService;
+          const _stDateIso = (this.selectedDate || new Date().toISOString().split('T')[0]);
+          const _stAbsent = (st.absences || []).some((ab) => (ab.absenceDate || '').split('T')[0] === _stDateIso && ab.status === 'ACTIVE');
+          const _stStatusColor = _stAbsent ? '#fb7185' : isOccupied ? '#c084fc' : '#34d399';
+          const _stStatusLabel = _stAbsent ? '🚫 Absent Today' : isOccupied ? `In Chair: ${inService.customer?.name || 'Client'}` : '🟢 Ready for Walk-In';
           return `
-                    <div class="station-card ${isOccupied ? 'occupied' : 'ready'}">
+                    <div class="station-card ${_stAbsent ? 'absent' : isOccupied ? 'occupied' : 'ready'}" style="${_stAbsent ? 'opacity: 0.55;' : ''}">
                       <div class="station-num-badge">#${idx + 1}</div>
                       <div style="flex: 1; min-width: 0;">
                         <div style="font-weight: 700; font-size: 0.85rem; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                           ${st.name}
                         </div>
-                        <div style="font-size: 0.72rem; color: ${isOccupied ? '#c084fc' : '#34d399'}; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                          ${isOccupied ? `In Chair: ${inService.customer?.name || 'Client'}` : '🟢 Ready for Walk-In'}
+                        <div style="font-size: 0.72rem; color: ${_stStatusColor}; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                          ${_stStatusLabel}
                         </div>
                       </div>
                     </div>
@@ -736,7 +742,7 @@ export class SalonDashboard {
           <div>
             <h3 style="font-size: 1.15rem; display: flex; align-items: center; gap: 8px;">
               ${Icons.users({ size: 18, color: '#818cf8' })}
-              <span>Stylist Floor Status (${this.staffList.length} Active)</span>
+              <span>Stylist Floor Status (${((sl, d) => sl.filter(s => s.status === 'ACTIVE' && !(s.absences || []).some(ab => (ab.absenceDate || '').split('T')[0] === d && ab.status === 'ACTIVE')).length)(this.staffList, this.selectedDate || new Date().toISOString().split('T')[0])} Available Today)</span>
             </h3>
             <p style="font-size: 0.82rem; color: var(--text-secondary);">Current station occupancy and working specialists.</p>
           </div>
@@ -749,16 +755,21 @@ export class SalonDashboard {
           ${this.staffList.map((st) => {
         const activeBookings = todayAppointments.filter((a) => a.staffId === st.id && (a.status === 'IN_PROGRESS' || a.status === 'CHECKED_IN'));
         const isBusy = activeBookings.length > 0;
+        const _fsDateIso = (this.selectedDate || new Date().toISOString().split('T')[0]);
+        const _fsAbsent = (st.absences || []).some((ab) => (ab.absenceDate || '').split('T')[0] === _fsDateIso && ab.status === 'ACTIVE');
+        const _fsBorderColor = _fsAbsent ? '#fb7185' : isBusy ? '#8b5cf6' : '#10b981';
+        const _fsStatusColor = _fsAbsent ? '#fb7185' : isBusy ? '#c084fc' : '#34d399';
+        const _fsStatusLabel = _fsAbsent ? '🚫 Absent Today' : isBusy ? 'Serving in Chair' : 'Ready for Walk-in';
         return `
-              <div class="staff-card" style="display: flex; align-items: center; gap: 14px; padding: 16px;">
-                <div class="staff-avatar" style="width: 44px; height: 44px; font-size: 1.1rem; border-radius: 12px; border: 2px solid ${isBusy ? '#8b5cf6' : '#10b981'}; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.05); font-weight: 800; color: #fff;">
+              <div class="staff-card" style="display: flex; align-items: center; gap: 14px; padding: 16px; ${_fsAbsent ? 'opacity: 0.55;' : ''}">
+                <div class="staff-avatar" style="width: 44px; height: 44px; font-size: 1.1rem; border-radius: 12px; border: 2px solid ${_fsBorderColor}; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.05); font-weight: 800; color: #fff;">
                   ${st.profileImageUrl ? `<img src="${st.profileImageUrl}" alt="${st.name}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 10px;" />` : st.name.charAt(0).toUpperCase()}
                 </div>
                 <div style="flex: 1;">
                   <div style="font-weight: 700; color: #fff; font-size: 0.95rem;">${st.name}</div>
-                  <div style="font-size: 0.78rem; display: flex; align-items: center; gap: 6px; margin-top: 2px; color: ${isBusy ? '#c084fc' : '#34d399'}; font-weight: 600;">
-                    <span class="q-live-dot" style="width: 5px; height: 5px; background: ${isBusy ? '#8b5cf6' : '#10b981'}; box-shadow: 0 0 8px ${isBusy ? '#8b5cf6' : '#10b981'};"></span>
-                    <span>${isBusy ? 'Serving in Chair' : 'Ready for Walk-in'}</span>
+                  <div style="font-size: 0.78rem; display: flex; align-items: center; gap: 6px; margin-top: 2px; color: ${_fsStatusColor}; font-weight: 600;">
+                    <span class="q-live-dot" style="width: 5px; height: 5px; background: ${_fsBorderColor}; box-shadow: 0 0 8px ${_fsBorderColor};"></span>
+                    <span>${_fsStatusLabel}</span>
                   </div>
                 </div>
               </div>

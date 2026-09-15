@@ -340,7 +340,7 @@ export class BookingWizard {
           sub = 'All appointment slots are taken. Please try another day.';
         } else if (data.status === 'STAFF_UNAVAILABLE') {
           title = 'Specialist Unavailable';
-          sub = 'The selected specialist does not work on this date. Try another specialist or date.';
+          sub = 'The selected specialist is either absent or does not work on this date. Try "Any Available Specialist" or choose another date.';
         }
 
         slotsContainer.innerHTML = `

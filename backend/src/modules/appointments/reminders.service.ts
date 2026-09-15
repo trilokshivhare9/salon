@@ -57,247 +57,247 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
         const now = DateTime.now().setZone(tz);
         const phoneNumberId = salon.whatsappAccount?.phoneNumberId;
 
-      // -----------------------------------------------------------------------
-      // STAGE 1: Advance 2-Hour Reminder
-      // -----------------------------------------------------------------------
-      const stage1Min = now.plus({ minutes: 45 }).toJSDate();
-      const stage1Max = now.plus({ hours: 2, minutes: 15 }).toJSDate();
+        // -----------------------------------------------------------------------
+        // STAGE 1: Advance 2-Hour Reminder
+        // -----------------------------------------------------------------------
+        const stage1Min = now.plus({ minutes: 45 }).toJSDate();
+        const stage1Max = now.plus({ hours: 2, minutes: 15 }).toJSDate();
 
-      const stage1Appointments = await this.prisma.appointment.findMany({
-        where: {
-          salonId: salon.id,
-          status: AppointmentStatus.CONFIRMED,
-          reminder2hSentAt: null,
-          startAt: {
-            gte: stage1Min,
-            lte: stage1Max,
-          },
-          reassignments: {
-            none: {
-              outcome: ReassignmentOutcome.NO_REPLACEMENT,
-              absence: { status: AbsenceStatus.ACTIVE },
+        const stage1Appointments = await this.prisma.appointment.findMany({
+          where: {
+            salonId: salon.id,
+            status: AppointmentStatus.CONFIRMED,
+            reminder2hSentAt: null,
+            startAt: {
+              gte: stage1Min,
+              lte: stage1Max,
+            },
+            reassignments: {
+              none: {
+                outcome: ReassignmentOutcome.NO_REPLACEMENT,
+                absence: { status: AbsenceStatus.ACTIVE },
+              },
             },
           },
-        },
-        include: {
-          salonUser: {
-            include: {
-              user: true,
+          include: {
+            salonUser: {
+              include: {
+                user: true,
+              },
             },
-          },
-          stylist: true,
-          service: true,
-        },
-      });
-
-      for (const appt of stage1Appointments) {
-        const user = appt.salonUser?.user;
-        if (!user?.phone) continue;
-        const timeStr = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('hh:mm a');
-        const dateStr = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('dd LLL, EEE');
-
-        const message = `⏰ *APPOINTMENT REMINDER*\n\nHello *${user.name || 'Customer'}*, your upcoming visit at *${salon.name}* is in ~2 hours:\n\n• *Service:* *${appt.serviceNameSnapshot || appt.service?.name}* (₹${appt.price})\n• *Stylist:* *${appt.stylist?.name || 'Stylist'}*\n• *Date:* *${dateStr}*\n• *Time:* *${timeStr}*\n\n📍 *${salon.name}*\n${salon.address || ''}\n\nPlease confirm your arrival so we keep your chair ready!`;
-
-        await this.whatsAppService.sendMetaMessage(
-          user.phone,
-          {
-            bodyText: message,
-            interactiveType: 'button',
-            buttons: [
-              { id: 'remind_confirm', title: "✅ I'll Be There" },
-              { id: 'remind_reschedule', title: '🔄 Reschedule' },
-              { id: 'remind_cancel', title: '❌ Cancel' },
-            ],
-          },
-          phoneNumberId,
-          salon.id,
-        );
-
-        await this.prisma.appointment.update({
-          where: { id: appt.id },
-          data: { reminder2hSentAt: new Date() },
-        });
-
-        stage1Count++;
-      }
-
-      // -----------------------------------------------------------------------
-      // STAGE 2: Imminent 15-Minute Arrival Alert & Warning
-      // -----------------------------------------------------------------------
-      const stage2Max = now.plus({ minutes: 20 }).toJSDate();
-
-      const stage2Appointments = await this.prisma.appointment.findMany({
-        where: {
-          salonId: salon.id,
-          status: AppointmentStatus.CONFIRMED,
-          reminder10mSentAt: null,
-          startAt: {
-            gte: now.toJSDate(),
-            lte: stage2Max,
-          },
-          reassignments: {
-            none: {
-              outcome: ReassignmentOutcome.NO_REPLACEMENT,
-              absence: { status: AbsenceStatus.ACTIVE },
-            },
-          },
-        },
-        include: {
-          salonUser: {
-            include: {
-              user: true,
-            },
-          },
-          stylist: true,
-          service: true,
-        },
-      });
-
-      for (const appt of stage2Appointments) {
-        const user = appt.salonUser?.user;
-        if (!user?.phone) continue;
-        const timeStr = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('hh:mm a');
-
-        const message = `🚨 *URGENT: ARRIVAL CHECK-IN REQUIRED*\n\nHi *${user.name || 'Customer'}*, your appointment at *${salon.name}* with *${appt.stylist?.name || 'Stylist'}* starts in ~15 mins (*${timeStr}*).\n\n⚠️ *Arrival Notice:* We hold your chair strictly for 5 minutes after start time before automatic slot cancellation.\n\nPlease update your status below:`;
-
-        await this.whatsAppService.sendMetaMessage(
-          user.phone,
-          {
-            bodyText: message,
-            interactiveType: 'button',
-            buttons: [
-              { id: 'btn_eta_arrived', title: "📍 I'm Arrived" },
-              { id: 'btn_eta_on_the_way', title: '🚗 On My Way' },
-              { id: 'btn_eta_cancel', title: '❌ Cancel Visit' },
-            ],
-          },
-          phoneNumberId,
-          salon.id,
-        );
-
-        await this.prisma.appointment.update({
-          where: { id: appt.id },
-          data: { reminder10mSentAt: new Date() },
-        });
-
-        stage2Count++;
-      }
-
-      // -----------------------------------------------------------------------
-      // STAGE 4: Auto-Cancellation & Penalty Strike Worker (+5m Grace Period)
-      // -----------------------------------------------------------------------
-      const todayStart = now.startOf('day').toJSDate();
-      const gracePeriodCutoff = now.minus({ minutes: 5 }).toJSDate();
-
-      const expiredAppointments = await this.prisma.appointment.findMany({
-        where: {
-          salonId: salon.id,
-          status: AppointmentStatus.CONFIRMED,
-          startAt: {
-            gte: todayStart,
-            lte: gracePeriodCutoff,
-          },
-          OR: [
-            { clientEtaStatus: null },
-            { clientEtaStatus: { not: ClientEtaStatus.ON_THE_WAY } },
-          ],
-        },
-        include: {
-          salonUser: {
-            include: {
-              user: true,
-            },
-          },
-          stylist: true,
-          service: true,
-          reassignments: {
-            where: {
-              outcome: ReassignmentOutcome.NO_REPLACEMENT,
-              absence: { status: AbsenceStatus.ACTIVE },
-            },
-          },
-        },
-      });
-
-      for (const appt of expiredAppointments) {
-        const user = appt.salonUser?.user;
-        const timeStr = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('hh:mm a');
-
-        // Check if appointment is unresolvable due to active stylist absence
-        const hasUnresolvedAbsence = (appt.reassignments && appt.reassignments.length > 0);
-        if (hasUnresolvedAbsence) {
-          // Salon Emergency cancellation: ZERO customer penalty
-          await this.appointmentsService.updateStatus(
-            salon.id,
-            appt.id,
-            {
-              status: AppointmentStatus.CANCELLED,
-              reasonCategory: 'SALON_EMERGENCY',
-              reason: 'Auto-cancelled: specialist absent and no replacement available',
-            },
-            'SYSTEM_REMINDERS_WORKER',
-          );
-          stage4Count++;
-          continue;
-        }
-
-        // Mark appointment as NO_SHOW and record auto-cancellation date
-        await this.prisma.appointment.update({
-          where: { id: appt.id },
-          data: {
-            status: AppointmentStatus.NO_SHOW,
-            notes: 'Auto-canceled by system due to no-response after 5-minute grace period.',
+            stylist: true,
+            service: true,
           },
         });
 
-        // Increment customer yearly no-show count & enforce penalty locking
-        let remainingPenalties = 2;
-        if (appt.salonUserId) {
-          const salonUser = await this.prisma.salonUser.findUnique({
-            where: { id: appt.salonUserId },
-          });
+        for (const appt of stage1Appointments) {
+          const user = appt.salonUser?.user;
+          if (!user?.phone) continue;
+          const timeStr = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('hh:mm a');
+          const dateStr = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('dd LLL, EEE');
 
-          const currentCount = salonUser?.yearlyNoShowCount || 0;
-          const newCount = currentCount + 1;
-          remainingPenalties = Math.max(0, 3 - newCount);
-          const isBlocked = newCount >= 3;
-
-          await this.prisma.salonUser.update({
-            where: { id: appt.salonUserId },
-            data: {
-              yearlyNoShowCount: newCount,
-              lastNoShowDate: new Date(),
-              isBookingBlocked: isBlocked,
-            },
-          });
-        }
-
-        // Send Penalty WhatsApp Notice to Customer
-        if (user?.phone) {
-          let message = '';
-          if (remainingPenalties > 0) {
-            message = `⚠️ *APPOINTMENT AUTO-CANCELED*\n\nHi *${user.name || 'Customer'}*, your appointment for *${timeStr}* with *${appt.stylist?.name || 'Stylist'}* was auto-canceled because we did not receive an arrival confirmation.\n\n⚠️ *Penalty Strike Recorded:* You have *1 penalty strike* recorded. You have *${remainingPenalties} penalty strike(s) remaining* this year before automatic slot booking is locked.`;
-          } else {
-            message = `⚠️ *ACCOUNT BOOKING LOCKED*\n\nHi *${user.name || 'Customer'}*, you have accumulated *3 penalty strikes* this year for missed appointments. Automatic slot booking is now locked for your account.\n\n📞 *Please contact the Salon Owner* directly to request access unblock.`;
-          }
+          const message = `⏰ *APPOINTMENT REMINDER*\n\nHello *${user.name || 'Customer'}*, your upcoming visit at *${salon.name}* is in ~2 hours:\n\n• *Service:* *${appt.serviceNameSnapshot || appt.service?.name}* (₹${appt.price})\n• *Stylist:* *${appt.stylist?.name || 'Stylist'}*\n• *Date:* *${dateStr}*\n• *Time:* *${timeStr}*\n\n📍 *${salon.name}*\n${salon.address || ''}\n\nPlease confirm your arrival so we keep your chair ready!`;
 
           await this.whatsAppService.sendMetaMessage(
             user.phone,
             {
               bodyText: message,
               interactiveType: 'button',
-              buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
+              buttons: [
+                { id: 'remind_confirm', title: "✅ I'll Be There" },
+                { id: 'remind_reschedule', title: '🔄 Reschedule' },
+                { id: 'remind_cancel', title: '❌ Cancel' },
+              ],
             },
             phoneNumberId,
             salon.id,
-          ).catch(() => { });
+          );
+
+          await this.prisma.appointment.update({
+            where: { id: appt.id },
+            data: { reminder2hSentAt: new Date() },
+          });
+
+          stage1Count++;
         }
 
-        // Trigger Smart Express Move-Up Broadcast for the newly freed slot
-        await this.appointmentsService.triggerSmartMoveUpBroadcast(appt);
+        // -----------------------------------------------------------------------
+        // STAGE 2: Imminent 15-Minute Arrival Alert & Warning
+        // -----------------------------------------------------------------------
+        const stage2Max = now.plus({ minutes: 20 }).toJSDate();
 
-        stage4Count++;
-      }
+        const stage2Appointments = await this.prisma.appointment.findMany({
+          where: {
+            salonId: salon.id,
+            status: AppointmentStatus.CONFIRMED,
+            reminder10mSentAt: null,
+            startAt: {
+              gte: now.toJSDate(),
+              lte: stage2Max,
+            },
+            reassignments: {
+              none: {
+                outcome: ReassignmentOutcome.NO_REPLACEMENT,
+                absence: { status: AbsenceStatus.ACTIVE },
+              },
+            },
+          },
+          include: {
+            salonUser: {
+              include: {
+                user: true,
+              },
+            },
+            stylist: true,
+            service: true,
+          },
+        });
+
+        for (const appt of stage2Appointments) {
+          const user = appt.salonUser?.user;
+          if (!user?.phone) continue;
+          const timeStr = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('hh:mm a');
+
+          const message = `🚨 *URGENT: ARRIVAL CHECK-IN REQUIRED*\n\nHi *${user.name || 'Customer'}*, your appointment at *${salon.name}* with *${appt.stylist?.name || 'Stylist'}* starts in ~15 mins (*${timeStr}*).\n\n⚠️ *Arrival Notice:* We hold your chair strictly for 5 minutes after start time before automatic slot cancellation.\n\nPlease update your status below:`;
+
+          await this.whatsAppService.sendMetaMessage(
+            user.phone,
+            {
+              bodyText: message,
+              interactiveType: 'button',
+              buttons: [
+                { id: 'btn_eta_arrived', title: "📍 I'm Arrived" },
+                { id: 'btn_eta_on_the_way', title: '🚗 On My Way' },
+                { id: 'btn_eta_cancel', title: '❌ Cancel Visit' },
+              ],
+            },
+            phoneNumberId,
+            salon.id,
+          );
+
+          await this.prisma.appointment.update({
+            where: { id: appt.id },
+            data: { reminder10mSentAt: new Date() },
+          });
+
+          stage2Count++;
+        }
+
+        // -----------------------------------------------------------------------
+        // STAGE 4: Auto-Cancellation & Penalty Strike Worker (+5m Grace Period)
+        // -----------------------------------------------------------------------
+        const todayStart = now.startOf('day').toJSDate();
+        const gracePeriodCutoff = now.minus({ minutes: 5 }).toJSDate();
+
+        const expiredAppointments = await this.prisma.appointment.findMany({
+          where: {
+            salonId: salon.id,
+            status: AppointmentStatus.CONFIRMED,
+            startAt: {
+              gte: todayStart,
+              lte: gracePeriodCutoff,
+            },
+            OR: [
+              { clientEtaStatus: null },
+              { clientEtaStatus: { not: ClientEtaStatus.ON_THE_WAY } },
+            ],
+          },
+          include: {
+            salonUser: {
+              include: {
+                user: true,
+              },
+            },
+            stylist: true,
+            service: true,
+            reassignments: {
+              where: {
+                outcome: ReassignmentOutcome.NO_REPLACEMENT,
+                absence: { status: AbsenceStatus.ACTIVE },
+              },
+            },
+          },
+        });
+
+        for (const appt of expiredAppointments) {
+          const user = appt.salonUser?.user;
+          const timeStr = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('hh:mm a');
+
+          // Check if appointment is unresolvable due to active stylist absence
+          const hasUnresolvedAbsence = (appt.reassignments && appt.reassignments.length > 0);
+          if (hasUnresolvedAbsence) {
+            // Salon Emergency cancellation: ZERO customer penalty
+            await this.appointmentsService.updateStatus(
+              salon.id,
+              appt.id,
+              {
+                status: AppointmentStatus.CANCELLED,
+                reasonCategory: 'SALON_EMERGENCY',
+                reason: 'Auto-cancelled: specialist absent and no replacement available',
+              },
+              'SYSTEM_REMINDERS_WORKER',
+            );
+            stage4Count++;
+            continue;
+          }
+
+          // Mark appointment as NO_SHOW and record auto-cancellation date
+          await this.prisma.appointment.update({
+            where: { id: appt.id },
+            data: {
+              status: AppointmentStatus.NO_SHOW,
+              notes: 'Auto-canceled by system due to no-response after 5-minute grace period.',
+            },
+          });
+
+          // Increment customer yearly no-show count & enforce penalty locking
+          let remainingPenalties = 2;
+          if (appt.salonUserId) {
+            const salonUser = await this.prisma.salonUser.findUnique({
+              where: { id: appt.salonUserId },
+            });
+
+            const currentCount = salonUser?.yearlyNoShowCount || 0;
+            const newCount = currentCount + 1;
+            remainingPenalties = Math.max(0, 3 - newCount);
+            const isBlocked = newCount >= 3;
+
+            await this.prisma.salonUser.update({
+              where: { id: appt.salonUserId },
+              data: {
+                yearlyNoShowCount: newCount,
+                lastNoShowDate: new Date(),
+                isBookingBlocked: isBlocked,
+              },
+            });
+          }
+
+          // Send Penalty WhatsApp Notice to Customer
+          if (user?.phone) {
+            let message = '';
+            if (remainingPenalties > 0) {
+              message = `⚠️ *APPOINTMENT AUTO-CANCELED*\n\nHi *${user.name || 'Customer'}*, your appointment for *${timeStr}* with *${appt.stylist?.name || 'Stylist'}* was auto-canceled because we did not receive an arrival confirmation.\n\n⚠️ *Penalty Strike Recorded:* You have *1 penalty strike* recorded. You have *${remainingPenalties} penalty strike(s) remaining* this year before automatic slot booking is locked.`;
+            } else {
+              message = `⚠️ *ACCOUNT BOOKING LOCKED*\n\nHi *${user.name || 'Customer'}*, you have accumulated *3 penalty strikes* this year for missed appointments. Automatic slot booking is now locked for your account.\n\n📞 *Please contact the Salon Owner* directly to request access unblock.`;
+            }
+
+            await this.whatsAppService.sendMetaMessage(
+              user.phone,
+              {
+                bodyText: message,
+                interactiveType: 'button',
+                buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
+              },
+              phoneNumberId,
+              salon.id,
+            ).catch(() => { });
+          }
+
+          // Trigger Smart Express Move-Up Broadcast for the newly freed slot
+          await this.appointmentsService.triggerSmartMoveUpBroadcast(appt);
+
+          stage4Count++;
+        }
       } catch (salonErr: any) {
         this.logger.error(
           `[Reminders Worker] Error processing reminders for salon "${salon.name}" (${salon.id}):`,

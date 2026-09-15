@@ -29,7 +29,7 @@ export class AbsenceService {
     private readonly appointmentsService: AppointmentsService,
     @Inject(forwardRef(() => WhatsAppService))
     private readonly whatsappService: WhatsAppService,
-  ) {}
+  ) { }
 
   private hashToSignedInt32(input: string): number {
     return crypto.createHash('sha256').update(input).digest().readInt32BE(0);
@@ -148,7 +148,7 @@ export class AbsenceService {
       const dateIso = DateTime.fromJSDate(absenceDate, { zone: 'UTC' }).toISODate()!;
       const candLockKey = this.hashToSignedInt32(`stylist:${candidate.id}:${dateIso}`);
       await tx.$executeRawUnsafe(
-        'SELECT pg_advisory_xact_lock($1, $2)',
+        'SELECT pg_advisory_xact_lock($1::integer, $2::integer)',
         key1,
         candLockKey,
       );
@@ -227,7 +227,7 @@ export class AbsenceService {
         const key1 = this.hashToSignedInt32(`salon:${salonId}`);
         const stylistLockKey = this.hashToSignedInt32(`stylist:${stylistId}:${dateIso}`);
         await tx.$executeRawUnsafe(
-          'SELECT pg_advisory_xact_lock($1, $2)',
+          'SELECT pg_advisory_xact_lock($1::integer, $2::integer)',
           key1,
           stylistLockKey,
         );
@@ -796,7 +796,7 @@ export class AbsenceService {
             status: 'DELIVERED',
             sentAt: new Date(),
           },
-        }).catch(() => {});
+        }).catch(() => { });
 
         // Mark reassignment notification sent
         await this.prisma.bookingReassignment.update({
@@ -849,7 +849,7 @@ export class AbsenceService {
             status: 'DELIVERED',
             sentAt: new Date(),
           },
-        }).catch(() => {});
+        }).catch(() => { });
 
         // Mark reassignment notification sent
         await this.prisma.bookingReassignment.update({
@@ -867,7 +867,7 @@ export class AbsenceService {
       await this.prisma.bookingReassignment.update({
         where: { id: reassignment.id },
         data: { notificationFailed: true },
-      }).catch(() => {});
+      }).catch(() => { });
     }
   }
 }

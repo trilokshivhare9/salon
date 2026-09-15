@@ -295,7 +295,7 @@ describe('AbsenceService - Stylist Absence & Reassignment', () => {
       expect(res.absence.id).toBe('abs-iso');
       // Verify advisory lock was called with stylist: key convention
       expect(mockPrisma.$executeRawUnsafe).toHaveBeenCalledWith(
-        'SELECT pg_advisory_xact_lock($1, $2)',
+        'SELECT pg_advisory_xact_lock($1::integer, $2::integer)',
         expect.any(Number),
         expect.any(Number),
       );
