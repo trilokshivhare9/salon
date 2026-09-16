@@ -11,6 +11,11 @@ import {
   StylistStatus,
 } from '@prisma/client';
 
+import { LeaveIntervalEngine } from './engines/leave-interval.engine';
+import { LeaveReassignmentEngine } from './engines/leave-reassignment.engine';
+import { LeaveValidationService } from './services/leave-validation.service';
+import { LeaveProcessingService } from './services/leave-processing.service';
+
 describe('Human Real-World Scenarios: Stylist Absence Handling', () => {
   let absenceService: AbsenceService;
   let mockPrisma: any;
@@ -46,15 +51,15 @@ describe('Human Real-World Scenarios: Stylist Absence Handling', () => {
           breakEndTime: '14:00',
         }),
       },
+      stylistWorkingHours: {
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
       stylistAbsence: {
-        upsert: jest.fn(),
-        update: jest.fn().mockImplementation((args: any) => ({
-          id: args.where.id,
-          ...args.data,
-          stylist: { id: absentStylistId, name: 'Aksh' },
-        })),
+        create: jest.fn().mockImplementation((args: any) => Promise.resolve({ id: (args.data?.reason === 'Vacation' || args.data?.notes === 'Vacation') ? 'abs-future' : 'abs-101', ...args.data })),
+        upsert: jest.fn().mockImplementation((args: any) => Promise.resolve({ id: 'abs-101', ...args.create })),
+        update: jest.fn().mockImplementation((args: any) => Promise.resolve({ id: args.where?.id || 'abs-101', ...args.data, stylist: { id: absentStylistId, name: 'Aksh' } })),
         findFirst: jest.fn(),
-        findMany: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
       },
       appointment: {
         findMany: jest.fn(),
@@ -86,6 +91,10 @@ describe('Human Real-World Scenarios: Stylist Absence Handling', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AbsenceService,
+        LeaveIntervalEngine,
+        LeaveReassignmentEngine,
+        LeaveValidationService,
+        LeaveProcessingService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: AppointmentsService, useValue: mockAppointmentsService },
         { provide: WhatsAppService, useValue: mockWhatsAppService },
@@ -97,7 +106,7 @@ describe('Human Real-World Scenarios: Stylist Absence Handling', () => {
 
   // SCENARIO 1: Marking a Stylist Absent for Today (Full Day)
   it('Scenario 1: Manager marks Aksh absent for today - Creates absence and emits real-time WebSocket update', async () => {
-    const dateToday = '2026-09-15';
+    const dateToday = '2026-09-25';
     mockPrisma.stylist.findFirst.mockResolvedValue({
       id: absentStylistId,
       salonId: mockSalonId,
@@ -133,7 +142,7 @@ describe('Human Real-World Scenarios: Stylist Absence Handling', () => {
 
   // SCENARIO 2: Automatic Reassignment of Existing Appointments
   it('Scenario 2: Aksh has a booking at 11 AM with Pooja - System automatically reassigns Pooja to available backup Amit', async () => {
-    const targetDate = '2026-09-15';
+    const targetDate = '2026-09-25';
     mockPrisma.stylist.findFirst.mockResolvedValue({
       id: absentStylistId,
       salonId: mockSalonId,
@@ -150,8 +159,8 @@ describe('Human Real-World Scenarios: Stylist Absence Handling', () => {
       appointmentNumber: 'SAL-20001',
       serviceId: 'svc-haircut',
       services: [{ serviceId: 'svc-haircut' }],
-      startAt: new Date('2026-09-15T05:30:00.000Z'),
-      endAt: new Date('2026-09-15T06:00:00.000Z'),
+      startAt: new Date('2026-09-25T05:30:00.000Z'),
+      endAt: new Date('2026-09-25T06:00:00.000Z'),
       salonUser: { user: { name: 'Pooja', phone: '+919876543210' } },
     };
     mockPrisma.appointment.findMany.mockResolvedValue([poojaBooking]);
@@ -194,7 +203,7 @@ describe('Human Real-World Scenarios: Stylist Absence Handling', () => {
 
   // SCENARIO 3: Unassigned / Orphaned Booking when No Backup Stylist Exists
   it('Scenario 3: Aksh has a booking at 3 PM - No replacement stylist is available - System flags as NO_REPLACEMENT and offers zero penalty options', async () => {
-    const targetDate = '2026-09-15';
+    const targetDate = '2026-09-25';
     mockPrisma.stylist.findFirst.mockResolvedValue({
       id: absentStylistId,
       salonId: mockSalonId,
@@ -208,8 +217,8 @@ describe('Human Real-World Scenarios: Stylist Absence Handling', () => {
       appointmentNumber: 'SAL-20002',
       serviceId: 'svc-spa',
       services: [{ serviceId: 'svc-spa' }],
-      startAt: new Date('2026-09-15T09:30:00.000Z'),
-      endAt: new Date('2026-09-15T10:30:00.000Z'),
+      startAt: new Date('2026-09-25T09:30:00.000Z'),
+      endAt: new Date('2026-09-25T10:30:00.000Z'),
       salonUser: { user: { name: 'Kavita', phone: '+919876543211' } },
     };
     mockPrisma.appointment.findMany.mockResolvedValue([kavitaBooking]);
@@ -236,20 +245,20 @@ describe('Human Real-World Scenarios: Stylist Absence Handling', () => {
 
   // SCENARIO 8: Absence for Future Date
   it('Scenario 8: Stylist applies for leave on a future date (Sept 25) - System schedules absence without affecting today', async () => {
-    const futureDate = '2026-09-25';
+    const futureDate = '2026-09-30';
     mockPrisma.stylist.findFirst.mockResolvedValue({
       id: absentStylistId,
       salonId: mockSalonId,
       name: 'Aksh',
     });
 
-    mockPrisma.stylistAbsence.upsert.mockResolvedValue({
+    mockPrisma.stylistAbsence.create.mockImplementationOnce(() => Promise.resolve({
       id: 'abs-future',
       salonId: mockSalonId,
       stylistId: absentStylistId,
       absenceDate: new Date(`${futureDate}T00:00:00.000Z`),
       status: AbsenceStatus.ACTIVE,
-    });
+    }));
 
     mockPrisma.appointment.findMany.mockResolvedValue([]);
 

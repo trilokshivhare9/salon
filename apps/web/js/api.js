@@ -619,8 +619,32 @@ export class ApiClient {
     return res;
   }
 
-  static async previewStaffAbsence(staffId, date) {
-    return this.request(`/staff/${staffId}/absence/preview?date=${encodeURIComponent(date)}`);
+  static async previewStaffAbsence(staffId, queryParams) {
+    let url = `/staff/${staffId}/absence/preview`;
+    if (typeof queryParams === 'string') {
+      url += `?date=${encodeURIComponent(queryParams)}`;
+    } else if (queryParams && typeof queryParams === 'object') {
+      const params = new URLSearchParams();
+      if (queryParams.date) params.append('date', queryParams.date);
+      if (queryParams.startDate) params.append('startDate', queryParams.startDate);
+      if (queryParams.endDate) params.append('endDate', queryParams.endDate);
+      if (queryParams.leavePortion) params.append('leavePortion', queryParams.leavePortion);
+      if (queryParams.customStartTime) params.append('customStartTime', queryParams.customStartTime);
+      if (queryParams.customEndTime) params.append('customEndTime', queryParams.customEndTime);
+      const qStr = params.toString();
+      if (qStr) url += `?${qStr}`;
+    }
+    return this.request(url);
+  }
+
+  static async extendStaffAbsence(staffId, absenceId, payload) {
+    this.invalidateCache('/staff');
+    const res = await this.request(`/staff/${staffId}/absence/${absenceId}/extend`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+    this.invalidateCache('/staff');
+    return res;
   }
 
   static async getStaffAbsences(staffId, queryParams = {}) {

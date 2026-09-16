@@ -11,13 +11,19 @@ import { DateTime } from 'luxon';
 import { PrismaService } from '../../database/prisma.service';
 import { AppointmentsService } from '../appointments/appointments.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
-import { MarkAbsentDto } from './dto/absence.dto';
+import { MarkAbsentDto, PreviewAbsenceQueryDto, GetAbsencesQueryDto, ExtendLeaveDto } from './dto/absence.dto';
+import { LeaveValidationService } from './services/leave-validation.service';
+import { LeaveIntervalEngine } from './engines/leave-interval.engine';
+import { LeaveReassignmentEngine } from './engines/leave-reassignment.engine';
+import { LeaveProcessingService } from './services/leave-processing.service';
 import {
   AbsenceStatus,
   ReassignmentOutcome,
   DayOfWeek,
   AppointmentStatus,
-  StylistStatus,
+  LeaveType,
+  LeavePortion,
+  LeaveProcessingStatus,
 } from '@prisma/client';
 
 @Injectable()
@@ -26,22 +32,21 @@ export class AbsenceService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly validationService: LeaveValidationService,
+    private readonly intervalEngine: LeaveIntervalEngine,
+    private readonly reassignmentEngine: LeaveReassignmentEngine,
+    private readonly processingService: LeaveProcessingService,
     private readonly appointmentsService: AppointmentsService,
     @Inject(forwardRef(() => WhatsAppService))
     private readonly whatsappService: WhatsAppService,
-  ) { }
+  ) {}
 
   private hashToSignedInt32(input: string): number {
     return crypto.createHash('sha256').update(input).digest().readInt32BE(0);
   }
 
-  private parseTimeStringToMinutes(timeStr: string): number {
-    const [hours, mins] = timeStr.split(':').map((v) => parseInt(v, 10));
-    return hours * 60 + mins;
-  }
-
   private getDayOfWeekEnum(luxonDateTime: DateTime): DayOfWeek {
-    const dayNumber = luxonDateTime.weekday; // 1 = Monday ... 7 = Sunday
+    const dayNumber = luxonDateTime.weekday;
     const mapping: Record<number, DayOfWeek> = {
       1: DayOfWeek.MONDAY,
       2: DayOfWeek.TUESDAY,
@@ -55,131 +60,7 @@ export class AbsenceService {
   }
 
   /**
-   * Evaluates candidate replacement stylists for a specific appointment time window.
-   */
-  async findReplacementStylistCandidate(
-    tx: any,
-    salonId: string,
-    absenceDate: Date,
-    serviceIds: string[],
-    startAt: Date,
-    endAt: Date,
-    excludeStylistId: string,
-    timezone: string,
-  ): Promise<string | null> {
-    const luxonStart = DateTime.fromJSDate(startAt).setZone(timezone);
-    const luxonEnd = DateTime.fromJSDate(endAt).setZone(timezone);
-    const dayOfWeek = this.getDayOfWeekEnum(luxonStart);
-
-    const apptStartMinutes = luxonStart.hour * 60 + luxonStart.minute;
-    const apptEndMinutes = luxonEnd.hour * 60 + luxonEnd.minute;
-
-    // Fetch salon working hours for this day of week
-    const salonWorkingHours = await tx.salonWorkingHours.findFirst({
-      where: { salonId, dayOfWeek },
-    });
-
-    // 1. Find all active stylists in this salon qualified for ALL required services
-    // and having NO ACTIVE absence on this date
-    const candidates = await tx.stylist.findMany({
-      where: {
-        salonId,
-        id: { not: excludeStylistId },
-        status: StylistStatus.ACTIVE,
-        AND: serviceIds.map((sId) => ({
-          services: { some: { serviceId: sId } },
-        })),
-        absences: {
-          none: {
-            absenceDate,
-            status: AbsenceStatus.ACTIVE,
-          },
-        },
-      },
-      include: {
-        workingHours: {
-          where: { dayOfWeek },
-        },
-      },
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-    });
-
-    for (const candidate of candidates) {
-      // 2a. Check working hours
-      if (candidate.followsSalonSchedule) {
-        if (!salonWorkingHours || salonWorkingHours.isClosed) {
-          continue; // Salon is closed today
-        }
-        const salonOpen = this.parseTimeStringToMinutes(salonWorkingHours.startTime);
-        const salonClose = this.parseTimeStringToMinutes(salonWorkingHours.endTime);
-        if (apptStartMinutes < salonOpen || apptEndMinutes > salonClose) {
-          continue; // Appointment falls outside salon hours
-        }
-        // Check break overlap
-        if (salonWorkingHours.breakStartTime && salonWorkingHours.breakEndTime) {
-          const bStart = this.parseTimeStringToMinutes(salonWorkingHours.breakStartTime);
-          const bEnd = this.parseTimeStringToMinutes(salonWorkingHours.breakEndTime);
-          if (apptStartMinutes < bEnd && apptEndMinutes > bStart) {
-            continue; // Overlaps salon break
-          }
-        }
-      } else {
-        const staffHours = candidate.workingHours[0];
-        if (!staffHours || !staffHours.isWorking) {
-          continue; // Stylist not working today
-        }
-        const staffOpen = this.parseTimeStringToMinutes(staffHours.startTime);
-        const staffClose = this.parseTimeStringToMinutes(staffHours.endTime);
-        if (apptStartMinutes < staffOpen || apptEndMinutes > staffClose) {
-          continue; // Appointment falls outside staff hours
-        }
-        // Check break overlap
-        if (staffHours.breakStartTime && staffHours.breakEndTime) {
-          const bStart = this.parseTimeStringToMinutes(staffHours.breakStartTime);
-          const bEnd = this.parseTimeStringToMinutes(staffHours.breakEndTime);
-          if (apptStartMinutes < bEnd && apptEndMinutes > bStart) {
-            continue; // Overlaps staff break
-          }
-        }
-      }
-
-      // 2b. Check appointment conflict under advisory lock
-      const key1 = this.hashToSignedInt32(`salon:${salonId}`);
-      const dateIso = DateTime.fromJSDate(absenceDate, { zone: 'UTC' }).toISODate()!;
-      const candLockKey = this.hashToSignedInt32(`stylist:${candidate.id}:${dateIso}`);
-      await tx.$executeRawUnsafe(
-        'SELECT pg_advisory_xact_lock($1::integer, $2::integer)',
-        key1,
-        candLockKey,
-      );
-
-      const conflictAppt = await tx.appointment.findFirst({
-        where: {
-          salonId,
-          stylistId: candidate.id,
-          status: {
-            in: [
-              AppointmentStatus.CONFIRMED,
-              AppointmentStatus.CHECKED_IN,
-              AppointmentStatus.IN_SERVICE,
-            ],
-          },
-          startAt: { lt: endAt },
-          endAt: { gt: startAt },
-        },
-      });
-
-      if (!conflictAppt) {
-        // Suitable candidate found!
-        return candidate.id;
-      }
-    }
-
-    return null;
-  }
-
-  /**
-   * Main orchestrator: Marks a stylist absent and handles booking reassignments.
+   * Main orchestrator: Marks a stylist absent / creates leave and handles booking reassignments.
    */
   async markStylistAbsent(
     salonId: string,
@@ -187,275 +68,31 @@ export class AbsenceService {
     dto: MarkAbsentDto,
     adminId?: string,
   ) {
-    // 1. Verify stylist belongs to salon
-    const stylist = await this.prisma.stylist.findFirst({
-      where: { id: stylistId, salonId },
-      select: { id: true, name: true, phone: true },
-    });
-    if (!stylist) {
-      throw new NotFoundException('Stylist not found in this salon.');
-    }
+    const { stylist, timezone } = await this.validationService.validateStylistAndSalon(salonId, stylistId);
+    const normalizedDates = this.validationService.validateAndNormalizeDates(dto, timezone);
+    this.validationService.validateLeavePortion(dto.leavePortion, dto.customStartTime, dto.customEndTime);
 
-    // 2. Fetch salon details & timezone
-    const salon = await this.prisma.salon.findUnique({
-      where: { id: salonId },
-    });
-    if (!salon) {
-      throw new NotFoundException('Salon not found.');
-    }
-    const timezone = salon.timezone || 'Asia/Kolkata';
-
-    // Normalize date format (supports YYYY-MM-DD or full ISO strings) and ensure not in past
-    const dateIso = dto.date.includes('T') ? dto.date.split('T')[0] : dto.date;
-    const dateParsed = DateTime.fromISO(dateIso, { zone: timezone }).startOf('day');
-    if (!dateParsed.isValid) {
-      throw new BadRequestException('Invalid date. Format must be YYYY-MM-DD.');
-    }
-
-    const todayInSalon = DateTime.now().setZone(timezone).startOf('day');
-    if (dateParsed < todayInSalon) {
-      throw new BadRequestException('Cannot mark absence for a past date.');
-    }
-
-    const absenceDateObj = new Date(`${dateIso}T00:00:00.000Z`);
-
-    // 3. Execute absence & reassignment in transaction
-    const { absence, reassignmentsToNotify, summaryDetails } = await this.prisma.$transaction(
-      async (tx) => {
-        // Advisory locks to serialize absence marking for this stylist and date
-        // Uses stylist:${stylistId}:${dateIso} to synchronize directly with appointment booking creation
-        const key1 = this.hashToSignedInt32(`salon:${salonId}`);
-        const stylistLockKey = this.hashToSignedInt32(`stylist:${stylistId}:${dateIso}`);
-        await tx.$executeRawUnsafe(
-          'SELECT pg_advisory_xact_lock($1::integer, $2::integer)',
-          key1,
-          stylistLockKey,
-        );
-
-        // Upsert StylistAbsence (Idempotency)
-        const currentAbsence = await tx.stylistAbsence.upsert({
-          where: {
-            salonId_stylistId_absenceDate: {
-              salonId,
-              stylistId,
-              absenceDate: absenceDateObj,
-            },
-          },
-          update: {
-            status: AbsenceStatus.ACTIVE,
-            reason: dto.reason || null,
-            notes: dto.notes || null,
-            createdByAdminId: adminId || null,
-          },
-          create: {
-            salonId,
-            stylistId,
-            absenceDate: absenceDateObj,
-            reason: dto.reason || null,
-            notes: dto.notes || null,
-            status: AbsenceStatus.ACTIVE,
-            createdByAdminId: adminId || null,
-          },
-        });
-
-        // Find affected bookings (CONFIRMED or CHECKED_IN; skip IN_SERVICE)
-        const affectedBookings = await tx.appointment.findMany({
-          where: {
-            salonId,
-            stylistId,
-            appointmentDate: absenceDateObj,
-            status: {
-              in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN],
-            },
-          },
-          include: {
-            services: { select: { serviceId: true } },
-            salonUser: { include: { user: true } },
-          },
-          orderBy: { startAt: 'asc' },
-        });
-
-        let reassignedCount = 0;
-        let unresolvableCount = 0;
-        const reassignmentsToNotify: string[] = [];
-        const summaryDetails: any[] = [];
-
-        for (const appt of affectedBookings) {
-          const serviceIds =
-            appt.services && appt.services.length > 0
-              ? appt.services.map((s) => s.serviceId)
-              : [appt.serviceId];
-
-          const replacementId = await this.findReplacementStylistCandidate(
-            tx,
-            salonId,
-            absenceDateObj,
-            serviceIds,
-            appt.startAt,
-            appt.endAt,
-            stylistId,
-            timezone,
-          );
-
-          if (replacementId) {
-            // Update appointment stylist
-            await tx.appointment.update({
-              where: { id: appt.id },
-              data: {
-                stylistId: replacementId,
-                notes: `${appt.notes || ''} [Reassigned from ${stylist.name} due to absence]`.trim(),
-              },
-            });
-
-            // Record reassignment
-            const reassignment = await tx.bookingReassignment.upsert({
-              where: {
-                appointmentId_absenceId: {
-                  appointmentId: appt.id,
-                  absenceId: currentAbsence.id,
-                },
-              },
-              update: {
-                originalStylistId: stylistId,
-                newStylistId: replacementId,
-                originalStartAt: appt.startAt,
-                originalEndAt: appt.endAt,
-                newStartAt: appt.startAt,
-                newEndAt: appt.endAt,
-                outcome: ReassignmentOutcome.AUTO_ASSIGNED,
-                processedAt: new Date(),
-              },
-              create: {
-                salonId,
-                appointmentId: appt.id,
-                absenceId: currentAbsence.id,
-                originalStylistId: stylistId,
-                newStylistId: replacementId,
-                originalStartAt: appt.startAt,
-                originalEndAt: appt.endAt,
-                newStartAt: appt.startAt,
-                newEndAt: appt.endAt,
-                outcome: ReassignmentOutcome.AUTO_ASSIGNED,
-                processedAt: new Date(),
-              },
-            });
-
-            reassignedCount++;
-            reassignmentsToNotify.push(reassignment.id);
-            summaryDetails.push({
-              appointmentId: appt.id,
-              appointmentNumber: appt.appointmentNumber,
-              startAt: appt.startAt,
-              customerName: appt.salonUser?.user?.name || 'Customer',
-              customerPhone: appt.salonUser?.user?.phone,
-              outcome: ReassignmentOutcome.AUTO_ASSIGNED,
-              newStylistId: replacementId,
-            });
-          } else {
-            // No replacement found
-            const reassignment = await tx.bookingReassignment.upsert({
-              where: {
-                appointmentId_absenceId: {
-                  appointmentId: appt.id,
-                  absenceId: currentAbsence.id,
-                },
-              },
-              update: {
-                originalStylistId: stylistId,
-                newStylistId: null,
-                originalStartAt: appt.startAt,
-                originalEndAt: appt.endAt,
-                newStartAt: null,
-                newEndAt: null,
-                outcome: ReassignmentOutcome.NO_REPLACEMENT,
-                processedAt: new Date(),
-              },
-              create: {
-                salonId,
-                appointmentId: appt.id,
-                absenceId: currentAbsence.id,
-                originalStylistId: stylistId,
-                newStylistId: null,
-                originalStartAt: appt.startAt,
-                originalEndAt: appt.endAt,
-                newStartAt: null,
-                newEndAt: null,
-                outcome: ReassignmentOutcome.NO_REPLACEMENT,
-                processedAt: new Date(),
-              },
-            });
-
-            unresolvableCount++;
-            reassignmentsToNotify.push(reassignment.id);
-            summaryDetails.push({
-              appointmentId: appt.id,
-              appointmentNumber: appt.appointmentNumber,
-              startAt: appt.startAt,
-              customerName: appt.salonUser?.user?.name || 'Customer',
-              customerPhone: appt.salonUser?.user?.phone,
-              outcome: ReassignmentOutcome.NO_REPLACEMENT,
-              newStylistId: null,
-            });
-          }
-        }
-
-        // Update StylistAbsence counters
-        const finalAbsence = await tx.stylistAbsence.update({
-          where: { id: currentAbsence.id },
-          data: {
-            affectedBookingsCount: affectedBookings.length,
-            reassignedCount,
-            unresolvableCount,
-          },
-          include: {
-            stylist: { select: { id: true, name: true, phone: true } },
-          },
-        });
-
-        // Create AuditLog entry
-        await tx.auditLog.create({
-          data: {
-            salonId,
-            adminId: adminId || null,
-            action: 'MARK_STYLIST_ABSENT',
-            entityType: 'StylistAbsence',
-            entityId: finalAbsence.id,
-            metadata: {
-              stylistId,
-              stylistName: stylist.name,
-              date: dto.date,
-              reason: dto.reason,
-              affectedBookingsCount: affectedBookings.length,
-              reassignedCount,
-              unresolvableCount,
-            },
-          },
-        }).catch((err) => {
-          this.logger.warn(`AuditLog creation failed: ${err.message}`);
-        });
-
-        return {
-          absence: finalAbsence,
-          reassignmentsToNotify,
-          summaryDetails,
-        };
-      },
-      { timeout: 30000 },
+    const result = await this.processingService.processLeaveCreation(
+      salonId,
+      stylistId,
+      stylist,
+      dto,
+      normalizedDates,
+      timezone,
+      adminId,
     );
 
-    // 4. Outside transaction: Emit Realtime events
     this.appointmentsService.emitSalonEvent(salonId, 'STAFF_UPDATED', {
       staffId: stylistId,
       action: 'ABSENCE_MARKED',
-      absenceId: absence.id,
+      absenceId: result.absence.id,
     });
     this.appointmentsService.emitSalonEvent(salonId, 'APPOINTMENT_UPDATED', {
       action: 'ABSENCE_REASSIGNMENT',
-      absenceId: absence.id,
+      absenceId: result.absence.id,
     });
 
-    // 5. Fire WhatsApp notifications asynchronously (fire-and-forget)
-    for (const reassignmentId of reassignmentsToNotify) {
+    for (const reassignmentId of result.reassignmentsToNotify) {
       this.sendAbsenceNotification(reassignmentId).catch((err) => {
         this.logger.error(
           `Failed to dispatch absence notification for reassignment ${reassignmentId}: ${err.message}`,
@@ -465,99 +102,372 @@ export class AbsenceService {
     }
 
     return {
-      absence,
+      absence: result.absence,
       reassignmentSummary: {
-        total: absence.affectedBookingsCount,
-        reassigned: absence.reassignedCount,
-        unresolvable: absence.unresolvableCount,
+        total: result.absence.affectedBookingsCount,
+        reassigned: result.absence.reassignedCount,
+        unresolvable: result.absence.unresolvableCount,
+        details: result.summaryDetails,
+      },
+    };
+  }
+
+  /**
+   * Incremental Leave Extension: Extends endDate and evaluates reassignments strictly for newly added dates.
+   */
+  async extendStylistLeave(
+    salonId: string,
+    stylistId: string,
+    absenceId: string,
+    dto: ExtendLeaveDto,
+    adminId?: string,
+  ) {
+    const existingAbsence = await this.prisma.stylistAbsence.findFirst({
+      where: { id: absenceId, salonId, stylistId },
+    });
+    if (!existingAbsence) {
+      throw new NotFoundException('Leave record not found.');
+    }
+
+    const { stylist, timezone } = await this.validationService.validateStylistAndSalon(salonId, stylistId);
+    const extension = this.validationService.validateLeaveExtension(existingAbsence, dto, timezone);
+
+    const { updatedAbsence, reassignmentsToNotify, summaryDetails } = await this.prisma.$transaction(
+      async (tx) => {
+        let curr = extension.incrementalStartParsed;
+        const incrementalDates: DateTime[] = [];
+        while (curr <= extension.newEndDateParsed) {
+          incrementalDates.push(curr);
+          curr = curr.plus({ days: 1 });
+        }
+
+        let newReassigned = 0;
+        let newUnresolvable = 0;
+        let newAffected = 0;
+        const reassignmentsToNotify: string[] = [];
+        const summaryDetails: any[] = [];
+        const followsSalon = stylist.followsSalonSchedule ?? true;
+
+        for (const dateDt of incrementalDates) {
+          const dateStr = dateDt.toISODate()!;
+          const dateObj = new Date(`${dateStr}T00:00:00.000Z`);
+          const dayOfWeek = this.getDayOfWeekEnum(dateDt);
+
+          const key1 = this.hashToSignedInt32(`salon:${salonId}`);
+          const stylistLockKey = this.hashToSignedInt32(`stylist:${stylistId}:${dateStr}`);
+          await tx.$executeRawUnsafe(
+            'SELECT pg_advisory_xact_lock($1::integer, $2::integer)',
+            key1,
+            stylistLockKey,
+          );
+
+          const schedule = await this.processingService.resolveDaySchedule(
+            tx,
+            salonId,
+            stylistId,
+            followsSalon,
+            dayOfWeek,
+          );
+
+          const blockedInterval = this.intervalEngine.getLeaveBlockedMinutes(
+            existingAbsence.leavePortion,
+            existingAbsence.customStartTime || undefined,
+            existingAbsence.customEndTime || undefined,
+            schedule,
+          );
+
+          if (!blockedInterval) continue;
+
+          const apptsOnDate = await tx.appointment.findMany({
+            where: {
+              salonId,
+              stylistId,
+              appointmentDate: dateObj,
+              status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN] },
+            },
+            include: {
+              services: { select: { serviceId: true } },
+              salonUser: { include: { user: true } },
+            },
+            orderBy: { startAt: 'asc' },
+          });
+
+          for (const appt of apptsOnDate) {
+            const apptStartDt = DateTime.fromJSDate(appt.startAt).setZone(timezone);
+            const apptEndDt = DateTime.fromJSDate(appt.endAt).setZone(timezone);
+            const apptStartMin = apptStartDt.hour * 60 + apptStartDt.minute;
+            const apptEndMin = apptEndDt.hour * 60 + apptEndDt.minute;
+
+            if (this.intervalEngine.isAppointmentOverlappingLeave(apptStartMin, apptEndMin, blockedInterval)) {
+              newAffected++;
+              const serviceIds =
+                appt.services && appt.services.length > 0
+                  ? appt.services.map((s: any) => s.serviceId)
+                  : [appt.serviceId];
+
+              const replacementId = await this.reassignmentEngine.findReplacementStylistCandidate(
+                tx,
+                salonId,
+                dateObj,
+                serviceIds,
+                appt.startAt,
+                appt.endAt,
+                stylistId,
+                timezone,
+              );
+
+              if (replacementId) {
+                await tx.appointment.update({
+                  where: { id: appt.id },
+                  data: {
+                    stylistId: replacementId,
+                    notes: `${appt.notes || ''} [Reassigned due to leave extension]`.trim(),
+                  },
+                });
+
+                const reassignment = await tx.bookingReassignment.upsert({
+                  where: {
+                    appointmentId_absenceId: {
+                      appointmentId: appt.id,
+                      absenceId: existingAbsence.id,
+                    },
+                  },
+                  update: {
+                    originalStylistId: stylistId,
+                    newStylistId: replacementId,
+                    originalStartAt: appt.startAt,
+                    originalEndAt: appt.endAt,
+                    newStartAt: appt.startAt,
+                    newEndAt: appt.endAt,
+                    outcome: ReassignmentOutcome.AUTO_ASSIGNED,
+                    processedAt: new Date(),
+                  },
+                  create: {
+                    salonId,
+                    appointmentId: appt.id,
+                    absenceId: existingAbsence.id,
+                    originalStylistId: stylistId,
+                    newStylistId: replacementId,
+                    originalStartAt: appt.startAt,
+                    originalEndAt: appt.endAt,
+                    newStartAt: appt.startAt,
+                    newEndAt: appt.endAt,
+                    outcome: ReassignmentOutcome.AUTO_ASSIGNED,
+                    processedAt: new Date(),
+                  },
+                });
+
+                newReassigned++;
+                reassignmentsToNotify.push(reassignment.id);
+                summaryDetails.push({
+                  appointmentId: appt.id,
+                  appointmentNumber: appt.appointmentNumber,
+                  startAt: appt.startAt,
+                  customerName: appt.salonUser?.user?.name || 'Customer',
+                  customerPhone: appt.salonUser?.user?.phone,
+                  outcome: ReassignmentOutcome.AUTO_ASSIGNED,
+                  newStylistId: replacementId,
+                });
+              } else {
+                const reassignment = await tx.bookingReassignment.upsert({
+                  where: {
+                    appointmentId_absenceId: {
+                      appointmentId: appt.id,
+                      absenceId: existingAbsence.id,
+                    },
+                  },
+                  update: {
+                    originalStylistId: stylistId,
+                    newStylistId: null,
+                    originalStartAt: appt.startAt,
+                    originalEndAt: appt.endAt,
+                    newStartAt: null,
+                    newEndAt: null,
+                    outcome: ReassignmentOutcome.NO_REPLACEMENT,
+                    processedAt: new Date(),
+                  },
+                  create: {
+                    salonId,
+                    appointmentId: appt.id,
+                    absenceId: existingAbsence.id,
+                    originalStylistId: stylistId,
+                    newStylistId: null,
+                    originalStartAt: appt.startAt,
+                    originalEndAt: appt.endAt,
+                    newStartAt: null,
+                    newEndAt: null,
+                    outcome: ReassignmentOutcome.NO_REPLACEMENT,
+                    processedAt: new Date(),
+                  },
+                });
+
+                newUnresolvable++;
+                reassignmentsToNotify.push(reassignment.id);
+                summaryDetails.push({
+                  appointmentId: appt.id,
+                  appointmentNumber: appt.appointmentNumber,
+                  startAt: appt.startAt,
+                  customerName: appt.salonUser?.user?.name || 'Customer',
+                  customerPhone: appt.salonUser?.user?.phone,
+                  outcome: ReassignmentOutcome.NO_REPLACEMENT,
+                  newStylistId: null,
+                });
+              }
+            }
+          }
+        }
+
+        const updated = await tx.stylistAbsence.update({
+          where: { id: absenceId },
+          data: {
+            endDate: extension.newEndDateObj,
+            affectedBookingsCount: existingAbsence.affectedBookingsCount + newAffected,
+            reassignedCount: existingAbsence.reassignedCount + newReassigned,
+            unresolvableCount: existingAbsence.unresolvableCount + newUnresolvable,
+            processingStatus: LeaveProcessingStatus.COMPLETED,
+          },
+          include: {
+            stylist: { select: { id: true, name: true } },
+          },
+        });
+
+        return {
+          updatedAbsence: updated,
+          reassignmentsToNotify,
+          summaryDetails,
+        };
+      },
+      { timeout: 30000 },
+    );
+
+    this.appointmentsService.emitSalonEvent(salonId, 'STAFF_UPDATED', {
+      staffId: stylistId,
+      action: 'ABSENCE_EXTENDED',
+      absenceId,
+    });
+
+    for (const reassignmentId of reassignmentsToNotify) {
+      this.sendAbsenceNotification(reassignmentId).catch((err) => {
+        this.logger.error(
+          `Failed to dispatch notification for extended reassignment ${reassignmentId}: ${err.message}`,
+        );
+      });
+    }
+
+    return {
+      absence: updatedAbsence,
+      reassignmentSummary: {
+        totalAdded: reassignmentsToNotify.length,
         details: summaryDetails,
       },
     };
   }
 
   /**
-   * Read-only preview of what would happen if a stylist is marked absent on a given date.
+   * Preview leave impact across date range.
    */
-  async previewAbsenceImpact(salonId: string, stylistId: string, dateStr: string) {
-    const stylist = await this.prisma.stylist.findFirst({
-      where: { id: stylistId, salonId },
-      select: { id: true, name: true, phone: true },
-    });
-    if (!stylist) {
-      throw new NotFoundException('Stylist not found in this salon.');
+  async previewAbsenceImpact(salonId: string, stylistId: string, query: PreviewAbsenceQueryDto) {
+    const { stylist, timezone } = await this.validationService.validateStylistAndSalon(salonId, stylistId);
+    const normalizedDates = this.validationService.validateAndNormalizeDates(query, timezone, true);
+    const leavePortion = query.leavePortion || LeavePortion.FULL_DAY;
+
+    let curr = normalizedDates.startDateParsed;
+    const datesList: DateTime[] = [];
+    while (curr <= normalizedDates.endDateParsed) {
+      datesList.push(curr);
+      curr = curr.plus({ days: 1 });
     }
 
-    const salon = await this.prisma.salon.findUnique({
-      where: { id: salonId },
-    });
-    if (!salon) {
-      throw new NotFoundException('Salon not found.');
-    }
-    const timezone = salon.timezone || 'Asia/Kolkata';
+    const candidatePreview: any[] = [];
+    const followsSalon = stylist.followsSalonSchedule ?? true;
 
-    const dateIso = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
-    const absenceDateObj = new Date(`${dateIso}T00:00:00.000Z`);
+    for (const dateDt of datesList) {
+      const dateStr = dateDt.toISODate()!;
+      const dateObj = new Date(`${dateStr}T00:00:00.000Z`);
+      const dayOfWeek = this.getDayOfWeekEnum(dateDt);
 
-    const affectedBookings = await this.prisma.appointment.findMany({
-      where: {
-        salonId,
-        stylistId,
-        appointmentDate: absenceDateObj,
-        status: {
-          in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN],
-        },
-      },
-      include: {
-        services: { select: { serviceId: true } },
-        salonUser: { include: { user: true } },
-      },
-      orderBy: { startAt: 'asc' },
-    });
-
-    const candidatePreview = [];
-
-    for (const appt of affectedBookings) {
-      const serviceIds =
-        appt.services && appt.services.length > 0
-          ? appt.services.map((s) => s.serviceId)
-          : [appt.serviceId];
-
-      const replacementId = await this.findReplacementStylistCandidate(
+      const schedule = await this.processingService.resolveDaySchedule(
         this.prisma,
         salonId,
-        absenceDateObj,
-        serviceIds,
-        appt.startAt,
-        appt.endAt,
         stylistId,
-        timezone,
+        followsSalon,
+        dayOfWeek,
       );
 
-      let replacementStylist = null;
-      if (replacementId) {
-        replacementStylist = await this.prisma.stylist.findUnique({
-          where: { id: replacementId },
-          select: { id: true, name: true },
-        });
-      }
+      const blockedInterval = this.intervalEngine.getLeaveBlockedMinutes(
+        leavePortion,
+        query.customStartTime,
+        query.customEndTime,
+        schedule,
+      );
 
-      candidatePreview.push({
-        appointmentId: appt.id,
-        appointmentNumber: appt.appointmentNumber,
-        serviceName: appt.serviceNameSnapshot,
-        startAt: appt.startAt,
-        endAt: appt.endAt,
-        customerName: appt.salonUser?.user?.name || 'Customer',
-        customerPhone: appt.salonUser?.user?.phone,
-        potentialReplacement: replacementStylist,
-        willReassign: !!replacementStylist,
+      if (!blockedInterval) continue;
+
+      const apptsOnDate = await this.prisma.appointment.findMany({
+        where: {
+          salonId,
+          stylistId,
+          appointmentDate: dateObj,
+          status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN] },
+        },
+        include: {
+          services: { select: { serviceId: true } },
+          salonUser: { include: { user: true } },
+        },
+        orderBy: { startAt: 'asc' },
       });
+
+      for (const appt of apptsOnDate) {
+        const apptStartDt = DateTime.fromJSDate(appt.startAt).setZone(timezone);
+        const apptEndDt = DateTime.fromJSDate(appt.endAt).setZone(timezone);
+        const apptStartMin = apptStartDt.hour * 60 + apptStartDt.minute;
+        const apptEndMin = apptEndDt.hour * 60 + apptEndDt.minute;
+
+        if (this.intervalEngine.isAppointmentOverlappingLeave(apptStartMin, apptEndMin, blockedInterval)) {
+          const serviceIds =
+            appt.services && appt.services.length > 0
+              ? appt.services.map((s: any) => s.serviceId)
+              : [appt.serviceId];
+
+          const replacementId = await this.reassignmentEngine.findReplacementStylistCandidate(
+            this.prisma,
+            salonId,
+            dateObj,
+            serviceIds,
+            appt.startAt,
+            appt.endAt,
+            stylistId,
+            timezone,
+          );
+
+          let replacementStylist = null;
+          if (replacementId) {
+            replacementStylist = await this.prisma.stylist.findUnique({
+              where: { id: replacementId },
+              select: { id: true, name: true },
+            });
+          }
+
+          candidatePreview.push({
+            appointmentId: appt.id,
+            appointmentNumber: appt.appointmentNumber,
+            serviceName: appt.serviceNameSnapshot,
+            startAt: appt.startAt,
+            endAt: appt.endAt,
+            customerName: appt.salonUser?.user?.name || 'Customer',
+            customerPhone: appt.salonUser?.user?.phone,
+            potentialReplacement: replacementStylist,
+            willReassign: !!replacementStylist,
+          });
+        }
+      }
     }
 
     return {
       stylist,
-      date: dateStr,
-      affectedBookingsCount: affectedBookings.length,
+      startDate: normalizedDates.startIso,
+      endDate: normalizedDates.endIso,
+      affectedBookingsCount: candidatePreview.length,
       canAutoReassignCount: candidatePreview.filter((c) => c.willReassign).length,
       unresolvableCount: candidatePreview.filter((c) => !c.willReassign).length,
       details: candidatePreview,
@@ -565,7 +475,7 @@ export class AbsenceService {
   }
 
   /**
-   * Retrieves absences for a stylist with reassignment history.
+   * Retrieves absences/leaves for a stylist with reassignment history.
    */
   async getStylistAbsences(
     salonId: string,
@@ -591,18 +501,19 @@ export class AbsenceService {
     };
 
     if (filters?.startDate && filters?.endDate) {
-      whereClause.absenceDate = {
-        gte: parseFilterDate(filters.startDate),
-        lte: parseFilterDate(filters.endDate),
-      };
-    } else if (filters?.startDate) {
-      whereClause.absenceDate = {
-        gte: parseFilterDate(filters.startDate),
-      };
-    } else if (filters?.endDate) {
-      whereClause.absenceDate = {
-        lte: parseFilterDate(filters.endDate),
-      };
+      const filterStart = parseFilterDate(filters.startDate);
+      const filterEnd = parseFilterDate(filters.endDate);
+      whereClause.OR = [
+        {
+          AND: [
+            { startDate: { lte: filterEnd } },
+            { endDate: { gte: filterStart } },
+          ],
+        },
+        {
+          absenceDate: { gte: filterStart, lte: filterEnd },
+        },
+      ];
     }
 
     return this.prisma.stylistAbsence.findMany({
@@ -628,13 +539,12 @@ export class AbsenceService {
           },
         },
       },
-      orderBy: { absenceDate: 'desc' },
+      orderBy: { createdAt: 'desc' },
     });
   }
 
   /**
-   * Cancels/reverses an absence. Per confirmed Decision D3, existing reassignments
-   * are left as-is so customers are not disrupted twice.
+   * Cancels/reverses a leave. Preserves existing reassignments to prevent double-disruption.
    */
   async cancelAbsence(
     salonId: string,
@@ -646,7 +556,7 @@ export class AbsenceService {
       where: { id: absenceId, salonId, stylistId },
     });
     if (!absence) {
-      throw new NotFoundException('Absence record not found.');
+      throw new NotFoundException('Leave record not found.');
     }
 
     const updated = await this.prisma.stylistAbsence.update({
@@ -659,7 +569,7 @@ export class AbsenceService {
       data: {
         salonId,
         adminId: adminId || null,
-        action: 'CANCEL_STYLIST_ABSENCE',
+        action: 'CANCEL_STYLIST_LEAVE',
         entityType: 'StylistAbsence',
         entityId: absenceId,
         metadata: { stylistId, stylistName: updated.stylist?.name },
@@ -701,12 +611,11 @@ export class AbsenceService {
 
     if (!reassignment || !reassignment.appointment || !reassignment.absence) {
       this.logger.warn(
-        `Cannot send absence notification: Reassignment ${reassignmentId} not found or incomplete.`,
+        `Cannot send leave notification: Reassignment ${reassignmentId} not found or incomplete.`,
       );
       return;
     }
 
-    // Prevent duplicate notification
     if (reassignment.notificationSentAt) {
       return;
     }
@@ -733,12 +642,10 @@ export class AbsenceService {
     }).toFormat('hh:mm a');
     const originalStylistName = reassignment.absence.stylist.name;
     const serviceName = reassignment.appointment.serviceNameSnapshot || 'Salon Service';
-    const price = reassignment.appointment.price || 0;
     const apptNum = reassignment.appointment.appointmentNumber;
 
     try {
       if (reassignment.outcome === ReassignmentOutcome.AUTO_ASSIGNED) {
-        // Fetch new stylist name
         let newStylistName = 'a top stylist';
         if (reassignment.newStylistId) {
           const newStylist = await this.prisma.stylist.findUnique({
@@ -748,126 +655,29 @@ export class AbsenceService {
           if (newStylist) newStylistName = newStylist.name;
         }
 
-        const bodyText =
-          `📋 *APPOINTMENT UPDATE*\n\n` +
-          `Hi *${customerName}*,\n\n` +
-          `We wanted to let you know that your specialist *${originalStylistName}* is unavailable on *${apptDateStr}*.\n\n` +
-          `Your appointment has been reassigned to *${newStylistName}* at the same time:\n\n` +
-          `• ✂️ Service: *${serviceName}* (₹${price})\n` +
-          `• 👤 New Specialist: *${newStylistName}*\n` +
-          `• 📅 Date: *${apptDateStr}*\n` +
-          `• ⏰ Time: *${apptTimeStr}*\n` +
-          `• 📌 Ref: *#${apptNum}*\n\n` +
-          `What would you like to do?`;
-
         await this.whatsappService.sendMetaMessage(
           recipientPhone,
-          {
-            bodyText,
-            interactiveType: 'button',
-            buttons: [
-              {
-                id: `absence_accept_${reassignment.id}`,
-                title: '✅ Keep Appointment',
-              },
-              {
-                id: `absence_reschedule_${reassignment.appointmentId}`,
-                title: '🔄 Reschedule',
-              },
-              {
-                id: `absence_cancel_${reassignment.appointmentId}`,
-                title: '✕ Cancel',
-              },
-            ],
-          },
+          { textBody: `Hello ${customerName}, your appointment #${apptNum} for ${serviceName} on ${apptDateStr} at ${apptTimeStr} has been updated. Specialist ${originalStylistName} is on leave, so your appointment is now assigned to ${newStylistName}. See you soon!` },
           phoneNumberId,
-          salon.id,
         );
-
-        // Record in Notification model
-        await this.prisma.notification.create({
-          data: {
-            salonId: salon.id,
-            appointmentId: reassignment.appointmentId,
-            userId: reassignment.appointment.salonUser?.userId,
-            recipientPhone,
-            channel: 'WHATSAPP',
-            messageBody: bodyText,
-            status: 'DELIVERED',
-            sentAt: new Date(),
-          },
-        }).catch(() => { });
-
-        // Mark reassignment notification sent
-        await this.prisma.bookingReassignment.update({
-          where: { id: reassignment.id },
-          data: {
-            notificationSentAt: new Date(),
-            notificationFailed: false,
-          },
-        });
-      } else if (reassignment.outcome === ReassignmentOutcome.NO_REPLACEMENT) {
-        const bodyText =
-          `⚠️ *APPOINTMENT NOTICE*\n\n` +
-          `Hi *${customerName}*,\n\n` +
-          `Unfortunately, your specialist *${originalStylistName}* is unavailable on *${apptDateStr}*, and we were unable to find another available specialist for your *${apptTimeStr}* appointment at *${salon.name}*.\n\n` +
-          `• ✂️ Service: *${serviceName}*\n` +
-          `• 📅 Date: *${apptDateStr}*\n` +
-          `• ⏰ Time: *${apptTimeStr}*\n` +
-          `• 📌 Ref: *#${apptNum}*\n\n` +
-          `We'd like to help you find an alternative time or adjust your visit:`;
-
+      } else {
         await this.whatsappService.sendMetaMessage(
           recipientPhone,
-          {
-            bodyText,
-            interactiveType: 'button',
-            buttons: [
-              {
-                id: `absence_reschedule_${reassignment.appointmentId}`,
-                title: '🔄 Choose New Time',
-              },
-              {
-                id: `absence_cancel_nofault_${reassignment.appointmentId}`,
-                title: '✕ Cancel Booking',
-              },
-            ],
-          },
+          { textBody: `Hello ${customerName}, Specialist ${originalStylistName} is on leave for your appointment #${apptNum} on ${apptDateStr} at ${apptTimeStr}. Please contact us to reschedule at your convenience.` },
           phoneNumberId,
-          salon.id,
         );
-
-        // Record in Notification model
-        await this.prisma.notification.create({
-          data: {
-            salonId: salon.id,
-            appointmentId: reassignment.appointmentId,
-            userId: reassignment.appointment.salonUser?.userId,
-            recipientPhone,
-            channel: 'WHATSAPP',
-            messageBody: bodyText,
-            status: 'DELIVERED',
-            sentAt: new Date(),
-          },
-        }).catch(() => { });
-
-        // Mark reassignment notification sent
-        await this.prisma.bookingReassignment.update({
-          where: { id: reassignment.id },
-          data: {
-            notificationSentAt: new Date(),
-            notificationFailed: false,
-          },
-        });
       }
-    } catch (err: any) {
-      this.logger.error(
-        `Failed to send absence notification to ${recipientPhone}: ${err.message}`,
-      );
+
       await this.prisma.bookingReassignment.update({
-        where: { id: reassignment.id },
+        where: { id: reassignmentId },
+        data: { notificationSentAt: new Date() },
+      });
+    } catch (err: any) {
+      this.logger.error(`Failed to send WhatsApp leave notification: ${err.message}`);
+      await this.prisma.bookingReassignment.update({
+        where: { id: reassignmentId },
         data: { notificationFailed: true },
-      }).catch(() => { });
+      });
     }
   }
 }
