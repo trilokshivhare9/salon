@@ -754,8 +754,8 @@ model StylistAbsence {
   salonId               String                @map("salon_id")
   stylistId             String                @map("stylist_id")
 
-  startDate             DateTime              @map("start_date") @db.Date
-  endDate               DateTime              @map("end_date") @db.Date
+  startDate             DateTime              @default(now()) @map("start_date") @db.Date
+  endDate               DateTime              @default(now()) @map("end_date") @db.Date
   absenceDate           DateTime?             @map("absence_date") @db.Date
 
   leaveType             LeaveType             @default(SICK_LEAVE) @map("leave_type")
