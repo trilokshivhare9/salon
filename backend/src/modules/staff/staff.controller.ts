@@ -23,6 +23,7 @@ import {
   MarkAbsentDto,
   PreviewAbsenceQueryDto,
   GetAbsencesQueryDto,
+  ExtendLeaveDto,
 } from './dto/absence.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -160,7 +161,19 @@ export class StaffController {
     @Param('id') staffId: string,
     @Query() query: PreviewAbsenceQueryDto,
   ) {
-    return this.absenceService.previewAbsenceImpact(salonId, staffId, query.date);
+    return this.absenceService.previewAbsenceImpact(salonId, staffId, query);
+  }
+
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
+  @Patch(':id/absence/:absenceId/extend')
+  async extendLeave(
+    @CurrentSalonId() salonId: string,
+    @Param('id') staffId: string,
+    @Param('absenceId') absenceId: string,
+    @Body() dto: ExtendLeaveDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.absenceService.extendStylistLeave(salonId, staffId, absenceId, dto, user?.id);
   }
 
   @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)

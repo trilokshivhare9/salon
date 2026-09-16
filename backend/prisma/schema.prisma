@@ -158,6 +158,28 @@ enum AbsenceStatus {
   CANCELLED
 }
 
+enum LeaveType {
+  SICK_LEAVE
+  CASUAL_LEAVE
+  EMERGENCY_LEAVE
+  UNPAID_LEAVE
+  OTHER
+}
+
+enum LeavePortion {
+  FULL_DAY
+  FIRST_HALF
+  SECOND_HALF
+  CUSTOM_HOURS
+}
+
+enum LeaveProcessingStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
 enum ReassignmentOutcome {
   PENDING
   AUTO_ASSIGNED
@@ -725,31 +747,40 @@ model ErrorLog {
 // STYLIST ABSENCE MANAGEMENT
 // -----------------------------------------------------------------------------
 model StylistAbsence {
-  id                    String         @id @default(uuid())
-  salonId               String         @map("salon_id")
-  stylistId             String         @map("stylist_id")
-  absenceDate           DateTime       @map("absence_date") @db.Date
+  id                    String                @id @default(uuid())
+  salonId               String                @map("salon_id")
+  stylistId             String                @map("stylist_id")
+
+  startDate             DateTime              @map("start_date") @db.Date
+  endDate               DateTime              @map("end_date") @db.Date
+  absenceDate           DateTime?             @map("absence_date") @db.Date
+
+  leaveType             LeaveType             @default(SICK_LEAVE) @map("leave_type")
+  leavePortion          LeavePortion          @default(FULL_DAY) @map("leave_portion")
+  customStartTime       String?               @map("custom_start_time")
+  customEndTime         String?               @map("custom_end_time")
+
   reason                String?
   notes                 String?
-  status                AbsenceStatus  @default(ACTIVE)
+  status                AbsenceStatus         @default(ACTIVE)
+  processingStatus      LeaveProcessingStatus @default(COMPLETED) @map("processing_status")
 
-  createdByAdminId      String?        @map("created_by_admin_id")
+  createdByAdminId      String?               @map("created_by_admin_id")
 
-  affectedBookingsCount Int            @default(0) @map("affected_bookings_count")
-  reassignedCount       Int            @default(0) @map("reassigned_count")
-  unresolvableCount     Int            @default(0) @map("unresolvable_count")
+  affectedBookingsCount Int                   @default(0) @map("affected_bookings_count")
+  reassignedCount       Int                   @default(0) @map("reassigned_count")
+  unresolvableCount     Int                   @default(0) @map("unresolvable_count")
 
-  createdAt             DateTime       @default(now()) @map("created_at")
-  updatedAt             DateTime       @updatedAt @map("updated_at")
+  createdAt             DateTime              @default(now()) @map("created_at")
+  updatedAt             DateTime              @updatedAt @map("updated_at")
 
-  salon                 Salon          @relation(fields: [salonId], references: [id], onDelete: Cascade)
-  stylist               Stylist        @relation(fields: [stylistId], references: [id], onDelete: Cascade)
-  createdByAdmin        Admin?         @relation("AdminCreatedAbsences", fields: [createdByAdminId], references: [id], onDelete: SetNull)
+  salon                 Salon                 @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  stylist               Stylist               @relation(fields: [stylistId], references: [id], onDelete: Cascade)
+  createdByAdmin        Admin?                @relation("AdminCreatedAbsences", fields: [createdByAdminId], references: [id], onDelete: SetNull)
   reassignments         BookingReassignment[]
 
-  @@unique([salonId, stylistId, absenceDate])
-  @@index([salonId, absenceDate])
-  @@index([stylistId, absenceDate])
+  @@index([salonId, startDate, endDate])
+  @@index([stylistId, startDate, endDate])
   @@map("stylist_absences")
 }
 

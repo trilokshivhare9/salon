@@ -63,6 +63,39 @@ export class AvailabilityService {
     return mapping[dayNumber];
   }
 
+  private getLeaveBlockedIntervals(
+    absence: any,
+    workingOpenMinutes: number,
+    workingCloseMinutes: number,
+    breakInterval: { start: number; end: number } | null,
+  ): { start: number; end: number }[] {
+    if (!absence.leavePortion || absence.leavePortion === 'FULL_DAY') {
+      return [{ start: workingOpenMinutes, end: workingCloseMinutes }];
+    }
+
+    const midPoint = Math.floor(workingOpenMinutes + (workingCloseMinutes - workingOpenMinutes) / 2);
+    const firstHalfEnd = breakInterval ? breakInterval.start : midPoint;
+    const secondHalfStart = breakInterval ? breakInterval.end : midPoint;
+
+    if (absence.leavePortion === 'FIRST_HALF') {
+      return [{ start: workingOpenMinutes, end: firstHalfEnd }];
+    }
+    if (absence.leavePortion === 'SECOND_HALF') {
+      return [{ start: secondHalfStart, end: workingCloseMinutes }];
+    }
+    if (absence.leavePortion === 'CUSTOM_HOURS' && absence.customStartTime && absence.customEndTime) {
+      const customStart = this.parseTimeStringToMinutes(absence.customStartTime);
+      const customEnd = this.parseTimeStringToMinutes(absence.customEndTime);
+      const clampedStart = Math.max(workingOpenMinutes, customStart);
+      const clampedEnd = Math.min(workingCloseMinutes, customEnd);
+      if (clampedStart < clampedEnd) {
+        return [{ start: clampedStart, end: clampedEnd }];
+      }
+    }
+
+    return [{ start: workingOpenMinutes, end: workingCloseMinutes }];
+  }
+
   async getAvailableSlots(
     salonId: string,
     serviceIdOrIds: string | string[],
@@ -166,32 +199,43 @@ export class AvailabilityService {
           }
         : null;
 
-    // 3. Query eligible active stylists assigned to ALL requested services (excluding absent stylists)
-    const absenceDateObj = new Date(dateStr);
+    // 3. Query eligible active stylists assigned to ALL requested services
+    const targetDateObj = new Date(`${dateStr}T00:00:00.000Z`);
     const stylistQueryWhere: any = {
       salonId,
       status: 'ACTIVE',
       AND: serviceIds.map((sId) => ({ services: { some: { serviceId: sId } } })),
-      absences: {
-        none: {
-          absenceDate: absenceDateObj,
-          status: 'ACTIVE',
-        },
-      },
     };
     if (preferredStylistId) {
       stylistQueryWhere.id = preferredStylistId;
     }
 
-    const eligibleStylists = await this.prisma.stylist.findMany({
-      where: stylistQueryWhere,
-      include: {
-        workingHours: {
-          where: { dayOfWeek },
+    const [eligibleStylists, activeAbsences] = await Promise.all([
+      this.prisma.stylist.findMany({
+        where: stylistQueryWhere,
+        include: {
+          workingHours: {
+            where: { dayOfWeek },
+          },
         },
-      },
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-    });
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      }),
+      this.prisma.stylistAbsence.findMany({
+        where: {
+          salonId,
+          status: 'ACTIVE',
+          OR: [
+            {
+              startDate: { lte: targetDateObj },
+              endDate: { gte: targetDateObj },
+            },
+            {
+              absenceDate: targetDateObj,
+            },
+          ],
+        },
+      }),
+    ]);
 
     if (eligibleStylists.length === 0) {
       // Diagnostic check: Does the salon have ANY active stylists qualified for these services?
@@ -280,6 +324,7 @@ export class AvailabilityService {
       let effectiveOpen: number;
       let effectiveClose: number;
       const busyIntervals: { start: number; end: number }[] = [];
+      let stylistBreakInterval: { start: number; end: number } | null = null;
 
       if (stylist.followsSalonSchedule) {
         if (salonOpenMinutes === null || salonCloseMinutes === null) {
@@ -288,6 +333,7 @@ export class AvailabilityService {
         effectiveOpen = salonOpenMinutes;
         effectiveClose = salonCloseMinutes;
         if (salonBreak) {
+          stylistBreakInterval = salonBreak;
           busyIntervals.push(salonBreak);
         }
       } else {
@@ -299,15 +345,33 @@ export class AvailabilityService {
         effectiveOpen = this.parseTimeStringToMinutes(customHours.startTime);
         effectiveClose = this.parseTimeStringToMinutes(customHours.endTime);
         if (customHours.breakStartTime && customHours.breakEndTime) {
-          busyIntervals.push({
+          stylistBreakInterval = {
             start: this.parseTimeStringToMinutes(customHours.breakStartTime),
             end: this.parseTimeStringToMinutes(customHours.breakEndTime),
-          });
+          };
+          busyIntervals.push(stylistBreakInterval);
         }
       }
 
       if (effectiveOpen >= effectiveClose) {
         continue;
+      }
+
+      // Check active leaves for this stylist on targetDateObj
+      const activeAbsence = activeAbsences.find((ab) => ab.stylistId === stylist.id);
+      if (activeAbsence) {
+        if (!activeAbsence.leavePortion || activeAbsence.leavePortion === 'FULL_DAY') {
+          continue; // Entire day unavailable
+        }
+        const leaveBlocks = this.getLeaveBlockedIntervals(
+          activeAbsence,
+          effectiveOpen,
+          effectiveClose,
+          stylistBreakInterval,
+        );
+        for (const lb of leaveBlocks) {
+          busyIntervals.push(lb);
+        }
       }
 
       // Add existing active appointments

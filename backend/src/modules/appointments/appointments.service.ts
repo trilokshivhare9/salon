@@ -16,7 +16,7 @@ import {
   RescheduleAppointmentDto,
 } from './dto/create-appointment.dto';
 import { DateTime } from 'luxon';
-import { AppointmentStatus, BookingSource, ClientEtaStatus, DayOfWeek, StylistStatus, ServiceStatus, AbsenceStatus } from '@prisma/client';
+import { AppointmentStatus, BookingSource, ClientEtaStatus, DayOfWeek, StylistStatus, ServiceStatus, AbsenceStatus, LeavePortion } from '@prisma/client';
 import { Subject, Observable } from 'rxjs';
 import { filter } from 'rxjs/operators';
 import * as crypto from 'crypto';
@@ -292,10 +292,13 @@ export class AppointmentsService {
       },
     });
 
+    // Canonical ISO date string for lock identity & date queries
+    const dateStr = dto.date.includes('T') ? dto.date.split('T')[0] : dto.date;
+
     // 4. Global 3-Level Lock Hierarchy & Atomic Transaction
     const key1 = this.hashToSignedInt32(`salon:${salonId}`);
     const scheduleKey2 = this.hashToSignedInt32(`schedule:${dayOfWeek}`);
-    const customerKey2 = this.hashToSignedInt32(`cust:${salonUser.id}:${dto.date}`);
+    const customerKey2 = this.hashToSignedInt32(`cust:${salonUser.id}:${dateStr}`);
 
     try {
       const createdAppt = await this.prisma.$transaction(
@@ -323,18 +326,17 @@ export class AppointmentsService {
             },
           });
 
-          if (customerOverlap) {
-            throw new ConflictException(
-              'You already have an active appointment at this salon during the selected time.',
-            );
-          }
+          // Fetch salon working hours for leave interval evaluation
+          const salonWorkingHours = await tx.salonWorkingHours.findUnique({
+            where: { salonId_dayOfWeek: { salonId, dayOfWeek } },
+          });
 
           // Level 3: Stylist Resource Lock
           let assignedStylistId: string | null = null;
 
           if (requestedStylistId) {
-            // Specific Stylist: exclusive lock
-            const stylistKey2 = this.hashToSignedInt32(`stylist:${requestedStylistId}:${dto.date}`);
+            // Specific Stylist: exclusive lock using normalized dateStr
+            const stylistKey2 = this.hashToSignedInt32(`stylist:${requestedStylistId}:${dateStr}`);
             await tx.$executeRawUnsafe(
               `SELECT pg_advisory_xact_lock(${key1}, ${stylistKey2})`,
             );
@@ -356,13 +358,41 @@ export class AppointmentsService {
                 'A concurrent booking just took this stylist time. Please choose another slot.',
               );
             }
+
+            // Re-verify requested stylist has no active leave overlapping this appointment window (BUG-01 SPECIFIC STYLIST FIX)
+            const targetDateObj = new Date(`${dateStr}T00:00:00.000Z`);
+            const activeAbsences = await tx.stylistAbsence.findMany({
+              where: {
+                salonId,
+                stylistId: requestedStylistId,
+                status: AbsenceStatus.ACTIVE,
+                OR: [
+                  { startDate: { lte: targetDateObj }, endDate: { gte: targetDateObj } },
+                  { absenceDate: targetDateObj },
+                ],
+              },
+            });
+
+            const reqStylistObj = await tx.stylist.findUnique({
+              where: { id: requestedStylistId },
+              select: { id: true, followsSalonSchedule: true },
+            });
+
+            for (const abs of activeAbsences) {
+              if (await this.isApptOverlappingAbsence(abs, startDt, endDt, dayOfWeek, salonWorkingHours, tx, reqStylistObj)) {
+                throw new ConflictException(
+                  'Selected specialist is on leave during the requested appointment time.',
+                );
+              }
+            }
+
             assignedStylistId = requestedStylistId;
           } else {
             // Any Stylist: Deterministic candidate ordering with try-lock fallback
             const candidateIds = [...matchingSlot.eligibleStaffIds].sort();
 
             for (const candidateId of candidateIds) {
-              const candKey2 = this.hashToSignedInt32(`stylist:${candidateId}:${dto.date}`);
+              const candKey2 = this.hashToSignedInt32(`stylist:${candidateId}:${dateStr}`);
               const lockRows = await tx.$queryRawUnsafe<[{ pg_try_advisory_xact_lock: boolean }]>(
                 `SELECT pg_try_advisory_xact_lock(${key1}, ${candKey2})`,
               );
@@ -382,17 +412,34 @@ export class AppointmentsService {
                 });
 
                 if (!overlap) {
-                  // Re-verify candidate has no active absence on this date
-                  const candidateAbsence = await tx.stylistAbsence.findFirst({
+                  // Re-verify candidate has no active absence overlapping this appointment window (BUG-01 ANY STYLIST FIX)
+                  const targetDateObj = new Date(`${dateStr}T00:00:00.000Z`);
+                  const candidateAbsences = await tx.stylistAbsence.findMany({
                     where: {
                       salonId,
                       stylistId: candidateId,
-                      absenceDate: new Date(`${dto.date}T00:00:00.000Z`),
                       status: AbsenceStatus.ACTIVE,
+                      OR: [
+                        { startDate: { lte: targetDateObj }, endDate: { gte: targetDateObj } },
+                        { absenceDate: targetDateObj },
+                      ],
                     },
                   });
 
-                  if (!candidateAbsence) {
+                  const candStylistObj = await tx.stylist.findUnique({
+                    where: { id: candidateId },
+                    select: { id: true, followsSalonSchedule: true },
+                  });
+
+                  let hasLeaveOverlap = false;
+                  for (const abs of candidateAbsences) {
+                    if (await this.isApptOverlappingAbsence(abs, startDt, endDt, dayOfWeek, salonWorkingHours, tx, candStylistObj)) {
+                      hasLeaveOverlap = true;
+                      break;
+                    }
+                  }
+
+                  if (!hasLeaveOverlap) {
                     assignedStylistId = candidateId;
                     break;
                   }
@@ -425,11 +472,14 @@ export class AppointmentsService {
             where: {
               salonId,
               stylistId: assignedStylistId!,
-              absenceDate: new Date(`${dto.date}T00:00:00.000Z`),
               status: AbsenceStatus.ACTIVE,
+              OR: [
+                { startDate: { lte: new Date(`${dto.date}T00:00:00.000Z`) }, endDate: { gte: new Date(`${dto.date}T00:00:00.000Z`) } },
+                { absenceDate: new Date(`${dto.date}T00:00:00.000Z`) },
+              ],
             },
           });
-          if (activeAbsence) {
+          if (activeAbsence && (!activeAbsence.leavePortion || activeAbsence.leavePortion === 'FULL_DAY')) {
             throw new ConflictException('Selected specialist is marked absent on this date.');
           }
 
@@ -870,14 +920,17 @@ Does this new time work for you?`;
     const endDt = startDt.plus({ minutes: appointment.durationMinutes });
     const dayOfWeek = startDt.toFormat('cccc').toUpperCase() as DayOfWeek;
 
+    // Canonical ISO date string for lock identity
+    const newDateStr = dto.newDate.includes('T') ? dto.newDate.split('T')[0] : dto.newDate;
+
     // Lock hierarchy for rescheduling:
     // Level 1: Schedule lock on new day
     // Level 2: Customer lock on new date
     // Level 3: Stylist lock on new date
     const key1 = this.hashToSignedInt32(`salon:${salonId}`);
     const newScheduleKey2 = this.hashToSignedInt32(`schedule:${dayOfWeek}`);
-    const customerKey2 = this.hashToSignedInt32(`cust:${appointment.salonUserId}:${dto.newDate}`);
-    const targetStylistKey2 = this.hashToSignedInt32(`stylist:${targetStylistId}:${dto.newDate}`);
+    const customerKey2 = this.hashToSignedInt32(`cust:${appointment.salonUserId}:${newDateStr}`);
+    const targetStylistKey2 = this.hashToSignedInt32(`stylist:${targetStylistId}:${newDateStr}`);
 
     try {
       const updated = await this.prisma.$transaction(
@@ -937,6 +990,37 @@ Does this new time work for you?`;
             );
           }
 
+          // Re-verify target stylist has no active leave overlapping this rescheduled time window
+          const targetDateObj = new Date(`${newDateStr}T00:00:00.000Z`);
+          const activeAbsences = await tx.stylistAbsence.findMany({
+            where: {
+              salonId,
+              stylistId: targetStylistId,
+              status: AbsenceStatus.ACTIVE,
+              OR: [
+                { startDate: { lte: targetDateObj }, endDate: { gte: targetDateObj } },
+                { absenceDate: targetDateObj },
+              ],
+            },
+          });
+
+          const salonWorkingHours = await tx.salonWorkingHours.findUnique({
+            where: { salonId_dayOfWeek: { salonId, dayOfWeek } },
+          });
+
+          const targetStylistObj = await tx.stylist.findUnique({
+            where: { id: targetStylistId },
+            select: { id: true, followsSalonSchedule: true },
+          });
+
+          for (const abs of activeAbsences) {
+            if (await this.isApptOverlappingAbsence(abs, startDt, endDt, dayOfWeek, salonWorkingHours, tx, targetStylistObj)) {
+              throw new ConflictException(
+                'Selected specialist is on leave during the requested rescheduled time.',
+              );
+            }
+          }
+
           // Re-verify target stylist status under lock (FOR SHARE to serialize with deactivation)
           await tx.$executeRawUnsafe(
             `SELECT id FROM stylists WHERE id = '${targetStylistId}' FOR SHARE`,
@@ -955,11 +1039,14 @@ Does this new time work for you?`;
             where: {
               salonId,
               stylistId: targetStylistId,
-              absenceDate: new Date(`${dto.newDate}T00:00:00.000Z`),
               status: AbsenceStatus.ACTIVE,
+              OR: [
+                { startDate: { lte: new Date(`${dto.newDate}T00:00:00.000Z`) }, endDate: { gte: new Date(`${dto.newDate}T00:00:00.000Z`) } },
+                { absenceDate: new Date(`${dto.newDate}T00:00:00.000Z`) },
+              ],
             },
           });
-          if (rescheduleAbsence) {
+          if (rescheduleAbsence && (!rescheduleAbsence.leavePortion || rescheduleAbsence.leavePortion === 'FULL_DAY')) {
             throw new ConflictException('Selected specialist is marked absent on the new date.');
           }
 
@@ -1297,5 +1384,83 @@ Would you like to move your *${currentSlotTimeStr}* appointment earlier to *${fr
       this.logger.error('Error in triggerSmartMoveUpBroadcast:', err);
       return 0;
     }
+  }
+
+  private parseTimeStringToMinutes(timeStr: string): number {
+    const [hours, mins] = timeStr.split(':').map((v) => parseInt(v, 10));
+    return hours * 60 + mins;
+  }
+
+  private async isApptOverlappingAbsence(
+    absence: any,
+    apptStartDt: DateTime,
+    apptEndDt: DateTime,
+    dayOfWeek: DayOfWeek,
+    salonWorkingHours: any,
+    tx: any,
+    stylist?: any,
+  ): Promise<boolean> {
+    if (!absence.leavePortion || absence.leavePortion === LeavePortion.FULL_DAY) {
+      return true;
+    }
+
+    const apptStartMin = apptStartDt.hour * 60 + apptStartDt.minute;
+    const apptEndMin = apptEndDt.hour * 60 + apptEndDt.minute;
+
+    let openMin = 0;
+    let closeMin = 0;
+    let breakInterval: { start: number; end: number } | null = null;
+
+    const followsSalon = stylist ? (stylist.followsSalonSchedule ?? true) : true;
+
+    if (followsSalon && salonWorkingHours && !salonWorkingHours.isClosed) {
+      openMin = this.parseTimeStringToMinutes(salonWorkingHours.startTime);
+      closeMin = this.parseTimeStringToMinutes(salonWorkingHours.endTime);
+      if (salonWorkingHours.breakStartTime && salonWorkingHours.breakEndTime) {
+        breakInterval = {
+          start: this.parseTimeStringToMinutes(salonWorkingHours.breakStartTime),
+          end: this.parseTimeStringToMinutes(salonWorkingHours.breakEndTime),
+        };
+      }
+    } else {
+      const wh = await tx.stylistWorkingHours.findFirst({
+        where: { stylistId: absence.stylistId, dayOfWeek },
+      });
+      if (!wh || !wh.isWorking) return false;
+      openMin = this.parseTimeStringToMinutes(wh.startTime);
+      closeMin = this.parseTimeStringToMinutes(wh.endTime);
+      if (wh.breakStartTime && wh.breakEndTime) {
+        breakInterval = {
+          start: this.parseTimeStringToMinutes(wh.breakStartTime),
+          end: this.parseTimeStringToMinutes(wh.breakEndTime),
+        };
+      }
+    }
+
+    if (openMin >= closeMin) return false;
+
+    let blockedStart = openMin;
+    let blockedEnd = closeMin;
+
+    const midPoint = Math.floor(openMin + (closeMin - openMin) / 2);
+    const firstHalfEnd = breakInterval ? breakInterval.start : midPoint;
+    const secondHalfStart = breakInterval ? breakInterval.end : midPoint;
+
+    if (absence.leavePortion === LeavePortion.FIRST_HALF) {
+      blockedStart = openMin;
+      blockedEnd = firstHalfEnd;
+    } else if (absence.leavePortion === LeavePortion.SECOND_HALF) {
+      blockedStart = secondHalfStart;
+      blockedEnd = closeMin;
+    } else if (absence.leavePortion === LeavePortion.CUSTOM_HOURS && absence.customStartTime && absence.customEndTime) {
+      const customStart = this.parseTimeStringToMinutes(absence.customStartTime);
+      const customEnd = this.parseTimeStringToMinutes(absence.customEndTime);
+      blockedStart = Math.max(openMin, customStart);
+      blockedEnd = Math.min(closeMin, customEnd);
+    }
+
+    if (blockedStart >= blockedEnd) return false;
+
+    return apptStartMin < blockedEnd && apptEndMin > blockedStart;
   }
 }
