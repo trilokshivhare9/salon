@@ -415,8 +415,9 @@ model SalonWorkingHours {
   isClosed       Boolean   @default(false) @map("is_closed")
   startTime      String    @map("start_time")       // "09:00"
   endTime        String    @map("end_time")         // "21:00"
-  breakStartTime String?   @map("break_start_time") // "13:00"
-  breakEndTime   String?   @map("break_end_time")   // "14:00"
+  breaks         Json?     @default("[]")
+  breakStartTime String?   @map("break_start_time") // "13:00" (legacy compatibility)
+  breakEndTime   String?   @map("break_end_time")   // "14:00" (legacy compatibility)
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
@@ -427,18 +428,20 @@ model SalonWorkingHours {
 }
 
 model StylistWorkingHours {
-  id             String    @id @default(uuid())
-  stylistId      String    @map("stylist_id")
-  dayOfWeek      DayOfWeek @map("day_of_week")
-  isWorking      Boolean   @default(true) @map("is_working")
-  startTime      String    @map("start_time")       // "10:00"
-  endTime        String    @map("end_time")         // "18:00"
-  breakStartTime String?   @map("break_start_time") // "13:00"
-  breakEndTime   String?   @map("break_end_time")   // "14:00"
-  createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime  @updatedAt @map("updated_at")
+  id               String    @id @default(uuid())
+  stylistId        String    @map("stylist_id")
+  dayOfWeek        DayOfWeek @map("day_of_week")
+  isWorking        Boolean   @default(true) @map("is_working")
+  startTime        String    @map("start_time")       // "10:00"
+  endTime          String    @map("end_time")         // "18:00"
+  hasBreakOverride Boolean   @default(false) @map("has_break_override")
+  breaks           Json?     @default("[]")
+  breakStartTime   String?   @map("break_start_time") // "13:00" (legacy compatibility)
+  breakEndTime     String?   @map("break_end_time")   // "14:00" (legacy compatibility)
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
 
-  stylist        Stylist   @relation(fields: [stylistId], references: [id], onDelete: Cascade)
+  stylist          Stylist   @relation(fields: [stylistId], references: [id], onDelete: Cascade)
 
   @@unique([stylistId, dayOfWeek])
   @@map("stylist_working_hours")

@@ -8,6 +8,7 @@ import { LeaveIntervalEngine } from '../staff/engines/leave-interval.engine';
 import { LeaveReassignmentEngine } from '../staff/engines/leave-reassignment.engine';
 import { LeaveValidationService } from '../staff/services/leave-validation.service';
 import { LeaveProcessingService } from '../staff/services/leave-processing.service';
+import { AvailabilityEngineService } from '../availability/availability-engine.service';
 import { ConflictException } from '@nestjs/common';
 import { AbsenceStatus, LeavePortion, AppointmentStatus } from '@prisma/client';
 import { DateTime } from 'luxon';
@@ -140,6 +141,7 @@ describe('Cross-Module Leave Remediation Tests (BUG-01, BUG-02, BUG-03, BUG-04)'
         LeaveReassignmentEngine,
         LeaveValidationService,
         LeaveProcessingService,
+        AvailabilityEngineService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: AvailabilityService, useValue: mockAvailabilityService },
         { provide: WhatsAppService, useValue: mockWhatsAppService },

@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AvailabilityService } from './availability.service';
+import { AvailabilityEngineService } from './availability-engine.service';
 import { PrismaService } from '../../database/prisma.service';
 import { DayOfWeek } from '@prisma/client';
 
@@ -80,6 +81,7 @@ describe('AvailabilityService (Unit Tests)', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AvailabilityService,
+        AvailabilityEngineService,
         {
           provide: PrismaService,
           useValue: {
@@ -191,7 +193,7 @@ describe('AvailabilityService (Unit Tests)', () => {
     expect(slotTimes).toContain('12:15'); // 12:15 to 13:00 fits perfectly!
   });
 
-  it('should allow custom-schedule stylists to operate outside salon hours independently', async () => {
+  it('should enforce Rule 1: Salon closed makes all stylists unavailable even if custom schedule is configured', async () => {
     jest.spyOn(prisma.salon, 'findUnique').mockResolvedValue(mockSalon as any);
     jest.spyOn(prisma.service, 'findMany').mockResolvedValue([mockService1] as any);
     // Salon closed
@@ -202,18 +204,12 @@ describe('AvailabilityService (Unit Tests)', () => {
       startTime: '10:00',
       endTime: '20:00',
     } as any);
-    // Only Priya (custom schedule 08:00 - 16:00)
+    // Priya has custom schedule 08:00 - 16:00
     jest.spyOn(prisma.stylist, 'findMany').mockResolvedValue([mockStylists[1]] as any);
     jest.spyOn(prisma.appointment, 'findMany').mockResolvedValue([]);
 
     const result = await service.getAvailableSlots(mockSalonId, mockService1.id, '2026-09-21');
-    expect(result.availableSlots.length).toBeGreaterThan(0);
-
-    const slotTimes = result.availableSlots.map((s) => s.startTime);
-    // Priya works starting from 08:00 with 30m service duration -> slots at 08:00, 08:30 (not 08:15)
-    expect(slotTimes).toContain('08:00');
-    expect(slotTimes).toContain('08:30');
-    expect(slotTimes).not.toContain('08:15');
+    expect(result.availableSlots.length).toBe(0);
   });
 
   describe('Dynamic Service-Duration Slot Interval Generation', () => {

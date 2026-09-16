@@ -1316,7 +1316,7 @@ export class SalonDashboard {
               <p style="color: var(--text-secondary); font-size: 0.85rem;">Manage staff members, personal details, weekly shift hours, and qualified services.</p>
             </div>
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-              <button class="btn btn-secondary btn-sm" id="btn-block-time" style="gap: 6px;">
+              <button class="btn btn-secondary btn-sm" id="btn-block-time" style="gap: 6px; border-color: rgba(251,113,133,0.3); color: #fb7185;">
                 ${Icons.clock({ size: 14, color: '#fb7185' })}
                 <span>Block Barber Time</span>
               </button>
@@ -1355,7 +1355,6 @@ export class SalonDashboard {
           return todayIso >= sDate && todayIso <= eDate;
         });
         const isAbsentToday = !!activeAbsence;
-        const isSelectedDateToday = todayIso === new Date().toISOString().split('T')[0];
 
         let statusDot = 'status-dot-free';
         let statusText = 'Available / Free for Walk-ins';
@@ -1377,12 +1376,12 @@ export class SalonDashboard {
         return `
                   <div class="staff-card" style="display: flex; flex-direction: column; justify-content: space-between;">
                     <div>
-                      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px;">
+                      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
                         <div style="display: flex; align-items: center; gap: 12px;">
-                          <img src="${st.profileImageUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'}" style="width: 48px; height: 48px; border-radius: 50%; object-fit: cover; border: 2px solid rgba(255,255,255,0.12);" />
+                          <img src="${st.profileImageUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'}" style="width: 44px; height: 44px; border-radius: 50%; object-fit: cover; border: 2px solid rgba(255,255,255,0.12);" />
                           <div>
-                            <div style="font-weight: 700; font-size: 1.05rem; color: #fff;">${st.name || 'Specialist'}</div>
-                            <div style="font-size: 0.8rem; color: var(--text-secondary);">${st.phone || 'No phone'}</div>
+                            <div style="font-weight: 700; font-size: 1.05rem; color: #fff; line-height: 1.2;">${st.name || 'Specialist'}</div>
+                            <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">${st.phone || 'No phone'}</div>
                           </div>
                         </div>
                         <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
@@ -1397,57 +1396,60 @@ export class SalonDashboard {
                         </div>
                       </div>
 
-                      <div style="background: rgba(0,0,0,0.3); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 14px;">
-                        <div style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; font-weight: 600;">
+                      <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 12px;">
+                        <div style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; font-weight: 600;">
                           <span class="status-dot ${statusDot}"></span>
                           <span style="color: #fff;">${statusText}</span>
                         </div>
-                        <div style="display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-muted); margin-top: 8px;">
+                        <div style="display: flex; justify-content: space-between; font-size: 0.74rem; color: var(--text-muted); margin-top: 6px;">
                           <span>Today: <strong>${confirmedCount}</strong> Active • <strong>${completedCount}</strong> Done</span>
                         </div>
-                        <div class="progress-bar-bg">
+                        <div class="progress-bar-bg" style="margin-top: 6px; height: 4px;">
                           <div class="progress-bar-fill" style="width: ${Math.min(todayAppts.length * 20, 100)}%;"></div>
                         </div>
                       </div>
 
-                      <div style="margin-bottom: 14px;">
-                        <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; margin-bottom: 6px;">Qualified Services (${st.services?.length || 0}):</div>
-                        <div style="display: flex; flex-wrap: wrap; gap: 4px;">
-                          ${(st.services && st.services.length > 0)
-            ? st.services.map((svc) => `<span class="badge" style="background: rgba(99,102,241,0.15); color: #818cf8; font-size: 0.7rem;">${svc.service?.name || 'Service'}</span>`).join('')
-            : '<span style="font-size: 0.75rem; color: var(--text-muted);">No services assigned</span>'}
+                      <div style="margin-bottom: 12px;">
+                        <div class="meta-bullet-row">
+                          <span style="color: var(--text-muted); font-size: 0.75rem;">QUALIFIED SERVICES (${st.services?.length || 0}):</span>
+                          <span style="color: var(--text-secondary); font-size: 0.78rem; font-weight: 500;">
+                            ${(st.services && st.services.length > 0)
+                              ? st.services.map((svc) => svc.service?.name || 'Service').join(', ')
+                              : 'None assigned'}
+                          </span>
                         </div>
                       </div>
                     </div>
 
                     <div>
-                      <!-- Primary Controls -->
+                      <!-- Primary Actions -->
                       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px;">
-                        <button class="btn btn-secondary btn-sm btn-edit-staff" data-id="${st.id}" data-name="${st.name || ''}" data-phone="${st.phone || ''}" data-email="${st.email || ''}" data-img="${st.profileImageUrl || ''}" style="font-size: 0.75rem; gap: 4px;">
+                        <button class="btn btn-secondary btn-sm btn-edit-staff" data-id="${st.id}" data-name="${st.name || ''}" data-phone="${st.phone || ''}" data-email="${st.email || ''}" data-img="${st.profileImageUrl || ''}" style="font-size: 0.76rem; gap: 4px; justify-content: center;">
                           ${Icons.edit({ size: 13 })}
                           <span>Edit Info</span>
                         </button>
-                        <button class="btn btn-secondary btn-sm btn-assign-services" data-id="${st.id}" data-name="${st.name || ''}" style="font-size: 0.75rem; gap: 4px;">
+                        <button class="btn btn-secondary btn-sm btn-assign-services" data-id="${st.id}" data-name="${st.name || ''}" style="font-size: 0.76rem; gap: 4px; justify-content: center;">
                           ${Icons.scissors({ size: 13 })}
                           <span>Services</span>
                         </button>
                       </div>
-                      <!-- Secondary Controls -->
-                      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr; gap: 4px; border-top: 1px solid var(--border-subtle); padding-top: 10px;">
-                        <button class="btn btn-secondary btn-sm btn-edit-hours" data-id="${st.id}" data-name="${st.name || ''}" style="font-size: 0.7rem; padding: 4px 2px;" title="Shift Working Hours">
+
+                      <!-- Secondary Operations Toolbar -->
+                      <div class="segmented-action-bar">
+                        <button class="segmented-action-btn btn-edit-hours" data-id="${st.id}" data-name="${st.name || ''}" title="Shift Working Hours">
                           <span>Hours</span>
                         </button>
-                        <button class="btn btn-secondary btn-sm btn-add-break" data-id="${st.id}" data-name="${st.name || ''}" style="font-size: 0.7rem; padding: 4px 2px;" title="Shift Breaks">
+                        <button class="segmented-action-btn btn-add-break" data-id="${st.id}" data-name="${st.name || ''}" title="Shift Breaks">
                           <span>Break</span>
                         </button>
-                        <button class="btn btn-secondary btn-sm btn-mark-absent" data-id="${st.id}" data-name="${st.name || ''}" style="font-size: 0.7rem; padding: 4px 2px; color: #fb7185; border-color: rgba(251,113,133,0.3);" title="Record Leave">
+                        <button class="segmented-action-btn btn-mark-absent" data-id="${st.id}" data-name="${st.name || ''}" style="color: #fb7185;" title="Record Leave">
                           <span>Leave</span>
                         </button>
-                        <button class="btn btn-secondary btn-sm btn-leave-history" data-id="${st.id}" data-name="${st.name || ''}" style="font-size: 0.7rem; padding: 4px 2px; color: #818cf8; border-color: rgba(99,102,241,0.3);" title="Leave History & Actions">
+                        <button class="segmented-action-btn btn-leave-history" data-id="${st.id}" data-name="${st.name || ''}" style="color: #818cf8;" title="Leave History & Actions">
                           <span>History</span>
                         </button>
-                        <button class="btn btn-danger-outline btn-sm btn-delete-staff" data-id="${st.id}" data-name="${st.name || ''}" style="font-size: 0.7rem; padding: 4px 2px;" title="Delete Stylist">
-                          <span>Del</span>
+                        <button class="segmented-action-btn danger-btn btn-delete-staff" data-id="${st.id}" data-name="${st.name || ''}" title="Delete Stylist">
+                          ${Icons.trash({ size: 12 })}
                         </button>
                       </div>
                     </div>
@@ -1509,55 +1511,52 @@ export class SalonDashboard {
               </button>
             </div>
           ` : `
-            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 18px;">
-              ${services.map((s) => `
-                <div class="staff-card" style="display: flex; flex-direction: column; justify-content: space-between; padding: 20px;">
-                  <div>
-                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
-                      <div style="font-weight: 700; font-size: 1.1rem; color: #fff;">${s.name || 'Service'}</div>
-                      <div style="font-weight: 800; color: #fbbf24; font-size: 1.25rem; font-family: var(--font-heading);">₹${s.price || 0}</div>
-                    </div>
-                    <p style="font-size: 0.84rem; color: var(--text-secondary); margin-bottom: 16px; min-height: 38px; line-height: 1.5;">
-                      ${s.description || 'Standard salon treatment service.'}
-                    </p>
-                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 8px;">
-                      <span style="display: flex; align-items: center; gap: 5px;">
-                        ${Icons.clock({ size: 13, color: '#94a3b8' })}
-                        <strong>${s.durationMinutes || 30}</strong> mins
-                      </span>
-                      <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
-                        <span class="badge badge-confirmed">${s.category || 'General'}</span>
-                        ${(() => {
-          const g = s.targetGender || 'UNISEX';
-          const labelMap = { MALE: '👨 Men', FEMALE: '👩 Women', UNISEX: '✂️ Unisex', KIDS: '👶 Kids' };
-          const bgMap = { MALE: 'rgba(59, 130, 246, 0.15)', FEMALE: 'rgba(236, 72, 153, 0.15)', UNISEX: 'rgba(168, 85, 247, 0.15)', KIDS: 'rgba(245, 158, 11, 0.15)' };
-          const colorMap = { MALE: '#60a5fa', FEMALE: '#f472b6', UNISEX: '#c084fc', KIDS: '#fbbf24' };
-          return `<span class="badge" style="background: ${bgMap[g]}; color: ${colorMap[g]}; font-size: 0.76rem; padding: 2px 8px; border-radius: 6px; font-weight: 600;">${labelMap[g]}</span>`;
-        })()}
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 16px;">
+              ${services.map((s) => {
+        const count = (s.stylists && s.stylists.length) || s._count?.stylists || 0;
+        const g = s.targetGender || 'UNISEX';
+        const labelMap = { MALE: 'Men', FEMALE: 'Women', UNISEX: 'Unisex', KIDS: 'Kids' };
+        const genderLabel = labelMap[g] || 'Unisex';
+
+        return `
+                  <div class="staff-card" style="display: flex; flex-direction: column; justify-content: space-between; padding: 18px;">
+                    <div>
+                      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+                        <div style="font-weight: 700; font-size: 1.1rem; color: #fff; line-height: 1.2;">${s.name || 'Service'}</div>
+                        <div style="font-weight: 800; color: #fbbf24; font-size: 1.25rem; font-family: var(--font-heading);">₹${s.price || 0}</div>
+                      </div>
+                      <p style="font-size: 0.84rem; color: var(--text-secondary); margin-bottom: 12px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 36px;">
+                        ${s.description || 'Standard salon treatment service.'}
+                      </p>
+                      
+                      <!-- Subtle Metadata Bullet Row (Replaces Loud Pills) -->
+                      <div class="meta-bullet-row" style="margin-bottom: 12px;">
+                        <span>⏱ <strong>${s.durationMinutes || 30}</strong> mins</span>
+                        <span class="meta-bullet-dot">•</span>
+                        <span>${s.category || 'General'}</span>
+                        <span class="meta-bullet-dot">•</span>
+                        <span>${genderLabel}</span>
+                      </div>
+
+                      <div style="margin-bottom: 14px;">
+                        ${count > 0
+            ? `<span style="font-size: 0.78rem; font-weight: 600; color: #34d399; display: flex; align-items: center; gap: 6px;"><span class="status-dot status-dot-free" style="width: 7px; height: 7px;"></span>${count} Stylist${count > 1 ? 's' : ''} Assigned</span>`
+            : `<span style="font-size: 0.78rem; font-weight: 600; color: #f87171; display: flex; align-items: center; gap: 6px;"><span class="status-dot status-dot-busy" style="width: 7px; height: 7px;"></span>⚠️ 0 Staff (Unbookable)</span>`}
                       </div>
                     </div>
-                    <div style="margin-bottom: 14px;">
-                      ${(() => {
-          const count = (s.stylists && s.stylists.length) || s._count?.stylists || 0;
-          if (count > 0) {
-            return `<span class="badge" style="background: rgba(34, 197, 94, 0.12); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.25); font-size: 0.76rem; padding: 3px 8px; border-radius: 999px;">✓ ${count} Stylist${count > 1 ? 's' : ''} Assigned</span>`;
-          } else {
-            return `<span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); font-size: 0.76rem; padding: 3px 8px; border-radius: 999px;" title="No stylists assigned. Clients cannot book this service on WhatsApp or Web.">⚠️ 0 Staff (Unbookable)</span>`;
-          }
-        })()}
+
+                    <div style="display: flex; gap: 8px; border-top: 1px solid var(--border-subtle); padding-top: 12px; align-items: center;">
+                      <button class="btn btn-secondary btn-sm btn-edit-service" data-id="${s.id}" data-name="${s.name || ''}" data-price="${s.price || 0}" data-duration="${s.durationMinutes || 30}" data-category="${s.category || ''}" data-desc="${s.description || ''}" style="flex: 1; gap: 6px; justify-content: center;">
+                        ${Icons.edit({ size: 13 })}
+                        <span>Edit</span>
+                      </button>
+                      <button class="btn btn-danger-outline btn-sm btn-delete-service" data-id="${s.id}" data-name="${s.name || ''}" style="padding: 6px 12px;" title="Delete Service">
+                        ${Icons.trash({ size: 13 })}
+                      </button>
                     </div>
                   </div>
-                  <div style="display: flex; gap: 8px; border-top: 1px solid var(--border-subtle); padding-top: 12px;">
-                    <button class="btn btn-secondary btn-sm btn-edit-service" data-id="${s.id}" data-name="${s.name || ''}" data-price="${s.price || 0}" data-duration="${s.durationMinutes || 30}" data-category="${s.category || ''}" data-desc="${s.description || ''}" style="flex: 1; gap: 6px;">
-                      ${Icons.edit({ size: 13 })}
-                      <span>Edit</span>
-                    </button>
-                    <button class="btn btn-danger-outline btn-sm btn-delete-service" data-id="${s.id}" data-name="${s.name || ''}" style="padding: 6px 12px;" title="Delete Service">
-                      ${Icons.trash({ size: 13 })}
-                    </button>
-                  </div>
-                </div>
-              `).join('')}
+                `;
+      }).join('')}
             </div>
           `}
         </div>
@@ -1990,7 +1989,19 @@ export class SalonDashboard {
             <div style="color: var(--text-muted);">${Icons.chevronRight({ size: 16 })}</div>
           </div>
 
-          <!-- 4. Staff Shifts & Working Hours -->
+          <!-- 4. Salon Weekly Operating Schedule -->
+          <div class="profile-tool-card" id="card-feature-salon-schedule">
+            <div class="profile-tool-icon" style="background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.3);">
+              ${Icons.calendar({ size: 22, color: '#34d399' })}
+            </div>
+            <div style="flex: 1;">
+              <div style="font-weight: 700; color: #fff; font-size: 0.98rem;">Weekly Operating Schedule</div>
+              <div style="font-size: 0.78rem; color: var(--text-secondary); margin-top: 3px;">This schedule repeats every week. Configure opening hours and default breaks.</div>
+            </div>
+            <div style="color: var(--text-muted);">${Icons.chevronRight({ size: 16 })}</div>
+          </div>
+
+          <!-- 5. Staff Shifts & Working Hours -->
           <div class="profile-tool-card" id="card-feature-shifts">
             <div class="profile-tool-icon" style="background: rgba(56,189,248,0.12); border: 1px solid rgba(56,189,248,0.3);">
               ${Icons.clock({ size: 22, color: '#38bdf8' })}
@@ -2002,7 +2013,7 @@ export class SalonDashboard {
             <div style="color: var(--text-muted);">${Icons.chevronRight({ size: 16 })}</div>
           </div>
 
-          <!-- 5. Sign Out -->
+          <!-- 6. Sign Out -->
           <div class="profile-tool-card" id="card-feature-logout" style="border-color: rgba(244,63,94,0.3); background: rgba(244,63,94,0.04);">
             <div class="profile-tool-icon" style="background: rgba(244,63,94,0.12); border: 1px solid rgba(244,63,94,0.3);">
               ${Icons.lock({ size: 22, color: '#fb7185' })}
@@ -2744,6 +2755,9 @@ export class SalonDashboard {
     });
     document.getElementById('card-feature-whatsapp')?.addEventListener('click', () => {
       this.switchTab('whatsapp-logs');
+    });
+    document.getElementById('card-feature-salon-schedule')?.addEventListener('click', () => {
+      this.showSalonScheduleModal();
     });
     document.getElementById('card-feature-shifts')?.addEventListener('click', () => {
       this.switchTab('staff');
@@ -3960,10 +3974,300 @@ export class SalonDashboard {
     });
   }
 
-  showEditStaffHoursModal(staffId, staffName) {
+  async showSalonScheduleModal() {
+    const modalContainer = document.getElementById('modal-container');
+    modalContainer.innerHTML = `
+      <div class="modal-backdrop show">
+        <div class="modal-content modal-content-lg" style="max-height: 90vh; overflow-y: auto; padding: 24px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div>
+              <h3 style="font-size: 1.3rem; font-weight: 800; color: #fff; margin-bottom: 2px;">🗓️ Weekly Operating Schedule</h3>
+              <p style="color: #34d399; font-size: 0.82rem; font-weight: 600; margin: 0;">This schedule repeats every week.</p>
+            </div>
+            <button class="close-btn" id="btn-close-salon-sched">&times;</button>
+          </div>
+
+          <div style="background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.25); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px; font-size: 0.8rem; color: var(--text-secondary); line-height: 1.5;">
+            ℹ️ The <strong>Salon Operating Schedule</strong> defines the absolute outer availability boundary. All stylists inherit these default operating hours and default salon breaks unless custom overrides are enabled.
+          </div>
+
+          <div id="salon-sched-loading" style="text-align: center; padding: 30px; color: var(--text-muted);">
+            ⏳ Fetching 7-Day Salon Schedule from PostgreSQL...
+          </div>
+
+          <form id="form-salon-schedule" style="display: none;">
+            <div id="salon-sched-days-container" style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px;">
+              <!-- Dynamically populated 7 days -->
+            </div>
+
+            <!-- Conflict / Error Alert Banner -->
+            <div id="salon-sched-error" style="background: rgba(244,63,94,0.15); border: 1px solid var(--danger-border); color: #f43f5e; padding: 12px; border-radius: var(--radius-sm); font-size: 0.85rem; margin-bottom: 16px; display: none;"></div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 10px;">
+              <button type="button" class="btn btn-secondary" id="btn-cancel-salon-sched">Cancel</button>
+              <button type="submit" class="btn btn-primary" id="btn-save-salon-sched" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); font-weight: 700;">
+                💾 Save Weekly Schedule →
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('btn-close-salon-sched')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+    document.getElementById('btn-cancel-salon-sched')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+
+    try {
+      const existingHours = await ApiClient.getSalonWorkingHours(true);
+      const loadingDiv = document.getElementById('salon-sched-loading');
+      const form = document.getElementById('form-salon-schedule');
+      if (loadingDiv) loadingDiv.style.display = 'none';
+      if (form) form.style.display = 'block';
+
+      const days = [
+        { key: 'MONDAY', label: 'Monday' },
+        { key: 'TUESDAY', label: 'Tuesday' },
+        { key: 'WEDNESDAY', label: 'Wednesday' },
+        { key: 'THURSDAY', label: 'Thursday' },
+        { key: 'FRIDAY', label: 'Friday' },
+        { key: 'SATURDAY', label: 'Saturday' },
+        { key: 'SUNDAY', label: 'Sunday' },
+      ];
+
+      let salonSchedState = days.map((d) => {
+        const found = (existingHours || []).find((h) => h.dayOfWeek === d.key) || {};
+        const isClosed = found.isClosed !== undefined ? found.isClosed : false;
+        let breaks = [];
+        if (Array.isArray(found.breaks) && found.breaks.length > 0) {
+          breaks = found.breaks.map((b) => ({
+            id: b.id || `brk-${d.key}-${Math.random()}`,
+            startTime: b.startTime || '13:00',
+            endTime: b.endTime || '14:00',
+            title: b.title || 'Lunch Break',
+          }));
+        } else if (found.breakStartTime && found.breakEndTime) {
+          breaks = [{ id: `brk-${d.key}-legacy`, startTime: found.breakStartTime, endTime: found.breakEndTime, title: 'Lunch Break' }];
+        } else if (!isClosed) {
+          breaks = [{ id: `brk-${d.key}-1`, startTime: '13:00', endTime: '14:00', title: 'Lunch Break' }];
+        }
+
+        return {
+          dayOfWeek: d.key,
+          label: d.label,
+          isClosed,
+          startTime: found.startTime || '09:00',
+          endTime: found.endTime || '19:00',
+          breaks,
+        };
+      });
+
+      const renderDays = () => {
+        const container = document.getElementById('salon-sched-days-container');
+        if (!container) return;
+
+        container.innerHTML = salonSchedState.map((day, idx) => `
+          <div style="background: var(--bg-input); border: 1px solid ${day.isClosed ? 'rgba(239,68,68,0.2)' : 'var(--border-subtle)'}; border-radius: var(--radius-sm); padding: 12px 14px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: ${day.isClosed ? '0' : '10px'};">
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <strong style="color: #fff; font-size: 0.95rem; min-width: 90px;">${day.label}</strong>
+                <span class="badge" style="background: ${day.isClosed ? 'rgba(239,68,68,0.15)' : 'rgba(16,185,129,0.15)'}; color: ${day.isClosed ? '#f87171' : '#34d399'}; border: 1px solid ${day.isClosed ? 'rgba(239,68,68,0.3)' : 'rgba(16,185,129,0.3)'}; font-size: 0.68rem; font-weight: 800;">
+                  ${day.isClosed ? 'CLOSED' : 'OPEN'}
+                </span>
+              </div>
+              <button type="button" class="btn btn-secondary btn-sm btn-toggle-salon-day" data-idx="${idx}" style="font-size: 0.75rem; padding: 4px 10px; background: ${day.isClosed ? 'rgba(16,185,129,0.18)' : 'rgba(239,68,68,0.18)'}; color: ${day.isClosed ? '#34d399' : '#f87171'}; border: 1px solid ${day.isClosed ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'};">
+                ${day.isClosed ? 'Set to OPEN' : 'Set to CLOSED'}
+              </button>
+            </div>
+
+            ${!day.isClosed ? `
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
+                <div>
+                  <label style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 2px;">Opening Time</label>
+                  <input type="time" class="form-control salon-day-start" data-idx="${idx}" value="${day.startTime}" style="padding: 6px 10px; font-size: 0.85rem;" />
+                </div>
+                <div>
+                  <label style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 2px;">Closing Time</label>
+                  <input type="time" class="form-control salon-day-end" data-idx="${idx}" value="${day.endTime}" style="padding: 6px 10px; font-size: 0.85rem;" />
+                </div>
+              </div>
+
+              <div style="border-top: 1px dashed var(--border-subtle); padding-top: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                  <span style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600;">Salon Default Breaks (${day.breaks.length})</span>
+                  <button type="button" class="btn btn-secondary btn-sm btn-add-salon-break" data-idx="${idx}" style="font-size: 0.7rem; padding: 2px 8px;">
+                    + Add Break
+                  </button>
+                </div>
+
+                ${day.breaks.length === 0 ? `
+                  <div style="font-size: 0.72rem; color: var(--text-muted); font-style: italic;">No default breaks configured for ${day.label}.</div>
+                ` : day.breaks.map((b, bIdx) => `
+                  <div style="display: flex; gap: 6px; align-items: center; margin-bottom: 6px;">
+                    <input type="text" class="form-control salon-brk-title" data-idx="${idx}" data-bidx="${bIdx}" value="${b.title || 'Break'}" placeholder="Title" style="flex: 1; padding: 4px 8px; font-size: 0.78rem;" />
+                    <input type="time" class="form-control salon-brk-start" data-idx="${idx}" data-bidx="${bIdx}" value="${b.startTime}" style="width: 100px; padding: 4px 6px; font-size: 0.78rem;" />
+                    <span style="color: var(--text-muted); font-size: 0.75rem;">-</span>
+                    <input type="time" class="form-control salon-brk-end" data-idx="${idx}" data-bidx="${bIdx}" value="${b.endTime}" style="width: 100px; padding: 4px 6px; font-size: 0.78rem;" />
+                    <button type="button" class="btn btn-secondary btn-sm btn-del-salon-break" data-idx="${idx}" data-bidx="${bIdx}" style="padding: 2px 6px; color: #f87171; font-size: 0.75rem;">✕</button>
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
+          </div>
+        `).join('');
+
+        // Handlers
+        container.querySelectorAll('.btn-toggle-salon-day').forEach((b) => {
+          b.addEventListener('click', (e) => {
+            const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+            salonSchedState[idx].isClosed = !salonSchedState[idx].isClosed;
+            renderDays();
+          });
+        });
+
+        container.querySelectorAll('.salon-day-start').forEach((inp) => {
+          inp.addEventListener('change', (e) => {
+            const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+            salonSchedState[idx].startTime = e.currentTarget.value;
+          });
+        });
+
+        container.querySelectorAll('.salon-day-end').forEach((inp) => {
+          inp.addEventListener('change', (e) => {
+            const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+            salonSchedState[idx].endTime = e.currentTarget.value;
+          });
+        });
+
+        container.querySelectorAll('.btn-add-salon-break').forEach((b) => {
+          b.addEventListener('click', (e) => {
+            const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+            salonSchedState[idx].breaks.push({
+              id: `brk-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+              startTime: '13:00',
+              endTime: '14:00',
+              title: 'Lunch Break',
+            });
+            renderDays();
+          });
+        });
+
+        container.querySelectorAll('.btn-del-salon-break').forEach((b) => {
+          b.addEventListener('click', (e) => {
+            const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+            const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
+            salonSchedState[idx].breaks.splice(bIdx, 1);
+            renderDays();
+          });
+        });
+
+        container.querySelectorAll('.salon-brk-title').forEach((inp) => {
+          inp.addEventListener('change', (e) => {
+            const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+            const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
+            salonSchedState[idx].breaks[bIdx].title = e.currentTarget.value;
+          });
+        });
+
+        container.querySelectorAll('.salon-brk-start').forEach((inp) => {
+          inp.addEventListener('change', (e) => {
+            const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+            const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
+            salonSchedState[idx].breaks[bIdx].startTime = e.currentTarget.value;
+          });
+        });
+
+        container.querySelectorAll('.salon-brk-end').forEach((inp) => {
+          inp.addEventListener('change', (e) => {
+            const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+            const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
+            salonSchedState[idx].breaks[bIdx].endTime = e.currentTarget.value;
+          });
+        });
+      };
+
+      renderDays();
+
+      document.getElementById('form-salon-schedule')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const submitBtn = document.getElementById('btn-save-salon-sched');
+        const errorDiv = document.getElementById('salon-sched-error');
+        submitBtn.textContent = 'Saving Schedule...';
+        submitBtn.setAttribute('disabled', 'true');
+        errorDiv.style.display = 'none';
+
+        // Client-side validation
+        for (const d of salonSchedState) {
+          if (!d.isClosed) {
+            if (d.startTime >= d.endTime) {
+              errorDiv.textContent = `Opening time (${d.startTime}) must be earlier than closing time (${d.endTime}) for ${d.label}.`;
+              errorDiv.style.display = 'block';
+              submitBtn.textContent = '💾 Save Weekly Schedule →';
+              submitBtn.removeAttribute('disabled');
+              return;
+            }
+            for (const b of d.breaks) {
+              if (b.startTime >= b.endTime) {
+                errorDiv.textContent = `Break start time (${b.startTime}) must be earlier than break end time (${b.endTime}) on ${d.label}.`;
+                errorDiv.style.display = 'block';
+                submitBtn.textContent = '💾 Save Weekly Schedule →';
+                submitBtn.removeAttribute('disabled');
+                return;
+              }
+              if (b.startTime < d.startTime || b.endTime > d.endTime) {
+                errorDiv.textContent = `Break ${b.startTime}-${b.endTime} must fall inside operating hours (${d.startTime}-${d.endTime}) on ${d.label}.`;
+                errorDiv.style.display = 'block';
+                submitBtn.textContent = '💾 Save Weekly Schedule →';
+                submitBtn.removeAttribute('disabled');
+                return;
+              }
+            }
+          }
+        }
+
+        const hoursPayload = salonSchedState.map((d) => ({
+          dayOfWeek: d.dayOfWeek,
+          isClosed: d.isClosed,
+          startTime: d.startTime,
+          endTime: d.endTime,
+          breaks: d.isClosed ? [] : d.breaks.map((b) => ({
+            id: b.id,
+            startTime: b.startTime,
+            endTime: b.endTime,
+            title: b.title || 'Break',
+          })),
+        }));
+
+        try {
+          await ApiClient.updateSalonWorkingHours(hoursPayload);
+          modalContainer.innerHTML = '';
+          this.loadData(true).then(() => {
+            this.refreshActiveTab();
+          }).catch(() => {});
+        } catch (err) {
+          errorDiv.textContent = err.message || 'Failed to update salon schedule. Please check for conflicting appointments.';
+          errorDiv.style.display = 'block';
+          submitBtn.textContent = '💾 Save Weekly Schedule →';
+          submitBtn.removeAttribute('disabled');
+        }
+      });
+    } catch (err) {
+      alert(`Error loading salon operating schedule: ${err.message}`);
+    }
+  }
+
+  async showEditStaffHoursModal(staffId, staffName) {
     const modalContainer = document.getElementById('modal-container');
     const staff = this.staffList.find((s) => s.id === staffId);
     const existingHours = staff?.workingHours || [];
+    let followsSalonSchedule = staff?.followsSalonSchedule ?? true;
+
+    // Fetch salon working hours to show as reference
+    let salonHours = [];
+    try {
+      salonHours = await ApiClient.getSalonWorkingHours();
+    } catch (e) {
+      salonHours = [];
+    }
 
     const days = [
       { key: 'MONDAY', label: 'Monday' },
@@ -3975,78 +4279,348 @@ export class SalonDashboard {
       { key: 'SUNDAY', label: 'Sunday' },
     ];
 
-    modalContainer.innerHTML = `
-      <div class="modal-backdrop show">
-        <div class="modal-content modal-content-lg" style="max-height: 90vh; overflow-y: auto;">
-          <div class="modal-header">
-            <h3>⏰ Weekly Shift Hours: ${staffName}</h3>
-            <button class="close-btn" id="btn-close-modal">&times;</button>
-          </div>
-          <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 16px;">
-            Configure active working days and daily shift start/end times for <strong>${staffName}</strong>.
-          </p>
+    let staffState = days.map((d) => {
+      const sDay = (salonHours || []).find((sh) => sh.dayOfWeek === d.key) || { isClosed: false, startTime: '09:00', endTime: '19:00' };
+      const wh = (existingHours || []).find((h) => h.dayOfWeek === d.key) || {};
 
-          <form id="edit-hours-form">
-            <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-              ${days.map((d) => {
-      const wh = existingHours.find((h) => h.dayOfWeek === d.key) || { isWorking: true, startTime: '09:00', endTime: '21:00' };
-      return `
-                  <div style="display: flex; align-items: center; justify-content: space-between; background: var(--bg-input); padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); gap: 10px;">
-                    <label style="display: flex; align-items: center; gap: 10px; min-width: 140px; cursor: pointer; margin-bottom: 0;">
-                      <input type="checkbox" class="shift-day-chk" data-day="${d.key}" ${wh.isWorking ? 'checked' : ''} style="width: 18px; height: 18px;" />
-                      <span style="font-weight: 700; color: #fff;">${d.label}</span>
-                    </label>
-                    <div style="display: flex; align-items: center; gap: 6px;">
-                      <input type="time" class="form-control shift-start" data-day="${d.key}" value="${wh.startTime || '09:00'}" style="padding: 6px; font-size: 0.85rem;" />
-                      <span style="color: var(--text-muted); font-size: 0.8rem;">to</span>
-                      <input type="time" class="form-control shift-end" data-day="${d.key}" value="${wh.endTime || '21:00'}" style="padding: 6px; font-size: 0.85rem;" />
-                    </div>
-                  </div>
-                `;
-    }).join('')}
+      let hasBreakOverride = wh.hasBreakOverride === true;
+      let breaks = [];
+      if (Array.isArray(wh.breaks) && wh.breaks.length > 0) {
+        breaks = wh.breaks.map((b) => ({
+          id: b.id || `st-brk-${d.key}-${Math.random()}`,
+          startTime: b.startTime || '13:00',
+          endTime: b.endTime || '14:00',
+          title: b.title || 'Lunch Break',
+        }));
+      } else if (wh.breakStartTime && wh.breakEndTime) {
+        breaks = [{ id: `st-brk-${d.key}-legacy`, startTime: wh.breakStartTime, endTime: wh.breakEndTime, title: 'Lunch Break' }];
+      }
+
+      return {
+        dayOfWeek: d.key,
+        label: d.label,
+        isWorking: wh.isWorking !== undefined ? wh.isWorking : !sDay.isClosed,
+        startTime: wh.startTime || sDay.startTime || '09:00',
+        endTime: wh.endTime || sDay.endTime || '19:00',
+        hasBreakOverride,
+        breaks,
+        salonOpen: sDay.startTime || '09:00',
+        salonClose: sDay.endTime || '19:00',
+        salonClosed: sDay.isClosed || false,
+        salonBreaks: sDay.breaks || (sDay.breakStartTime ? [{ startTime: sDay.breakStartTime, endTime: sDay.breakEndTime, title: 'Lunch Break' }] : []),
+      };
+    });
+
+    const renderStaffModal = () => {
+      modalContainer.innerHTML = `
+        <div class="modal-backdrop show">
+          <div class="modal-content modal-content-lg" style="max-height: 90vh; overflow-y: auto; padding: 24px;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
+              <div>
+                <h3 style="font-size: 1.25rem; font-weight: 800; color: #fff; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
+                  <span>⏰ Weekly Shift Hours: ${staffName}</span>
+                </h3>
+                <p style="color: var(--text-secondary); font-size: 0.84rem; margin: 0;">Configure active working days and daily shift start/end times for <strong>${staffName}</strong>.</p>
+              </div>
+              <button class="close-btn" id="btn-close-modal" style="background: rgba(255,255,255,0.06); border: 1px solid var(--border-subtle); border-radius: 50%; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-secondary); font-size: 1.1rem;">&times;</button>
             </div>
 
-            <button type="submit" class="btn btn-primary" style="width: 100%;">Save Weekly Shift Schedule →</button>
-          </form>
+            <!-- Follow Salon Schedule Checkbox Banner -->
+            <div style="background: rgba(99,102,241,0.08); border: 1px solid rgba(99,102,241,0.25); border-radius: var(--radius-md); padding: 12px 16px; margin-bottom: 18px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+              <label style="display: flex; align-items: center; gap: 12px; cursor: pointer; margin: 0;">
+                <input type="checkbox" id="chk-follow-salon" ${followsSalonSchedule ? 'checked' : ''} style="width: 18px; height: 18px; accent-color: #6366f1;" />
+                <div>
+                  <strong style="color: #fff; font-size: 0.92rem;">Follow Salon Operating Schedule</strong>
+                  <div style="font-size: 0.76rem; color: var(--text-muted); margin-top: 2px;">
+                    ${followsSalonSchedule ? 'Stylist inherits effective salon opening hours and default salon breaks automatically.' : 'Custom stylist hours enabled. (Must remain inside salon operating bounds).'}
+                  </div>
+                </div>
+              </label>
+              <span class="badge" style="background: ${followsSalonSchedule ? 'rgba(16,185,129,0.15)' : 'rgba(245,158,11,0.15)'}; color: ${followsSalonSchedule ? '#34d399' : '#fbbf24'}; border: 1px solid ${followsSalonSchedule ? 'rgba(16,185,129,0.3)' : 'rgba(245,158,11,0.3)'}; font-size: 0.72rem; padding: 3px 10px;">
+                ${followsSalonSchedule ? 'INHERITING SALON' : 'CUSTOM SCHEDULE'}
+              </span>
+            </div>
+
+            <form id="edit-hours-form">
+              <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
+                ${staffState.map((d, idx) => {
+                  const isDayActive = d.isWorking && !d.salonClosed;
+                  return `
+                    <div class="schedule-day-row ${!isDayActive ? 'off-day' : ''}">
+                      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                          <label class="switch-toggle" style="margin: 0;">
+                            <input type="checkbox" class="st-day-chk" data-idx="${idx}" ${isDayActive ? 'checked' : ''} ${followsSalonSchedule || d.salonClosed ? 'disabled' : ''} />
+                            <span class="switch-slider"></span>
+                          </label>
+                          <span style="font-weight: 700; color: #fff; font-size: 0.95rem; min-width: 95px;">${d.label}</span>
+                          ${d.salonClosed ? `
+                            <span class="badge" style="background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.3); font-size: 0.65rem;">SALON CLOSED</span>
+                          ` : isDayActive ? `
+                            <span class="badge badge-completed" style="font-size: 0.65rem;">WORKING</span>
+                          ` : `
+                            <span class="badge" style="background: rgba(100,116,139,0.2); color: #94a3b8; font-size: 0.65rem;">OFF</span>
+                          `}
+                        </div>
+
+                        ${!d.salonClosed && isDayActive ? `
+                          <div style="display: flex; align-items: center; gap: 8px;">
+                            <input type="time" class="time-input-compact st-shift-start" data-idx="${idx}" value="${followsSalonSchedule ? d.salonOpen : d.startTime}" ${followsSalonSchedule ? 'disabled' : ''} style="width: 110px;" />
+                            <span style="color: var(--text-muted); font-size: 0.8rem; font-weight: 600;">to</span>
+                            <input type="time" class="time-input-compact st-shift-end" data-idx="${idx}" value="${followsSalonSchedule ? d.salonClose : d.endTime}" ${followsSalonSchedule ? 'disabled' : ''} style="width: 110px;" />
+                          </div>
+                        ` : `
+                          <div style="font-size: 0.82rem; color: var(--text-muted); font-style: italic;">
+                            ${d.salonClosed ? 'Salon Closed' : 'Day Off'}
+                          </div>
+                        `}
+                      </div>
+
+                      ${!d.salonClosed && (d.isWorking || followsSalonSchedule) ? `
+                        <!-- Break Override Selection -->
+                        <div style="border-top: 1px dashed var(--border-subtle); padding-top: 8px; margin-top: 4px;">
+                          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
+                            <div style="display: flex; gap: 14px; align-items: center;">
+                              <label style="font-size: 0.76rem; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; gap: 5px; margin: 0;">
+                                <input type="radio" name="break-opt-${idx}" class="st-break-rad" data-idx="${idx}" value="inherit" ${!d.hasBreakOverride ? 'checked' : ''} ${followsSalonSchedule ? 'disabled' : ''} style="accent-color: #6366f1;" />
+                                Inherit Salon Breaks
+                              </label>
+                              <label style="font-size: 0.76rem; color: #a5b4fc; cursor: pointer; display: flex; align-items: center; gap: 5px; margin: 0;">
+                                <input type="radio" name="break-opt-${idx}" class="st-break-rad" data-idx="${idx}" value="custom" ${d.hasBreakOverride ? 'checked' : ''} ${followsSalonSchedule ? 'disabled' : ''} style="accent-color: #6366f1;" />
+                                Custom Break Override
+                              </label>
+                            </div>
+
+                            ${d.hasBreakOverride && !followsSalonSchedule ? `
+                              <button type="button" class="btn btn-secondary btn-sm btn-st-add-break" data-idx="${idx}" style="font-size: 0.7rem; padding: 2px 8px;">
+                                + Add Break
+                              </button>
+                            ` : ''}
+                          </div>
+
+                          ${!d.hasBreakOverride ? `
+                            <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px; font-style: italic;">
+                              Inheriting salon breaks: ${d.salonBreaks.length > 0 ? d.salonBreaks.map((sb) => `${sb.startTime}-${sb.endTime} (${sb.title || 'Lunch'})`).join(', ') : 'No salon default breaks.'}
+                            </div>
+                          ` : `
+                            <div style="font-size: 0.72rem; color: #a5b4fc; margin-top: 4px; margin-bottom: 4px;">
+                              ℹ️ Custom breaks replace salon default breaks for this stylist.
+                            </div>
+                            ${d.breaks.length === 0 ? `
+                              <div style="font-size: 0.72rem; color: var(--text-muted); font-style: italic;">No custom breaks added yet.</div>
+                            ` : d.breaks.map((b, bIdx) => `
+                              <div style="display: flex; gap: 6px; align-items: center; margin-bottom: 6px;">
+                                <input type="text" class="form-control st-brk-title" data-idx="${idx}" data-bidx="${bIdx}" value="${b.title || 'Break'}" placeholder="Title" style="flex: 1; padding: 4px 8px; font-size: 0.78rem;" />
+                                <input type="time" class="time-input-compact st-brk-start" data-idx="${idx}" data-bidx="${bIdx}" value="${b.startTime}" style="width: 100px; padding: 4px 6px; font-size: 0.78rem;" />
+                                <span style="color: var(--text-muted); font-size: 0.75rem;">-</span>
+                                <input type="time" class="time-input-compact st-brk-end" data-idx="${idx}" data-bidx="${bIdx}" value="${b.endTime}" style="width: 100px; padding: 4px 6px; font-size: 0.78rem;" />
+                                <button type="button" class="btn btn-secondary btn-sm btn-st-del-break" data-idx="${idx}" data-bidx="${bIdx}" style="padding: 2px 6px; color: #f87171; font-size: 0.75rem;">✕</button>
+                              </div>
+                            `).join('')}
+                          `}
+                        </div>
+                      ` : ''}
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+
+              <!-- Error Banner -->
+              <div id="st-hours-error" style="background: rgba(244,63,94,0.15); border: 1px solid var(--danger-border); color: #f43f5e; padding: 12px; border-radius: var(--radius-sm); font-size: 0.85rem; margin-bottom: 16px; display: none;"></div>
+
+              <div style="display: flex; gap: 10px; justify-content: flex-end; align-items: center; border-top: 1px solid var(--border-subtle); padding-top: 16px;">
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-cancel-st-hours" style="padding: 8px 18px;">Cancel</button>
+                <button type="submit" class="btn btn-primary btn-sm" id="btn-save-st-hours" style="padding: 8px 24px; font-weight: 700;">Save Weekly Shift Schedule →</button>
+              </div>
+            </form>
+          </div>
         </div>
-      </div>
-    `;
+      `;
 
-    document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+      // Event Listeners inside Staff Modal
+      document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+      document.getElementById('btn-cancel-st-hours')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
 
-    document.getElementById('edit-hours-form')?.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const hoursPayload = days.map((d) => {
-        const chk = document.querySelector(`.shift-day-chk[data-day="${d.key}"]`);
-        const start = document.querySelector(`.shift-start[data-day="${d.key}"]`);
-        const end = document.querySelector(`.shift-end[data-day="${d.key}"]`);
-        return {
-          dayOfWeek: d.key,
-          isWorking: chk?.checked || false,
-          startTime: start?.value || '09:00',
-          endTime: end?.value || '21:00',
-        };
+      document.getElementById('chk-follow-salon')?.addEventListener('change', (e) => {
+        followsSalonSchedule = e.target.checked;
+        renderStaffModal();
       });
 
-      try {
-        await ApiClient.updateStaffWorkingHours(staffId, hoursPayload);
-        const idx = this.staffList.findIndex((s) => String(s.id) === String(staffId));
-        if (idx !== -1) {
-          this.staffList[idx] = {
-            ...this.staffList[idx],
-            workingHours: hoursPayload,
-          };
-        }
-        modalContainer.innerHTML = '';
-        this.render();
+      modalContainer.querySelectorAll('.st-day-chk').forEach((chk) => {
+        chk.addEventListener('change', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          staffState[idx].isWorking = e.currentTarget.checked;
+          renderStaffModal();
+        });
+      });
 
-        this.loadData(true).then(() => {
-          this.refreshActiveTab();
-        }).catch(() => { });
-      } catch (err) {
-        alert(`Failed to update hours: ${err.message}`);
-      }
-    });
+      modalContainer.querySelectorAll('.st-shift-start').forEach((inp) => {
+        inp.addEventListener('change', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          staffState[idx].startTime = e.currentTarget.value;
+        });
+      });
+
+      modalContainer.querySelectorAll('.st-shift-end').forEach((inp) => {
+        inp.addEventListener('change', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          staffState[idx].endTime = e.currentTarget.value;
+        });
+      });
+
+      modalContainer.querySelectorAll('.st-break-rad').forEach((rad) => {
+        rad.addEventListener('change', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          staffState[idx].hasBreakOverride = e.currentTarget.value === 'custom';
+          renderStaffModal();
+        });
+      });
+
+      modalContainer.querySelectorAll('.btn-st-add-break').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          staffState[idx].breaks.push({
+            id: `st-brk-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+            startTime: '14:00',
+            endTime: '15:00',
+            title: 'Lunch Break',
+          });
+          renderStaffModal();
+        });
+      });
+
+      modalContainer.querySelectorAll('.btn-st-del-break').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
+          staffState[idx].breaks.splice(bIdx, 1);
+          renderStaffModal();
+        });
+      });
+
+      modalContainer.querySelectorAll('.st-brk-title').forEach((inp) => {
+        inp.addEventListener('change', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
+          staffState[idx].breaks[bIdx].title = e.currentTarget.value;
+        });
+      });
+
+      modalContainer.querySelectorAll('.st-brk-start').forEach((inp) => {
+        inp.addEventListener('change', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
+          staffState[idx].breaks[bIdx].startTime = e.currentTarget.value;
+        });
+      });
+
+      modalContainer.querySelectorAll('.st-brk-end').forEach((inp) => {
+        inp.addEventListener('change', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
+          staffState[idx].breaks[bIdx].endTime = e.currentTarget.value;
+        });
+      });
+
+      document.getElementById('edit-hours-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const submitBtn = document.getElementById('btn-save-st-hours');
+        const errorDiv = document.getElementById('st-hours-error');
+        submitBtn.textContent = 'Saving Stylist Schedule...';
+        submitBtn.setAttribute('disabled', 'true');
+        errorDiv.style.display = 'none';
+
+        // Update followsSalonSchedule property on staff member first
+        try {
+          await ApiClient.updateStaff(staffId, { followsSalonSchedule });
+        } catch (err) {
+          errorDiv.textContent = `Failed updating schedule inheritance: ${err.message}`;
+          errorDiv.style.display = 'block';
+          submitBtn.textContent = 'Save Stylist Schedule & Breaks →';
+          submitBtn.removeAttribute('disabled');
+          return;
+        }
+
+        // Validate client boundary rules
+        if (!followsSalonSchedule) {
+          for (const d of staffState) {
+            if (d.isWorking && !d.salonClosed) {
+              if (d.startTime < d.salonOpen || d.endTime > d.salonClose) {
+                errorDiv.textContent = `Stylist shift (${d.startTime}-${d.endTime}) on ${d.label} must fall within salon operating bounds (${d.salonOpen}-${d.salonClose}).`;
+                errorDiv.style.display = 'block';
+                submitBtn.textContent = 'Save Stylist Schedule & Breaks →';
+                submitBtn.removeAttribute('disabled');
+                return;
+              }
+              if (d.startTime >= d.endTime) {
+                errorDiv.textContent = `Shift start time (${d.startTime}) must be earlier than shift end time (${d.endTime}) on ${d.label}.`;
+                errorDiv.style.display = 'block';
+                submitBtn.textContent = 'Save Stylist Schedule & Breaks →';
+                submitBtn.removeAttribute('disabled');
+                return;
+              }
+              if (d.hasBreakOverride) {
+                for (const b of d.breaks) {
+                  if (b.startTime >= b.endTime) {
+                    errorDiv.textContent = `Break start (${b.startTime}) must be earlier than break end (${b.endTime}) on ${d.label}.`;
+                    errorDiv.style.display = 'block';
+                    submitBtn.textContent = 'Save Stylist Schedule & Breaks →';
+                    submitBtn.removeAttribute('disabled');
+                    return;
+                  }
+                  if (b.startTime < d.startTime || b.endTime > d.endTime) {
+                    errorDiv.textContent = `Break ${b.startTime}-${b.endTime} must fall within stylist working shift (${d.startTime}-${d.endTime}) on ${d.label}.`;
+                    errorDiv.style.display = 'block';
+                    submitBtn.textContent = 'Save Stylist Schedule & Breaks →';
+                    submitBtn.removeAttribute('disabled');
+                    return;
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        const hoursPayload = staffState.map((d) => ({
+          dayOfWeek: d.dayOfWeek,
+          isWorking: followsSalonSchedule ? !d.salonClosed : d.isWorking,
+          startTime: followsSalonSchedule ? d.salonOpen : d.startTime,
+          endTime: followsSalonSchedule ? d.salonClose : d.endTime,
+          hasBreakOverride: d.hasBreakOverride === true,
+          breaks: d.hasBreakOverride ? d.breaks.map((b) => ({
+            id: b.id,
+            startTime: b.startTime,
+            endTime: b.endTime,
+            title: b.title || 'Break',
+          })) : [],
+        }));
+
+        try {
+          await ApiClient.updateStaffWorkingHours(staffId, hoursPayload);
+          const idx = this.staffList.findIndex((s) => String(s.id) === String(staffId));
+          if (idx !== -1) {
+            this.staffList[idx] = {
+              ...this.staffList[idx],
+              followsSalonSchedule,
+              workingHours: hoursPayload,
+            };
+          }
+          modalContainer.innerHTML = '';
+          this.render();
+
+          this.loadData(true).then(() => {
+            this.refreshActiveTab();
+          }).catch(() => { });
+        } catch (err) {
+          errorDiv.textContent = err.message || 'Failed to update stylist schedule. Please verify input hours.';
+          errorDiv.style.display = 'block';
+          submitBtn.textContent = 'Save Stylist Schedule & Breaks →';
+          submitBtn.removeAttribute('disabled');
+        }
+      });
+    };
+
+    renderStaffModal();
   }
 
   showDeleteServiceModal(serviceId, serviceName) {

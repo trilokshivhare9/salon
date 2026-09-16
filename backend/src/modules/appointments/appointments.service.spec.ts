@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AppointmentsService, VALID_STATUS_TRANSITIONS } from './appointments.service';
 import { PrismaService } from '../../database/prisma.service';
 import { AvailabilityService } from '../availability/availability.service';
+import { AvailabilityEngineService } from '../availability/availability-engine.service';
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { AppointmentStatus, BookingSource } from '@prisma/client';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
@@ -18,11 +19,13 @@ describe('AppointmentsService (Unit Tests)', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AppointmentsService,
+        AvailabilityEngineService,
         {
           provide: PrismaService,
           useValue: {
             salon: { findUnique: jest.fn() },
             salonWorkingHours: { findUnique: jest.fn().mockResolvedValue({ startTime: '09:00', endTime: '21:00', isClosed: false }) },
+            stylistWorkingHours: { findUnique: jest.fn().mockResolvedValue({ isWorking: true, startTime: '09:00', endTime: '21:00' }), findFirst: jest.fn().mockResolvedValue({ isWorking: true, startTime: '09:00', endTime: '21:00' }) },
             stylist: { findUnique: jest.fn().mockResolvedValue({ id: 'sty-1', followsSalonSchedule: false, status: 'ACTIVE' }), findMany: jest.fn() },
             stylistService: { findMany: jest.fn().mockResolvedValue([{ id: 'ss-1' }]), findFirst: jest.fn().mockResolvedValue({ id: 'ss-1' }) },
             service: { findMany: jest.fn().mockResolvedValue([{ id: 'srv-1', salonId: mockSalonId, name: 'Haircut', durationMinutes: 30, price: 300, status: 'ACTIVE' }]), findFirst: jest.fn().mockResolvedValue({ id: 'srv-1', salonId: mockSalonId, status: 'ACTIVE' }), findUnique: jest.fn() },

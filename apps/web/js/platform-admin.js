@@ -845,51 +845,328 @@ export class PlatformAdminPortal {
               </div>
             </div>
 
-            <!-- Operating Hours (Dedicated Clean Row) -->
-            <div class="form-group" style="margin-bottom: 14px;">
-              <label style="margin-bottom: 6px; display: block;">Store Operating Hours *</label>
-              <div style="display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; align-items: center;">
-                <div>
-                  <input type="time" class="form-control" id="prov-open-time" value="09:00" style="padding: 8px 12px; width: 100%;" required />
+            <!-- Step Wizard Container -->
+            <div id="super-provision-step-container">
+              
+              <!-- STEP 1: Basic Salon & Owner Info -->
+              <div id="prov-step-1" class="prov-wizard-step" style="display: block;">
+                <!-- Operating Hours Summary Header -->
+                <div style="background: rgba(99,102,241,0.08); border: 1px solid rgba(99,102,241,0.25); border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 16px; font-size: 0.82rem; color: var(--text-secondary); display: flex; align-items: center; justify-content: space-between;">
+                  <div>
+                    <strong style="color: #fff;">🗓️ Step 1 of 3: Basic Salon Info & Credentials</strong>
+                    <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px;">Enter owner details and Meta Phone ID. Step 2 configures the 7-day weekly operating schedule.</div>
+                  </div>
                 </div>
-                <span style="color: var(--text-muted); font-size: 0.82rem; font-weight: 600;">to</span>
-                <div>
-                  <input type="time" class="form-control" id="prov-close-time" value="21:00" style="padding: 8px 12px; width: 100%;" required />
+
+                <!-- Shop Address / Landmark -->
+                <div class="form-group" style="margin-bottom: 16px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <label style="margin-bottom: 0;">Shop Address / Landmark</label>
+                    <span style="font-size: 0.72rem; color: var(--text-muted);">(Optional)</span>
+                  </div>
+                  <input type="text" class="form-control" id="prov-address" placeholder="e.g. Shop 12, Main Market, Near Rajwada" />
+                </div>
+
+                <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px;">
+                  <button type="button" class="btn btn-secondary" id="btn-cancel-super-modal">Cancel</button>
+                  <button type="button" class="btn btn-primary" id="btn-next-step-2" style="background: linear-gradient(135deg, #ec4899 0%, #be185d 100%);">
+                    Next: Configure Operating Schedule 🗓️ →
+                  </button>
                 </div>
               </div>
-            </div>
 
-            <!-- Shop Address / Landmark (Full Width for Full Comfort) -->
-            <div class="form-group" style="margin-bottom: 16px;">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                <label style="margin-bottom: 0;">Shop Address / Landmark</label>
-                <span style="font-size: 0.72rem; color: var(--text-muted);">(Optional)</span>
+              <!-- STEP 2: Weekly Operating Schedule (7 Days) -->
+              <div id="prov-step-2" class="prov-wizard-step" style="display: none;">
+                <div style="background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.25); border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 16px; font-size: 0.82rem; color: var(--text-secondary);">
+                  <strong style="color: #fff;">🗓️ Step 2 of 3: Weekly Operating Schedule</strong>
+                  <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px;">Set the recurring weekly schedule. This defines the default operating boundary for all stylists.</div>
+                </div>
+
+                <!-- 7-Day Schedule Editor Grid -->
+                <div id="prov-schedule-days-container" style="display: flex; flex-direction: column; gap: 12px; max-height: 52vh; overflow-y: auto; padding-right: 4px;">
+                  <!-- Dynamically populated 7 days -->
+                </div>
+
+                <div style="display: flex; justify-content: space-between; gap: 12px; margin-top: 20px;">
+                  <button type="button" class="btn btn-secondary" id="btn-back-step-1">← Back to Basic Info</button>
+                  <button type="button" class="btn btn-primary" id="btn-next-step-3" style="background: linear-gradient(135deg, #ec4899 0%, #be185d 100%);">
+                    Next: Review & Confirm 📋 →
+                  </button>
+                </div>
               </div>
-              <input type="text" class="form-control" id="prov-address" placeholder="e.g. Shop 12, Main Market, Near Rajwada" />
-            </div>
 
-            <div style="background: rgba(99,102,241,0.06); border: 1px solid rgba(99,102,241,0.2); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px; font-size: 0.8rem; color: var(--text-secondary); line-height: 1.5;">
-              ℹ️ <strong>Zero Dummy Guarantee:</strong> This salon will start clean with 0 staff & 0 services in <strong>DEACTIVATED</strong> status. It will automatically activate as soon as the salon owner adds their first staff member and service.
-            </div>
+              <!-- STEP 3: Review & Confirmation -->
+              <div id="prov-step-3" class="prov-wizard-step" style="display: none;">
+                <div style="background: rgba(236,72,153,0.08); border: 1px solid rgba(236,72,153,0.25); border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 16px; font-size: 0.82rem; color: var(--text-secondary);">
+                  <strong style="color: #fff;">📋 Step 3 of 3: Review Salon Provisioning Payload</strong>
+                  <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px;">Verify basic information and persisted 7-day operating schedule before executing creation.</div>
+                </div>
 
-            <!-- Error Banner -->
-            <div id="prov-error" style="background: rgba(244,63,94,0.15); border: 1px solid var(--danger-border); color: #f43f5e; padding: 12px; border-radius: var(--radius-sm); font-size: 0.85rem; margin-bottom: 16px; display: none;"></div>
+                <div id="prov-review-summary-container" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 16px; margin-bottom: 16px;">
+                  <!-- Summary HTML -->
+                </div>
 
-            <!-- Submit Button Bar -->
-            <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 10px;">
-              <button type="button" class="btn btn-secondary" id="btn-cancel-super-modal">Cancel</button>
-              <button type="submit" class="btn btn-primary" id="btn-submit-provision" style="background: linear-gradient(135deg, #ec4899 0%, #be185d 100%);">
-                ⚡ Create Salon Shard →
-              </button>
+                <!-- Error Banner -->
+                <div id="prov-error" style="background: rgba(244,63,94,0.15); border: 1px solid var(--danger-border); color: #f43f5e; padding: 12px; border-radius: var(--radius-sm); font-size: 0.85rem; margin-bottom: 16px; display: none;"></div>
+
+                <div style="display: flex; justify-content: space-between; gap: 12px; margin-top: 20px;">
+                  <button type="button" class="btn btn-secondary" id="btn-back-step-2">← Back to Schedule</button>
+                  <button type="submit" class="btn btn-primary" id="btn-submit-provision" style="background: linear-gradient(135deg, #ec4899 0%, #be185d 100%); font-weight: 800; font-size: 0.95rem; padding: 10px 20px;">
+                    ⚡ Confirm & Provision Salon Shard →
+                  </button>
+                </div>
+              </div>
+
             </div>
           </form>
         </div>
       </div>
     `;
 
-    // Handlers
+    // Handlers & Initial State for 7-Day Schedule
     document.getElementById('btn-close-super-modal')?.addEventListener('click', () => { modalContainer.innerHTML = ''; });
     document.getElementById('btn-cancel-super-modal')?.addEventListener('click', () => { modalContainer.innerHTML = ''; });
+
+    // Initial 7-Day Schedule Data Model (Defaults: Mon-Sat 09:00-19:00 with 13:00-14:00 Lunch Break; Sun CLOSED)
+    const dayNames = [
+      { key: 'MONDAY', label: 'Monday', defaultOpen: true },
+      { key: 'TUESDAY', label: 'Tuesday', defaultOpen: true },
+      { key: 'WEDNESDAY', label: 'Wednesday', defaultOpen: true },
+      { key: 'THURSDAY', label: 'Thursday', defaultOpen: true },
+      { key: 'FRIDAY', label: 'Friday', defaultOpen: true },
+      { key: 'SATURDAY', label: 'Saturday', defaultOpen: true },
+      { key: 'SUNDAY', label: 'Sunday', defaultOpen: false },
+    ];
+
+    let provScheduleState = dayNames.map((d) => ({
+      dayOfWeek: d.key,
+      label: d.label,
+      isClosed: !d.defaultOpen,
+      startTime: '09:00',
+      endTime: '19:00',
+      breaks: d.defaultOpen
+        ? [{ id: `brk-${d.key}-1`, startTime: '13:00', endTime: '14:00', title: 'Lunch Break' }]
+        : [],
+    }));
+
+    const renderProvScheduleDays = () => {
+      const container = document.getElementById('prov-schedule-days-container');
+      if (!container) return;
+
+      container.innerHTML = provScheduleState.map((day, idx) => `
+        <div style="background: rgba(255,255,255,0.025); border: 1px solid ${day.isClosed ? 'rgba(239,68,68,0.2)' : 'var(--border-subtle)'}; border-radius: var(--radius-sm); padding: 12px 14px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: ${day.isClosed ? '0' : '10px'};">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <strong style="color: #fff; font-size: 0.95rem; font-family: var(--font-heading); min-width: 90px;">${day.label}</strong>
+              <span class="badge" style="background: ${day.isClosed ? 'rgba(239,68,68,0.15)' : 'rgba(16,185,129,0.15)'}; color: ${day.isClosed ? '#f87171' : '#34d399'}; border: 1px solid ${day.isClosed ? 'rgba(239,68,68,0.3)' : 'rgba(16,185,129,0.3)'}; font-size: 0.68rem; font-weight: 800;">
+                ${day.isClosed ? 'CLOSED' : 'OPEN'}
+              </span>
+            </div>
+            <button type="button" class="btn btn-secondary btn-sm btn-prov-toggle-day" data-idx="${idx}" style="font-size: 0.75rem; padding: 4px 10px; background: ${day.isClosed ? 'rgba(16,185,129,0.18)' : 'rgba(239,68,68,0.18)'}; color: ${day.isClosed ? '#34d399' : '#f87171'}; border: 1px solid ${day.isClosed ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'};">
+              ${day.isClosed ? 'Set to OPEN' : 'Set to CLOSED'}
+            </button>
+          </div>
+
+          ${!day.isClosed ? `
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
+              <div>
+                <label style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 2px;">Opening Time</label>
+                <input type="time" class="form-control prov-day-start" data-idx="${idx}" value="${day.startTime}" style="padding: 6px 10px; font-size: 0.85rem;" />
+              </div>
+              <div>
+                <label style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 2px;">Closing Time</label>
+                <input type="time" class="form-control prov-day-end" data-idx="${idx}" value="${day.endTime}" style="padding: 6px 10px; font-size: 0.85rem;" />
+              </div>
+            </div>
+
+            <div style="border-top: 1px dashed var(--border-subtle); padding-top: 8px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <span style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600;">Breaks (${day.breaks.length})</span>
+                <button type="button" class="btn btn-secondary btn-sm btn-prov-add-break" data-idx="${idx}" style="font-size: 0.7rem; padding: 2px 8px;">
+                  + Add Break
+                </button>
+              </div>
+
+              ${day.breaks.length === 0 ? `
+                <div style="font-size: 0.72rem; color: var(--text-muted); font-style: italic;">No breaks configured for ${day.label}.</div>
+              ` : day.breaks.map((b, bIdx) => `
+                <div style="display: flex; gap: 6px; align-items: center; margin-bottom: 6px;">
+                  <input type="text" class="form-control prov-break-title" data-idx="${idx}" data-bidx="${bIdx}" value="${b.title || 'Break'}" placeholder="Title" style="flex: 1; padding: 4px 8px; font-size: 0.78rem;" />
+                  <input type="time" class="form-control prov-break-start" data-idx="${idx}" data-bidx="${bIdx}" value="${b.startTime}" style="width: 100px; padding: 4px 6px; font-size: 0.78rem;" />
+                  <span style="color: var(--text-muted); font-size: 0.75rem;">-</span>
+                  <input type="time" class="form-control prov-break-end" data-idx="${idx}" data-bidx="${bIdx}" value="${b.endTime}" style="width: 100px; padding: 4px 6px; font-size: 0.78rem;" />
+                  <button type="button" class="btn btn-secondary btn-sm btn-prov-del-break" data-idx="${idx}" data-bidx="${bIdx}" style="padding: 2px 6px; color: #f87171; font-size: 0.75rem;">✕</button>
+                </div>
+              `).join('')}
+            </div>
+          ` : ''}
+        </div>
+      `).join('');
+
+      // Attach Day Editor Event Handlers
+      container.querySelectorAll('.btn-prov-toggle-day').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          provScheduleState[idx].isClosed = !provScheduleState[idx].isClosed;
+          renderProvScheduleDays();
+        });
+      });
+
+      container.querySelectorAll('.prov-day-start').forEach((inp) => {
+        inp.addEventListener('change', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          provScheduleState[idx].startTime = e.currentTarget.value;
+        });
+      });
+
+      container.querySelectorAll('.prov-day-end').forEach((inp) => {
+        inp.addEventListener('change', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          provScheduleState[idx].endTime = e.currentTarget.value;
+        });
+      });
+
+      container.querySelectorAll('.btn-prov-add-break').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          provScheduleState[idx].breaks.push({
+            id: `brk-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+            startTime: '13:00',
+            endTime: '14:00',
+            title: 'Break',
+          });
+          renderProvScheduleDays();
+        });
+      });
+
+      container.querySelectorAll('.btn-prov-del-break').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
+          provScheduleState[idx].breaks.splice(bIdx, 1);
+          renderProvScheduleDays();
+        });
+      });
+
+      container.querySelectorAll('.prov-break-title').forEach((inp) => {
+        inp.addEventListener('change', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
+          provScheduleState[idx].breaks[bIdx].title = e.currentTarget.value;
+        });
+      });
+
+      container.querySelectorAll('.prov-break-start').forEach((inp) => {
+        inp.addEventListener('change', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
+          provScheduleState[idx].breaks[bIdx].startTime = e.currentTarget.value;
+        });
+      });
+
+      container.querySelectorAll('.prov-break-end').forEach((inp) => {
+        inp.addEventListener('change', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
+          provScheduleState[idx].breaks[bIdx].endTime = e.currentTarget.value;
+        });
+      });
+    };
+
+    // Step Wizard Navigation Logic
+    const goToStep = (stepNum) => {
+      document.getElementById('prov-step-1').style.display = stepNum === 1 ? 'block' : 'none';
+      document.getElementById('prov-step-2').style.display = stepNum === 2 ? 'block' : 'none';
+      document.getElementById('prov-step-3').style.display = stepNum === 3 ? 'block' : 'none';
+
+      if (stepNum === 2) {
+        renderProvScheduleDays();
+      } else if (stepNum === 3) {
+        renderReviewSummary();
+      }
+    };
+
+    const renderReviewSummary = () => {
+      const summaryDiv = document.getElementById('prov-review-summary-container');
+      if (!summaryDiv) return;
+
+      const name = document.getElementById('prov-name').value.trim();
+      const ownerName = document.getElementById('prov-owner-name').value.trim();
+      const email = document.getElementById('prov-email').value.trim();
+      const phone = document.getElementById('prov-phone').value.trim();
+      const city = document.getElementById('prov-city').value.trim();
+
+      summaryDiv.innerHTML = `
+        <div style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.6; margin-bottom: 14px;">
+          <div>🏢 Salon Name: <strong style="color: #fff;">${name}</strong> (${city})</div>
+          <div>👤 Owner: <strong style="color: #fff;">${ownerName}</strong> (${email})</div>
+          <div>📞 WhatsApp Phone: <code>${phone}</code></div>
+        </div>
+
+        <div style="font-size: 0.8rem; font-weight: 700; color: #fff; margin-bottom: 6px; text-transform: uppercase;">
+          🗓️ Persisted Weekly Operating Schedule (7 Days):
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 0.78rem;">
+          ${provScheduleState.map((d) => `
+            <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); padding: 6px 10px; border-radius: 6px;">
+              <div style="display: flex; justify-content: space-between;">
+                <strong>${d.label}:</strong>
+                <span style="color: ${d.isClosed ? '#f87171' : '#34d399'}; font-weight: 700;">
+                  ${d.isClosed ? 'CLOSED' : `${d.startTime} - ${d.endTime}`}
+                </span>
+              </div>
+              ${!d.isClosed && d.breaks.length > 0 ? `
+                <div style="color: var(--text-muted); font-size: 0.72rem; margin-top: 2px;">
+                  Breaks: ${d.breaks.map((b) => `${b.startTime}-${b.endTime}`).join(', ')}
+                </div>
+              ` : ''}
+            </div>
+          `).join('')}
+        </div>
+      `;
+    };
+
+    document.getElementById('btn-next-step-2')?.addEventListener('click', () => {
+      // Validate Step 1 basic fields
+      const name = document.getElementById('prov-name').value.trim();
+      const ownerName = document.getElementById('prov-owner-name').value.trim();
+      const email = document.getElementById('prov-email').value.trim();
+      const password = document.getElementById('prov-password').value;
+      const city = document.getElementById('prov-city').value.trim();
+
+      if (!name || !ownerName || !email || !password || !city) {
+        alert('Please complete all required fields in Step 1.');
+        return;
+      }
+      goToStep(2);
+    });
+
+    document.getElementById('btn-back-step-1')?.addEventListener('click', () => { goToStep(1); });
+    document.getElementById('btn-next-step-3')?.addEventListener('click', () => {
+      // Validate Step 2 schedule times
+      for (const d of provScheduleState) {
+        if (!d.isClosed) {
+          if (d.startTime >= d.endTime) {
+            alert(`Opening time must be earlier than closing time for ${d.label}.`);
+            return;
+          }
+          for (const b of d.breaks) {
+            if (b.startTime >= b.endTime) {
+              alert(`Break start time (${b.startTime}) must be earlier than break end time (${b.endTime}) on ${d.label}.`);
+              return;
+            }
+            if (b.startTime < d.startTime || b.endTime > d.endTime) {
+              alert(`Break ${b.startTime}-${b.endTime} must fall inside operating hours (${d.startTime}-${d.endTime}) on ${d.label}.`);
+              return;
+            }
+          }
+        }
+      }
+      goToStep(3);
+    });
+
+    document.getElementById('btn-back-step-2')?.addEventListener('click', () => { goToStep(2); });
 
     // Live Meta Verification Logic & Auto-Fill Phone Number
     let isMetaPhoneVerified = false;
@@ -1004,7 +1281,7 @@ export class PlatformAdminPortal {
       e.preventDefault();
       const submitBtn = document.getElementById('btn-submit-provision');
       const errorDiv = document.getElementById('prov-error');
-      submitBtn.textContent = 'Validating & Creating...';
+      submitBtn.textContent = 'Validating & Persisting Schedule...';
       submitBtn.setAttribute('disabled', 'true');
       errorDiv.style.display = 'none';
 
@@ -1012,7 +1289,7 @@ export class PlatformAdminPortal {
       if (!rawWaId) {
         errorDiv.textContent = 'Meta WhatsApp Phone Number ID is required to enable bot bookings.';
         errorDiv.style.display = 'block';
-        submitBtn.textContent = '⚡ Create Salon Shard →';
+        submitBtn.textContent = '⚡ Confirm & Provision Salon Shard →';
         submitBtn.removeAttribute('disabled');
         return;
       }
@@ -1022,7 +1299,7 @@ export class PlatformAdminPortal {
         if (!pass) {
           errorDiv.textContent = 'Please verify a valid Meta WhatsApp Phone Number ID before creating the salon.';
           errorDiv.style.display = 'block';
-          submitBtn.textContent = '⚡ Create Salon Shard →';
+          submitBtn.textContent = '⚡ Confirm & Provision Salon Shard →';
           submitBtn.removeAttribute('disabled');
           return;
         }
@@ -1032,10 +1309,13 @@ export class PlatformAdminPortal {
       if (!rawPhone) {
         errorDiv.textContent = 'Please verify your Meta WhatsApp Phone ID above to fetch and populate the mobile number.';
         errorDiv.style.display = 'block';
-        submitBtn.textContent = '⚡ Create Salon Shard →';
+        submitBtn.textContent = '⚡ Confirm & Provision Salon Shard →';
         submitBtn.removeAttribute('disabled');
         return;
       }
+
+      // Pick general open/close times from Monday or default 09:00 - 19:00
+      const monState = provScheduleState.find((d) => d.dayOfWeek === 'MONDAY') || provScheduleState[0];
 
       const payload = {
         name: document.getElementById('prov-name').value.trim(),
@@ -1047,12 +1327,30 @@ export class PlatformAdminPortal {
         address: document.getElementById('prov-address')?.value?.trim() || undefined,
         whatsappPhoneNumberId: rawWaId,
         timezone: 'Asia/Kolkata',
-        openTime: document.getElementById('prov-open-time').value,
-        closeTime: document.getElementById('prov-close-time').value,
+        openTime: monState.isClosed ? '09:00' : monState.startTime,
+        closeTime: monState.isClosed ? '19:00' : monState.endTime,
       };
 
       try {
+        // Step A: Create Salon in backend
         const createdSalon = await ApiClient.createSalonPlatform(payload);
+
+        // Step B: Persist exact custom 7-day schedule to PostgreSQL salon_working_hours
+        const hoursPayload = provScheduleState.map((d) => ({
+          dayOfWeek: d.dayOfWeek,
+          isClosed: d.isClosed,
+          startTime: d.startTime,
+          endTime: d.endTime,
+          breaks: d.isClosed ? [] : d.breaks.map((b) => ({
+            id: b.id,
+            startTime: b.startTime,
+            endTime: b.endTime,
+            title: b.title || 'Break',
+          })),
+        }));
+
+        await ApiClient.updateSalonWorkingHoursForSalon(createdSalon.id, hoursPayload);
+
         this.showProvisionSuccessModal(createdSalon, payload.password);
         this.data = await ApiClient.getAllSalonsPlatform();
         this.render();
@@ -1066,7 +1364,7 @@ export class PlatformAdminPortal {
           errorDiv.textContent = err.message || 'Could not create salon. Please verify input fields.';
         }
         errorDiv.style.display = 'block';
-        submitBtn.textContent = '⚡ Create Salon Shard →';
+        submitBtn.textContent = '⚡ Confirm & Provision Salon Shard →';
         submitBtn.removeAttribute('disabled');
       }
     });

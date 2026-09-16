@@ -15,6 +15,7 @@ import { LeaveIntervalEngine } from './engines/leave-interval.engine';
 import { LeaveReassignmentEngine } from './engines/leave-reassignment.engine';
 import { LeaveValidationService } from './services/leave-validation.service';
 import { LeaveProcessingService } from './services/leave-processing.service';
+import { AvailabilityEngineService } from '../availability/availability-engine.service';
 
 describe('Human Real-World Scenarios: Stylist Absence Handling', () => {
   let absenceService: AbsenceService;
@@ -95,6 +96,7 @@ describe('Human Real-World Scenarios: Stylist Absence Handling', () => {
         LeaveReassignmentEngine,
         LeaveValidationService,
         LeaveProcessingService,
+        AvailabilityEngineService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: AppointmentsService, useValue: mockAppointmentsService },
         { provide: WhatsAppService, useValue: mockWhatsAppService },
