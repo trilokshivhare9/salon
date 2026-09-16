@@ -4,6 +4,7 @@ import { DateTime } from 'luxon';
 import { PrismaService } from '../../../database/prisma.service';
 import { LeaveIntervalEngine, DayScheduleDetails } from '../engines/leave-interval.engine';
 import { LeaveReassignmentEngine } from '../engines/leave-reassignment.engine';
+import { AvailabilityEngineService } from '../../availability/availability-engine.service';
 import { MarkAbsentDto, ExtendLeaveDto } from '../dto/absence.dto';
 import {
   AbsenceStatus,
@@ -23,6 +24,7 @@ export class LeaveProcessingService {
     private readonly prisma: PrismaService,
     private readonly intervalEngine: LeaveIntervalEngine,
     private readonly reassignmentEngine: LeaveReassignmentEngine,
+    private readonly availabilityEngine: AvailabilityEngineService,
   ) {}
 
   private hashToSignedInt32(input: string): number {
@@ -58,35 +60,21 @@ export class LeaveProcessingService {
       tx.stylistWorkingHours.findFirst({ where: { stylistId, dayOfWeek } }),
     ]);
 
-    if (followsSalonSchedule) {
-      if (!salonWH || salonWH.isClosed) {
-        return { openMin: 0, closeMin: 0, breakInterval: null, isOff: true };
-      }
-      const openMin = this.intervalEngine.parseTimeStringToMinutes(salonWH.startTime);
-      const closeMin = this.intervalEngine.parseTimeStringToMinutes(salonWH.endTime);
-      let breakInterval: { start: number; end: number } | null = null;
-      if (salonWH.breakStartTime && salonWH.breakEndTime) {
-        breakInterval = {
-          start: this.intervalEngine.parseTimeStringToMinutes(salonWH.breakStartTime),
-          end: this.intervalEngine.parseTimeStringToMinutes(salonWH.breakEndTime),
-        };
-      }
-      return { openMin, closeMin, breakInterval, isOff: false };
-    } else {
-      if (!stylistWH || !stylistWH.isWorking) {
-        return { openMin: 0, closeMin: 0, breakInterval: null, isOff: true };
-      }
-      const openMin = this.intervalEngine.parseTimeStringToMinutes(stylistWH.startTime);
-      const closeMin = this.intervalEngine.parseTimeStringToMinutes(stylistWH.endTime);
-      let breakInterval: { start: number; end: number } | null = null;
-      if (stylistWH.breakStartTime && stylistWH.breakEndTime) {
-        breakInterval = {
-          start: this.intervalEngine.parseTimeStringToMinutes(stylistWH.breakStartTime),
-          end: this.intervalEngine.parseTimeStringToMinutes(stylistWH.breakEndTime),
-        };
-      }
-      return { openMin, closeMin, breakInterval, isOff: false };
+    const stylist = { followsSalonSchedule };
+    const shiftWindow = this.availabilityEngine.getEffectiveShiftWindow(salonWH, stylist, stylistWH);
+
+    if (!shiftWindow.isWorking || shiftWindow.effectiveOpenMinutes === null || shiftWindow.effectiveCloseMinutes === null) {
+      return { openMin: 0, closeMin: 0, breakInterval: null, isOff: true };
     }
+
+    const firstBreak = shiftWindow.effectiveBreaks.length > 0 ? shiftWindow.effectiveBreaks[0] : null;
+
+    return {
+      openMin: shiftWindow.effectiveOpenMinutes,
+      closeMin: shiftWindow.effectiveCloseMinutes,
+      breakInterval: firstBreak,
+      isOff: false,
+    };
   }
 
   /**

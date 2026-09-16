@@ -64,22 +64,21 @@ export class LeaveManagementUI {
 
     modalContainer.innerHTML = `
       <div class="modal-backdrop show">
-        <div class="modal-content" style="max-width: 620px; max-height: 90vh; overflow-y: auto;">
-          <div class="modal-header">
-            <h3 style="display: flex; align-items: center; gap: 8px;">
-              <span>🗓️</span>
-              <span>Leave Management — Record Leave</span>
-            </h3>
-            <button class="close-btn" id="btn-close-leave-modal">&times;</button>
+        <div class="modal-content" style="max-width: 580px; max-height: 90vh; overflow-y: auto; padding: 24px;">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
+            <div>
+              <h3 style="font-size: 1.2rem; font-weight: 800; color: #fff; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
+                <span>🗓️ Record Specialist Leave</span>
+              </h3>
+              <p style="color: var(--text-secondary); font-size: 0.82rem; margin: 0;">Schedule leave or mark absence for a specialist.</p>
+            </div>
+            <button class="close-btn" id="btn-close-leave-modal" style="background: rgba(255,255,255,0.06); border: 1px solid var(--border-subtle); border-radius: 50%; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-secondary); font-size: 1.1rem;">&times;</button>
           </div>
-          <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 16px;">
-            Schedule leave or mark absence for a specialist. The system will calculate availability overrides and process affected bookings.
-          </p>
 
           <form id="leave-management-form">
             <!-- Stylist Selection -->
             <div class="form-group" style="margin-bottom: 14px;">
-              <label style="font-weight: 600;">Specialist *</label>
+              <label style="font-weight: 600; font-size: 0.82rem; color: #e2e8f0; display: block; margin-bottom: 4px;">Specialist *</label>
               <select class="form-control" id="leave-staff-id" ${staffId ? 'disabled' : 'required'}>
                 ${staffList.map((st) => `
                   <option value="${st.id}" ${st.id === staffId ? 'selected' : ''}>
@@ -92,11 +91,11 @@ export class LeaveManagementUI {
             <!-- Date Range -->
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px;">
               <div class="form-group" style="margin: 0;">
-                <label style="font-weight: 600;">Start Date *</label>
+                <label style="font-weight: 600; font-size: 0.82rem; color: #e2e8f0; display: block; margin-bottom: 4px;">Start Date *</label>
                 <input type="date" class="form-control" id="leave-start-date" value="${initialDate}" required />
               </div>
               <div class="form-group" style="margin: 0;">
-                <label style="font-weight: 600;">End Date *</label>
+                <label style="font-weight: 600; font-size: 0.82rem; color: #e2e8f0; display: block; margin-bottom: 4px;">End Date *</label>
                 <input type="date" class="form-control" id="leave-end-date" value="${initialDate}" required />
               </div>
             </div>
@@ -104,7 +103,7 @@ export class LeaveManagementUI {
             <!-- Leave Type & Portion -->
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px;">
               <div class="form-group" style="margin: 0;">
-                <label style="font-weight: 600;">Leave Type *</label>
+                <label style="font-weight: 600; font-size: 0.82rem; color: #e2e8f0; display: block; margin-bottom: 4px;">Leave Type *</label>
                 <select class="form-control" id="leave-type" required>
                   <option value="SICK_LEAVE">🤒 Sick Leave</option>
                   <option value="CASUAL_LEAVE">🌴 Casual Leave</option>
@@ -114,11 +113,11 @@ export class LeaveManagementUI {
                 </select>
               </div>
               <div class="form-group" style="margin: 0;">
-                <label style="font-weight: 600;">Leave Portion *</label>
-                <select class="form-control" id="leave-portion" required>
+                <label style="font-weight: 600; font-size: 0.82rem; color: #e2e8f0; display: block; margin-bottom: 4px;">Leave Portion *</label>
+                <select class="form-control" id="leave-portion" required style="text-overflow: ellipsis;">
                   <option value="FULL_DAY">Full Day (Entire Shift)</option>
-                  <option value="FIRST_HALF">First Half (Shift Start → Mid-day)</option>
-                  <option value="SECOND_HALF">Second Half (Mid-day → Shift End)</option>
+                  <option value="FIRST_HALF">First Half (Morning)</option>
+                  <option value="SECOND_HALF">Second Half (Afternoon)</option>
                   <option value="CUSTOM_HOURS">Custom Hours</option>
                 </select>
               </div>
@@ -140,19 +139,19 @@ export class LeaveManagementUI {
             </div>
 
             <!-- Reason & Notes -->
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px;">
+            <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px;">
               <div class="form-group" style="margin: 0;">
-                <label style="font-size: 0.82rem;">Reason (Optional)</label>
+                <label style="font-size: 0.82rem; color: var(--text-secondary); display: block; margin-bottom: 4px;">Reason (Optional)</label>
                 <input type="text" class="form-control" id="leave-reason" placeholder="e.g. Medical checkup" />
               </div>
               <div class="form-group" style="margin: 0;">
-                <label style="font-size: 0.82rem;">Internal Notes (Optional)</label>
-                <input type="text" class="form-control" id="leave-notes" placeholder="e.g. Informed manager" />
+                <label style="font-size: 0.82rem; color: var(--text-secondary); display: block; margin-bottom: 4px;">Internal Notes (Optional)</label>
+                <input type="text" class="form-control" id="leave-notes" placeholder="e.g. Informed manager in advance" />
               </div>
             </div>
 
             <!-- Live Impact Preview Box -->
-            <div id="leave-impact-preview-box" style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 16px;">
+            <div id="leave-impact-preview-box" style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 16px;">
               <div style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text-secondary);">
                 <div class="spinner-small" style="display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.2); border-top-color: #818cf8; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
                 <span>Fetching live impact preview from server...</span>
@@ -160,13 +159,13 @@ export class LeaveManagementUI {
             </div>
 
             <!-- Operational Warning Banner -->
-            <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: var(--radius-sm); padding: 10px 14px; margin-bottom: 16px; font-size: 0.78rem; color: #fca5a5;">
+            <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: var(--radius-sm); padding: 10px 14px; margin-bottom: 16px; font-size: 0.78rem; color: #fca5a5; line-height: 1.4;">
               ⚠️ <strong>Auto-Reassignment:</strong> Affected bookings will be reassigned to available qualified staff. Customers will receive interactive WhatsApp notifications.
             </div>
 
-            <div style="display: flex; gap: 10px; justify-content: flex-end;">
-              <button type="button" class="btn btn-secondary" id="btn-cancel-leave-modal">Cancel</button>
-              <button type="submit" class="btn btn-danger" id="btn-submit-leave" style="gap: 6px;">
+            <div style="display: flex; gap: 10px; justify-content: flex-end; align-items: center; border-top: 1px solid var(--border-subtle); padding-top: 14px;">
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-cancel-leave-modal" style="padding: 8px 16px;">Cancel</button>
+              <button type="submit" class="btn btn-danger btn-sm" id="btn-submit-leave" style="gap: 6px; padding: 8px 20px; font-weight: 700;">
                 <span>🚫 Confirm & Process Leave</span>
               </button>
             </div>
@@ -248,25 +247,22 @@ export class LeaveManagementUI {
           previewBox.innerHTML = `
             <div style="display: flex; align-items: center; gap: 8px; color: #34d399; font-size: 0.82rem;">
               <span style="font-size: 1.1rem;">✅</span>
-              <div>
-                <div style="font-weight: 600;">No existing bookings affected</div>
-                <div style="font-size: 0.75rem; color: var(--text-secondary);">Stylist availability will be blocked for ${sDate === eDate ? formatDateFriendly(sDate) : `${formatDateFriendly(sDate)} to ${formatDateFriendly(eDate)}`}.</div>
-              </div>
+              <span>No booking conflicts found for this date/period.</span>
             </div>
           `;
         } else {
           previewBox.innerHTML = `
             <div>
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                <span style="font-weight: 700; font-size: 0.85rem; color: #fff;">
-                  ⚡ Live Operational Impact (${total} Booking${total > 1 ? 's' : ''}):
-                </span>
+                <div style="font-weight: 700; font-size: 0.85rem; color: #fb7185;">
+                  ⚠️ Impact: ${total} Booking${total > 1 ? 's' : ''} Affected
+                </div>
                 <div style="display: flex; gap: 6px;">
-                  <span class="badge" style="background: rgba(52, 211, 153, 0.15); color: #34d399; border: 1px solid rgba(52,211,153,0.3); font-size: 0.7rem;">
+                  <span class="badge" style="background: rgba(52, 211, 153, 0.15); color: #34d399; font-size: 0.65rem;">
                     ${reassignable} Auto-Reassignable
                   </span>
                   ${unresolvable > 0 ? `
-                    <span class="badge" style="background: rgba(251, 113, 133, 0.15); color: #fb7185; border: 1px solid rgba(251,113,133,0.3); font-size: 0.7rem;">
+                    <span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #f87171; font-size: 0.65rem;">
                       ${unresolvable} No Replacement
                     </span>
                   ` : ''}
@@ -290,9 +286,10 @@ export class LeaveManagementUI {
         }
       } catch (err) {
         if (previewBox) {
+          const rawMsg = Array.isArray(err.message) ? err.message.join(', ') : (err.message || 'Unable to fetch preview');
           previewBox.innerHTML = `
-            <div style="font-size: 0.8rem; color: #fca5a5;">
-              ⚠️ Preview server response: ${err.message || 'Unable to fetch preview'}
+            <div style="font-size: 0.8rem; color: #fca5a5; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.25); padding: 8px 12px; border-radius: var(--radius-sm);">
+              ⚠️ <strong>Impact Preview:</strong> ${rawMsg}
             </div>
           `;
         }

@@ -21,6 +21,8 @@ import { Subject, Observable } from 'rxjs';
 import { filter } from 'rxjs/operators';
 import * as crypto from 'crypto';
 
+import { AvailabilityEngineService } from '../availability/availability-engine.service';
+
 export interface SalonRealtimeEvent {
   salonId: string;
   type:
@@ -85,6 +87,7 @@ export class AppointmentsService {
   constructor(
     private prisma: PrismaService,
     private availabilityService: AvailabilityService,
+    private engine: AvailabilityEngineService,
     @Inject(forwardRef(() => WhatsAppService))
     private whatsappService: WhatsAppService,
   ) { }
@@ -507,34 +510,48 @@ export class AppointmentsService {
             throw new ConflictException('Specialist is no longer assigned to perform the selected services.');
           }
 
-          if (assignedStylist.followsSalonSchedule) {
-            const currentSalonHours = await tx.salonWorkingHours.findUnique({
-              where: { salonId_dayOfWeek: { salonId, dayOfWeek } },
-            });
+          const currentSalonHours = await tx.salonWorkingHours.findUnique({
+            where: { salonId_dayOfWeek: { salonId, dayOfWeek } },
+          });
 
-            if (!currentSalonHours || currentSalonHours.isClosed) {
-              throw new ConflictException(`Salon is closed on ${dayOfWeek}.`);
-            }
+          const stylistHours = tx.stylistWorkingHours
+            ? (await (tx.stylistWorkingHours.findUnique
+                ? tx.stylistWorkingHours.findUnique({ where: { stylistId_dayOfWeek: { stylistId: assignedStylist.id, dayOfWeek } } })
+                : tx.stylistWorkingHours.findFirst({ where: { stylistId: assignedStylist.id, dayOfWeek } })))
+            : null;
 
-            const apptStartStr = dto.startTime;
-            const apptEndStr = endDt.toFormat('HH:mm');
+          const shiftWindow = this.engine.getEffectiveShiftWindow(
+            currentSalonHours,
+            assignedStylist,
+            stylistHours,
+          );
 
-            if (currentSalonHours.startTime && apptStartStr < currentSalonHours.startTime) {
+          if (!shiftWindow.isWorking || shiftWindow.effectiveOpenMinutes === null || shiftWindow.effectiveCloseMinutes === null) {
+            throw new ConflictException(shiftWindow.statusReason || `Salon is closed or specialist is unavailable on ${dayOfWeek}.`);
+          }
+
+          const apptStartMin = this.engine.parseTimeStringToMinutes(dto.startTime);
+          const apptEndMin = apptStartMin + totalDuration;
+
+          if (apptStartMin < shiftWindow.effectiveOpenMinutes) {
+            const openTimeStr = this.engine.formatMinutesToTime(shiftWindow.effectiveOpenMinutes);
+            throw new ConflictException(
+              `Appointment start time ${dto.startTime} is earlier than working opening time ${openTimeStr}.`,
+            );
+          }
+          if (apptEndMin > shiftWindow.effectiveCloseMinutes) {
+            const closeTimeStr = this.engine.formatMinutesToTime(shiftWindow.effectiveCloseMinutes);
+            throw new ConflictException(
+              `Appointment end time ${this.engine.formatMinutesToTime(apptEndMin)} exceeds working closing time ${closeTimeStr}.`,
+            );
+          }
+          for (const b of shiftWindow.effectiveBreaks) {
+            if (apptStartMin < b.end && apptEndMin > b.start) {
+              const bStartStr = this.engine.formatMinutesToTime(b.start);
+              const bEndStr = this.engine.formatMinutesToTime(b.end);
               throw new ConflictException(
-                `Appointment start time ${apptStartStr} is earlier than salon opening time ${currentSalonHours.startTime}.`,
+                `Appointment conflicts with break (${bStartStr}-${bEndStr}).`,
               );
-            }
-            if (currentSalonHours.endTime && apptEndStr > currentSalonHours.endTime) {
-              throw new ConflictException(
-                `Appointment end time ${apptEndStr} exceeds salon closing time ${currentSalonHours.endTime}.`,
-              );
-            }
-            if (currentSalonHours.breakStartTime && currentSalonHours.breakEndTime) {
-              if (apptStartStr < currentSalonHours.breakEndTime && apptEndStr > currentSalonHours.breakStartTime) {
-                throw new ConflictException(
-                  `Appointment conflicts with salon break (${currentSalonHours.breakStartTime}-${currentSalonHours.breakEndTime}).`,
-                );
-              }
             }
           }
 
@@ -1074,34 +1091,48 @@ Does this new time work for you?`;
             throw new ConflictException('Specialist is no longer assigned to perform this service.');
           }
 
-          if (targetStylist.followsSalonSchedule) {
-            const currentSalonHours = await tx.salonWorkingHours.findUnique({
-              where: { salonId_dayOfWeek: { salonId, dayOfWeek } },
-            });
+          const currentSalonHours = await tx.salonWorkingHours.findUnique({
+            where: { salonId_dayOfWeek: { salonId, dayOfWeek } },
+          });
 
-            if (!currentSalonHours || currentSalonHours.isClosed) {
-              throw new ConflictException(`Salon is closed on ${dayOfWeek}.`);
-            }
+          const stylistHours = tx.stylistWorkingHours
+            ? (await (tx.stylistWorkingHours.findUnique
+                ? tx.stylistWorkingHours.findUnique({ where: { stylistId_dayOfWeek: { stylistId: targetStylist.id, dayOfWeek } } })
+                : tx.stylistWorkingHours.findFirst({ where: { stylistId: targetStylist.id, dayOfWeek } })))
+            : null;
 
-            const apptStartStr = dto.newStartTime;
-            const apptEndStr = endDt.toFormat('HH:mm');
+          const shiftWindow = this.engine.getEffectiveShiftWindow(
+            currentSalonHours,
+            targetStylist,
+            stylistHours,
+          );
 
-            if (currentSalonHours.startTime && apptStartStr < currentSalonHours.startTime) {
+          if (!shiftWindow.isWorking || shiftWindow.effectiveOpenMinutes === null || shiftWindow.effectiveCloseMinutes === null) {
+            throw new ConflictException(shiftWindow.statusReason || `Salon is closed or specialist is unavailable on ${dayOfWeek}.`);
+          }
+
+          const apptStartMin = this.engine.parseTimeStringToMinutes(dto.newStartTime);
+          const apptEndMin = apptStartMin + appointment.totalDurationMinutes;
+
+          if (apptStartMin < shiftWindow.effectiveOpenMinutes) {
+            const openTimeStr = this.engine.formatMinutesToTime(shiftWindow.effectiveOpenMinutes);
+            throw new ConflictException(
+              `Rescheduled start time ${dto.newStartTime} is earlier than working opening time ${openTimeStr}.`,
+            );
+          }
+          if (apptEndMin > shiftWindow.effectiveCloseMinutes) {
+            const closeTimeStr = this.engine.formatMinutesToTime(shiftWindow.effectiveCloseMinutes);
+            throw new ConflictException(
+              `Rescheduled end time ${this.engine.formatMinutesToTime(apptEndMin)} exceeds working closing time ${closeTimeStr}.`,
+            );
+          }
+          for (const b of shiftWindow.effectiveBreaks) {
+            if (apptStartMin < b.end && apptEndMin > b.start) {
+              const bStartStr = this.engine.formatMinutesToTime(b.start);
+              const bEndStr = this.engine.formatMinutesToTime(b.end);
               throw new ConflictException(
-                `Rescheduled start time ${apptStartStr} is earlier than salon opening time ${currentSalonHours.startTime}.`,
+                `Rescheduled appointment conflicts with break (${bStartStr}-${bEndStr}).`,
               );
-            }
-            if (currentSalonHours.endTime && apptEndStr > currentSalonHours.endTime) {
-              throw new ConflictException(
-                `Rescheduled end time ${apptEndStr} exceeds salon closing time ${currentSalonHours.endTime}.`,
-              );
-            }
-            if (currentSalonHours.breakStartTime && currentSalonHours.breakEndTime) {
-              if (apptStartStr < currentSalonHours.breakEndTime && apptEndStr > currentSalonHours.breakStartTime) {
-                throw new ConflictException(
-                  `Rescheduled appointment conflicts with salon break (${currentSalonHours.breakStartTime}-${currentSalonHours.breakEndTime}).`,
-                );
-              }
             }
           }
 
@@ -1407,60 +1438,40 @@ Would you like to move your *${currentSlotTimeStr}* appointment earlier to *${fr
     const apptStartMin = apptStartDt.hour * 60 + apptStartDt.minute;
     const apptEndMin = apptEndDt.hour * 60 + apptEndDt.minute;
 
-    let openMin = 0;
-    let closeMin = 0;
-    let breakInterval: { start: number; end: number } | null = null;
+    const targetStylist = stylist || (await tx.stylist.findUnique({
+      where: { id: absence.stylistId },
+      select: { id: true, followsSalonSchedule: true },
+    }));
 
-    const followsSalon = stylist ? (stylist.followsSalonSchedule ?? true) : true;
+    const stylistHours = tx.stylistWorkingHours
+      ? (await (tx.stylistWorkingHours.findUnique
+          ? tx.stylistWorkingHours.findUnique({ where: { stylistId_dayOfWeek: { stylistId: absence.stylistId, dayOfWeek } } })
+          : tx.stylistWorkingHours.findFirst({ where: { stylistId: absence.stylistId, dayOfWeek } })))
+      : null;
 
-    if (followsSalon && salonWorkingHours && !salonWorkingHours.isClosed) {
-      openMin = this.parseTimeStringToMinutes(salonWorkingHours.startTime);
-      closeMin = this.parseTimeStringToMinutes(salonWorkingHours.endTime);
-      if (salonWorkingHours.breakStartTime && salonWorkingHours.breakEndTime) {
-        breakInterval = {
-          start: this.parseTimeStringToMinutes(salonWorkingHours.breakStartTime),
-          end: this.parseTimeStringToMinutes(salonWorkingHours.breakEndTime),
-        };
-      }
-    } else {
-      const wh = await tx.stylistWorkingHours.findFirst({
-        where: { stylistId: absence.stylistId, dayOfWeek },
-      });
-      if (!wh || !wh.isWorking) return false;
-      openMin = this.parseTimeStringToMinutes(wh.startTime);
-      closeMin = this.parseTimeStringToMinutes(wh.endTime);
-      if (wh.breakStartTime && wh.breakEndTime) {
-        breakInterval = {
-          start: this.parseTimeStringToMinutes(wh.breakStartTime),
-          end: this.parseTimeStringToMinutes(wh.breakEndTime),
-        };
+    const shiftWindow = this.engine.getEffectiveShiftWindow(
+      salonWorkingHours,
+      targetStylist,
+      stylistHours,
+    );
+
+    if (!shiftWindow.isWorking || shiftWindow.effectiveOpenMinutes === null || shiftWindow.effectiveCloseMinutes === null) {
+      return true; // Salon closed or stylist not working => unavailable
+    }
+
+    const leaveBlocks = this.engine.getLeaveBlockedIntervals(
+      absence,
+      shiftWindow.effectiveOpenMinutes,
+      shiftWindow.effectiveCloseMinutes,
+      shiftWindow.effectiveBreaks,
+    );
+
+    for (const lb of leaveBlocks) {
+      if (apptStartMin < lb.end && apptEndMin > lb.start) {
+        return true;
       }
     }
 
-    if (openMin >= closeMin) return false;
-
-    let blockedStart = openMin;
-    let blockedEnd = closeMin;
-
-    const midPoint = Math.floor(openMin + (closeMin - openMin) / 2);
-    const firstHalfEnd = breakInterval ? breakInterval.start : midPoint;
-    const secondHalfStart = breakInterval ? breakInterval.end : midPoint;
-
-    if (absence.leavePortion === LeavePortion.FIRST_HALF) {
-      blockedStart = openMin;
-      blockedEnd = firstHalfEnd;
-    } else if (absence.leavePortion === LeavePortion.SECOND_HALF) {
-      blockedStart = secondHalfStart;
-      blockedEnd = closeMin;
-    } else if (absence.leavePortion === LeavePortion.CUSTOM_HOURS && absence.customStartTime && absence.customEndTime) {
-      const customStart = this.parseTimeStringToMinutes(absence.customStartTime);
-      const customEnd = this.parseTimeStringToMinutes(absence.customEndTime);
-      blockedStart = Math.max(openMin, customStart);
-      blockedEnd = Math.min(closeMin, customEnd);
-    }
-
-    if (blockedStart >= blockedEnd) return false;
-
-    return apptStartMin < blockedEnd && apptEndMin > blockedStart;
+    return false;
   }
 }

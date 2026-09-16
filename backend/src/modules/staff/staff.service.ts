@@ -301,6 +301,63 @@ export class StaffService {
           `SELECT pg_advisory_xact_lock(${key1}, ${scheduleKey2})`,
         );
 
+        // Fetch Salon Working Hours for this day of week
+        const salonHours = await tx.salonWorkingHours.findUnique({
+          where: { salonId_dayOfWeek: { salonId, dayOfWeek: item.dayOfWeek } },
+        });
+
+        // RULE 1 & 2: Hard Salon Boundary Validation at write time
+        if (item.isWorking) {
+          if (!salonHours || salonHours.isClosed) {
+            throw new BadRequestException(
+              `Cannot set working hours on ${item.dayOfWeek}: salon is closed on this day.`,
+            );
+          }
+          if (salonHours.startTime && item.startTime < salonHours.startTime) {
+            throw new BadRequestException(
+              `Stylist start time ${item.startTime} cannot be earlier than salon opening time ${salonHours.startTime} on ${item.dayOfWeek}.`,
+            );
+          }
+          if (salonHours.endTime && item.endTime > salonHours.endTime) {
+            throw new BadRequestException(
+              `Stylist end time ${item.endTime} cannot be later than salon closing time ${salonHours.endTime} on ${item.dayOfWeek}.`,
+            );
+          }
+          if (item.startTime >= item.endTime) {
+            throw new BadRequestException('Shift start time must be earlier than shift end time.');
+          }
+        }
+
+        const hasOverride = item.hasBreakOverride ?? (item.breaks && item.breaks.length > 0);
+        let breaksToSave: any[] = [];
+
+        if (hasOverride && item.breaks && item.breaks.length > 0) {
+          for (const b of item.breaks) {
+            if (b.startTime >= b.endTime) {
+              throw new BadRequestException(`Break start time ${b.startTime} must be earlier than break end time ${b.endTime}.`);
+            }
+            if (item.isWorking && (b.startTime < item.startTime || b.endTime > item.endTime)) {
+              throw new BadRequestException(`Break ${b.startTime}-${b.endTime} must fall strictly within working hours (${item.startTime}-${item.endTime}).`);
+            }
+            breaksToSave.push({
+              id: b.id || crypto.randomUUID(),
+              startTime: b.startTime,
+              endTime: b.endTime,
+              title: b.title || 'Shift Break',
+            });
+          }
+        } else if (item.breakStartTime && item.breakEndTime) {
+          if (item.breakStartTime >= item.breakEndTime) {
+            throw new BadRequestException('Break start time must be earlier than break end time.');
+          }
+          breaksToSave.push({
+            id: crypto.randomUUID(),
+            startTime: item.breakStartTime,
+            endTime: item.breakEndTime,
+            title: 'Lunch Break',
+          });
+        }
+
         const dayAppointments = futureAppointments.filter((appt) => {
           const dayName = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('cccc').toUpperCase();
           return dayName === item.dayOfWeek;
@@ -324,35 +381,13 @@ export class StaffService {
               );
             }
 
-            if (item.breakStartTime && item.breakEndTime) {
-              if (apptStart < item.breakEndTime && apptEnd > item.breakStartTime) {
+            for (const b of breaksToSave) {
+              if (apptStart < b.endTime && apptEnd > b.startTime) {
                 throw new ConflictException(
-                  `Cannot set stylist break on ${item.dayOfWeek} to ${item.breakStartTime}-${item.breakEndTime}: future appointment #${appt.appointmentNumber} conflicts with the break.`,
+                  `Cannot set stylist break on ${item.dayOfWeek} to ${b.startTime}-${b.endTime}: future appointment #${appt.appointmentNumber} conflicts with the break.`,
                 );
               }
             }
-          }
-        }
-
-        if (item.startTime >= item.endTime) {
-          throw new BadRequestException('Shift start time must be earlier than shift end time.');
-        }
-
-        if (item.breakStartTime || item.breakEndTime) {
-          if (!item.breakStartTime || !item.breakEndTime) {
-            throw new BadRequestException('Both break start time and break end time must be specified.');
-          }
-          if (item.breakStartTime >= item.breakEndTime) {
-            throw new BadRequestException('Break start time must be earlier than break end time.');
-          }
-          if (item.breakStartTime <= item.startTime || item.breakEndTime >= item.endTime) {
-            throw new BadRequestException('Break times must fall strictly within the shift.');
-          }
-          const [bStartH, bStartM] = item.breakStartTime.split(':').map(Number);
-          const [bEndH, bEndM] = item.breakEndTime.split(':').map(Number);
-          const breakDuration = (bEndH * 60 + bEndM) - (bStartH * 60 + bStartM);
-          if (breakDuration < 15 || breakDuration % 15 !== 0) {
-            throw new BadRequestException('Break duration must be at least 15 minutes and divisible by 15.');
           }
         }
 
@@ -367,6 +402,8 @@ export class StaffService {
             isWorking: item.isWorking,
             startTime: item.startTime,
             endTime: item.endTime,
+            hasBreakOverride: hasOverride,
+            breaks: breaksToSave,
             breakStartTime: item.breakStartTime || null,
             breakEndTime: item.breakEndTime || null,
           },
@@ -376,6 +413,8 @@ export class StaffService {
             isWorking: item.isWorking,
             startTime: item.startTime,
             endTime: item.endTime,
+            hasBreakOverride: hasOverride,
+            breaks: breaksToSave,
             breakStartTime: item.breakStartTime || null,
             breakEndTime: item.breakEndTime || null,
           },

@@ -8,6 +8,7 @@ import {
   AppointmentStatus,
   StylistStatus,
 } from '@prisma/client';
+import { AvailabilityEngineService } from '../../availability/availability-engine.service';
 
 export interface ReassignmentResult {
   reassignedCount: number;
@@ -19,13 +20,14 @@ export interface ReassignmentResult {
 
 @Injectable()
 export class LeaveReassignmentEngine {
+  constructor(private readonly availabilityEngine: AvailabilityEngineService) {}
+
   private hashToSignedInt32(input: string): number {
     return crypto.createHash('sha256').update(input).digest().readInt32BE(0);
   }
 
   private parseTimeStringToMinutes(timeStr: string): number {
-    const [hours, mins] = timeStr.split(':').map((v) => parseInt(v, 10));
-    return hours * 60 + mins;
+    return this.availabilityEngine.parseTimeStringToMinutes(timeStr);
   }
 
   private getDayOfWeekEnum(luxonDateTime: DateTime): DayOfWeek {
@@ -93,40 +95,35 @@ export class LeaveReassignmentEngine {
     });
 
     for (const candidate of candidates) {
-      if (candidate.followsSalonSchedule) {
-        if (!salonWorkingHours || salonWorkingHours.isClosed) {
-          continue;
-        }
-        const salonOpen = this.parseTimeStringToMinutes(salonWorkingHours.startTime);
-        const salonClose = this.parseTimeStringToMinutes(salonWorkingHours.endTime);
-        if (apptStartMinutes < salonOpen || apptEndMinutes > salonClose) {
-          continue;
-        }
-        if (salonWorkingHours.breakStartTime && salonWorkingHours.breakEndTime) {
-          const bStart = this.parseTimeStringToMinutes(salonWorkingHours.breakStartTime);
-          const bEnd = this.parseTimeStringToMinutes(salonWorkingHours.breakEndTime);
-          if (apptStartMinutes < bEnd && apptEndMinutes > bStart) {
-            continue;
-          }
-        }
-      } else {
-        const staffHours = candidate.workingHours[0];
-        if (!staffHours || !staffHours.isWorking) {
-          continue;
-        }
-        const staffOpen = this.parseTimeStringToMinutes(staffHours.startTime);
-        const staffClose = this.parseTimeStringToMinutes(staffHours.endTime);
-        if (apptStartMinutes < staffOpen || apptEndMinutes > staffClose) {
-          continue;
-        }
-        if (staffHours.breakStartTime && staffHours.breakEndTime) {
-          const bStart = this.parseTimeStringToMinutes(staffHours.breakStartTime);
-          const bEnd = this.parseTimeStringToMinutes(staffHours.breakEndTime);
-          if (apptStartMinutes < bEnd && apptEndMinutes > bStart) {
-            continue;
-          }
+      const shiftWindow = this.availabilityEngine.getEffectiveShiftWindow(
+        salonWorkingHours,
+        candidate,
+        candidate.workingHours[0],
+      );
+
+      if (
+        !shiftWindow.isWorking ||
+        shiftWindow.effectiveOpenMinutes === null ||
+        shiftWindow.effectiveCloseMinutes === null
+      ) {
+        continue;
+      }
+
+      if (
+        apptStartMinutes < shiftWindow.effectiveOpenMinutes ||
+        apptEndMinutes > shiftWindow.effectiveCloseMinutes
+      ) {
+        continue;
+      }
+
+      let breakConflict = false;
+      for (const b of shiftWindow.effectiveBreaks) {
+        if (apptStartMinutes < b.end && apptEndMinutes > b.start) {
+          breakConflict = true;
+          break;
         }
       }
+      if (breakConflict) continue;
 
       const key1 = this.hashToSignedInt32(`salon:${salonId}`);
       const dateIso = DateTime.fromJSDate(absenceDate, { zone: 'UTC' }).toISODate()!;

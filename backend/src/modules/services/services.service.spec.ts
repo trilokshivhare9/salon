@@ -34,9 +34,18 @@ describe('ServicesService - Duration & Staff Qualification Tests', () => {
       salon: {
         update: jest.fn().mockResolvedValue({}),
       },
+      serviceCategory: {
+        findFirst: jest.fn().mockResolvedValue({ id: 'cat-1', name: 'General' }),
+        findUnique: jest.fn().mockResolvedValue({ id: 'cat-1', name: 'General' }),
+        create: jest.fn().mockResolvedValue({ id: 'cat-1', name: 'General' }),
+      },
       appointment: {
         count: jest.fn().mockResolvedValue(0),
         deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
+      appointmentService: {
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
       conversation: {
         updateMany: jest.fn().mockResolvedValue({ count: 0 }),
@@ -110,6 +119,7 @@ describe('ServicesService - Duration & Staff Qualification Tests', () => {
           name: `Service ${dur}m`,
           price: 100,
           durationMinutes: dur,
+          category: 'General',
         });
 
         expect(created).toBeDefined();
@@ -141,6 +151,7 @@ describe('ServicesService - Duration & Staff Qualification Tests', () => {
         name: 'Beard Trim',
         price: 300,
         durationMinutes: 30,
+        category: 'General',
       });
 
       expect(mockPrisma.stylistService.createMany).toHaveBeenCalledWith({
@@ -172,6 +183,7 @@ describe('ServicesService - Duration & Staff Qualification Tests', () => {
         price: 1500,
         durationMinutes: 60,
         stylistIds: ['stylist-1'],
+        category: 'General',
       });
 
       expect(mockPrisma.stylistService.createMany).toHaveBeenCalledWith({
