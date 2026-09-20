@@ -4,9 +4,10 @@ import { WhatsAppController } from './whatsapp.controller';
 import { WhatsAppWebhookQueue } from './queues/whatsapp-webhook.queue';
 import { AvailabilityModule } from '../availability/availability.module';
 import { AppointmentsModule } from '../appointments/appointments.module';
+import { QuickBookingModule } from '../quick-booking/quick-booking.module';
 
 @Module({
-  imports: [AvailabilityModule, forwardRef(() => AppointmentsModule)],
+  imports: [AvailabilityModule, forwardRef(() => AppointmentsModule), QuickBookingModule],
   controllers: [WhatsAppController],
   providers: [WhatsAppService, WhatsAppWebhookQueue],
   exports: [WhatsAppService, WhatsAppWebhookQueue],

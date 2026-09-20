@@ -5,6 +5,7 @@ import { AppointmentsService } from '../appointments/appointments.service';
 import { AvailabilityService } from '../availability/availability.service';
 import { ConfigService } from '@nestjs/config';
 import { ConversationState } from '@prisma/client';
+import { QuickCodeService } from '../quick-booking/quick-code.service';
 
 describe('Smart WhatsApp Stale Button Fallbacks (Flow Matrix Tests)', () => {
   let whatsAppService: WhatsAppService;
@@ -18,6 +19,13 @@ describe('Smart WhatsApp Stale Button Fallbacks (Flow Matrix Tests)', () => {
       providers: [
         PrismaService,
         WhatsAppService,
+        {
+          provide: QuickCodeService,
+          useValue: {
+            verifyCode: jest.fn(),
+            getOrCreateTodayCode: jest.fn(),
+          },
+        },
         {
           provide: ConfigService,
           useValue: { get: jest.fn() },
