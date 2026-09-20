@@ -67,6 +67,24 @@ export class AssignStaffServicesDto {
   serviceIds: string[];
 }
 
+export class StaffBreakItemDto {
+  @IsString()
+  @IsOptional()
+  id?: string;
+
+  @IsString()
+  @IsNotEmpty()
+  startTime: string; // "13:00"
+
+  @IsString()
+  @IsNotEmpty()
+  endTime: string;   // "14:00"
+
+  @IsString()
+  @IsOptional()
+  title?: string;
+}
+
 export class StaffDayWorkingHourDto {
   @IsEnum(DayOfWeek)
   dayOfWeek: DayOfWeek;
@@ -81,6 +99,16 @@ export class StaffDayWorkingHourDto {
   @IsString()
   @IsNotEmpty()
   endTime: string; // "18:00"
+
+  @IsBoolean()
+  @IsOptional()
+  hasBreakOverride?: boolean;
+
+  @IsArray()
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => StaffBreakItemDto)
+  breaks?: StaffBreakItemDto[];
 
   @IsString()
   @IsOptional()
@@ -114,4 +142,3 @@ export class CreateStaffBreakDto {
   @IsOptional()
   title?: string;
 }
-

@@ -6,6 +6,7 @@ import {
 import { PrismaService } from '../../database/prisma.service';
 import { DateTime } from 'luxon';
 import { DayOfWeek } from '@prisma/client';
+import { AvailabilityEngineService, MinuteInterval } from './availability-engine.service';
 
 export type AvailabilityStatus =
   | 'AVAILABLE'
@@ -36,17 +37,17 @@ export interface AvailabilityResult {
 
 @Injectable()
 export class AvailabilityService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private engine: AvailabilityEngineService,
+  ) {}
 
   private parseTimeStringToMinutes(timeStr: string): number {
-    const [hours, mins] = timeStr.split(':').map((v) => parseInt(v, 10));
-    return hours * 60 + mins;
+    return this.engine.parseTimeStringToMinutes(timeStr);
   }
 
   private formatMinutesToTime(totalMinutes: number): string {
-    const hours = Math.floor(totalMinutes / 60);
-    const mins = totalMinutes % 60;
-    return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
+    return this.engine.formatMinutesToTime(totalMinutes);
   }
 
   private getDayOfWeekEnum(luxonDateTime: DateTime): DayOfWeek {
@@ -61,6 +62,21 @@ export class AvailabilityService {
       7: DayOfWeek.SUNDAY,
     };
     return mapping[dayNumber];
+  }
+
+  private getLeaveBlockedIntervals(
+    absence: any,
+    workingOpenMinutes: number,
+    workingCloseMinutes: number,
+    breakInterval: { start: number; end: number } | null,
+  ): { start: number; end: number }[] {
+    const breaks = breakInterval ? [breakInterval] : [];
+    return this.engine.getLeaveBlockedIntervals(
+      absence,
+      workingOpenMinutes,
+      workingCloseMinutes,
+      breaks,
+    );
   }
 
   async getAvailableSlots(
@@ -146,52 +162,44 @@ export class AvailabilityService {
         : (totalServiceDuration > 0 ? totalServiceDuration : 15);
 
     const isSalonClosed = !salonWorkingHours || salonWorkingHours.isClosed;
-    const salonOpenMinutes =
-      !isSalonClosed && salonWorkingHours
-        ? this.parseTimeStringToMinutes(salonWorkingHours.startTime)
-        : null;
-    const salonCloseMinutes =
-      !isSalonClosed && salonWorkingHours
-        ? this.parseTimeStringToMinutes(salonWorkingHours.endTime)
-        : null;
 
-    const salonBreak =
-      !isSalonClosed &&
-      salonWorkingHours &&
-      salonWorkingHours.breakStartTime &&
-      salonWorkingHours.breakEndTime
-        ? {
-            start: this.parseTimeStringToMinutes(salonWorkingHours.breakStartTime),
-            end: this.parseTimeStringToMinutes(salonWorkingHours.breakEndTime),
-          }
-        : null;
-
-    // 3. Query eligible active stylists assigned to ALL requested services (excluding absent stylists)
-    const absenceDateObj = new Date(dateStr);
+    // 3. Query eligible active stylists assigned to ALL requested services
+    const targetDateObj = new Date(`${dateStr}T00:00:00.000Z`);
     const stylistQueryWhere: any = {
       salonId,
       status: 'ACTIVE',
       AND: serviceIds.map((sId) => ({ services: { some: { serviceId: sId } } })),
-      absences: {
-        none: {
-          absenceDate: absenceDateObj,
-          status: 'ACTIVE',
-        },
-      },
     };
     if (preferredStylistId) {
       stylistQueryWhere.id = preferredStylistId;
     }
 
-    const eligibleStylists = await this.prisma.stylist.findMany({
-      where: stylistQueryWhere,
-      include: {
-        workingHours: {
-          where: { dayOfWeek },
+    const [eligibleStylists, activeAbsences] = await Promise.all([
+      this.prisma.stylist.findMany({
+        where: stylistQueryWhere,
+        include: {
+          workingHours: {
+            where: { dayOfWeek },
+          },
         },
-      },
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-    });
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      }),
+      this.prisma.stylistAbsence.findMany({
+        where: {
+          salonId,
+          status: 'ACTIVE',
+          OR: [
+            {
+              startDate: { lte: targetDateObj },
+              endDate: { gte: targetDateObj },
+            },
+            {
+              absenceDate: targetDateObj,
+            },
+          ],
+        },
+      }),
+    ]);
 
     if (eligibleStylists.length === 0) {
       // Diagnostic check: Does the salon have ANY active stylists qualified for these services?
@@ -219,7 +227,6 @@ export class AvailabilityService {
         statusReason: diagnosticReason,
       };
     }
-
 
     // 4. Fetch existing active blocking appointments for eligible stylists on this date
     const apptWhere: any = {
@@ -261,7 +268,7 @@ export class AvailabilityService {
       appointmentsByStylist.get(appt.stylistId)!.push({ start: startMin, end: endMin });
     }
 
-    // 5. Continuous Free-Interval Calculation per Stylist
+    // 5. Continuous Free-Interval Calculation per Stylist via AvailabilityEngineService
     const slotsMap = new Map<string, { startTime: string; endTime: string; eligibleStylistIds: Set<string> }>();
 
     // Advance notice check if booking for today: zero artificial buffer, only upcoming slots
@@ -277,43 +284,39 @@ export class AvailabilityService {
     }
 
     for (const stylist of eligibleStylists) {
-      let effectiveOpen: number;
-      let effectiveClose: number;
-      const busyIntervals: { start: number; end: number }[] = [];
+      const shiftWindow = this.engine.getEffectiveShiftWindow(
+        salonWorkingHours,
+        stylist,
+        stylist.workingHours[0],
+      );
 
-      if (salonOpenMinutes === null || salonCloseMinutes === null) {
-        continue; // Salon is closed today — NO STYLIST CAN BE BOOKED
-      }
-
-      if (stylist.followsSalonSchedule) {
-        effectiveOpen = salonOpenMinutes;
-        effectiveClose = salonCloseMinutes;
-        if (salonBreak) {
-          busyIntervals.push(salonBreak);
-        }
-      } else {
-        // Custom stylist schedule: capped within salon operating hours
-        const customHours = stylist.workingHours[0];
-        if (!customHours || !customHours.isWorking) {
-          continue; // Stylist not working today
-        }
-        const customOpen = this.parseTimeStringToMinutes(customHours.startTime);
-        const customClose = this.parseTimeStringToMinutes(customHours.endTime);
-
-        // Hard Boundary: Custom schedule can REDUCE availability, never EXPAND beyond salon hours
-        effectiveOpen = Math.max(customOpen, salonOpenMinutes);
-        effectiveClose = Math.min(customClose, salonCloseMinutes);
-
-        if (customHours.breakStartTime && customHours.breakEndTime) {
-          busyIntervals.push({
-            start: this.parseTimeStringToMinutes(customHours.breakStartTime),
-            end: this.parseTimeStringToMinutes(customHours.breakEndTime),
-          });
-        }
-      }
-
-      if (effectiveOpen >= effectiveClose) {
+      if (
+        !shiftWindow.isWorking ||
+        shiftWindow.effectiveOpenMinutes === null ||
+        shiftWindow.effectiveCloseMinutes === null
+      ) {
         continue;
+      }
+
+      const effectiveOpen = shiftWindow.effectiveOpenMinutes;
+      const effectiveClose = shiftWindow.effectiveCloseMinutes;
+      const busyIntervals: MinuteInterval[] = [...shiftWindow.effectiveBreaks];
+
+      // Check active leaves for this stylist on targetDateObj
+      const activeAbsence = activeAbsences.find((ab) => ab.stylistId === stylist.id);
+      if (activeAbsence) {
+        if (!activeAbsence.leavePortion || activeAbsence.leavePortion === 'FULL_DAY') {
+          continue; // Entire day unavailable
+        }
+        const leaveBlocks = this.engine.getLeaveBlockedIntervals(
+          activeAbsence,
+          effectiveOpen,
+          effectiveClose,
+          shiftWindow.effectiveBreaks,
+        );
+        for (const lb of leaveBlocks) {
+          busyIntervals.push(lb);
+        }
       }
 
       // Add existing active appointments
@@ -322,28 +325,12 @@ export class AvailabilityService {
         busyIntervals.push(a);
       }
 
-      // Subtract busy intervals to find continuous free intervals
-      let freeIntervals: { start: number; end: number }[] = [
-        { start: effectiveOpen, end: effectiveClose },
-      ];
-
-      for (const busy of busyIntervals) {
-        const nextFree: { start: number; end: number }[] = [];
-        for (const free of freeIntervals) {
-          // Check overlap
-          if (Math.max(free.start, busy.start) < Math.min(free.end, busy.end)) {
-            if (free.start < busy.start) {
-              nextFree.push({ start: free.start, end: Math.min(free.end, busy.start) });
-            }
-            if (free.end > busy.end) {
-              nextFree.push({ start: Math.max(free.start, busy.end), end: free.end });
-            }
-          } else {
-            nextFree.push(free);
-          }
-        }
-        freeIntervals = nextFree;
-      }
+      // Subtract busy intervals using single-source domain engine
+      const freeIntervals = this.engine.calculateFreeIntervals(
+        effectiveOpen,
+        effectiveClose,
+        busyIntervals,
+      );
 
       // Filter intervals that can accommodate the continuous total service duration
       const validFreeIntervals = freeIntervals.filter(

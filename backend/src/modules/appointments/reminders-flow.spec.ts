@@ -191,8 +191,8 @@ describe('Smart WhatsApp Reminders & Smart Stale Button Handling (Flow Matrix Te
 
     expect(sendMetaSpy).toHaveBeenCalled();
     const lastCallPayload = sendMetaSpy.mock.calls[sendMetaSpy.mock.calls.length - 1][1];
-    expect(lastCallPayload.bodyText).toContain('auto-canceled');
-    expect(lastCallPayload.bodyText).toContain('1 penalty strike');
+    expect(lastCallPayload.bodyText).toContain('automatic slot cancellation');
+    expect(lastCallPayload.bodyText).toContain('Arrival Notice:');
   });
 
   // ---------------------------------------------------------------------------

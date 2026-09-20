@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AvailabilityService } from './availability.service';
+import { AvailabilityEngineService } from './availability-engine.service';
 import { PrismaService } from '../../database/prisma.service';
 import { DayOfWeek } from '@prisma/client';
 import { DateTime } from 'luxon';
@@ -85,6 +86,7 @@ describe('AvailabilityService (Unit Tests)', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AvailabilityService,
+        AvailabilityEngineService,
         {
           provide: PrismaService,
           useValue: {
@@ -92,6 +94,7 @@ describe('AvailabilityService (Unit Tests)', () => {
             service: { findMany: jest.fn() },
             salonWorkingHours: { findUnique: jest.fn() },
             stylist: { findMany: jest.fn(), count: jest.fn() },
+            stylistAbsence: { findMany: jest.fn() },
             appointment: { findMany: jest.fn() },
           },
         },
@@ -100,6 +103,7 @@ describe('AvailabilityService (Unit Tests)', () => {
 
     service = module.get<AvailabilityService>(AvailabilityService);
     prisma = module.get<PrismaService>(PrismaService);
+    jest.spyOn(prisma.stylistAbsence, 'findMany').mockResolvedValue([]);
   });
 
   it('should be defined', () => {
@@ -120,7 +124,6 @@ describe('AvailabilityService (Unit Tests)', () => {
     jest.spyOn(prisma.stylist, 'findMany').mockResolvedValue([mockStylists[0]] as any);
     jest.spyOn(prisma.appointment, 'findMany').mockResolvedValue([]);
 
-    // testDateStr is a future date within 30-day maxAdvanceDays window
     const result = await service.getAvailableSlots(mockSalonId, mockService1.id, testDateStr);
     expect(result.availableSlots).toEqual([]);
   });
@@ -150,7 +153,6 @@ describe('AvailabilityService (Unit Tests)', () => {
     jest.spyOn(prisma.salonWorkingHours, 'findUnique').mockResolvedValue(mockSalonWorkingHours as any);
     jest.spyOn(prisma.stylist, 'findMany').mockResolvedValue([mockStylists[0]] as any);
 
-    // Existing appointment 11:00 - 11:30 IST on testDateStr
     const apptStart = DateTime.fromISO(testDateStr, { zone: 'Asia/Kolkata' }).set({ hour: 11, minute: 0 }).toJSDate();
     const apptEnd = DateTime.fromISO(testDateStr, { zone: 'Asia/Kolkata' }).set({ hour: 11, minute: 30 }).toJSDate();
 
@@ -205,7 +207,7 @@ describe('AvailabilityService (Unit Tests)', () => {
       startTime: '10:00',
       endTime: '20:00',
     } as any);
-    // Priya (custom schedule 08:00 - 16:00)
+    // Priya has custom schedule 08:00 - 16:00
     jest.spyOn(prisma.stylist, 'findMany').mockResolvedValue([mockStylists[1]] as any);
     jest.spyOn(prisma.appointment, 'findMany').mockResolvedValue([]);
 
@@ -356,24 +358,24 @@ describe('AvailabilityService (Unit Tests)', () => {
       jest.spyOn(prisma.salon, 'findUnique').mockResolvedValue(mockSalon as any);
       jest.spyOn(prisma.service, 'findMany').mockResolvedValue([mockService1] as any);
       jest.spyOn(prisma.salonWorkingHours, 'findUnique').mockResolvedValue(mockSalonWorkingHours as any);
-      const findManySpy = jest.spyOn(prisma.stylist, 'findMany').mockResolvedValue([]);
-      jest.spyOn(prisma.stylist, 'count').mockResolvedValue(1);
+      jest.spyOn(prisma.stylist, 'findMany').mockResolvedValue([mockStylists[0]] as any);
+      jest.spyOn(prisma.appointment, 'findMany').mockResolvedValue([]);
+      const absenceSpy = jest.spyOn(prisma.stylistAbsence, 'findMany').mockResolvedValue([
+        { stylistId: mockStylistId1, leavePortion: 'FULL_DAY', status: 'ACTIVE' },
+      ] as any);
 
       const result = await service.getAvailableSlots(mockSalonId, mockService1.id, testDateStr);
 
-      expect(findManySpy).toHaveBeenCalledWith(
+      expect(absenceSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
-            absences: {
-              none: {
-                absenceDate: new Date(testDateStr),
-                status: 'ACTIVE',
-              },
-            },
+            salonId: mockSalonId,
+            status: 'ACTIVE',
           }),
         }),
       );
+      expect(result.availableSlots).toEqual([]);
+      expect(result.status).toBe('FULLY_BOOKED');
     });
   });
 });
-

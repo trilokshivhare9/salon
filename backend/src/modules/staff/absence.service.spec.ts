@@ -11,6 +11,12 @@ import {
   StylistStatus,
 } from '@prisma/client';
 
+import { LeaveIntervalEngine } from './engines/leave-interval.engine';
+import { LeaveReassignmentEngine } from './engines/leave-reassignment.engine';
+import { LeaveValidationService } from './services/leave-validation.service';
+import { LeaveProcessingService } from './services/leave-processing.service';
+import { AvailabilityEngineService } from '../availability/availability-engine.service';
+
 describe('AbsenceService - Stylist Absence & Reassignment', () => {
   let service: AbsenceService;
   let mockPrisma: any;
@@ -46,11 +52,15 @@ describe('AbsenceService - Stylist Absence & Reassignment', () => {
           breakEndTime: '14:00',
         }),
       },
+      stylistWorkingHours: {
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
       stylistAbsence: {
-        upsert: jest.fn(),
-        update: jest.fn(),
+        create: jest.fn().mockImplementation((args: any) => Promise.resolve({ id: 'absence-mock-123', ...args.data })),
+        upsert: jest.fn().mockImplementation((args: any) => Promise.resolve({ id: 'absence-mock-123', ...args.create })),
+        update: jest.fn().mockImplementation((args: any) => Promise.resolve({ id: 'absence-mock-123', ...args.data })),
         findFirst: jest.fn(),
-        findMany: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
       },
       appointment: {
         findMany: jest.fn(),
@@ -82,6 +92,11 @@ describe('AbsenceService - Stylist Absence & Reassignment', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AbsenceService,
+        LeaveIntervalEngine,
+        LeaveReassignmentEngine,
+        LeaveValidationService,
+        LeaveProcessingService,
+        AvailabilityEngineService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: AppointmentsService, useValue: mockAppointmentsService },
         { provide: WhatsAppService, useValue: mockWhatsAppService },

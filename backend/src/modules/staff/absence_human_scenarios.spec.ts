@@ -12,6 +12,12 @@ import {
   StylistStatus,
 } from '@prisma/client';
 
+import { LeaveIntervalEngine } from './engines/leave-interval.engine';
+import { LeaveReassignmentEngine } from './engines/leave-reassignment.engine';
+import { LeaveValidationService } from './services/leave-validation.service';
+import { LeaveProcessingService } from './services/leave-processing.service';
+import { AvailabilityEngineService } from '../availability/availability-engine.service';
+
 describe('Human Real-World Scenarios: Stylist Absence Handling', () => {
   let absenceService: AbsenceService;
   let mockPrisma: any;
@@ -43,20 +49,48 @@ describe('Human Real-World Scenarios: Stylist Absence Handling', () => {
         findFirst: jest.fn().mockResolvedValue({
           isClosed: false,
           startTime: '09:00',
-          endTime: '20:00',
-          breakStartTime: '13:00',
-          breakEndTime: '14:00',
+          endTime: '21:00',
         }),
       },
+      stylistWorkingHours: {
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
+      service: {
+        findMany: jest.fn().mockResolvedValue([
+          { id: 'svc-haircut', durationMinutes: 30, price: 500, name: 'Haircut' },
+          { id: 'svc-spa', durationMinutes: 60, price: 1500, name: 'Hair Spa' },
+        ]),
+      },
       stylistAbsence: {
-        upsert: jest.fn(),
-        update: jest.fn().mockImplementation((args: any) => ({
-          id: args.where.id,
-          ...args.data,
-          stylist: { id: absentStylistId, name: 'Aksh' },
-        })),
         findFirst: jest.fn(),
-        findMany: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
+        upsert: jest.fn().mockImplementation(async (args) => ({
+          id: args?.create?.id || args?.update?.id || args?.where?.id || 'abs-101',
+          salonId: mockSalonId,
+          stylistId: absentStylistId,
+          absenceDate: new Date(),
+          status: AbsenceStatus.ACTIVE,
+          ...(args?.create || args?.update || {}),
+        })),
+        update: jest.fn().mockImplementation(async (args) => ({
+          id: args?.where?.id || 'abs-101',
+          salonId: mockSalonId,
+          stylistId: absentStylistId,
+          absenceDate: new Date(),
+          status: AbsenceStatus.ACTIVE,
+          ...(args?.data || {}),
+        })),
+        create: jest.fn().mockImplementation(async (args) => ({
+          salonId: mockSalonId,
+          stylistId: absentStylistId,
+          absenceDate: new Date(),
+          status: AbsenceStatus.ACTIVE,
+          ...(args?.data || {}),
+          id: args?.data?.id || 'abs-101',
+        })),
+      },
+      auditLog: {
+        create: jest.fn().mockResolvedValue(true),
       },
       appointment: {
         findMany: jest.fn(),
@@ -64,21 +98,17 @@ describe('Human Real-World Scenarios: Stylist Absence Handling', () => {
         update: jest.fn(),
       },
       bookingReassignment: {
+        findUnique: jest.fn().mockResolvedValue(null),
         upsert: jest.fn(),
-        findUnique: jest.fn(),
-        update: jest.fn(),
       },
-      auditLog: {
-        create: jest.fn().mockResolvedValue({}),
-      },
-      notification: {
-        create: jest.fn().mockResolvedValue({}),
+      stylistService: {
+        findMany: jest.fn().mockResolvedValue([{ serviceId: 'svc-haircut' }, { serviceId: 'svc-spa' }]),
       },
     };
 
     mockAppointmentsService = {
       emitSalonEvent: jest.fn(),
-      updateStatus: jest.fn(),
+      getAppointmentById: jest.fn(),
     };
 
     mockWhatsAppService = {
@@ -88,6 +118,11 @@ describe('Human Real-World Scenarios: Stylist Absence Handling', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AbsenceService,
+        LeaveIntervalEngine,
+        LeaveReassignmentEngine,
+        LeaveValidationService,
+        LeaveProcessingService,
+        AvailabilityEngineService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: AppointmentsService, useValue: mockAppointmentsService },
         { provide: WhatsAppService, useValue: mockWhatsAppService },
@@ -216,19 +251,18 @@ describe('Human Real-World Scenarios: Stylist Absence Handling', () => {
     };
     mockPrisma.appointment.findMany.mockResolvedValue([kavitaBooking]);
 
-    // No replacement candidates qualified or available
+    // Zero qualified backup stylists available
     mockPrisma.stylist.findMany.mockResolvedValue([]);
 
     mockPrisma.bookingReassignment.upsert.mockResolvedValue({
       id: 'reassign-kavita',
       appointmentId: 'appt-kavita-2',
-      newStylistId: null,
       outcome: ReassignmentOutcome.NO_REPLACEMENT,
     });
 
     const result = await absenceService.markStylistAbsent(mockSalonId, absentStylistId, {
       date: targetDate,
-      reason: 'Personal Leave',
+      reason: 'Emergency Leave',
     });
 
     expect(result.reassignmentSummary.total).toBe(1);
@@ -236,35 +270,41 @@ describe('Human Real-World Scenarios: Stylist Absence Handling', () => {
     expect(result.reassignmentSummary.unresolvable).toBe(1);
   });
 
-  // SCENARIO 8: Absence for Future Date
+  // SCENARIO 8: Marking Future Leave
   it('Scenario 8: Stylist applies for leave on a future date (Sept 25) - System schedules absence without affecting today', async () => {
-    const futureDate = '2026-09-25';
+    const futureDateStr = DateTime.now().plus({ days: 5 }).toFormat('yyyy-MM-dd');
     mockPrisma.stylist.findFirst.mockResolvedValue({
       id: absentStylistId,
       salonId: mockSalonId,
       name: 'Aksh',
+      status: StylistStatus.ACTIVE,
     });
 
-    mockPrisma.stylistAbsence.upsert.mockResolvedValue({
-      id: 'abs-future',
-      salonId: mockSalonId,
-      stylistId: absentStylistId,
-      absenceDate: new Date(`${futureDate}T00:00:00.000Z`),
+    mockPrisma.stylistAbsence.create.mockImplementationOnce(async (args) => ({
+      id: 'abs-108',
+      absenceDate: new Date(`${futureDateStr}T00:00:00.000Z`),
       status: AbsenceStatus.ACTIVE,
-    });
-
+      ...(args?.data || {}),
+    }));
+    mockPrisma.stylistAbsence.upsert.mockImplementationOnce(async (args) => ({
+      id: 'abs-108',
+      absenceDate: new Date(`${futureDateStr}T00:00:00.000Z`),
+      status: AbsenceStatus.ACTIVE,
+      ...(args?.create || args?.update || {}),
+    }));
     mockPrisma.appointment.findMany.mockResolvedValue([]);
 
     const result = await absenceService.markStylistAbsent(mockSalonId, absentStylistId, {
-      date: futureDate,
-      reason: 'Vacation',
+      date: futureDateStr,
+      reason: 'Planned Vacation',
     });
 
-    expect(result.absence.id).toBe('abs-future');
+    expect(result.absence.id).toBe('abs-108');
   });
 
-  // SCENARIO 10: Attempting to Mark Absence for Past Dates
+  // SCENARIO 10: Invalid Past Date Leave Attempt
   it('Scenario 10: Manager tries to mark absence for a past date (Sept 14) - System rejects with BadRequestException', async () => {
+    const pastDateStr = '2020-01-01';
     mockPrisma.stylist.findFirst.mockResolvedValue({
       id: absentStylistId,
       salonId: mockSalonId,
@@ -273,34 +313,38 @@ describe('Human Real-World Scenarios: Stylist Absence Handling', () => {
 
     await expect(
       absenceService.markStylistAbsent(mockSalonId, absentStylistId, {
-        date: '2026-09-14',
+        date: pastDateStr,
         reason: 'Past Date Attempt',
       }),
     ).rejects.toThrow(BadRequestException);
   });
 
-  // SCENARIO 11: Manager Cancels an Absence
+  // SCENARIO 11: Early Return from Leave (Cancel Absence)
   it('Scenario 11: Aksh returns to work early - Manager cancels absence record - System restores stylist state to ACTIVE', async () => {
+    const todayAbsenceDate = todayStr;
     mockPrisma.stylistAbsence.findFirst.mockResolvedValue({
       id: 'abs-101',
       salonId: mockSalonId,
       stylistId: absentStylistId,
+      absenceDate: new Date(`${todayAbsenceDate}T00:00:00.000Z`),
       status: AbsenceStatus.ACTIVE,
     });
 
     mockPrisma.stylistAbsence.update.mockResolvedValue({
       id: 'abs-101',
       status: AbsenceStatus.CANCELLED,
-      stylist: { id: absentStylistId, name: 'Aksh' },
     });
 
-    const res = await absenceService.cancelAbsence(mockSalonId, absentStylistId, 'abs-101', 'admin-01');
+    const result = await absenceService.cancelAbsence(mockSalonId, absentStylistId, 'abs-101');
 
-    expect(res.status).toBe(AbsenceStatus.CANCELLED);
+    expect(result.status).toBe(AbsenceStatus.CANCELLED);
     expect(mockAppointmentsService.emitSalonEvent).toHaveBeenCalledWith(
       mockSalonId,
       'STAFF_UPDATED',
-      expect.objectContaining({ action: 'ABSENCE_CANCELLED' }),
+      expect.objectContaining({
+        staffId: absentStylistId,
+        action: 'ABSENCE_CANCELLED',
+      }),
     );
   });
 });

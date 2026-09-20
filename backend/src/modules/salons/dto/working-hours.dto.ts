@@ -2,6 +2,24 @@ import { IsArray, IsBoolean, IsEnum, IsNotEmpty, IsOptional, IsString, ValidateN
 import { Type } from 'class-transformer';
 import { DayOfWeek } from '@prisma/client';
 
+export class BreakItemDto {
+  @IsString()
+  @IsOptional()
+  id?: string;
+
+  @IsString()
+  @IsNotEmpty()
+  startTime: string; // "13:00"
+
+  @IsString()
+  @IsNotEmpty()
+  endTime: string;   // "14:00"
+
+  @IsString()
+  @IsOptional()
+  title?: string;    // "Lunch Break"
+}
+
 export class DayWorkingHourDto {
   @IsEnum(DayOfWeek)
   @IsNotEmpty()
@@ -30,6 +48,12 @@ export class DayWorkingHourDto {
   @IsString()
   @IsOptional()
   closeTime?: string; // legacy alias
+
+  @IsArray()
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => BreakItemDto)
+  breaks?: BreakItemDto[];
 
   @IsString()
   @IsOptional()

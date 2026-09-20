@@ -739,6 +739,34 @@ Here are your salon owner login credentials:
           `SELECT pg_advisory_xact_lock(${key1}, ${scheduleKey2})`,
         );
 
+        let breaksToSave: any[] = [];
+        if (item.breaks && item.breaks.length > 0) {
+          for (const b of item.breaks) {
+            if (b.startTime >= b.endTime) {
+              throw new BadRequestException(`Break start time ${b.startTime} must be earlier than break end time ${b.endTime}.`);
+            }
+            if (!isClosed && (b.startTime < startTime || b.endTime > endTime)) {
+              throw new BadRequestException(`Break ${b.startTime}-${b.endTime} must fall strictly within salon operating hours (${startTime}-${endTime}).`);
+            }
+            breaksToSave.push({
+              id: b.id || crypto.randomUUID(),
+              startTime: b.startTime,
+              endTime: b.endTime,
+              title: b.title || 'Lunch Break',
+            });
+          }
+        } else if (item.breakStartTime && item.breakEndTime) {
+          if (item.breakStartTime >= item.breakEndTime) {
+            throw new BadRequestException('Break start time must be earlier than break end time.');
+          }
+          breaksToSave.push({
+            id: crypto.randomUUID(),
+            startTime: item.breakStartTime,
+            endTime: item.breakEndTime,
+            title: 'Lunch Break',
+          });
+        }
+
         // Check active future appointments strictly for stylists who follow the salon schedule
         const now = new Date();
         const futureAppointments = await tx.appointment.findMany({
@@ -774,10 +802,10 @@ Here are your salon owner login credentials:
               );
             }
 
-            if (item.breakStartTime && item.breakEndTime) {
-              if (apptStart < item.breakEndTime && apptEnd > item.breakStartTime) {
+            for (const b of breaksToSave) {
+              if (apptStart < b.endTime && apptEnd > b.startTime) {
                 throw new ConflictException(
-                  `Cannot set salon break on ${item.dayOfWeek} to ${item.breakStartTime}-${item.breakEndTime}: future appointment #${appt.appointmentNumber} (${apptStart}-${apptEnd}) conflicts with the break.`,
+                  `Cannot set salon break on ${item.dayOfWeek} to ${b.startTime}-${b.endTime}: future appointment #${appt.appointmentNumber} (${apptStart}-${apptEnd}) conflicts with the break.`,
                 );
               }
             }
@@ -795,6 +823,7 @@ Here are your salon owner login credentials:
             isClosed,
             startTime,
             endTime,
+            breaks: breaksToSave,
             breakStartTime: item.breakStartTime || null,
             breakEndTime: item.breakEndTime || null,
           },
@@ -804,6 +833,7 @@ Here are your salon owner login credentials:
             isClosed,
             startTime,
             endTime,
+            breaks: breaksToSave,
             breakStartTime: item.breakStartTime || null,
             breakEndTime: item.breakEndTime || null,
           },
