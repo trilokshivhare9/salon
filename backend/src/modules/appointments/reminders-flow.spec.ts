@@ -103,6 +103,14 @@ describe('Smart WhatsApp Reminders & Smart Stale Button Handling (Flow Matrix Te
     });
   });
 
+  beforeEach(async () => {
+    if (testSalon && testSalonUser) {
+      await prisma.appointment.deleteMany({
+        where: { salonId: testSalon.id, salonUserId: testSalonUser.id },
+      });
+    }
+  });
+
   afterAll(async () => {
     if (testSalon && testSalonUser) {
       await prisma.appointment.deleteMany({

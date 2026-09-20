@@ -4,6 +4,7 @@ import { AppointmentsService } from '../appointments/appointments.service';
 import { PrismaService } from '../../database/prisma.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
+import { DateTime } from 'luxon';
 import {
   AbsenceStatus,
   ReassignmentOutcome,
@@ -17,6 +18,7 @@ describe('Human Real-World Scenarios: Stylist Absence Handling', () => {
   let mockAppointmentsService: any;
   let mockWhatsAppService: any;
 
+  const todayStr = DateTime.now().setZone('Asia/Kolkata').toFormat('yyyy-MM-dd');
   const mockSalonId = 'salon-main-01';
   const absentStylistId = 'stylist-aksh';
   const backupStylistId = 'stylist-amit';
@@ -97,7 +99,7 @@ describe('Human Real-World Scenarios: Stylist Absence Handling', () => {
 
   // SCENARIO 1: Marking a Stylist Absent for Today (Full Day)
   it('Scenario 1: Manager marks Aksh absent for today - Creates absence and emits real-time WebSocket update', async () => {
-    const dateToday = '2026-09-15';
+    const dateToday = todayStr;
     mockPrisma.stylist.findFirst.mockResolvedValue({
       id: absentStylistId,
       salonId: mockSalonId,
@@ -133,7 +135,7 @@ describe('Human Real-World Scenarios: Stylist Absence Handling', () => {
 
   // SCENARIO 2: Automatic Reassignment of Existing Appointments
   it('Scenario 2: Aksh has a booking at 11 AM with Pooja - System automatically reassigns Pooja to available backup Amit', async () => {
-    const targetDate = '2026-09-15';
+    const targetDate = todayStr;
     mockPrisma.stylist.findFirst.mockResolvedValue({
       id: absentStylistId,
       salonId: mockSalonId,
@@ -150,8 +152,8 @@ describe('Human Real-World Scenarios: Stylist Absence Handling', () => {
       appointmentNumber: 'SAL-20001',
       serviceId: 'svc-haircut',
       services: [{ serviceId: 'svc-haircut' }],
-      startAt: new Date('2026-09-15T05:30:00.000Z'),
-      endAt: new Date('2026-09-15T06:00:00.000Z'),
+      startAt: new Date(`${targetDate}T05:30:00.000Z`),
+      endAt: new Date(`${targetDate}T06:00:00.000Z`),
       salonUser: { user: { name: 'Pooja', phone: '+919876543210' } },
     };
     mockPrisma.appointment.findMany.mockResolvedValue([poojaBooking]);
@@ -194,7 +196,7 @@ describe('Human Real-World Scenarios: Stylist Absence Handling', () => {
 
   // SCENARIO 3: Unassigned / Orphaned Booking when No Backup Stylist Exists
   it('Scenario 3: Aksh has a booking at 3 PM - No replacement stylist is available - System flags as NO_REPLACEMENT and offers zero penalty options', async () => {
-    const targetDate = '2026-09-15';
+    const targetDate = todayStr;
     mockPrisma.stylist.findFirst.mockResolvedValue({
       id: absentStylistId,
       salonId: mockSalonId,
@@ -208,8 +210,8 @@ describe('Human Real-World Scenarios: Stylist Absence Handling', () => {
       appointmentNumber: 'SAL-20002',
       serviceId: 'svc-spa',
       services: [{ serviceId: 'svc-spa' }],
-      startAt: new Date('2026-09-15T09:30:00.000Z'),
-      endAt: new Date('2026-09-15T10:30:00.000Z'),
+      startAt: new Date(`${targetDate}T09:30:00.000Z`),
+      endAt: new Date(`${targetDate}T10:30:00.000Z`),
       salonUser: { user: { name: 'Kavita', phone: '+919876543211' } },
     };
     mockPrisma.appointment.findMany.mockResolvedValue([kavitaBooking]);

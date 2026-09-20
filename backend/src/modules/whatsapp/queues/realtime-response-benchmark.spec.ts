@@ -6,6 +6,7 @@ import { AppointmentsService } from '../../appointments/appointments.service';
 import { AvailabilityService } from '../../availability/availability.service';
 import { ConfigService } from '@nestjs/config';
 import { ConversationState } from '@prisma/client';
+import { QuickCodeService } from '../../quick-booking/quick-code.service';
 
 describe('⚡ REAL-TIME SYSTEM RESPONSE TIME & BENCHMARK SUITE', () => {
   let whatsAppService: WhatsAppService;
@@ -20,6 +21,7 @@ describe('⚡ REAL-TIME SYSTEM RESPONSE TIME & BENCHMARK SUITE', () => {
         WhatsAppWebhookQueue,
         PrismaService,
         WhatsAppService,
+        QuickCodeService,
         {
           provide: ConfigService,
           useValue: { get: jest.fn() },

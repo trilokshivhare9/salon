@@ -10,6 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../database/prisma.service';
 import { AvailabilityService, AvailableSlotResponse } from '../availability/availability.service';
 import { AppointmentsService } from '../appointments/appointments.service';
+import { CreateAppointmentDto } from '../appointments/dto/create-appointment.dto';
 import {
   ConversationState,
   BookingSource,
@@ -28,6 +29,8 @@ export interface InteractiveButton {
   title: string;
 }
 
+import { QuickCodeService } from '../quick-booking/quick-code.service';
+
 export interface InteractiveListRow {
   id: string;
   title: string;
@@ -44,6 +47,7 @@ export class WhatsAppService {
     private availabilityService: AvailabilityService,
     @Inject(forwardRef(() => AppointmentsService))
     private appointmentsService: AppointmentsService,
+    private quickCodeService: QuickCodeService,
   ) { }
 
   // Verify Webhook Handshake for Meta
@@ -639,6 +643,74 @@ export class WhatsAppService {
     selectedService: any,
     phoneNumberId?: string,
   ) {
+    const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId } });
+    const now = new Date();
+    const isQuickBookingActive =
+      conv?.quickCodeVerifiedAt &&
+      now.getTime() - new Date(conv.quickCodeVerifiedAt).getTime() < 30 * 60 * 1000;
+
+    if (isQuickBookingActive) {
+      const tz = salon.timezone || 'Asia/Kolkata';
+      const todayDateStr = DateTime.now().setZone(tz).toFormat('yyyy-MM-dd');
+
+      const availability = await this.availabilityService.getAvailableSlots(
+        salon.id,
+        [selectedService.id],
+        todayDateStr,
+      );
+
+      if (!availability.availableSlots || availability.availableSlots.length === 0) {
+        const reply = `😔 *Fully Booked Today!*\n\nWe don't have any available Quick Booking slots left for today (${todayDateStr}). Please check with our front desk for walk-in availability.`;
+        await this.sendMetaMessage(
+          cleanNumber,
+          {
+            bodyText: reply,
+            interactiveType: 'button',
+            buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
+          },
+          phoneNumberId,
+          salon.id,
+        );
+        await this.prisma.conversation.update({
+          where: { id: conversationId },
+          data: { state: ConversationState.START, quickCodeVerifiedAt: null },
+        });
+        return { replyMessage: reply, state: ConversationState.START };
+      }
+
+      const earliestSlot = availability.availableSlots[0];
+      const timeStr = earliestSlot.startTime;
+
+      const [sh, sm] = timeStr.split(':').map((v: string) => parseInt(v, 10));
+      const startDt = DateTime.fromISO(todayDateStr, { zone: tz }).set({ hour: sh, minute: sm, second: 0 });
+
+      await this.prisma.conversation.update({
+        where: { id: conversationId },
+        data: {
+          selectedServiceId: selectedService.id,
+          selectedDate: startDt.startOf('day').toJSDate(),
+          selectedStartTime: startDt.toJSDate(),
+          state: ConversationState.QUICK_BOOK_CONFIRM,
+        },
+      });
+
+      const formattedTime = startDt.toFormat('hh:mm a');
+      const reply = `⚡ *QUICK BOOKING DETAILS*\n\n• *Service:* ${selectedService.name} (₹${selectedService.price})\n• *Time Today:* ${formattedTime}\n• *Specialist:* Assigned automatically upon confirmation\n\nTap below to confirm your check-in:`;
+
+      await this.sendMetaMessage(
+        cleanNumber,
+        {
+          bodyText: reply,
+          interactiveType: 'button',
+          buttons: [{ id: 'btn_confirm_quick', title: '⚡ Confirm Check-In' }],
+        },
+        phoneNumberId,
+        salon.id,
+      );
+
+      return { replyMessage: reply, state: ConversationState.QUICK_BOOK_CONFIRM };
+    }
+
     const qualifiedStaff = salon.staff.filter((st: any) =>
       st.services.some((svc: any) => svc.serviceId === selectedService.id),
     );
@@ -1461,6 +1533,7 @@ You have accumulated *3 penalty strikes* this year for missed appointments. Auto
           selectedDate: null,
           selectedStartTime: null,
           activeAppointmentId: null,
+          quickCodeVerifiedAt: null,
         },
       });
 
@@ -1472,14 +1545,37 @@ You have accumulated *3 penalty strikes* this year for missed appointments. Auto
           interactiveType: 'button',
           buttons: [
             { id: 'btn_book', title: '📅 Book Slot' },
+            { id: 'btn_quick_book', title: '⚡ Quick Book' },
             { id: 'btn_services', title: '✂️ Services Menu' },
-            { id: 'btn_info', title: '📍 Salon Info' },
           ],
         },
         phoneNumberId,
       );
 
       return { replyMessage: reply, state: ConversationState.START };
+    }
+
+    if (input === 'btn_quick_book' || normalized === 'quick book') {
+      await this.prisma.conversation.update({
+        where: { id: conversation.id },
+        data: {
+          state: ConversationState.QUICK_BOOK_CODE,
+        },
+      });
+
+      const reply = `⚡ *IN-SALON QUICK BOOKING*\n\nPlease enter today's 4-digit Salon Code displayed at reception:`;
+      await this.sendMetaMessage(
+        cleanNumber,
+        {
+          bodyText: reply,
+          interactiveType: 'button',
+          buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
+        },
+        phoneNumberId,
+        salonId,
+      );
+
+      return { replyMessage: reply, state: ConversationState.QUICK_BOOK_CODE };
     }
 
     // -------------------------------------------------------------------------
@@ -2152,7 +2248,7 @@ We look forward to seeing you earlier today.`;
     // EXPIRED INTERACTIVE BUTTON GUARD (Strict Old Message Button Locking)
     // -------------------------------------------------------------
     const isGlobalButton =
-      ['btn_menu', 'btn_start', 'btn_book', 'btn_services'].includes(input) ||
+      ['btn_menu', 'btn_start', 'btn_book', 'btn_quick_book', 'btn_services'].includes(input) ||
       input.startsWith('remind_') ||
       input.startsWith('propose_') ||
       input.startsWith('late_') ||
@@ -2176,6 +2272,12 @@ We look forward to seeing you earlier today.`;
       let isAllowedForState = isGlobalButton;
       if (!isAllowedForState) {
         switch (conversation.state) {
+          case ConversationState.QUICK_BOOK_CODE:
+            isAllowedForState = true;
+            break;
+          case ConversationState.QUICK_BOOK_CONFIRM:
+            isAllowedForState = ['btn_confirm_quick', 'confirm'].includes(input);
+            break;
           case ConversationState.CONFIRMATION:
             isAllowedForState = ['btn_confirm_yes', 'btn_confirm_no', 'btn_confirm'].includes(input);
             break;
@@ -2277,6 +2379,156 @@ We look forward to seeing you earlier today.`;
     // STATE MACHINE
     // -------------------------------------------------------------
     switch (conversation.state) {
+      case ConversationState.QUICK_BOOK_CODE: {
+        const verifyResult = await this.quickCodeService.verifyCode(
+          salonId,
+          cleanNumber,
+          input,
+        );
+
+        if (verifyResult.message === 'LOCKED' || verifyResult.message === 'LOCKED_NOW') {
+          const mins = verifyResult.minutesRemaining || 10;
+          const reply = `⚠️ *ACCOUNT TEMPORARILY LOCKED*\n\nToo many incorrect code attempts. Please wait *${mins} minutes* before trying again, or ask salon reception for assistance.`;
+          await this.sendMetaMessage(
+            cleanNumber,
+            {
+              bodyText: reply,
+              interactiveType: 'button',
+              buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
+            },
+            phoneNumberId,
+            salonId,
+          );
+          await this.prisma.conversation.update({
+            where: { id: conversation.id },
+            data: { state: ConversationState.START },
+          });
+          return { replyMessage: reply, state: ConversationState.START };
+        }
+
+        if (verifyResult.message === 'INVALID_CODE') {
+          const reply = `❌ *INVALID SALON CODE*\n\nYou have *${verifyResult.attemptsRemaining} attempt(s)* remaining today. Please check the 4-digit code displayed at reception and try again:`;
+          await this.sendMetaMessage(
+            cleanNumber,
+            {
+              bodyText: reply,
+              interactiveType: 'button',
+              buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
+            },
+            phoneNumberId,
+            salonId,
+          );
+          return { replyMessage: reply, state: ConversationState.QUICK_BOOK_CODE };
+        }
+
+        // Code VERIFIED: set state to SELECT_CATEGORY and render service/category picker!
+        await this.prisma.conversation.update({
+          where: { id: conversation.id },
+          data: {
+            state: ConversationState.SELECT_CATEGORY,
+            quickCodeVerifiedAt: new Date(),
+          },
+        });
+
+        const reply = `✅ *CODE VERIFIED!*\n\nPlease select your service for today's Quick Booking:`;
+        await this.sendMetaMessage(cleanNumber, { bodyText: reply }, phoneNumberId, salonId);
+
+        const refreshedConv = await this.prisma.conversation.findUnique({ where: { id: conversation.id } });
+        return this.promptCategorySelection(refreshedConv, cleanNumber, salon, salonUser, phoneNumberId);
+      }
+
+      case ConversationState.QUICK_BOOK_CONFIRM: {
+        const now = new Date();
+        const isContextValid =
+          conversation.quickCodeVerifiedAt &&
+          now.getTime() - new Date(conversation.quickCodeVerifiedAt).getTime() < 30 * 60 * 1000;
+
+        if (!isContextValid || !conversation.selectedServiceId || !conversation.selectedStartTime || !conversation.selectedDate) {
+          const reply = `⚠️ *Quick Booking session expired.*\n\nPlease tap below to restart:`;
+          await this.sendMetaMessage(
+            cleanNumber,
+            {
+              bodyText: reply,
+              interactiveType: 'button',
+              buttons: [{ id: 'btn_quick_book', title: '⚡ Quick Book' }],
+            },
+            phoneNumberId,
+            salonId,
+          );
+          await this.prisma.conversation.update({
+            where: { id: conversation.id },
+            data: { state: ConversationState.START, quickCodeVerifiedAt: null },
+          });
+          return { replyMessage: reply, state: ConversationState.START };
+        }
+
+        const tz = salon.timezone || 'Asia/Kolkata';
+        const dateStr = DateTime.fromJSDate(conversation.selectedDate, { zone: tz }).toFormat('yyyy-MM-dd');
+        const timeStr = DateTime.fromJSDate(conversation.selectedStartTime, { zone: tz }).toFormat('HH:mm');
+        const serviceObj = salon.services.find((s: any) => s.id === conversation.selectedServiceId);
+
+        try {
+          const dto: CreateAppointmentDto = {
+            customerPhone: cleanNumber,
+            customerName: conversation.customerName || user.name || 'In-Salon Client',
+            serviceIds: [conversation.selectedServiceId],
+            date: dateStr,
+            startTime: timeStr,
+            source: BookingSource.QUICK_BOOK,
+          };
+
+          const createdAppt = await this.appointmentsService.createAppointment(
+            salonId,
+            dto,
+            undefined,
+            { initialStatus: AppointmentStatus.CHECKED_IN },
+          );
+
+          await this.prisma.conversation.update({
+            where: { id: conversation.id },
+            data: {
+              state: ConversationState.COMPLETED,
+              quickCodeVerifiedAt: null,
+            },
+          });
+
+          const stylistName = createdAppt.stylist?.name || createdAppt.stylistName || 'Your Specialist';
+          const formattedTime = DateTime.fromJSDate(new Date(createdAppt.startAt), { zone: tz }).toFormat('hh:mm a');
+
+          const reply = `✨ *QUICK BOOKING CONFIRMED!*\n\n• *Booking #:* *${createdAppt.appointmentNumber}*\n• *Service:* *${createdAppt.serviceNameSnapshot || serviceObj?.name || 'Service'}*\n• *Time:* *${formattedTime}*\n• *Specialist:* *${stylistName}*\n• *Status:* *Checked In*\n\nPlease take a seat! *${stylistName}* will call you to the chair shortly.`;
+
+          await this.sendMetaMessage(
+            cleanNumber,
+            {
+              bodyText: reply,
+              interactiveType: 'button',
+              buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
+            },
+            phoneNumberId,
+            salonId,
+          );
+
+          return { replyMessage: reply, state: ConversationState.COMPLETED };
+        } catch (err: any) {
+          this.logger.error(`Quick Booking create failed: ${err.message}`, err.stack);
+          const reply = `⚠️ *Slot no longer available!*\n\nThe slot *${timeStr}* was just booked or is no longer available. Please select your service again:`;
+          await this.sendMetaMessage(
+            cleanNumber,
+            {
+              bodyText: reply,
+              interactiveType: 'button',
+              buttons: [{ id: 'btn_quick_book', title: '⚡ Quick Book' }],
+            },
+            phoneNumberId,
+            salonId,
+          );
+          await this.prisma.conversation.update({
+            where: { id: conversation.id },
+            data: { state: ConversationState.START, quickCodeVerifiedAt: null },
+          });
+          return { replyMessage: reply, state: ConversationState.START };
+        }
+      }
       case ConversationState.ACTIVE_HUB: {
         if (input === 'btn_add_service' || normalized.includes('add')) {
           const activeAppt = conversation.activeAppointmentId

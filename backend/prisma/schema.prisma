@@ -68,6 +68,7 @@ enum BookingSource {
   PHONE
   WALK_IN
   MANUAL
+  QUICK_BOOK
 }
 
 enum DayOfWeek {
@@ -123,6 +124,8 @@ enum ConversationState {
   COLLECT_NAME
   CONFIRMATION
   COMPLETED
+  QUICK_BOOK_CODE
+  QUICK_BOOK_CONFIRM
 }
 
 enum ServiceGender {
@@ -275,6 +278,7 @@ model Salon {
   auditLogs            AuditLog[]
   errorLogs            ErrorLog[]
   stylistAbsences      StylistAbsence[]
+  quickCode            SalonQuickCode?
 
   @@index([createdByAdminId])
   @@index([slug])
@@ -565,6 +569,10 @@ model Conversation {
   isBotPaused         Boolean           @default(false) @map("is_bot_paused")
   botPausedUntil      DateTime?         @map("bot_paused_until") @db.Timestamptz
 
+  quickCodeVerifiedAt  DateTime?         @map("quick_code_verified_at") @db.Timestamptz
+  quickCodeAttempts    Int               @default(0) @map("quick_code_attempts")
+  quickCodeLockedUntil DateTime?         @map("quick_code_locked_until") @db.Timestamptz
+
   updatedAt             DateTime          @updatedAt @map("updated_at")
 
   salon               Salon             @relation(fields: [salonId], references: [id], onDelete: Cascade)
@@ -572,6 +580,20 @@ model Conversation {
   @@unique([salonId, customerPhone])
   @@index([customerPhone])
   @@map("conversations")
+}
+
+model SalonQuickCode {
+  id        String   @id @default(uuid())
+  salonId   String   @unique @map("salon_id")
+  code      String
+  validDate String   @map("valid_date")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  salon     Salon    @relation(fields: [salonId], references: [id], onDelete: Cascade)
+
+  @@index([salonId, validDate])
+  @@map("salon_quick_codes")
 }
 
 model WhatsAppAccount {

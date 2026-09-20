@@ -15,6 +15,7 @@ import { HealthModule } from './modules/health/health.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
 import { MasterCategoriesModule } from './modules/master-categories/master-categories.module';
 import { ErrorLogModule } from './modules/error-logs/error-log.module';
+import { QuickBookingModule } from './modules/quick-booking/quick-booking.module';
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
 
 @Module({
@@ -43,6 +44,7 @@ import { CorrelationIdMiddleware } from './common/middleware/correlation-id.midd
     HealthModule,
     WhatsAppModule,
     MasterCategoriesModule,
+    QuickBookingModule,
   ],
 })
 export class AppModule implements NestModule {

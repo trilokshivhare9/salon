@@ -77,6 +77,10 @@ const appointmentInclude = {
   },
 };
 
+export interface InternalCreateAppointmentOptions {
+  initialStatus?: AppointmentStatus;
+}
+
 @Injectable()
 export class AppointmentsService {
   private readonly logger = new Logger(AppointmentsService.name);
@@ -187,6 +191,7 @@ export class AppointmentsService {
     salonId: string,
     dto: CreateAppointmentDto,
     createdByAdminId?: string,
+    options?: InternalCreateAppointmentOptions,
   ) {
     const salon = await this.prisma.salon.findUnique({
       where: { id: salonId },
@@ -258,6 +263,10 @@ export class AppointmentsService {
     });
     const endDt = startDt.plus({ minutes: totalDuration });
     const dayOfWeek = startDt.toFormat('cccc').toUpperCase() as DayOfWeek;
+    const nowInSalonZone = DateTime.now().setZone(timezone);
+    if (startDt < nowInSalonZone.minus({ minutes: 2 })) {
+      throw new ConflictException('The selected appointment time has already passed. Please select a fresh slot.');
+    }
 
     const cleanPhone = this.sanitizePhone(dto.customerPhone);
 
@@ -457,34 +466,33 @@ export class AppointmentsService {
             throw new ConflictException('Specialist is no longer assigned to perform the selected services.');
           }
 
-          if (assignedStylist.followsSalonSchedule) {
-            const currentSalonHours = await tx.salonWorkingHours.findUnique({
-              where: { salonId_dayOfWeek: { salonId, dayOfWeek } },
-            });
+          // Enforce Salon Operating Hours / Closed Day for ALL appointments
+          const currentSalonHours = await tx.salonWorkingHours.findUnique({
+            where: { salonId_dayOfWeek: { salonId, dayOfWeek } },
+          });
 
-            if (!currentSalonHours || currentSalonHours.isClosed) {
-              throw new ConflictException(`Salon is closed on ${dayOfWeek}.`);
-            }
+          if (!currentSalonHours || currentSalonHours.isClosed) {
+            throw new ConflictException(`Salon is closed on ${dayOfWeek}.`);
+          }
 
-            const apptStartStr = dto.startTime;
-            const apptEndStr = endDt.toFormat('HH:mm');
+          const apptStartStr = dto.startTime;
+          const apptEndStr = endDt.toFormat('HH:mm');
 
-            if (currentSalonHours.startTime && apptStartStr < currentSalonHours.startTime) {
+          if (currentSalonHours.startTime && apptStartStr < currentSalonHours.startTime) {
+            throw new ConflictException(
+              `Appointment start time ${apptStartStr} is earlier than salon opening time ${currentSalonHours.startTime}.`,
+            );
+          }
+          if (currentSalonHours.endTime && apptEndStr > currentSalonHours.endTime) {
+            throw new ConflictException(
+              `Appointment end time ${apptEndStr} exceeds salon closing time ${currentSalonHours.endTime}.`,
+            );
+          }
+          if (currentSalonHours.breakStartTime && currentSalonHours.breakEndTime) {
+            if (apptStartStr < currentSalonHours.breakEndTime && apptEndStr > currentSalonHours.breakStartTime) {
               throw new ConflictException(
-                `Appointment start time ${apptStartStr} is earlier than salon opening time ${currentSalonHours.startTime}.`,
+                `Appointment conflicts with salon break (${currentSalonHours.breakStartTime}-${currentSalonHours.breakEndTime}).`,
               );
-            }
-            if (currentSalonHours.endTime && apptEndStr > currentSalonHours.endTime) {
-              throw new ConflictException(
-                `Appointment end time ${apptEndStr} exceeds salon closing time ${currentSalonHours.endTime}.`,
-              );
-            }
-            if (currentSalonHours.breakStartTime && currentSalonHours.breakEndTime) {
-              if (apptStartStr < currentSalonHours.breakEndTime && apptEndStr > currentSalonHours.breakStartTime) {
-                throw new ConflictException(
-                  `Appointment conflicts with salon break (${currentSalonHours.breakStartTime}-${currentSalonHours.breakEndTime}).`,
-                );
-              }
             }
           }
 
@@ -505,7 +513,7 @@ export class AppointmentsService {
               appointmentDate: new Date(dto.date),
               startAt: startDt.toJSDate(),
               endAt: endDt.toJSDate(),
-              status: AppointmentStatus.CONFIRMED,
+              status: options?.initialStatus || AppointmentStatus.CONFIRMED,
               source: dto.source || BookingSource.WEB,
               notes: dto.notes,
               createdByAdminId: createdByAdminId || null,
@@ -604,6 +612,7 @@ export class AppointmentsService {
       isTargetCancelledNoShow &&
       isClientFault &&
       dto.reasonCategory !== 'SALON_EMERGENCY' &&
+      appointment.source !== BookingSource.QUICK_BOOK &&
       hoursRemaining < 2 &&
       appointment.salonUserId
     ) {

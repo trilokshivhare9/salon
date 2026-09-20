@@ -281,23 +281,29 @@ export class AvailabilityService {
       let effectiveClose: number;
       const busyIntervals: { start: number; end: number }[] = [];
 
+      if (salonOpenMinutes === null || salonCloseMinutes === null) {
+        continue; // Salon is closed today — NO STYLIST CAN BE BOOKED
+      }
+
       if (stylist.followsSalonSchedule) {
-        if (salonOpenMinutes === null || salonCloseMinutes === null) {
-          continue; // Salon is closed today
-        }
         effectiveOpen = salonOpenMinutes;
         effectiveClose = salonCloseMinutes;
         if (salonBreak) {
           busyIntervals.push(salonBreak);
         }
       } else {
-        // Custom stylist schedule: independent of salon hours
+        // Custom stylist schedule: capped within salon operating hours
         const customHours = stylist.workingHours[0];
         if (!customHours || !customHours.isWorking) {
           continue; // Stylist not working today
         }
-        effectiveOpen = this.parseTimeStringToMinutes(customHours.startTime);
-        effectiveClose = this.parseTimeStringToMinutes(customHours.endTime);
+        const customOpen = this.parseTimeStringToMinutes(customHours.startTime);
+        const customClose = this.parseTimeStringToMinutes(customHours.endTime);
+
+        // Hard Boundary: Custom schedule can REDUCE availability, never EXPAND beyond salon hours
+        effectiveOpen = Math.max(customOpen, salonOpenMinutes);
+        effectiveClose = Math.min(customClose, salonCloseMinutes);
+
         if (customHours.breakStartTime && customHours.breakEndTime) {
           busyIntervals.push({
             start: this.parseTimeStringToMinutes(customHours.breakStartTime),
