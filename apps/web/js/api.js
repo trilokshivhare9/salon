@@ -906,6 +906,18 @@ export class ApiClient {
     });
   }
 
+  // Quick Booking Code Management
+  static async getQuickCode(salonId) {
+    return this.request(`/salons/${salonId}/quick-code`);
+  }
+
+  static async regenerateQuickCode(salonId) {
+    return this.request(`/salons/${salonId}/quick-code/generate`, {
+      method: 'POST',
+    });
+  }
+
+
 
   // WhatsApp Logs & Simulator
   static async getWhatsAppLogs(filters = {}) {
