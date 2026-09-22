@@ -96,6 +96,7 @@ describe('AvailabilityService (Unit Tests)', () => {
             stylist: { findMany: jest.fn(), count: jest.fn() },
             stylistAbsence: { findMany: jest.fn() },
             appointment: { findMany: jest.fn() },
+            salonClosure: { findFirst: jest.fn().mockResolvedValue(null) },
           },
         },
       ],

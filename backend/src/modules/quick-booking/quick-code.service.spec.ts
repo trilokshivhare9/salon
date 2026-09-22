@@ -59,7 +59,11 @@ describe('QuickCodeService', () => {
         id: 'code-1',
         salonId: 'salon-1',
         code: '1234',
-        validDate: '2026-09-20',
+      });
+      (prisma.salonQuickCode.upsert as jest.Mock).mockResolvedValue({
+        id: 'code-1',
+        salonId: 'salon-1',
+        code: '1234',
       });
       (prisma.conversation.update as jest.Mock).mockResolvedValue({});
 
@@ -86,7 +90,11 @@ describe('QuickCodeService', () => {
         id: 'code-1',
         salonId: 'salon-1',
         code: '1234',
-        validDate: '2026-09-20',
+      });
+      (prisma.salonQuickCode.upsert as jest.Mock).mockResolvedValue({
+        id: 'code-1',
+        salonId: 'salon-1',
+        code: '1234',
       });
       (prisma.conversation.update as jest.Mock).mockResolvedValue({});
 
@@ -107,7 +115,11 @@ describe('QuickCodeService', () => {
         id: 'code-1',
         salonId: 'salon-1',
         code: '1234',
-        validDate: '2026-09-20',
+      });
+      (prisma.salonQuickCode.upsert as jest.Mock).mockResolvedValue({
+        id: 'code-1',
+        salonId: 'salon-1',
+        code: '1234',
       });
       (prisma.conversation.update as jest.Mock).mockResolvedValue({});
 

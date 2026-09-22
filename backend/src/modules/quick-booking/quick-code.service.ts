@@ -128,7 +128,7 @@ export class QuickCodeService {
     // 3. Evaluate submitted code
     const cleanSubmitted = (submittedCode || '').trim();
 
-    if (cleanSubmitted === activeQuickCode.code) {
+    if (activeQuickCode && cleanSubmitted === activeQuickCode.code) {
       // SUCCESS: Clear attempts, clear lock, set verified timestamp
       if (conversation) {
         await this.prisma.conversation.update({

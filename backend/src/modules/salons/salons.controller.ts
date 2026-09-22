@@ -15,6 +15,7 @@ import { SalonsService } from './salons.service';
 import { CreateSalonPlatformDto } from './dto/create-salon-platform.dto';
 import { UpdateSalonDto } from './dto/update-salon.dto';
 import { UpdateWorkingHoursDto } from './dto/working-hours.dto';
+import { CreateClosureDto } from './dto/create-closure.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -126,5 +127,34 @@ export class SalonsController {
     @Body() dto: UpdateWorkingHoursDto,
   ) {
     return this.salonsService.updateWorkingHours(salonId, dto);
+  }
+
+  // -------------------------------------------------------------
+  // SALON CLOSURES & HOLIDAYS MANAGEMENT
+  // -------------------------------------------------------------
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
+  @Get('closures')
+  async getSalonClosures(@CurrentSalonId() salonId: string) {
+    return this.salonsService.getSalonClosures(salonId);
+  }
+
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
+  @Post('closures')
+  async createSalonClosure(
+    @CurrentSalonId() salonId: string,
+    @Request() req: any,
+    @Body() dto: CreateClosureDto,
+  ) {
+    const adminId = req.user?.id || req.user?.sub;
+    return this.salonsService.createSalonClosure(salonId, dto, adminId);
+  }
+
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
+  @Delete('closures/:id')
+  async deleteSalonClosure(
+    @CurrentSalonId() salonId: string,
+    @Param('id') closureId: string,
+  ) {
+    return this.salonsService.deleteSalonClosure(salonId, closureId);
   }
 }

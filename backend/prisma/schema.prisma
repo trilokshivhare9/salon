@@ -225,6 +225,7 @@ model Admin {
   auditLogs           AuditLog[]
   sessions            UserSession[]
   createdAbsences     StylistAbsence[] @relation("AdminCreatedAbsences")
+  createdClosures     SalonClosure[]   @relation("AdminCreatedClosures")
 
   @@index([email])
   @@index([salonId])
@@ -301,6 +302,7 @@ model Salon {
   auditLogs            AuditLog[]
   errorLogs            ErrorLog[]
   stylistAbsences      StylistAbsence[]
+  salonClosures        SalonClosure[]
   quickCode            SalonQuickCode?
 
   @@index([createdByAdminId])
@@ -843,3 +845,42 @@ model BookingReassignment {
   @@index([appointmentId])
   @@map("booking_reassignments")
 }
+
+// -----------------------------------------------------------------------------
+// SALON CLOSURE & HOLIDAY MANAGEMENT
+// -----------------------------------------------------------------------------
+enum SalonClosureType {
+  HOLIDAY             // Advance planned holiday (Festivals, Public Holidays)
+  EMERGENCY_CLOSURE   // Last-minute emergency store closure (Power outage, Maintenance)
+  PARTIAL_DAY         // Partial day store closure (e.g. closing early at 4 PM)
+}
+
+model SalonClosure {
+  id                    String           @id @default(uuid())
+  salonId               String           @map("salon_id")
+  closureType           SalonClosureType @default(HOLIDAY) @map("closure_type")
+
+  startDate             DateTime         @map("start_date") @db.Date
+  endDate               DateTime         @map("end_date") @db.Date
+
+  isPartialDay          Boolean          @default(false) @map("is_partial_day")
+  startTime             String?          @map("start_time") // e.g. "16:00"
+  endTime               String?          @map("end_time")   // e.g. "21:00"
+
+  reason                String?
+  notes                 String?
+  affectedBookingsCount Int              @default(0) @map("affected_bookings_count")
+  cancelledCount        Int              @default(0) @map("cancelled_count")
+
+  createdByAdminId      String?          @map("created_by_admin_id")
+
+  createdAt             DateTime         @default(now()) @map("created_at")
+  updatedAt             DateTime         @updatedAt @map("updated_at")
+
+  salon                 Salon            @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  createdByAdmin        Admin?           @relation("AdminCreatedClosures", fields: [createdByAdminId], references: [id], onDelete: SetNull)
+
+  @@index([salonId, startDate, endDate])
+  @@map("salon_closures")
+}
+
