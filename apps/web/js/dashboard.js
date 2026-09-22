@@ -364,11 +364,7 @@ export class SalonDashboard {
         this.categoriesList = Array.isArray(categories) ? categories : [];
         this.salonProfile = profile || {};
 
-        if (this.salonProfile?.id) {
-          const quickCodeRes = await ApiClient.getQuickCode(this.salonProfile.id).catch(() => null);
-          this.quickCodeRecord = quickCodeRes;
-          this.quickCode = quickCodeRes?.code || null;
-        }
+
       } catch (err) {
         console.warn('[Dashboard] loadData batch error:', err);
       }
@@ -481,10 +477,6 @@ export class SalonDashboard {
             <button class="btn btn-secondary btn-sm" id="btn-header-quick-requests" title="View Pending Quick Booking Requests" style="background: ${pendingQuickCount > 0 ? 'rgba(245,158,11,0.25)' : 'rgba(99,102,241,0.12)'}; border: 1px solid ${pendingQuickCount > 0 ? 'rgba(245,158,11,0.5)' : 'rgba(99,102,241,0.3)'}; color: ${pendingQuickCount > 0 ? '#fbbf24' : '#818cf8'}; font-weight: 700; gap: 6px; display: flex; align-items: center;">
               ${Icons.sparkles({ size: 14, color: pendingQuickCount > 0 ? '#fbbf24' : '#818cf8' })}
               <span>Quick Requests <strong id="header-quick-requests-val" style="background: ${pendingQuickCount > 0 ? '#f59e0b' : 'rgba(255,255,255,0.15)'}; color: ${pendingQuickCount > 0 ? '#000' : '#fff'}; padding: 1px 7px; border-radius: 10px; font-weight: 800; margin-left: 4px; font-size: 0.8rem;">${pendingQuickCount}</strong></span>
-            </button>
-            <button class="btn btn-secondary btn-sm" id="btn-header-quick-code" title="In-Salon Daily Quick Booking Code" style="background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.3); color: #818cf8; font-weight: 700; gap: 6px; display: flex; align-items: center;">
-              ${Icons.sparkles({ size: 14, color: '#818cf8' })}
-              <span>Quick Code: <strong id="header-quick-code-val" style="color: #fff; font-family: monospace; font-size: 0.95rem; letter-spacing: 1px;">${this.quickCode || '----'}</strong></span>
             </button>
             <button class="btn btn-secondary btn-sm" id="btn-toggle-sound" title="${SoundManager.isMuted() ? 'Unmute Floor Audio' : 'Mute Floor Audio'}">
               <span id="sound-icon">${SoundManager.isMuted() ? Icons.volumeX({ size: 16, color: '#94a3b8' }) : Icons.volume2({ size: 16, color: '#34d399' })}</span>
@@ -891,19 +883,7 @@ export class SalonDashboard {
             <div class="action-tile-desc">Copy direct booking URL for Instagram bio, Google Maps, or WhatsApp</div>
           </div>
 
-          <!-- Action 5: Daily Quick Code -->
-          <div class="action-tile" id="card-action-quick-code" style="background: linear-gradient(135deg, rgba(99,102,241,0.12) 0%, rgba(139,92,246,0.12) 100%); border-color: rgba(99,102,241,0.3);">
-            <div class="action-tile-icon" style="background: rgba(99,102,241,0.25); border: 1px solid rgba(99,102,241,0.4);">
-              ${Icons.sparkles({ size: 22, color: '#a5b4fc' })}
-            </div>
-            <div class="action-tile-title" style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
-              <span>Quick Code</span>
-              <span style="font-family: monospace; font-size: 1rem; font-weight: 800; color: #fff; background: #6366f1; padding: 2px 8px; border-radius: 6px; letter-spacing: 2px;">
-                ${this.quickCode || '----'}
-              </span>
-            </div>
-            <div class="action-tile-desc">View, copy, or regenerate today's 4-digit code for walk-in customer check-ins</div>
-          </div>
+
         </div>
       </div>
 
@@ -2369,13 +2349,9 @@ export class SalonDashboard {
       }
     });
 
-    // Quick Booking Code & Request Triggers
-    const openQuickCodeModal = () => this.showQuickCodeModal();
+    // Quick Booking Request Triggers
     const openQuickRequestsModal = () => this.openQuickRequestsModal();
     document.getElementById('btn-header-quick-requests')?.addEventListener('click', openQuickRequestsModal);
-    document.getElementById('btn-header-quick-code')?.addEventListener('click', openQuickCodeModal);
-    document.getElementById('btn-dash-quick-code')?.addEventListener('click', openQuickCodeModal);
-    document.getElementById('card-action-quick-code')?.addEventListener('click', openQuickCodeModal);
 
     // Queue Filter Pills
     this.container.querySelectorAll('.q-chip').forEach((pill) => {
