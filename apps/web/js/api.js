@@ -514,6 +514,31 @@ export class ApiClient {
     return this.request(`/whatsapp/chat/history?${params.toString()}`);
   }
 
+  // Salon Closures & Holidays Management
+  static async getSalonClosures(bypassCache = false) {
+    const url = bypassCache ? `/salons/closures?_t=${Date.now()}` : '/salons/closures';
+    return this.request(url, {}, 30000);
+  }
+
+  static async createSalonClosure(payload) {
+    this.invalidateCache('/salons/closures');
+    this.invalidateCache('/appointments');
+    this.invalidateCache('/reports');
+    return this.request('/salons/closures', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  static async deleteSalonClosure(id) {
+    this.invalidateCache('/salons/closures');
+    this.invalidateCache('/appointments');
+    this.invalidateCache('/reports');
+    return this.request(`/salons/closures/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
 
   // Staff Management (Cached for 3 mins)
   static async getStaff(bypassCache = false) {

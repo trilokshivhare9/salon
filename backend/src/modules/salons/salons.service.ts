@@ -4,17 +4,21 @@ import {
   ConflictException,
   BadRequestException,
   Logger,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../database/prisma.service';
 import { CreateSalonPlatformDto } from './dto/create-salon-platform.dto';
 import { UpdateSalonDto } from './dto/update-salon.dto';
 import { UpdateWorkingHoursDto } from './dto/working-hours.dto';
+import { CreateClosureDto } from './dto/create-closure.dto';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { DateTime } from 'luxon';
 import { AdminRole, SalonStatus, DayOfWeek, AppointmentStatus } from '@prisma/client';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { AppointmentsService } from '../appointments/appointments.service';
 
 @Injectable()
 export class SalonsService {
@@ -24,6 +28,8 @@ export class SalonsService {
     private prisma: PrismaService,
     private configService: ConfigService,
     private whatsAppService: WhatsAppService,
+    @Inject(forwardRef(() => AppointmentsService))
+    private appointmentsService: AppointmentsService,
   ) { }
 
   // -------------------------------------------------------------
@@ -845,5 +851,121 @@ Here are your salon owner login credentials:
         orderBy: { dayOfWeek: 'asc' },
       });
     });
+  }
+
+  // -------------------------------------------------------------
+  // SALON CLOSURES & HOLIDAY MANAGEMENT
+  // -------------------------------------------------------------
+  async getSalonClosures(salonId: string) {
+    return this.prisma.salonClosure.findMany({
+      where: { salonId },
+      orderBy: { startDate: 'desc' },
+      include: {
+        createdByAdmin: { select: { id: true, name: true, email: true } },
+      },
+    });
+  }
+
+  async createSalonClosure(salonId: string, dto: CreateClosureDto, adminId?: string) {
+    const salon = await this.prisma.salon.findUnique({ where: { id: salonId } });
+    if (!salon) throw new NotFoundException('Salon not found.');
+
+    const tz = salon.timezone || 'Asia/Kolkata';
+    const startDt = DateTime.fromISO(dto.startDate, { zone: tz }).startOf('day');
+    const endDt = DateTime.fromISO(dto.endDate, { zone: tz }).endOf('day');
+
+    if (startDt > endDt) {
+      throw new BadRequestException('Closure start date must be on or before end date.');
+    }
+
+    const startJS = startDt.toJSDate();
+    const endJS = endDt.toJSDate();
+
+    // Query active appointments within [startJS, endJS]
+    const activeStatusList: AppointmentStatus[] = [
+      AppointmentStatus.CONFIRMED,
+      AppointmentStatus.CHECKED_IN,
+      AppointmentStatus.PENDING_ACCEPTANCE,
+      AppointmentStatus.PENDING_RESCHEDULE,
+    ];
+
+    const affectedAppointments = await this.prisma.appointment.findMany({
+      where: {
+        salonId,
+        startAt: { gte: startJS, lte: endJS },
+        status: { in: activeStatusList },
+      },
+      include: {
+        salonUser: { include: { user: true } },
+        service: true,
+        stylist: true,
+      },
+    });
+
+    let apptsToCancel = affectedAppointments;
+    if (dto.isPartialDay && dto.startTime && dto.endTime) {
+      apptsToCancel = affectedAppointments.filter((appt) => {
+        const apptStartStr = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('HH:mm');
+        const apptEndStr = DateTime.fromJSDate(appt.endAt, { zone: tz }).toFormat('HH:mm');
+        return apptStartStr < dto.endTime! && apptEndStr > dto.startTime!;
+      });
+    }
+
+    // Save SalonClosure record
+    const closure = await this.prisma.salonClosure.create({
+      data: {
+        salonId,
+        closureType: dto.closureType,
+        startDate: new Date(`${dto.startDate}T00:00:00Z`),
+        endDate: new Date(`${dto.endDate}T00:00:00Z`),
+        isPartialDay: dto.isPartialDay || false,
+        startTime: dto.startTime || null,
+        endTime: dto.endTime || null,
+        reason: dto.reason || 'Salon Store Closure',
+        notes: dto.notes || null,
+        affectedBookingsCount: apptsToCancel.length,
+        cancelledCount: apptsToCancel.length,
+        createdByAdminId: adminId || null,
+      },
+    });
+
+    // Batch cancel affected appointments with SALON_EMERGENCY (0 penalty to customer!)
+    for (const appt of apptsToCancel) {
+      try {
+        await this.appointmentsService.updateStatus(salonId, appt.id, {
+          status: AppointmentStatus.CANCELLED,
+          reason: `Store Closure: ${dto.reason || 'Salon Emergency Closure'}`,
+          reasonCategory: 'SALON_EMERGENCY',
+        });
+      } catch (err: any) {
+        this.logger.warn(`Failed to cancel appt #${appt.appointmentNumber} during store closure: ${err.message}`);
+      }
+    }
+
+    // Emit Realtime Event to Dashboard
+    this.appointmentsService.emitSalonEvent(salonId, 'STATUS_UPDATED', {
+      type: 'SALON_CLOSURE_CREATED',
+      closure,
+    });
+
+    return closure;
+  }
+
+  async deleteSalonClosure(salonId: string, closureId: string) {
+    const closure = await this.prisma.salonClosure.findFirst({
+      where: { id: closureId, salonId },
+    });
+    if (!closure) throw new NotFoundException('Salon closure record not found.');
+
+    await this.prisma.salonClosure.delete({
+      where: { id: closureId },
+    });
+
+    this.appointmentsService.emitSalonEvent(salonId, 'STATUS_UPDATED', {
+      type: 'SALON_CLOSURE_DELETED',
+      closureId,
+    });
+
+    return { message: 'Salon closure record removed successfully.' };
   }
 }

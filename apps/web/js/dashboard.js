@@ -2157,6 +2157,21 @@ export class SalonDashboard {
             <div style="color: var(--text-muted);">${Icons.chevronRight({ size: 16 })}</div>
           </div>
 
+          <!-- 4B. Store Closures & Holiday Calendar -->
+          <div class="profile-tool-card" id="card-feature-closures" style="background: rgba(239, 68, 68, 0.08); border-color: rgba(239, 68, 68, 0.3);">
+            <div class="profile-tool-icon" style="background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.4);">
+              ${Icons.alertTriangle ? Icons.alertTriangle({ size: 22, color: '#f87171' }) : '🚨'}
+            </div>
+            <div style="flex: 1;">
+              <div style="font-weight: 700; color: #fff; font-size: 0.98rem; display: flex; align-items: center; gap: 8px;">
+                <span>Store Closures & Holiday Calendar</span>
+                <span style="background: rgba(239, 68, 68, 0.2); color: #f87171; font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; font-weight: 800;">HOLIDAYS & EMERGENCIES</span>
+              </div>
+              <div style="font-size: 0.78rem; color: var(--text-secondary); margin-top: 3px;">Schedule planned festival holidays or trigger instant 0-penalty emergency store closures.</div>
+            </div>
+            <div style="color: var(--text-muted);">${Icons.chevronRight({ size: 16 })}</div>
+          </div>
+
           <!-- 5. Staff Shifts & Working Hours -->
           <div class="profile-tool-card" id="card-feature-shifts">
             <div class="profile-tool-icon" style="background: rgba(56,189,248,0.12); border: 1px solid rgba(56,189,248,0.3);">
@@ -2917,6 +2932,9 @@ export class SalonDashboard {
     });
     document.getElementById('card-feature-salon-schedule')?.addEventListener('click', () => {
       this.showSalonScheduleModal();
+    });
+    document.getElementById('card-feature-closures')?.addEventListener('click', () => {
+      this.openSalonClosuresModal();
     });
     document.getElementById('card-feature-shifts')?.addEventListener('click', () => {
       this.switchTab('staff');
@@ -4412,6 +4430,310 @@ export class SalonDashboard {
     } catch (err) {
       alert(`Error loading salon operating schedule: ${err.message}`);
     }
+  }
+
+  async openSalonClosuresModal() {
+    const modalContainer = document.getElementById('modal-container');
+    modalContainer.innerHTML = `
+      <div class="modal-backdrop show">
+        <div class="modal-content modal-content-lg" style="max-height: 90vh; overflow-y: auto; padding: 24px; max-width: 780px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <div>
+              <h3 style="font-size: 1.35rem; font-weight: 800; color: #fff; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
+                <span>🚨 Store Closures & Holiday Calendar</span>
+              </h3>
+              <p style="color: var(--text-secondary); font-size: 0.82rem; margin: 0;">
+                Schedule planned festival holidays or trigger instant zero-penalty emergency store closures.
+              </p>
+            </div>
+            <button class="close-btn" id="btn-close-closures-modal">&times;</button>
+          </div>
+
+          <!-- Top Action Bar -->
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); padding: 12px 16px; border-radius: var(--radius-sm);">
+            <div style="font-size: 0.85rem; font-weight: 700; color: #fff;">
+              Salon Closures List
+            </div>
+            <button class="btn btn-primary btn-sm" id="btn-show-add-closure-form" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); font-weight: 700; border: none; box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);">
+              + Schedule Closure / Holiday
+            </button>
+          </div>
+
+          <!-- Add Closure Form Container (Hidden by default) -->
+          <div id="container-add-closure-form" style="display: none; background: rgba(239, 68, 68, 0.05); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: var(--radius-sm); padding: 16px; margin-bottom: 20px;">
+            <h4 style="font-size: 1rem; font-weight: 700; color: #f87171; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between;">
+              <span>🗓️ New Store Closure Specification</span>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-cancel-add-closure" style="padding: 2px 8px; font-size: 0.75rem;">✕ Close Form</button>
+            </h4>
+
+            <form id="form-create-closure">
+              <div style="display: flex; flex-direction: column; gap: 14px;">
+                <!-- Closure Type Selector -->
+                <div>
+                  <label class="form-label" style="font-size: 0.8rem; font-weight: 700; color: #fff; margin-bottom: 6px;">Closure Category *</label>
+                  <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
+                    <label style="display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--border-subtle); padding: 10px; border-radius: var(--radius-sm); cursor: pointer; background: var(--bg-input); font-size: 0.8rem;" class="type-pill">
+                      <div style="display: flex; align-items: center; gap: 6px; font-weight: 700; color: #fff;">
+                        <input type="radio" name="closureType" value="HOLIDAY" checked /> 🌴 Planned Holiday
+                      </div>
+                      <span style="font-size: 0.72rem; color: var(--text-muted);">Diwali, Eid, National Holidays</span>
+                    </label>
+
+                    <label style="display: flex; flex-direction: column; gap: 4px; border: 1px solid rgba(239,68,68,0.4); padding: 10px; border-radius: var(--radius-sm); cursor: pointer; background: rgba(239,68,68,0.08); font-size: 0.8rem;" class="type-pill">
+                      <div style="display: flex; align-items: center; gap: 6px; font-weight: 700; color: #f87171;">
+                        <input type="radio" name="closureType" value="EMERGENCY_CLOSURE" /> 🚨 Emergency Closure
+                      </div>
+                      <span style="font-size: 0.72rem; color: var(--text-muted);">Power Cut, Maintenance, Emergency</span>
+                    </label>
+
+                    <label style="display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--border-subtle); padding: 10px; border-radius: var(--radius-sm); cursor: pointer; background: var(--bg-input); font-size: 0.8rem;" class="type-pill">
+                      <div style="display: flex; align-items: center; gap: 6px; font-weight: 700; color: #fff;">
+                        <input type="radio" name="closureType" value="PARTIAL_DAY" /> ⏳ Partial-Day Hours
+                      </div>
+                      <span style="font-size: 0.72rem; color: var(--text-muted);">Closing early or opening late</span>
+                    </label>
+                  </div>
+                </div>
+
+                <!-- Date Range -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                  <div>
+                    <label class="form-label" style="font-size: 0.78rem; font-weight: 700; color: #fff;">Start Date *</label>
+                    <input type="date" class="form-control" id="closure-start-date" required value="${new Date().toISOString().split('T')[0]}" />
+                  </div>
+                  <div>
+                    <label class="form-label" style="font-size: 0.78rem; font-weight: 700; color: #fff;">End Date *</label>
+                    <input type="date" class="form-control" id="closure-end-date" required value="${new Date().toISOString().split('T')[0]}" />
+                  </div>
+                </div>
+
+                <!-- Partial Day Hours (Only shown if PARTIAL_DAY selected) -->
+                <div id="row-partial-day-hours" style="display: none; grid-template-columns: 1fr 1fr; gap: 12px; background: rgba(255,255,255,0.02); border: 1px dashed var(--border-subtle); padding: 10px; border-radius: var(--radius-sm);">
+                  <div>
+                    <label class="form-label" style="font-size: 0.78rem; font-weight: 700; color: #fbbf24;">Closed From Time *</label>
+                    <input type="time" class="form-control" id="closure-start-time" value="14:00" />
+                  </div>
+                  <div>
+                    <label class="form-label" style="font-size: 0.78rem; font-weight: 700; color: #fbbf24;">Closed Until Time *</label>
+                    <input type="time" class="form-control" id="closure-end-time" value="19:00" />
+                  </div>
+                </div>
+
+                <!-- Reason -->
+                <div>
+                  <label class="form-label" style="font-size: 0.78rem; font-weight: 700; color: #fff;">Closure Reason / Note *</label>
+                  <input type="text" class="form-control" id="closure-reason" placeholder="e.g. Festival Holiday / Sudden Power Cut & Maintenance" required />
+                </div>
+
+                <!-- Emergency Banner Warning -->
+                <div id="closure-emergency-notice" style="display: none; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); padding: 10px 12px; border-radius: var(--radius-sm); font-size: 0.78rem; color: #f87171; line-height: 1.4;">
+                  ⚡ <strong>0-Penalty Emergency Guarantee:</strong> Creating an Emergency Closure will instantly cancel all overlapping <code>CONFIRMED</code>, <code>CHECKED_IN</code>, and <code>PENDING</code> appointments. Affected clients receive zero no-show penalty strikes and are notified via emergency WhatsApp apology messages.
+                </div>
+
+                <!-- Submit Button -->
+                <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px;">
+                  <button type="submit" class="btn btn-primary" id="btn-submit-create-closure" style="background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%); font-weight: 700; width: 100%;">
+                    🚀 Create Store Closure & Block Booking Calendar
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+
+          <!-- Loading Spinner / Content Area -->
+          <div id="closures-loading" style="text-align: center; padding: 40px; color: var(--text-muted);">
+            ⏳ Loading Store Closures from Database...
+          </div>
+
+          <div id="closures-list-container" style="display: none;">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+      </div>
+    `;
+
+    const closeBtn = document.getElementById('btn-close-closures-modal');
+    closeBtn?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+
+    const toggleFormBtn = document.getElementById('btn-show-add-closure-form');
+    const formContainer = document.getElementById('container-add-closure-form');
+    const cancelFormBtn = document.getElementById('btn-cancel-add-closure');
+
+    toggleFormBtn?.addEventListener('click', () => {
+      formContainer.style.display = formContainer.style.display === 'none' ? 'block' : 'none';
+    });
+
+    cancelFormBtn?.addEventListener('click', () => {
+      formContainer.style.display = 'none';
+    });
+
+    // Handle Closure Type Radio Switch
+    const radioTypes = document.querySelectorAll('input[name="closureType"]');
+    const partialHoursRow = document.getElementById('row-partial-day-hours');
+    const emergencyNotice = document.getElementById('closure-emergency-notice');
+
+    radioTypes.forEach((radio) => {
+      radio.addEventListener('change', (e) => {
+        const val = e.target.value;
+        if (val === 'PARTIAL_DAY') {
+          partialHoursRow.style.display = 'grid';
+        } else {
+          partialHoursRow.style.display = 'none';
+        }
+
+        if (val === 'EMERGENCY_CLOSURE') {
+          emergencyNotice.style.display = 'block';
+        } else {
+          emergencyNotice.style.display = 'none';
+        }
+      });
+    });
+
+    // Function to render closures list
+    const fetchAndRenderClosures = async () => {
+      const loadingDiv = document.getElementById('closures-loading');
+      const listDiv = document.getElementById('closures-list-container');
+      if (loadingDiv) loadingDiv.style.display = 'block';
+      if (listDiv) listDiv.style.display = 'none';
+
+      try {
+        const closures = await ApiClient.getSalonClosures(true);
+        if (loadingDiv) loadingDiv.style.display = 'none';
+        if (listDiv) listDiv.style.display = 'block';
+
+        if (!closures || closures.length === 0) {
+          listDiv.innerHTML = `
+            <div style="text-align: center; padding: 30px; background: rgba(255,255,255,0.02); border: 1px dashed var(--border-subtle); border-radius: var(--radius-sm); color: var(--text-muted);">
+              🌴 No store closures or holidays currently configured.<br>
+              <span style="font-size: 0.78rem;">Click <strong>"+ Schedule Closure / Holiday"</strong> to block operating dates.</span>
+            </div>
+          `;
+          return;
+        }
+
+        listDiv.innerHTML = `
+          <div style="display: flex; flex-direction: column; gap: 12px;">
+            ${closures.map((c) => {
+              const startDateFormatted = new Date(c.startDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+              const endDateFormatted = new Date(c.endDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+              const isSameDate = startDateFormatted === endDateFormatted;
+              const dateDisplay = isSameDate ? startDateFormatted : `${startDateFormatted} → ${endDateFormatted}`;
+
+              let typeBadge = '';
+              if (c.closureType === 'HOLIDAY') {
+                typeBadge = `<span class="badge" style="background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3); font-size: 0.7rem; font-weight: 800;">🌴 PLANNED HOLIDAY</span>`;
+              } else if (c.closureType === 'EMERGENCY_CLOSURE') {
+                typeBadge = `<span class="badge" style="background: rgba(239,68,68,0.2); color: #f87171; border: 1px solid rgba(239,68,68,0.4); font-size: 0.7rem; font-weight: 800;">🚨 EMERGENCY CLOSURE</span>`;
+              } else {
+                typeBadge = `<span class="badge" style="background: rgba(245,158,11,0.15); color: #fbbf24; border: 1px solid rgba(245,158,11,0.3); font-size: 0.7rem; font-weight: 800;">⏳ PARTIAL-DAY (${c.startTime || '00:00'} - ${c.endTime || '23:59'})</span>`;
+              }
+
+              return `
+                <div style="background: var(--bg-input); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 14px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
+                  <div style="flex: 1; min-width: 240px;">
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+                      ${typeBadge}
+                      <span style="font-size: 0.88rem; font-weight: 700; color: #fff;">${dateDisplay}</span>
+                    </div>
+                    <div style="font-size: 0.82rem; color: var(--text-secondary); line-height: 1.4;">
+                      Reason: <strong style="color: #fff;">${c.reason}</strong>
+                    </div>
+                    ${c.cancelledAppointmentsCount > 0 ? `
+                      <div style="font-size: 0.75rem; color: #f87171; margin-top: 4px; font-weight: 600;">
+                        ⚠️ Auto-cancelled ${c.cancelledAppointmentsCount} appointment(s) with 0 customer penalty.
+                      </div>
+                    ` : ''}
+                  </div>
+                  <div>
+                    <button class="btn btn-secondary btn-sm btn-delete-closure" data-id="${c.id}" style="border-color: rgba(239,68,68,0.4); color: #f87171; font-size: 0.78rem;">
+                      🗑️ Reopen / Delete
+                    </button>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        `;
+
+        // Bind delete buttons
+        listDiv.querySelectorAll('.btn-delete-closure').forEach((btn) => {
+          btn.addEventListener('click', async (e) => {
+            const id = e.currentTarget.getAttribute('data-id');
+            if (confirm('Are you sure you want to delete this store closure and reopen the booking calendar for these dates?')) {
+              try {
+                await ApiClient.deleteSalonClosure(id);
+                fetchAndRenderClosures();
+              } catch (err) {
+                alert(err.message || 'Failed to delete store closure.');
+              }
+            }
+          });
+        });
+      } catch (err) {
+        if (loadingDiv) loadingDiv.style.display = 'none';
+        if (listDiv) {
+          listDiv.style.display = 'block';
+          listDiv.innerHTML = `
+            <div style="color: #f87171; padding: 14px; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: var(--radius-sm); font-size: 0.85rem;">
+              Failed to load store closures: ${err.message || 'Server error'}
+            </div>
+          `;
+        }
+      }
+    };
+
+    // Form Submit Handler
+    document.getElementById('form-create-closure')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const submitBtn = document.getElementById('btn-submit-create-closure');
+      const closureType = document.querySelector('input[name="closureType"]:checked')?.value || 'HOLIDAY';
+      const startDate = document.getElementById('closure-start-date').value;
+      const endDate = document.getElementById('closure-end-date').value;
+      const startTime = document.getElementById('closure-start-time').value;
+      const endTime = document.getElementById('closure-end-time').value;
+      const reason = document.getElementById('closure-reason').value.trim();
+
+      if (!startDate || !endDate || !reason) {
+        alert('Please fill in all required fields.');
+        return;
+      }
+
+      if (endDate < startDate) {
+        alert('End date cannot be earlier than start date.');
+        return;
+      }
+
+      const payload = {
+        closureType,
+        startDate,
+        endDate,
+        reason,
+        autoCancelAppointments: true
+      };
+
+      if (closureType === 'PARTIAL_DAY') {
+        payload.startTime = startTime;
+        payload.endTime = endTime;
+      }
+
+      submitBtn.textContent = 'Enforcing Store Closure...';
+      submitBtn.setAttribute('disabled', 'true');
+
+      try {
+        await ApiClient.createSalonClosure(payload);
+        formContainer.style.display = 'none';
+        submitBtn.textContent = '🚀 Create Store Closure & Block Booking Calendar';
+        submitBtn.removeAttribute('disabled');
+        fetchAndRenderClosures();
+      } catch (err) {
+        alert(err.message || 'Failed to create store closure.');
+        submitBtn.textContent = '🚀 Create Store Closure & Block Booking Calendar';
+        submitBtn.removeAttribute('disabled');
+      }
+    });
+
+    // Initial Load
+    fetchAndRenderClosures();
   }
 
   async showEditStaffHoursModal(staffId, staffName) {

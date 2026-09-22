@@ -161,10 +161,31 @@ export class AvailabilityService {
         ? candidateStepMinutes
         : (totalServiceDuration > 0 ? totalServiceDuration : 15);
 
+    const targetDateObj = new Date(`${dateStr}T00:00:00.000Z`);
+
+    // Check if the store is closed via a SalonClosure record on target date
+    const activeClosure = await this.prisma.salonClosure.findFirst({
+      where: {
+        salonId,
+        startDate: { lte: targetDateObj },
+        endDate: { gte: targetDateObj },
+      },
+    });
+
+    if (activeClosure && !activeClosure.isPartialDay) {
+      return {
+        date: dateStr,
+        salonTimezone: timezone,
+        serviceDurationMinutes: totalServiceDuration,
+        availableSlots: [],
+        status: 'STORE_CLOSED' as any,
+        statusReason: `Salon Store Closure: ${activeClosure.reason || 'Store Closed'}`,
+      };
+    }
+
     const isSalonClosed = !salonWorkingHours || salonWorkingHours.isClosed;
 
     // 3. Query eligible active stylists assigned to ALL requested services
-    const targetDateObj = new Date(`${dateStr}T00:00:00.000Z`);
     const stylistQueryWhere: any = {
       salonId,
       status: 'ACTIVE',
