@@ -688,7 +688,7 @@ export class WhatsAppService {
         where: { id: conversationId },
         data: {
           selectedServiceId: selectedService.id,
-          selectedDate: startDt.startOf('day').toJSDate(),
+          selectedDate: new Date(`${todayDateStr}T00:00:00Z`),
           selectedStartTime: startDt.toJSDate(),
           state: ConversationState.QUICK_BOOK_CONFIRM,
         },
@@ -2463,7 +2463,8 @@ We look forward to seeing you earlier today.`;
         }
 
         const tz = salon.timezone || 'Asia/Kolkata';
-        const dateStr = DateTime.fromJSDate(conversation.selectedDate, { zone: tz }).toFormat('yyyy-MM-dd');
+        // Read @db.Date safely: Prisma returns Date at UTC midnight, extract YYYY-MM-DD from UTC
+        const dateStr = DateTime.fromJSDate(conversation.selectedDate, { zone: 'utc' }).toFormat('yyyy-MM-dd');
         const timeStr = DateTime.fromJSDate(conversation.selectedStartTime, { zone: tz }).toFormat('HH:mm');
         const serviceObj = salon.services.find((s: any) => s.id === conversation.selectedServiceId);
 
@@ -2510,7 +2511,7 @@ We look forward to seeing you earlier today.`;
 
           return { replyMessage: reply, state: ConversationState.COMPLETED };
         } catch (err: any) {
-          this.logger.error(`Quick Booking create failed: ${err.message}`, err.stack);
+          this.logger.error(`Quick Booking create failed [salon=${salonId}, date=${dateStr}, time=${timeStr}]: ${err.message}`, err.stack);
           const reply = `⚠️ *Slot no longer available!*\n\nThe slot *${timeStr}* was just booked or is no longer available. Please select your service again:`;
           await this.sendMetaMessage(
             cleanNumber,
