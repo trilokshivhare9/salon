@@ -67,6 +67,7 @@ describe('Human-like Scenario Test Suite: Salon Closures & Emergency Holiday Man
   const mockAppointmentsService = {
     updateStatus: jest.fn(),
     emitSalonEvent: jest.fn(),
+    autoCompleteElapsedAppointments: jest.fn().mockResolvedValue(0),
   };
 
   const mockAvailabilityEngineService = {

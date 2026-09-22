@@ -881,7 +881,12 @@ Here are your salon owner login credentials:
     const startJS = startDt.toJSDate();
     const endJS = endDt.toJSDate();
 
-    // Query active appointments within [startJS, endJS]
+    const nowJS = new Date();
+
+    // 1. Run auto-complete sweeper for any checked-in appointments whose service time has elapsed
+    await this.appointmentsService.autoCompleteElapsedAppointments(salonId);
+
+    // 2. Query active appointments within [startJS, endJS]
     const activeStatusList: AppointmentStatus[] = [
       AppointmentStatus.CONFIRMED,
       AppointmentStatus.CHECKED_IN,
@@ -902,13 +907,34 @@ Here are your salon owner login credentials:
       },
     });
 
-    let apptsToCancel = affectedAppointments;
+    let targetAppts = affectedAppointments;
     if (dto.isPartialDay && dto.startTime && dto.endTime) {
-      apptsToCancel = affectedAppointments.filter((appt) => {
+      targetAppts = affectedAppointments.filter((appt) => {
         const apptStartStr = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('HH:mm');
         const apptEndStr = DateTime.fromJSDate(appt.endAt, { zone: tz }).toFormat('HH:mm');
         return apptStartStr < dto.endTime! && apptEndStr > dto.startTime!;
       });
+    }
+
+    // 3. Separate into past checked-in (endAt <= nowJS) vs future active (endAt > nowJS)
+    const pastCheckedInAppts = targetAppts.filter(
+      (a) => (a.status === AppointmentStatus.CHECKED_IN || a.status === AppointmentStatus.IN_SERVICE) && a.endAt <= nowJS,
+    );
+
+    const futureApptsToCancel = targetAppts.filter(
+      (a) => a.endAt > nowJS,
+    );
+
+    // Silently auto-complete past checked-in appointments (no WhatsApp cancellation message)
+    for (const appt of pastCheckedInAppts) {
+      try {
+        await this.prisma.appointment.update({
+          where: { id: appt.id },
+          data: { status: AppointmentStatus.COMPLETED, notes: `Auto-completed upon store closure` },
+        });
+      } catch (err: any) {
+        this.logger.warn(`Failed to auto-complete past appt #${appt.appointmentNumber}: ${err.message}`);
+      }
     }
 
     // Save SalonClosure record
@@ -923,14 +949,14 @@ Here are your salon owner login credentials:
         endTime: dto.endTime || null,
         reason: dto.reason || 'Salon Store Closure',
         notes: dto.notes || null,
-        affectedBookingsCount: apptsToCancel.length,
-        cancelledCount: apptsToCancel.length,
+        affectedBookingsCount: targetAppts.length,
+        cancelledCount: futureApptsToCancel.length,
         createdByAdminId: adminId || null,
       },
     });
 
-    // Batch cancel affected appointments with SALON_EMERGENCY (0 penalty to customer!)
-    for (const appt of apptsToCancel) {
+    // Batch cancel future active appointments with SALON_EMERGENCY (0 penalty to customer!)
+    for (const appt of futureApptsToCancel) {
       try {
         await this.appointmentsService.updateStatus(salonId, appt.id, {
           status: AppointmentStatus.CANCELLED,

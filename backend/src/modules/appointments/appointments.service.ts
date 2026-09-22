@@ -1516,4 +1516,43 @@ Would you like to move your *${currentSlotTimeStr}* appointment earlier to *${fr
 
     return false;
   }
+
+  async autoCompleteElapsedAppointments(salonId?: string): Promise<number> {
+    const nowJS = new Date();
+    const whereCondition: any = {
+      status: { in: [AppointmentStatus.CHECKED_IN, AppointmentStatus.IN_SERVICE] },
+      endAt: { lte: nowJS },
+    };
+    if (salonId) {
+      whereCondition.salonId = salonId;
+    }
+
+    const elapsed = await this.prisma.appointment.findMany({
+      where: whereCondition,
+      select: { id: true, salonId: true, appointmentNumber: true, status: true },
+    });
+
+    if (elapsed.length === 0) return 0;
+
+    let count = 0;
+    for (const appt of elapsed) {
+      try {
+        const updated = await this.prisma.appointment.update({
+          where: { id: appt.id },
+          data: {
+            status: AppointmentStatus.COMPLETED,
+          },
+          include: appointmentInclude,
+        });
+
+        const formatted = this.formatAppointment(updated);
+        this.emitSalonEvent(appt.salonId, 'APPOINTMENT_UPDATED', formatted);
+        count++;
+      } catch (err: any) {
+        this.logger.warn(`Failed to auto-complete elapsed appt #${appt.appointmentNumber}: ${err.message}`);
+      }
+    }
+
+    return count;
+  }
 }
