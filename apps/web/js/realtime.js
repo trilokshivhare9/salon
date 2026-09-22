@@ -289,21 +289,47 @@ export class RealtimeNotifier {
 
           SoundManager.playNewBookingChime();
 
-          this.dispatchNotification({
-            badgeText: 'New Appointment',
-            title: '⚡ New Salon Booking!',
-            clientName,
-            details: `${serviceName}${price} • ${timeStr}`,
-            specialist: specialistName,
-            icon: '✂️',
-            variant: 'success',
-            eventKey,
-            actionCallback: () => {
-              if (window.salonDashboard) {
-                window.salonDashboard.switchTab('queue');
-              }
-            },
-          });
+          const isQuickRequest = appt?.status === 'PENDING_ACCEPTANCE' || appt?.source === 'QUICK_BOOK';
+
+          if (isQuickRequest && appt?.status === 'PENDING_ACCEPTANCE') {
+            this.dispatchNotification({
+              badgeText: 'Quick Book Request',
+              title: '⚡ Incoming Quick Booking Request!',
+              clientName,
+              details: `${serviceName}${price} • ${timeStr}`,
+              specialist: specialistName,
+              icon: '📩',
+              variant: 'warning',
+              eventKey,
+              actionCallback: () => {
+                if (window.salonDashboard && typeof window.salonDashboard.openQuickRequestsModal === 'function') {
+                  window.salonDashboard.openQuickRequestsModal();
+                } else if (window.salonDashboard) {
+                  window.salonDashboard.switchTab('queue');
+                }
+              },
+            });
+          } else {
+            this.dispatchNotification({
+              badgeText: 'New Appointment',
+              title: '⚡ New Salon Booking!',
+              clientName,
+              details: `${serviceName}${price} • ${timeStr}`,
+              specialist: specialistName,
+              icon: '✂️',
+              variant: 'success',
+              eventKey,
+              actionCallback: () => {
+                if (window.salonDashboard) {
+                  window.salonDashboard.switchTab('queue');
+                }
+              },
+            });
+          }
+
+          if (window.salonDashboard && typeof window.salonDashboard.loadData === 'function') {
+            window.salonDashboard.loadData(true);
+          }
 
         } else if (
           payload.type === 'BOOKING_CANCELLED' ||

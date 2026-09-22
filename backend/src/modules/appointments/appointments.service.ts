@@ -61,6 +61,11 @@ export const VALID_STATUS_TRANSITIONS: Record<AppointmentStatus, AppointmentStat
     AppointmentStatus.CONFIRMED,
     AppointmentStatus.CANCELLED,
   ],
+  [AppointmentStatus.PENDING_ACCEPTANCE]: [
+    AppointmentStatus.CHECKED_IN,
+    AppointmentStatus.CONFIRMED,
+    AppointmentStatus.CANCELLED,
+  ],
 };
 
 const appointmentInclude = {
@@ -730,7 +735,33 @@ export class AppointmentsService {
       const tz = salon.timezone || 'Asia/Kolkata';
       const timeStr = DateTime.fromJSDate(new Date(updated.startAt), { zone: tz }).toFormat('hh:mm a');
 
-      if (isTargetCancelledNoShow) {
+      if (appointment.status === AppointmentStatus.PENDING_ACCEPTANCE) {
+        if (dto.status === AppointmentStatus.CHECKED_IN || dto.status === AppointmentStatus.CONFIRMED) {
+          const acceptMsg = `🎉 *QUICK BOOKING ACCEPTED!*\n\nHi *${userName}*, your quick booking check-in at *${salon.name}* has been accepted!\n\n• *Booking #:* *${updated.appointmentNumber}*\n• *Service:* *${updated.serviceNameSnapshot}*\n• *Time:* *${timeStr}*\n• *Specialist:* *${updated.stylist?.name || 'Your Specialist'}*\n• *Status:* *Checked In*\n\nPlease take a seat! *${updated.stylist?.name || 'Your Specialist'}* will call you to the chair shortly.`;
+          await this.whatsappService.sendMetaMessage(
+            userPhone,
+            {
+              bodyText: acceptMsg,
+              interactiveType: 'button',
+              buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
+            },
+            phoneNumberId,
+            salonId,
+          ).catch(() => { });
+        } else if (dto.status === AppointmentStatus.CANCELLED) {
+          const declineMsg = `❌ *QUICK BOOKING DECLINED*\n\nHi *${userName}*, *${salon.name}* is currently unable to accept quick bookings at this moment. Please speak to salon reception or book a regular appointment.`;
+          await this.whatsappService.sendMetaMessage(
+            userPhone,
+            {
+              bodyText: declineMsg,
+              interactiveType: 'button',
+              buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
+            },
+            phoneNumberId,
+            salonId,
+          ).catch(() => { });
+        }
+      } else if (isTargetCancelledNoShow) {
         if (dto.reasonCategory === 'SALON_EMERGENCY') {
           // Salon Emergency Apology (NO Penalty)
           const apologyMsg = `🙏 *SALON NOTICE: APPOINTMENT CANCELED*\n\nHi *${userName}*, we sincerely apologize! Your appointment for *${timeStr}* at *${salon.name}* was canceled due to a salon emergency.\n\n✨ *No penalty has been applied* to your account. We welcome you to rebook at your convenience!`;

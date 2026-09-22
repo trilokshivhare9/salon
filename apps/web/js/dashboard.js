@@ -48,6 +48,137 @@ export class SalonDashboard {
     showNotification(msg, type);
   }
 
+  openQuickRequestsModal() {
+    const todayAppts = this.summaryData?.todayAppointments || [];
+    const pendingRequests = todayAppts.filter(
+      (a) => a.status === 'PENDING_ACCEPTANCE' || (a.source === 'QUICK_BOOK' && a.status === 'PENDING_ACCEPTANCE')
+    );
+
+    let modal = document.getElementById('modal-quick-requests');
+    if (modal) modal.remove();
+
+    modal = document.createElement('div');
+    modal.id = 'modal-quick-requests';
+    modal.className = 'modal-backdrop';
+    modal.style.cssText = `
+      position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+      background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(8px);
+      z-index: 99999; display: flex; align-items: center; justify-content: center; padding: 16px;
+    `;
+
+    const listHtml = pendingRequests.length === 0
+      ? `
+        <div style="text-align: center; padding: 40px 20px; color: #94a3b8;">
+          <div style="font-size: 2.5rem; margin-bottom: 12px;">⚡</div>
+          <h4 style="color: #f8fafc; margin-bottom: 6px; font-weight: 700;">No Pending Requests</h4>
+          <p style="font-size: 0.88rem; margin: 0;">There are no active quick booking check-in requests waiting for approval.</p>
+        </div>
+      `
+      : pendingRequests.map((req) => {
+        const clientName = req.customer?.name || req.customerPhone || 'In-Salon Client';
+        const clientPhone = req.customer?.phone || req.customerPhone || '';
+        const serviceName = req.service?.name || req.serviceNameSnapshot || 'Quick Service';
+        const timeStr = req.startTime ? formatTime12h(req.startTime) : 'Today';
+        const specialist = req.staff?.name || req.stylist?.name || 'Any Specialist';
+        const price = req.price ? `₹${req.price}` : '';
+
+        return `
+          <div class="quick-req-card" style="background: rgba(30, 41, 59, 0.85); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 12px; padding: 16px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 10px;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+              <div>
+                <div style="font-weight: 700; color: #f8fafc; font-size: 1rem; display: flex; align-items: center; gap: 8px;">
+                  <span>${clientName}</span>
+                  <span style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; font-size: 0.72rem; padding: 2px 8px; border-radius: 6px; font-weight: 800;">⚡ QUICK BOOK</span>
+                </div>
+                <div style="color: #94a3b8; font-size: 0.82rem; margin-top: 2px;">📞 ${clientPhone}</div>
+              </div>
+              <div style="text-align: right;">
+                <div style="font-weight: 700; color: #34d399; font-size: 1rem;">${price}</div>
+                <div style="color: #cbd5e1; font-size: 0.82rem; font-weight: 600;">🕒 ${timeStr}</div>
+              </div>
+            </div>
+            <div style="font-size: 0.85rem; color: #e2e8f0; background: rgba(15, 23, 42, 0.6); padding: 8px 12px; border-radius: 8px; display: flex; justify-content: space-between;">
+              <span><strong>Service:</strong> ${serviceName}</span>
+              <span><strong>Specialist:</strong> ${specialist}</span>
+            </div>
+            <div style="display: flex; gap: 10px; margin-top: 4px;">
+              <button class="btn btn-success btn-sm btn-accept-quick-req" data-id="${req.id}" style="flex: 1; padding: 10px; font-weight: 700; gap: 6px; display: flex; align-items: center; justify-content: center; background: #10b981; border: none; border-radius: 8px; color: #fff; cursor: pointer;">
+                ✅ Accept & Check In
+              </button>
+              <button class="btn btn-danger btn-sm btn-decline-quick-req" data-id="${req.id}" style="flex: 1; padding: 10px; font-weight: 700; gap: 6px; display: flex; align-items: center; justify-content: center; background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 8px; color: #f87171; cursor: pointer;">
+                ❌ Decline
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+    modal.innerHTML = `
+      <div class="modal-card" style="background: #0f172a; border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 16px; max-width: 520px; width: 100%; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);">
+        <div style="padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center; background: rgba(245, 158, 11, 0.08);">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 1.4rem;">⚡</span>
+            <div>
+              <h3 style="margin: 0; color: #f8fafc; font-size: 1.1rem; font-weight: 700;">Quick Booking Requests</h3>
+              <span style="font-size: 0.78rem; color: #fbbf24;">Pending Salon Check-in Approval</span>
+            </div>
+          </div>
+          <button id="btn-close-quick-requests-modal" style="background: none; border: none; color: #94a3b8; font-size: 1.4rem; cursor: pointer; padding: 4px;">✕</button>
+        </div>
+        <div style="padding: 16px 20px; overflow-y: auto; flex: 1;">
+          ${listHtml}
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    document.getElementById('btn-close-quick-requests-modal')?.addEventListener('click', () => modal.remove());
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) modal.remove();
+    });
+
+    modal.querySelectorAll('.btn-accept-quick-req').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        if (!id) return;
+        btn.disabled = true;
+        btn.innerText = 'Accepting...';
+        try {
+          await ApiClient.updateAppointmentStatus(id, 'CHECKED_IN');
+          this.showToast('Quick booking accepted & customer checked in!', 'success');
+          modal.remove();
+          await this.loadData(true);
+          this.render();
+        } catch (err) {
+          this.showToast(`Error accepting booking: ${err.message}`, 'danger');
+          btn.disabled = false;
+          btn.innerText = '✅ Accept & Check In';
+        }
+      });
+    });
+
+    modal.querySelectorAll('.btn-decline-quick-req').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        if (!id) return;
+        btn.disabled = true;
+        btn.innerText = 'Declining...';
+        try {
+          await ApiClient.updateAppointmentStatus(id, 'CANCELLED');
+          this.showToast('Quick booking declined.', 'warning');
+          modal.remove();
+          await this.loadData(true);
+          this.render();
+        } catch (err) {
+          this.showToast(`Error declining booking: ${err.message}`, 'danger');
+          btn.disabled = false;
+          btn.innerText = '❌ Decline';
+        }
+      });
+    });
+  }
+
   // Safe local date formatting (YYYY-MM-DD) avoiding UTC shifts
   getLocalDateString(dateObj = new Date()) {
     const year = dateObj.getFullYear();
@@ -320,6 +451,8 @@ export class SalonDashboard {
     const webBookingUrl = `${window.location.origin}/#book/${salonSlug}`;
     const isDeactivated = this.salonProfile?.status === 'DEACTIVATED' || this.staffList.length === 0 || this.servicesList.length === 0;
 
+    const pendingQuickCount = (this.summaryData?.todayAppointments || []).filter((a) => a.status === 'PENDING_ACCEPTANCE').length;
+
     this.container.innerHTML = `
       <!-- Dedicated Modern Luxury Header Bar -->
       <header class="portal-header">
@@ -345,6 +478,10 @@ export class SalonDashboard {
             </div>
           </div>
           <div class="header-actions-group" style="display: flex; gap: 8px; align-items: center;">
+            <button class="btn btn-secondary btn-sm" id="btn-header-quick-requests" title="View Pending Quick Booking Requests" style="background: ${pendingQuickCount > 0 ? 'rgba(245,158,11,0.25)' : 'rgba(99,102,241,0.12)'}; border: 1px solid ${pendingQuickCount > 0 ? 'rgba(245,158,11,0.5)' : 'rgba(99,102,241,0.3)'}; color: ${pendingQuickCount > 0 ? '#fbbf24' : '#818cf8'}; font-weight: 700; gap: 6px; display: flex; align-items: center;">
+              ${Icons.sparkles({ size: 14, color: pendingQuickCount > 0 ? '#fbbf24' : '#818cf8' })}
+              <span>Quick Requests <strong id="header-quick-requests-val" style="background: ${pendingQuickCount > 0 ? '#f59e0b' : 'rgba(255,255,255,0.15)'}; color: ${pendingQuickCount > 0 ? '#000' : '#fff'}; padding: 1px 7px; border-radius: 10px; font-weight: 800; margin-left: 4px; font-size: 0.8rem;">${pendingQuickCount}</strong></span>
+            </button>
             <button class="btn btn-secondary btn-sm" id="btn-header-quick-code" title="In-Salon Daily Quick Booking Code" style="background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.3); color: #818cf8; font-weight: 700; gap: 6px; display: flex; align-items: center;">
               ${Icons.sparkles({ size: 14, color: '#818cf8' })}
               <span>Quick Code: <strong id="header-quick-code-val" style="color: #fff; font-family: monospace; font-size: 0.95rem; letter-spacing: 1px;">${this.quickCode || '----'}</strong></span>
@@ -848,6 +985,7 @@ export class SalonDashboard {
       // 5. CANCELLED / NO_SHOW -> Bottom
       const getStatusPriority = (status) => {
         switch (status) {
+          case 'PENDING_ACCEPTANCE': return 0;
           case 'IN_SERVICE': return 1;
           case 'CHECKED_IN': return 2;
           case 'CONFIRMED': return 3;
@@ -874,7 +1012,7 @@ export class SalonDashboard {
       // Filter appointments based on operator selection
       let filteredAppointments = sortedAppointments;
       if (this.queueFilter === 'WAITING') {
-        filteredAppointments = sortedAppointments.filter((a) => ['CONFIRMED', 'CHECKED_IN'].includes(a.status));
+        filteredAppointments = sortedAppointments.filter((a) => ['CONFIRMED', 'CHECKED_IN', 'PENDING_ACCEPTANCE'].includes(a.status));
       } else if (this.queueFilter === 'IN_CHAIR') {
         filteredAppointments = sortedAppointments.filter((a) => a.status === 'IN_SERVICE');
       } else if (this.queueFilter === 'COMPLETED') {
@@ -1228,6 +1366,19 @@ export class SalonDashboard {
 
                   <!-- Row 4: Action Bar -->
                   <div class="qc__row4">
+                    ${appt.status === 'PENDING_ACCEPTANCE' ? `
+                      <div class="qc__cta-wrap" style="display: flex; gap: 8px; width: 100%;">
+                        <button class="qc__cta btn-status" data-id="${appt.id}" data-status="CHECKED_IN" style="background: #10b981; color: #fff; flex: 1;">
+                          ${Icons.check({ size: 16, color: '#fff' })}
+                          <span>Accept & Check In</span>
+                        </button>
+                        <button class="qc__cta btn-status" data-id="${appt.id}" data-status="CANCELLED" style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); flex: 1;">
+                          ${Icons.x({ size: 16, color: '#f87171' })}
+                          <span>Decline</span>
+                        </button>
+                      </div>
+                    ` : ''}
+
                     ${appt.status === 'CONFIRMED' ? `
                       <div class="qc__cta-wrap">
                         <button class="qc__cta qc__cta--checkin btn-status" data-id="${appt.id}" data-status="CHECKED_IN">
@@ -1311,6 +1462,7 @@ export class SalonDashboard {
 
   getStatusColor(status) {
     switch (status) {
+      case 'PENDING_ACCEPTANCE': return '#f59e0b';
       case 'CONFIRMED': return '#0ea5e9';
       case 'CHECKED_IN': return '#f59e0b';
       case 'IN_SERVICE': return '#a855f7';
@@ -2217,8 +2369,10 @@ export class SalonDashboard {
       }
     });
 
-    // Quick Booking Code Modal Triggers
+    // Quick Booking Code & Request Triggers
     const openQuickCodeModal = () => this.showQuickCodeModal();
+    const openQuickRequestsModal = () => this.openQuickRequestsModal();
+    document.getElementById('btn-header-quick-requests')?.addEventListener('click', openQuickRequestsModal);
     document.getElementById('btn-header-quick-code')?.addEventListener('click', openQuickCodeModal);
     document.getElementById('btn-dash-quick-code')?.addEventListener('click', openQuickCodeModal);
     document.getElementById('card-action-quick-code')?.addEventListener('click', openQuickCodeModal);
