@@ -57,6 +57,7 @@ describe('Salon Closures & Emergency Holiday Management Suite', () => {
   const mockAppointmentsService = {
     updateStatus: jest.fn(),
     emitSalonEvent: jest.fn(),
+    autoCompleteElapsedAppointments: jest.fn().mockResolvedValue(0),
   };
 
   const mockAvailabilityEngineService = {
