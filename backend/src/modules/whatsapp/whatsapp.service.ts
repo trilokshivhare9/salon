@@ -1559,23 +1559,16 @@ You have accumulated *3 penalty strikes* this year for missed appointments. Auto
       await this.prisma.conversation.update({
         where: { id: conversation.id },
         data: {
-          state: ConversationState.QUICK_BOOK_CODE,
+          state: ConversationState.SELECT_CATEGORY,
+          quickCodeVerifiedAt: new Date(),
         },
       });
 
-      const reply = `⚡ *IN-SALON QUICK BOOKING*\n\nPlease enter today's 4-digit Salon Code displayed at reception:`;
-      await this.sendMetaMessage(
-        cleanNumber,
-        {
-          bodyText: reply,
-          interactiveType: 'button',
-          buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
-        },
-        phoneNumberId,
-        salonId,
-      );
+      const reply = `⚡ *IN-SALON QUICK BOOKING*\n\nPlease select your service for today's Quick Booking:`;
+      await this.sendMetaMessage(cleanNumber, { bodyText: reply }, phoneNumberId, salonId);
 
-      return { replyMessage: reply, state: ConversationState.QUICK_BOOK_CODE };
+      const refreshedConv = await this.prisma.conversation.findUnique({ where: { id: conversation.id } });
+      return this.promptCategorySelection(refreshedConv, cleanNumber, salon, salonUser, phoneNumberId);
     }
 
     // -------------------------------------------------------------------------
@@ -2482,7 +2475,7 @@ We look forward to seeing you earlier today.`;
             salonId,
             dto,
             undefined,
-            { initialStatus: AppointmentStatus.CHECKED_IN },
+            { initialStatus: AppointmentStatus.PENDING_ACCEPTANCE },
           );
 
           await this.prisma.conversation.update({
@@ -2496,7 +2489,7 @@ We look forward to seeing you earlier today.`;
           const stylistName = createdAppt.stylist?.name || createdAppt.stylistName || 'Your Specialist';
           const formattedTime = DateTime.fromJSDate(new Date(createdAppt.startAt), { zone: tz }).toFormat('hh:mm a');
 
-          const reply = `✨ *QUICK BOOKING CONFIRMED!*\n\n• *Booking #:* *${createdAppt.appointmentNumber}*\n• *Service:* *${createdAppt.serviceNameSnapshot || serviceObj?.name || 'Service'}*\n• *Time:* *${formattedTime}*\n• *Specialist:* *${stylistName}*\n• *Status:* *Checked In*\n\nPlease take a seat! *${stylistName}* will call you to the chair shortly.`;
+          const reply = `⏳ *REQUEST SENT TO SALON!*\n\n• *Booking Request #:* *${createdAppt.appointmentNumber}*\n• *Service:* *${createdAppt.serviceNameSnapshot || serviceObj?.name || 'Service'}*\n• *Time:* *${formattedTime}*\n• *Specialist:* *${stylistName}*\n• *Status:* *Pending Approval*\n\nWe've sent your Quick Booking request to *${salon.name}* reception. Please hold on — you'll receive a confirmation notification here as soon as salon reception accepts your request! 🚀`;
 
           await this.sendMetaMessage(
             cleanNumber,

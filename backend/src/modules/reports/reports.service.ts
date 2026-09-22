@@ -216,6 +216,7 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
       completed: 0,
       cancelled: 0,
       noShow: 0,
+      pendingAcceptance: 0,
     };
 
     let todayRevenue = 0;
@@ -226,6 +227,7 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
         case AppointmentStatus.CONFIRMED: statusCounts.confirmed++; break;
         case AppointmentStatus.CHECKED_IN: statusCounts.checkedIn++; break;
         case AppointmentStatus.IN_SERVICE: statusCounts.inService++; break;
+        case AppointmentStatus.PENDING_ACCEPTANCE: statusCounts.pendingAcceptance++; break;
         case AppointmentStatus.COMPLETED:
           statusCounts.completed++;
           todayRevenue += Number(appt.price);

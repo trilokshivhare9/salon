@@ -59,6 +59,7 @@ enum AppointmentStatus {
   CANCELLED
   NO_SHOW
   PENDING_RESCHEDULE
+  PENDING_ACCEPTANCE
 }
 
 enum BookingSource {
