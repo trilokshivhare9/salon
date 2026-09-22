@@ -32,4 +32,8 @@ export class CreateClosureDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  autoCancelAppointments?: boolean;
 }
