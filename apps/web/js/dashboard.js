@@ -335,7 +335,7 @@ export class SalonDashboard {
 
     if (fullReload) {
       try {
-        const [summary, staff, services, profile, categories] = await Promise.all([
+        const [summary, staff, services, profile, categories, closures] = await Promise.all([
           ApiClient.getDashboardSummary(this.selectedDate, true).catch((err) => {
             console.warn('[Dashboard] Summary fetch error:', err);
             return this.summaryData || fallbackSummary;
@@ -356,6 +356,10 @@ export class SalonDashboard {
             console.warn('[Dashboard] Categories fetch error:', err);
             return this.categoriesList || [];
           }),
+          ApiClient.getSalonClosures(true).catch((err) => {
+            console.warn('[Dashboard] Closures fetch error:', err);
+            return this.closuresList || [];
+          }),
         ]);
 
         this.summaryData = summary || fallbackSummary;
@@ -363,6 +367,7 @@ export class SalonDashboard {
         this.servicesList = Array.isArray(services) ? services : [];
         this.categoriesList = Array.isArray(categories) ? categories : [];
         this.salonProfile = profile || {};
+        this.closuresList = Array.isArray(closures) ? closures : [];
 
 
       } catch (err) {
@@ -441,11 +446,25 @@ export class SalonDashboard {
   }
 
 
+  getTodayClosure() {
+    if (!this.closuresList || !Array.isArray(this.closuresList) || this.closuresList.length === 0) {
+      return null;
+    }
+    const todayStr = (this.selectedDate || this.getLocalDateString());
+    return this.closuresList.find((c) => {
+      const startDateStr = new Date(c.startDate).toISOString().split('T')[0];
+      const endDateStr = new Date(c.endDate).toISOString().split('T')[0];
+      return todayStr >= startDateStr && todayStr <= endDateStr;
+    }) || null;
+  }
+
   render() {
     const salonName = this.salonProfile?.name || 'Salon Operations';
     const salonSlug = this.salonProfile?.slug || 'salon';
     const webBookingUrl = `${window.location.origin}/#book/${salonSlug}`;
     const isDeactivated = this.salonProfile?.status === 'DEACTIVATED' || this.staffList.length === 0 || this.servicesList.length === 0;
+    const todayClosure = this.getTodayClosure();
+    const isClosedToday = !!todayClosure;
 
     const pendingQuickCount = (this.summaryData?.todayAppointments || []).filter((a) => a.status === 'PENDING_ACCEPTANCE').length;
 
@@ -456,14 +475,14 @@ export class SalonDashboard {
           <div class="header-brand-group">
             <div class="brand-icon-box">
               ${Icons.scissors({ size: 20, color: '#c7d2fe' })}
-              <span class="brand-live-indicator ${isDeactivated ? 'offline' : 'live'}" title="${isDeactivated ? 'Offline' : 'Real-Time Connected'}"></span>
+              <span class="brand-live-indicator ${isClosedToday ? 'offline' : isDeactivated ? 'offline' : 'live'}" title="${isClosedToday ? 'Store Closed Today' : isDeactivated ? 'Offline' : 'Real-Time Connected'}"></span>
             </div>
             <div class="header-title-block">
               <div class="header-title-row">
                 <span class="header-salon-name">${salonName}</span>
-                <span class="q-live-pill desktop-only-badge" style="padding: 2px 7px;">
-                  <span class="q-live-dot"></span>
-                  <span class="q-live-label" style="font-size: 0.62rem;">${isDeactivated ? 'OFFLINE' : 'LIVE'}</span>
+                <span class="q-live-pill desktop-only-badge" style="padding: 2px 8px; background: ${isClosedToday ? 'rgba(239, 68, 68, 0.2)' : isDeactivated ? 'rgba(100,116,139,0.2)' : 'rgba(16,185,129,0.2)'}; border: 1px solid ${isClosedToday ? 'rgba(239, 68, 68, 0.4)' : isDeactivated ? 'rgba(100,116,139,0.4)' : 'rgba(16,185,129,0.4)'};">
+                  <span class="q-live-dot" style="background: ${isClosedToday ? '#f87171' : isDeactivated ? '#94a3b8' : '#34d399'};"></span>
+                  <span class="q-live-label" style="font-size: 0.64rem; font-weight: 800; color: ${isClosedToday ? '#f87171' : isDeactivated ? '#94a3b8' : '#34d399'};">${isClosedToday ? (todayClosure.closureType === 'HOLIDAY' ? '🌴 HOLIDAY' : '🚨 STORE CLOSED') : isDeactivated ? 'OFFLINE' : 'LIVE'}</span>
                 </span>
               </div>
               <div class="header-meta-row">
@@ -628,6 +647,7 @@ export class SalonDashboard {
     const todayRevenue = summary.todayRevenue || 0;
     const todayAppointments = summary.todayAppointments || [];
     const profile = this.salonProfile || {};
+    const todayClosure = this.getTodayClosure();
 
     const todayISO = this.getLocalDateString();
     const [sy, sm, sd] = (this.selectedDate || todayISO).split('-').map(Number);
@@ -645,6 +665,18 @@ export class SalonDashboard {
     }
 
     return `
+      ${todayClosure ? `
+        <div style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: var(--radius-md); padding: 14px 18px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; box-shadow: 0 8px 24px rgba(239, 68, 68, 0.15);">
+          <div style="display: flex; align-items: center; gap: 10px; color: #f87171; font-size: 0.88rem; font-weight: 700;">
+            <span style="font-size: 1.2rem;">🚨</span>
+            <span>STORE CLOSED TODAY (${todayClosure.closureType}): ${todayClosure.reason}</span>
+          </div>
+          <button class="btn btn-secondary btn-sm btn-open-closures-modal" style="border-color: rgba(239, 68, 68, 0.4); color: #f87171; font-size: 0.78rem;">
+            Manage Closures & Holidays →
+          </button>
+        </div>
+      ` : ''}
+
       ${(profile.status === 'INACTIVE' || summary.status === 'INACTIVE') ? `
         <div style="background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; border-radius: 14px; padding: 16px 20px; margin-bottom: 24px; color: #fca5a5; display: flex; align-items: center; justify-content: space-between; gap: 16px; box-shadow: 0 10px 25px rgba(239, 68, 68, 0.15);">
           <div style="display: flex; align-items: center; gap: 14px;">
@@ -716,10 +748,10 @@ export class SalonDashboard {
             const eDate = (ab.endDate || ab.absenceDate || '').split('T')[0];
             return _stDateIso >= sDate && _stDateIso <= eDate;
           });
-          const _stStatusColor = _stAbsent ? '#fb7185' : isOccupied ? '#c084fc' : '#34d399';
-          const _stStatusLabel = _stAbsent ? '🚫 Absent Today' : isOccupied ? `In Chair: ${inService.customer?.name || 'Client'}` : '🟢 Ready for Walk-In';
+          const _stStatusColor = todayClosure ? '#f87171' : _stAbsent ? '#fb7185' : isOccupied ? '#c084fc' : '#34d399';
+          const _stStatusLabel = todayClosure ? '🚨 Store Closed Today' : _stAbsent ? '🚫 Absent Today' : isOccupied ? `In Chair: ${inService.customer?.name || 'Client'}` : '🟢 Ready for Walk-In';
           return `
-                    <div class="station-card ${_stAbsent ? 'absent' : isOccupied ? 'occupied' : 'ready'}" style="${_stAbsent ? 'opacity: 0.55;' : ''}">
+                    <div class="station-card ${_stAbsent || todayClosure ? 'absent' : isOccupied ? 'occupied' : 'ready'}" style="${_stAbsent || todayClosure ? 'opacity: 0.7;' : ''}">
                       <div class="station-num-badge">#${idx + 1}</div>
                       <div style="flex: 1; min-width: 0;">
                         <div style="font-weight: 700; font-size: 0.85rem; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
@@ -1460,8 +1492,21 @@ export class SalonDashboard {
     try {
       const staff = Array.isArray(this.staffList) ? this.staffList : [];
       const appts = this.summaryData?.todayAppointments || [];
+      const todayClosure = this.getTodayClosure();
 
       return `
+        ${todayClosure ? `
+          <div style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: var(--radius-md); padding: 14px 18px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; box-shadow: 0 8px 24px rgba(239, 68, 68, 0.15);">
+            <div style="display: flex; align-items: center; gap: 10px; color: #f87171; font-size: 0.88rem; font-weight: 700;">
+              <span style="font-size: 1.2rem;">🚨</span>
+              <span>STORE CLOSED TODAY (${todayClosure.closureType}): ${todayClosure.reason}</span>
+            </div>
+            <button class="btn btn-secondary btn-sm btn-open-closures-modal" style="border-color: rgba(239, 68, 68, 0.4); color: #f87171; font-size: 0.78rem;">
+              Manage Closures & Holidays →
+            </button>
+          </div>
+        ` : ''}
+
         <div class="glass-panel">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
             <div>
@@ -1514,7 +1559,10 @@ export class SalonDashboard {
 
         let statusDot = 'status-dot-free';
         let statusText = 'Available / Free for Walk-ins';
-        if (isAbsentToday) {
+        if (todayClosure) {
+          statusDot = 'status-dot-busy';
+          statusText = `🚨 Store Closed Today (${todayClosure.reason})`;
+        } else if (isAbsentToday) {
           statusDot = 'status-dot-busy';
           const portionText = activeAbsence.leavePortion === 'FIRST_HALF' ? 'First Half'
             : activeAbsence.leavePortion === 'SECOND_HALF' ? 'Second Half'
@@ -2024,10 +2072,12 @@ export class SalonDashboard {
     const freeChatsLeft = this.summaryData?.whatsappQuota?.remaining !== undefined ? this.summaryData.whatsappQuota.remaining : 1000;
     const slug = profile.slug || 'the-grand-royal-barber-1';
     const bookingUrl = `${window.location.origin}/#book/${slug}`;
+    const todayClosure = this.getTodayClosure();
+    const isClosedToday = !!todayClosure;
 
     return `
       <!-- Salon Identity HQ Card -->
-      <div class="profile-identity-card">
+      <div class="profile-identity-card" style="margin-top: 14px; padding-top: 20px;">
         <div class="profile-identity-header">
           <div class="profile-avatar-box">
             ${Icons.scissors({ size: 30, color: '#c7d2fe' })}
@@ -2037,8 +2087,8 @@ export class SalonDashboard {
               <h2 style="font-size: 1.45rem; color: #fff; font-family: var(--font-heading); font-weight: 800; letter-spacing: -0.02em;">
                 ${profile.name || 'Salon Command Operations'}
               </h2>
-              <span class="badge badge-completed" style="font-size: 0.7rem; letter-spacing: 0.04em;">
-                ${profile.status || 'ACTIVE STORE'}
+              <span class="badge ${isClosedToday ? 'badge-cancelled' : 'badge-completed'}" style="font-size: 0.7rem; letter-spacing: 0.04em;">
+                ${isClosedToday ? (todayClosure.closureType === 'HOLIDAY' ? '🌴 PLANNED HOLIDAY' : '🚨 STORE CLOSED TODAY') : (profile.status || 'ACTIVE STORE')}
               </span>
             </div>
             <div style="font-size: 0.82rem; color: var(--text-secondary); margin-top: 6px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
@@ -2059,14 +2109,14 @@ export class SalonDashboard {
         </div>
 
         <!-- Direct Customer Booking Link Strip -->
-        <div style="margin-top: 20px; padding: 14px 18px; background: rgba(0,0,0,0.35); border-radius: var(--radius-md); border: 1px solid rgba(255,255,255,0.08); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
-          <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
+        <div style="margin-top: 20px; padding: 14px 18px; background: rgba(99,102,241,0.08); border-radius: var(--radius-md); border: 1px solid rgba(99,102,241,0.25); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+          <div style="display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1;">
             <div style="color: #818cf8; flex-shrink: 0;">${Icons.link({ size: 16 })}</div>
-            <div style="font-size: 0.84rem; color: #fff; font-family: monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+            <div style="font-size: 0.84rem; color: #c7d2fe; font-family: monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
               ${bookingUrl}
             </div>
           </div>
-          <div style="display: flex; gap: 8px;">
+          <div style="display: flex; gap: 8px; flex-shrink: 0;">
             <button class="btn btn-secondary btn-sm" id="btn-copy-invite" style="gap: 6px; font-size: 0.78rem;">
               ${Icons.copy({ size: 13 })}
               <span>Copy Link</span>
@@ -2094,7 +2144,7 @@ export class SalonDashboard {
           </div>
           <div class="profile-metric-pill">
             <div style="font-size: 0.7rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Store Status</div>
-            <div style="font-size: 1.3rem; font-weight: 800; color: #818cf8; font-family: var(--font-heading); margin-top: 2px;">Live & Online</div>
+            <div style="font-size: 1.15rem; font-weight: 800; color: ${isClosedToday ? '#f87171' : '#34d399'}; font-family: var(--font-heading); margin-top: 2px;">${isClosedToday ? `🚨 STORE CLOSED (${todayClosure.closureType})` : '🟢 Live & Online'}</div>
           </div>
         </div>
       </div>
@@ -2917,8 +2967,8 @@ export class SalonDashboard {
       navigator.clipboard.writeText(url);
       alert(`Booking link copied to clipboard:\n${url}`);
     });
-    tabContent.querySelectorAll('.btn-fast-walkin, #btn-fast-walkin').forEach((b) => {
-      b.onclick = () => this.showWalkInModal();
+    tabContent.querySelectorAll('.btn-open-closures-modal').forEach((b) => {
+      b.onclick = () => this.openSalonClosuresModal();
     });
     document.getElementById('btn-open-qr')?.addEventListener('click', () => this.showQRCodeModal());
     document.getElementById('btn-block-time')?.addEventListener('click', () => this.showBlockTimeModal());
