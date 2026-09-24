@@ -24,6 +24,12 @@ import {
 } from '@prisma/client';
 import { DateTime } from 'luxon';
 
+export enum BookingLifecycleStage {
+  PRE_BOOKING = 'PRE_BOOKING',
+  POST_BOOKING = 'POST_BOOKING',
+  IDLE = 'IDLE',
+}
+
 export interface InteractiveButton {
   id: string;
   title: string;
@@ -57,6 +63,136 @@ export class WhatsAppService {
       return challenge;
     }
     throw new BadRequestException('Webhook verification token mismatch.');
+  }
+
+  // --- Universal Booking Lifecycle Engine ---
+
+  private determineLifecycleStage(
+    conversation: any,
+    activeAppointment: any,
+  ): BookingLifecycleStage {
+    if (activeAppointment) {
+      return BookingLifecycleStage.POST_BOOKING;
+    }
+    const preBookingStates: ConversationState[] = [
+      ConversationState.SELECT_CATEGORY,
+      ConversationState.SELECT_SERVICE,
+      ConversationState.SELECT_STAFF,
+      ConversationState.SELECT_DATE,
+      ConversationState.SELECT_TIME,
+      ConversationState.SELECT_ADDON,
+      ConversationState.CONFIRMATION,
+      ConversationState.COLLECT_NAME,
+      ConversationState.QUICK_BOOK_CODE,
+      ConversationState.QUICK_BOOK_CONFIRM,
+    ];
+    if (preBookingStates.includes(conversation.state as ConversationState)) {
+      return BookingLifecycleStage.PRE_BOOKING;
+    }
+    return BookingLifecycleStage.IDLE;
+  }
+
+  private isActionValidForLifecycle(
+    stage: BookingLifecycleStage,
+    conversationState: ConversationState,
+    input: string,
+  ): boolean {
+    // Navigation buttons are always valid globally
+    if (['btn_menu', 'btn_start', 'btn_services', 'btn_quick_book'].includes(input)) {
+      return true;
+    }
+    
+    // Some buttons are allowed unconditionally when in specific states
+    if (['btn_cancel_yes', 'btn_cancel_no'].includes(input) && conversationState === ConversationState.CONFIRM_CANCEL) return true;
+    if (['btn_confirm_yes', 'btn_confirm_no', 'btn_confirm'].includes(input) && conversationState === ConversationState.CONFIRMATION) return true;
+    if (['btn_confirm_quick', 'confirm'].includes(input) && conversationState === ConversationState.QUICK_BOOK_CONFIRM) return true;
+    if (['btn_reschedule', 'btn_change_stylist', 'btn_keep_appt'].includes(input) && conversationState === ConversationState.ADDON_CONFLICT) return true;
+    if (['btn_book'].includes(input) && (conversationState === ConversationState.START || conversationState === ConversationState.COMPLETED)) return true;
+
+    if (stage === BookingLifecycleStage.PRE_BOOKING) {
+      // Allowed Pre-booking actions
+      switch (conversationState) {
+        case ConversationState.QUICK_BOOK_CODE:
+          return true; // Any input could be code
+        case ConversationState.SELECT_CATEGORY:
+          return input.startsWith('cat_') || input.startsWith('gender_select_') || input === 'btn_switch_gender';
+        case ConversationState.SELECT_SERVICE:
+          return input.startsWith('svc_') || input === 'cat_back' || input.startsWith('gender_select_') || input === 'btn_switch_gender';
+        case ConversationState.SELECT_STAFF:
+          return input.startsWith('staff_');
+        case ConversationState.SELECT_DATE:
+          return input.startsWith('date_');
+        case ConversationState.SELECT_TIME:
+          return input.startsWith('slot_');
+        case ConversationState.SELECT_ADDON:
+          return input.startsWith('addon_');
+        default:
+          return false;
+      }
+    } else if (stage === BookingLifecycleStage.POST_BOOKING) {
+      // Allowed Post-booking actions
+      if (['btn_add_service', 'btn_add_addon', 'btn_reschedule', 'btn_cancel_appt', 'btn_running_late', 'btn_eta_late_15', 'btn_book', 'btn_cancel_no', 'btn_cancel_yes'].includes(input)) {
+        return true;
+      }
+      if (input.startsWith('svc_') || input.startsWith('remind_') || input.startsWith('appt_') || input.startsWith('propose_') || input.startsWith('late_') || input.startsWith('move_up_')) {
+        return true;
+      }
+      
+      switch (conversationState) {
+        case ConversationState.SELECT_RESCHEDULE_DATE:
+          return input.startsWith('rdate_');
+        case ConversationState.SELECT_RESCHEDULE_TIME:
+          return input.startsWith('rslot_');
+        default:
+          // Active Hub and other post-booking generic handler bypass
+          if (conversationState === ConversationState.ACTIVE_HUB) return true;
+          return false;
+      }
+    }
+
+    return true; // IDLE allows most things to pass through to IDLE handlers
+  }
+
+  private async sendLifecycleExpirationResponse(
+    cleanNumber: string,
+    stage: BookingLifecycleStage,
+    conversation: any,
+    phoneNumberId?: string,
+    salonId?: string,
+  ) {
+    if (stage === BookingLifecycleStage.POST_BOOKING || stage === BookingLifecycleStage.IDLE) {
+      // Scenario B: After Booking is Complete / Active Hub
+      const reply = `⚠️ This option has expired. You can check your active booking or start a new one.`;
+      await this.sendMetaMessage(
+        cleanNumber,
+        {
+          bodyText: reply,
+          interactiveType: 'button',
+          buttons: [
+            { id: 'btn_book', title: '📋 Check Active Booking' },
+            { id: 'btn_start', title: '📅 New Booking' },
+          ],
+        },
+        phoneNumberId,
+        salonId,
+      );
+    } else {
+      // Scenario A: Pre Booking / Draft in Progress
+      const reply = `⚠️ This option has expired. Would you like to continue your current booking or start a new one?`;
+      await this.sendMetaMessage(
+        cleanNumber,
+        {
+          bodyText: reply,
+          interactiveType: 'button',
+          buttons: [
+            { id: 'btn_book', title: '▶️ Continue Booking' },
+            { id: 'btn_start', title: '📅 New Booking' },
+          ],
+        },
+        phoneNumberId,
+        salonId,
+      );
+    }
   }
 
   private cleanPhone(phone: string): string {
@@ -2421,16 +2557,10 @@ We look forward to seeing you earlier today.`;
     }
 
     // -------------------------------------------------------------
-    // EXPIRED INTERACTIVE BUTTON GUARD (Strict Old Message Button Locking)
+    // UNIVERSAL BOOKING LIFECYCLE & STATE GUARD ENGINE
     // -------------------------------------------------------------
-    const isGlobalButton =
-      ['btn_menu', 'btn_start', 'btn_book', 'btn_quick_book', 'btn_services'].includes(input) ||
-      input.startsWith('propose_') ||
-      input.startsWith('late_') ||
-      input.startsWith('move_up_');
-
     const isKnownButtonPayload =
-      isGlobalButton ||
+      ['btn_menu', 'btn_start', 'btn_book', 'btn_quick_book', 'btn_services', 'btn_confirm_quick', 'confirm', 'btn_confirm_yes', 'btn_confirm_no', 'btn_confirm', 'btn_add_service', 'btn_add_addon', 'btn_reschedule', 'btn_cancel_appt', 'btn_running_late', 'btn_eta_late_15', 'btn_cancel_yes', 'btn_cancel_no', 'btn_change_stylist', 'btn_keep_appt', 'btn_switch_gender', 'cat_back'].includes(input) ||
       input.startsWith('btn_') ||
       input.startsWith('cat_') ||
       input.startsWith('gender_select_') ||
@@ -2441,111 +2571,29 @@ We look forward to seeing you earlier today.`;
       input.startsWith('slot_') ||
       input.startsWith('staff_') ||
       input.startsWith('svc_') ||
-      input.startsWith('appt_');
+      input.startsWith('appt_') ||
+      input.startsWith('remind_') ||
+      input.startsWith('propose_') ||
+      input.startsWith('late_') ||
+      input.startsWith('move_up_');
 
     if (isKnownButtonPayload) {
-      let isAllowedForState = isGlobalButton;
-      if (!isAllowedForState) {
-        switch (conversation.state) {
-          case ConversationState.QUICK_BOOK_CODE:
-            isAllowedForState = true;
-            break;
-          case ConversationState.QUICK_BOOK_CONFIRM:
-            isAllowedForState = ['btn_confirm_quick', 'confirm'].includes(input);
-            break;
-          case ConversationState.CONFIRMATION:
-            isAllowedForState = ['btn_confirm_yes', 'btn_confirm_no', 'btn_confirm'].includes(input);
-            break;
-          case ConversationState.ACTIVE_HUB:
-            isAllowedForState = ['btn_add_service', 'btn_add_addon', 'btn_reschedule', 'btn_cancel_appt', 'btn_running_late', 'btn_eta_late_15'].includes(input) || input.startsWith('svc_') || input.startsWith('remind_');
-            break;
-          case ConversationState.CONFIRM_CANCEL:
-            isAllowedForState = ['btn_cancel_yes', 'btn_cancel_no'].includes(input);
-            break;
-          case ConversationState.ADDON_CONFLICT:
-            isAllowedForState = ['btn_reschedule', 'btn_change_stylist', 'btn_keep_appt'].includes(input);
-            break;
-          case ConversationState.SELECT_RESCHEDULE_DATE:
-            isAllowedForState = input.startsWith('rdate_');
-            break;
-          case ConversationState.SELECT_RESCHEDULE_TIME:
-            isAllowedForState = input.startsWith('rslot_');
-            break;
-          case ConversationState.SELECT_CATEGORY:
-            isAllowedForState = input.startsWith('cat_') || input.startsWith('gender_select_') || input === 'btn_switch_gender';
-            break;
-          case ConversationState.SELECT_SERVICE:
-            isAllowedForState = input.startsWith('svc_') || input === 'cat_back' || input.startsWith('gender_select_') || input === 'btn_switch_gender';
-            break;
-          case ConversationState.SELECT_STAFF:
-            isAllowedForState = input.startsWith('staff_');
-            break;
-          case ConversationState.SELECT_DATE:
-            isAllowedForState = input.startsWith('date_');
-            break;
-          case ConversationState.SELECT_TIME:
-            isAllowedForState = input.startsWith('slot_');
-            break;
-          case ConversationState.SELECT_ADDON:
-            isAllowedForState = input.startsWith('addon_');
-            break;
-          case ConversationState.SELECT_APPOINTMENT:
-            isAllowedForState = input.startsWith('appt_');
-            break;
-          case ConversationState.START:
-          case ConversationState.COMPLETED:
-            isAllowedForState = true;
-            break;
-          default:
-            isAllowedForState = true;
+      // Evaluate actual DB state to determine lifecycle domain
+      let activeApptForGuard = null;
+      if (salonId) {
+        const appts = await this.findActiveUpcomingAppointments(salonId, cleanNumber);
+        if (appts && appts.length > 0) {
+          activeApptForGuard = appts[0];
         }
       }
 
-      if (!isAllowedForState) {
-        const bookingStates: ConversationState[] = [
-          ConversationState.SELECT_CATEGORY,
-          ConversationState.SELECT_SERVICE,
-          ConversationState.SELECT_STAFF,
-          ConversationState.SELECT_DATE,
-          ConversationState.SELECT_TIME,
-          ConversationState.CONFIRMATION,
-          ConversationState.COLLECT_NAME,
-        ];
-        const isInBookingFlow = bookingStates.includes(conversation.state as ConversationState);
+      const stage = this.determineLifecycleStage(conversation, activeApptForGuard);
+      const isAllowedForState = this.isActionValidForLifecycle(stage, conversation.state as ConversationState, input);
 
-        if (isInBookingFlow) {
-          const reply = `This option has expired. Would you like to continue your current booking or start a new one?`;
-          await this.sendMetaMessage(
-            cleanNumber,
-            {
-              bodyText: reply,
-              interactiveType: 'button',
-              buttons: [
-                { id: 'btn_book', title: '▶️ Continue Booking' },
-                { id: 'btn_start', title: '📅 New Booking' },
-              ],
-            },
-            phoneNumberId,
-            salonId,
-          );
-          return { replyMessage: reply, state: conversation.state };
-        } else {
-          const reply = `This option has expired. You can check your last booking or start a new one.`;
-          await this.sendMetaMessage(
-            cleanNumber,
-            {
-              bodyText: reply,
-              interactiveType: 'button',
-              buttons: [
-                { id: 'btn_book', title: '📋 Check Last Booking' },
-                { id: 'btn_start', title: '📅 New Booking' },
-              ],
-            },
-            phoneNumberId,
-            salonId,
-          );
-          return { replyMessage: reply, state: conversation.state };
-        }
+      if (!isAllowedForState) {
+        this.logger.warn(`[Lifecycle Guard] Blocked stale action: '${input}' | Stage: ${stage} | State: ${conversation.state}`);
+        await this.sendLifecycleExpirationResponse(cleanNumber, stage, conversation, phoneNumberId, salonId);
+        return { replyMessage: 'Expired option', state: conversation.state };
       }
     }
 
