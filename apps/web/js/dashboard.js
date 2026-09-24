@@ -77,7 +77,9 @@ export class SalonDashboard {
       : pendingRequests.map((req) => {
         const clientName = req.customer?.name || req.customerPhone || 'In-Salon Client';
         const clientPhone = req.customer?.phone || req.customerPhone || '';
-        const serviceName = req.service?.name || req.serviceNameSnapshot || 'Quick Service';
+        const serviceName = (Array.isArray(req.services) && req.services.length > 0)
+          ? req.services.map((s) => s.serviceNameSnapshot || s.service?.name || 'Service').join(' + ')
+          : (req.service?.name || req.serviceNameSnapshot || 'Quick Service');
         const timeStr = req.startTime ? formatTime12h(req.startTime) : 'Today';
         const specialist = req.staff?.name || req.stylist?.name || 'Any Specialist';
         const price = req.price ? `₹${req.price}` : '';
@@ -220,6 +222,7 @@ export class SalonDashboard {
         this.realtime = new RealtimeNotifier(this.salonProfile.id, async (payload) => {
           // Live sync from SSE stream (appointments, staff, services)
           await this.loadData(true);
+          this.updateQuickRequestsBadge();
           const isStaffOrService = payload?.type === 'STAFF_UPDATED' || payload?.type === 'SERVICE_UPDATED';
           if (isStaffOrService || this.activeTab === 'staff' || this.activeTab === 'services') {
             this.render();
@@ -247,6 +250,29 @@ export class SalonDashboard {
         window.location.hash = '#login';
         window.location.reload();
       });
+    }
+  }
+
+  /** Live-update the Quick Requests header badge count without full DOM rebuild */
+  updateQuickRequestsBadge() {
+    const pendingQuickCount = (this.summaryData?.todayAppointments || [])
+      .filter((a) => a.status === 'PENDING_ACCEPTANCE').length;
+
+    const badge = document.getElementById('header-quick-requests-val');
+    const btn = document.getElementById('btn-header-quick-requests');
+
+    if (badge) {
+      badge.textContent = pendingQuickCount;
+      badge.style.background = pendingQuickCount > 0 ? '#f59e0b' : 'rgba(255,255,255,0.15)';
+      badge.style.color = pendingQuickCount > 0 ? '#000' : '#fff';
+    }
+
+    if (btn) {
+      btn.style.background = pendingQuickCount > 0
+        ? 'rgba(245,158,11,0.25)' : 'rgba(99,102,241,0.12)';
+      btn.style.borderColor = pendingQuickCount > 0
+        ? 'rgba(245,158,11,0.5)' : 'rgba(99,102,241,0.3)';
+      btn.style.color = pendingQuickCount > 0 ? '#fbbf24' : '#818cf8';
     }
   }
 
@@ -1124,11 +1150,32 @@ export class SalonDashboard {
         const rawStart = appt.startTime || appt.startAt;
         const startDt = rawStart ? new Date(rawStart) : new Date();
         const startTimeStr = formatTime12h(startDt) || '--:--';
-        const durationMins = appt.service?.durationMinutes || appt.durationMinutes || 30;
+
+        const servicesList = (Array.isArray(appt.services) && appt.services.length > 0)
+          ? appt.services
+          : (appt.service ? [appt.service] : []);
+
+        let totalDurationMins = appt.durationMinutes || 0;
+        if (!totalDurationMins && servicesList.length > 0) {
+          totalDurationMins = servicesList.reduce((sum, s) => sum + (s.durationMinutes || s.service?.durationMinutes || 0), 0);
+        }
+        if (!totalDurationMins) totalDurationMins = 30;
+
+        let durationDisplayStr = `${totalDurationMins}m`;
+
+        if (servicesList.length > 1) {
+          const individualDurations = servicesList
+            .map((s) => s.durationMinutes || s.service?.durationMinutes || 0)
+            .filter((d) => d > 0);
+          if (individualDurations.length > 1) {
+            durationDisplayStr = `${individualDurations.join(' + ')} min`;
+          }
+        }
+
         const rawEnd = appt.endTime || appt.endAt;
-        const endDt = rawEnd ? new Date(rawEnd) : new Date(startDt.getTime() + durationMins * 60000);
+        const endDt = rawEnd ? new Date(rawEnd) : new Date(startDt.getTime() + totalDurationMins * 60000);
         const endTimeStr = formatTime12h(endDt) || '--:--';
-        return { startTimeStr, endTimeStr, timeRangeStr: `${startTimeStr} – ${endTimeStr}`, durationMins };
+        return { startTimeStr, endTimeStr, timeRangeStr: `${startTimeStr} – ${endTimeStr}`, durationMins: totalDurationMins, durationDisplayStr };
       };
 
       // Format Cancellation Details and Timestamp (12-Hour AM/PM)
@@ -1260,7 +1307,7 @@ export class SalonDashboard {
                     <div class="qc__time-block">
                       <div class="qc__time-primary">
                         <span class="qc__time">${timeRange.timeRangeStr}</span>
-                        <span class="qc__duration-pill">${timeRange.durationMins}m</span>
+                        <span class="qc__duration-pill">${timeRange.durationDisplayStr}</span>
                       </div>
                       <div class="qc__booking-meta">
                         ${formatBookingOrigin(appt)}
@@ -1312,10 +1359,21 @@ export class SalonDashboard {
 
                   <!-- Row 3: Service Tag + Live Status Badges + Live 10m Countdown -->
                   <div class="qc__row3" style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
-                    <span class="qc__tag qc__tag--service">
-                      ${Icons.scissors({ size: 13, color: '#94a3b8' })}
-                      <span>${serviceName}</span>
-                    </span>
+                    ${(() => {
+                      const servicesList = (Array.isArray(appt.services) && appt.services.length > 0)
+                        ? appt.services
+                        : [{ serviceNameSnapshot: serviceName, durationMinutes: service.durationMinutes || appt.durationMinutes }];
+                      return servicesList.map((s, idx) => {
+                        const sName = s.serviceNameSnapshot || s.service?.name || 'Service';
+                        const isAddon = idx > 0 || (s.service && s.service.isAddon);
+                        return `
+                          <span class="qc__tag qc__tag--service ${isAddon ? 'qc__tag--addon' : ''}" style="${isAddon ? 'background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); font-weight: 700;' : ''}">
+                            ${Icons.scissors({ size: 13, color: isAddon ? '#fbbf24' : '#94a3b8' })}
+                            <span>${sName}${isAddon ? ' (Add-on)' : ''}</span>
+                          </span>
+                        `;
+                      }).join('');
+                    })()}
                     ${appt.status === 'IN_SERVICE' ? `
                       <span class="qc__tag qc__tag--inchair">
                         <span class="qc__pulse-dot"></span>
