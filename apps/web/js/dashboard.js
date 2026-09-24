@@ -21,6 +21,75 @@ function showNotification(msg, type = 'info') {
   setTimeout(() => toast.remove(), 3500);
 }
 
+export function getApptServices(appt) {
+  if (!appt) return [];
+
+  // 1) If appt.services is a non-empty array
+  if (Array.isArray(appt.services) && appt.services.length > 0) {
+    return appt.services.map((s, idx) => {
+      const name = s.serviceNameSnapshot || s.service?.name || s.name || 'Service';
+      const durationMinutes = s.durationMinutes || s.service?.durationMinutes || 0;
+      const isAddon = idx > 0 || Boolean(s.service?.isAddon || s.isAddon);
+      return { name, durationMinutes, isAddon, raw: s };
+    });
+  }
+
+  // 2) If serviceNameSnapshot contains comma-separated values (e.g. "Face, Hair Cut")
+  if (appt.serviceNameSnapshot && typeof appt.serviceNameSnapshot === 'string' && appt.serviceNameSnapshot.includes(',')) {
+    const names = appt.serviceNameSnapshot.split(',').map((n) => n.trim()).filter(Boolean);
+    const totalDur = appt.durationMinutes || 0;
+    const primaryDur = appt.service?.durationMinutes || 0;
+    return names.map((name, idx) => {
+      const isAddon = idx > 0;
+      let durationMinutes = 0;
+      if (idx === 0) {
+        durationMinutes = primaryDur || (names.length === 1 ? totalDur : 0);
+      } else if (idx === names.length - 1 && primaryDur > 0 && totalDur > primaryDur) {
+        durationMinutes = totalDur - primaryDur;
+      } else if (totalDur > primaryDur && primaryDur > 0) {
+        durationMinutes = Math.round((totalDur - primaryDur) / (names.length - 1));
+      }
+      return { name, durationMinutes, isAddon };
+    });
+  }
+
+  // 3) If appt.service is object
+  if (appt.service && appt.service.name) {
+    const mainName = appt.service.name;
+    const mainDur = appt.service.durationMinutes || appt.durationMinutes || 0;
+
+    // Check if appt.serviceNameSnapshot has add-on names not equal to mainName
+    if (appt.serviceNameSnapshot && typeof appt.serviceNameSnapshot === 'string' && appt.serviceNameSnapshot !== mainName) {
+      const parts = appt.serviceNameSnapshot.split(',').map((n) => n.trim()).filter(Boolean);
+      const addonParts = parts.filter((p) => p !== mainName);
+      if (addonParts.length > 0) {
+        const totalDur = appt.durationMinutes || 0;
+        const primaryDur = appt.service.durationMinutes || 0;
+        const remainingDur = Math.max(0, totalDur - primaryDur);
+        const addonDur = Math.round(remainingDur / addonParts.length);
+
+        const list = [{ name: mainName, durationMinutes: primaryDur || mainDur, isAddon: false }];
+        addonParts.forEach((aName) => {
+          list.push({ name: aName, durationMinutes: addonDur, isAddon: true });
+        });
+        return list;
+      }
+    }
+
+    return [{ name: mainName, durationMinutes: mainDur, isAddon: false }];
+  }
+
+  // 4) If serviceNameSnapshot is a single string
+  if (appt.serviceNameSnapshot && typeof appt.serviceNameSnapshot === 'string') {
+    return [{ name: appt.serviceNameSnapshot.trim(), durationMinutes: appt.durationMinutes || 0, isAddon: false }];
+  }
+
+  return [];
+}
+if (typeof window !== 'undefined') {
+  window.getApptServices = getApptServices;
+}
+
 export class SalonDashboard {
   constructor(containerId, currentUser = null) {
     this.container = document.getElementById(containerId);
@@ -77,9 +146,10 @@ export class SalonDashboard {
       : pendingRequests.map((req) => {
         const clientName = req.customer?.name || req.customerPhone || 'In-Salon Client';
         const clientPhone = req.customer?.phone || req.customerPhone || '';
-        const serviceName = (Array.isArray(req.services) && req.services.length > 0)
-          ? req.services.map((s) => s.serviceNameSnapshot || s.service?.name || 'Service').join(' + ')
-          : (req.service?.name || req.serviceNameSnapshot || 'Quick Service');
+        const reqServices = getApptServices(req);
+        const serviceName = reqServices.length > 0
+          ? reqServices.map((s) => `${s.name}${s.isAddon ? ' (Add-on)' : ''}`).join(' + ')
+          : (req.serviceNameSnapshot || req.service?.name || 'Quick Service');
         const timeStr = req.startTime ? formatTime12h(req.startTime) : 'Today';
         const specialist = req.staff?.name || req.stylist?.name || 'Any Specialist';
         const price = req.price ? `₹${req.price}` : '';
@@ -1151,13 +1221,11 @@ export class SalonDashboard {
         const startDt = rawStart ? new Date(rawStart) : new Date();
         const startTimeStr = formatTime12h(startDt) || '--:--';
 
-        const servicesList = (Array.isArray(appt.services) && appt.services.length > 0)
-          ? appt.services
-          : (appt.service ? [appt.service] : []);
+        const servicesList = getApptServices(appt);
 
         let totalDurationMins = appt.durationMinutes || 0;
         if (!totalDurationMins && servicesList.length > 0) {
-          totalDurationMins = servicesList.reduce((sum, s) => sum + (s.durationMinutes || s.service?.durationMinutes || 0), 0);
+          totalDurationMins = servicesList.reduce((sum, s) => sum + (s.durationMinutes || 0), 0);
         }
         if (!totalDurationMins) totalDurationMins = 30;
 
@@ -1165,9 +1233,9 @@ export class SalonDashboard {
 
         if (servicesList.length > 1) {
           const individualDurations = servicesList
-            .map((s) => s.durationMinutes || s.service?.durationMinutes || 0)
+            .map((s) => s.durationMinutes || 0)
             .filter((d) => d > 0);
-          if (individualDurations.length > 1) {
+          if (individualDurations.length === servicesList.length) {
             durationDisplayStr = `${individualDurations.join(' + ')} min`;
           }
         }
@@ -1279,7 +1347,8 @@ export class SalonDashboard {
         const staffName = staff.name || 'Any Stylist';
         const staffId = staff.id || appt.stylistId || appt.staffId || '';
         const serviceId = service.id || appt.serviceId || '';
-        const serviceName = service.name || appt.serviceNameSnapshot || 'Service';
+        const apptSvcs = getApptServices(appt);
+        const serviceName = apptSvcs.map((s) => s.name).join(' + ') || appt.serviceNameSnapshot || service.name || 'Service';
         const price = appt.price ?? service.price ?? 0;
 
         const timeRange = formatServiceTimeRange(appt);
@@ -1360,16 +1429,21 @@ export class SalonDashboard {
                   <!-- Row 3: Service Tag + Live Status Badges + Live 10m Countdown -->
                   <div class="qc__row3" style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
                     ${(() => {
-                      const servicesList = (Array.isArray(appt.services) && appt.services.length > 0)
-                        ? appt.services
-                        : [{ serviceNameSnapshot: serviceName, durationMinutes: service.durationMinutes || appt.durationMinutes }];
-                      return servicesList.map((s, idx) => {
-                        const sName = s.serviceNameSnapshot || s.service?.name || 'Service';
-                        const isAddon = idx > 0 || (s.service && s.service.isAddon);
+                      const servicesList = getApptServices(appt);
+                      if (servicesList.length === 0) {
+                        return `
+                          <span class="qc__tag qc__tag--service">
+                            ${Icons.scissors({ size: 13, color: '#94a3b8' })}
+                            <span>Service</span>
+                          </span>
+                        `;
+                      }
+                      return servicesList.map((s) => {
+                        const isAddon = s.isAddon;
                         return `
                           <span class="qc__tag qc__tag--service ${isAddon ? 'qc__tag--addon' : ''}" style="${isAddon ? 'background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); font-weight: 700;' : ''}">
                             ${Icons.scissors({ size: 13, color: isAddon ? '#fbbf24' : '#94a3b8' })}
-                            <span>${sName}${isAddon ? ' (Add-on)' : ''}</span>
+                            <span>${s.name}${isAddon ? ' (Add-on)' : ''}</span>
                           </span>
                         `;
                       }).join('');
@@ -5482,7 +5556,7 @@ export class SalonDashboard {
                         <div style="font-weight: 700; color: #fff;">${dateStr}</div>
                         <div style="font-size: 0.75rem; color: var(--text-muted);">${timeStr}</div>
                       </td>
-                      <td style="padding: 10px; font-weight: 700; color: #c7d2fe;">${a.serviceNameSnapshot || a.service?.name || 'Service'}</td>
+                      <td style="padding: 10px; font-weight: 700; color: #c7d2fe;">${getApptServices(a).map((s) => s.name).join(' + ') || a.serviceNameSnapshot || a.service?.name || 'Service'}</td>
                       <td style="padding: 10px; color: var(--text-secondary);">${a.stylist?.name || 'Any Staff'}</td>
                       <td style="padding: 10px; font-weight: 700; color: #10b981;">₹${a.price || 0}</td>
                       <td style="padding: 10px;">
