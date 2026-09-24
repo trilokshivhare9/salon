@@ -2134,176 +2134,237 @@ export class SalonDashboard {
     const isClosedToday = !!todayClosure;
 
     return `
-      <!-- Salon Identity HQ Card -->
-      <div class="profile-identity-card" style="margin-top: 14px; padding-top: 20px;">
-        <div class="profile-identity-header">
-          <div class="profile-avatar-box">
-            ${Icons.scissors({ size: 30, color: '#c7d2fe' })}
-          </div>
-          <div style="flex: 1; min-width: 240px;">
-            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-              <h2 style="font-size: 1.45rem; color: #fff; font-family: var(--font-heading); font-weight: 800; letter-spacing: -0.02em;">
-                ${profile.name || 'Salon Command Operations'}
-              </h2>
-              <span class="badge ${isClosedToday ? 'badge-cancelled' : 'badge-completed'}" style="font-size: 0.7rem; letter-spacing: 0.04em;">
-                ${isClosedToday ? (todayClosure.closureType === 'HOLIDAY' ? '🌴 PLANNED HOLIDAY' : '🚨 STORE CLOSED TODAY') : (profile.status || 'ACTIVE STORE')}
-              </span>
+      <!-- Hero Profile & Command Center Header -->
+      <div class="profile-hero-card">
+        <div class="profile-hero-top">
+          <div class="profile-hero-identity">
+            <div class="profile-avatar-box">
+              ${Icons.scissors({ size: 26, color: '#a5b4fc' })}
             </div>
-            <div style="font-size: 0.82rem; color: var(--text-secondary); margin-top: 6px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
-              <span style="display: flex; align-items: center; gap: 4px;">
-                ${Icons.mapPin({ size: 13, color: '#818cf8' })}
-                <span>${profile.address || profile.city || 'Indore, India'}</span>
-              </span>
-              <span style="display: flex; align-items: center; gap: 4px;">
-                ${Icons.phone({ size: 13, color: '#34d399' })}
-                <span>${profile.phone || '+91'}</span>
-              </span>
-              <span style="display: flex; align-items: center; gap: 4px;">
-                ${Icons.clock({ size: 13, color: '#fbbf24' })}
-                <span>${this.summaryData?.timezone || 'Asia/Kolkata'}</span>
-              </span>
+            <div class="profile-identity-info">
+              <div class="profile-title-row">
+                <h2 class="profile-salon-name">${profile.name || 'Salon Command Operations'}</h2>
+                <span class="badge ${isClosedToday ? 'badge-cancelled' : 'badge-completed'} profile-status-badge">
+                  ${isClosedToday ? (todayClosure.closureType === 'HOLIDAY' ? '🌴 PLANNED HOLIDAY' : '🚨 STORE CLOSED TODAY') : (profile.status || 'ACTIVE STORE')}
+                </span>
+              </div>
+              <div class="profile-meta-row">
+                <span class="profile-meta-item">
+                  ${Icons.mapPin({ size: 13, color: '#818cf8' })}
+                  <span>${profile.address || profile.city || 'Indore, India'}</span>
+                </span>
+                <span class="profile-meta-item">
+                  ${Icons.phone({ size: 13, color: '#34d399' })}
+                  <span>${profile.phone || '+91'}</span>
+                </span>
+                <span class="profile-meta-item">
+                  ${Icons.clock({ size: 13, color: '#fbbf24' })}
+                  <span>${this.summaryData?.timezone || 'Asia/Kolkata'}</span>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Direct Customer Booking Link Pill -->
+          <div class="profile-booking-pill">
+            <div class="profile-link-text">
+              ${Icons.link({ size: 14, color: '#818cf8' })}
+              <span class="profile-link-url" title="${bookingUrl}">${bookingUrl}</span>
+            </div>
+            <div class="profile-link-actions">
+              <button class="btn btn-secondary btn-sm profile-action-btn" id="btn-copy-invite" title="Copy public booking link">
+                ${Icons.copy({ size: 13 })}
+                <span>Copy</span>
+              </button>
+              <button class="btn btn-primary btn-sm profile-action-btn" id="btn-open-qr" title="View printable QR posters">
+                ${Icons.qrCode({ size: 13 })}
+                <span>QR Poster</span>
+              </button>
             </div>
           </div>
         </div>
 
-        <!-- Direct Customer Booking Link Strip -->
-        <div style="margin-top: 20px; padding: 14px 18px; background: rgba(99,102,241,0.08); border-radius: var(--radius-md); border: 1px solid rgba(99,102,241,0.25); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
-          <div style="display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1;">
-            <div style="color: #818cf8; flex-shrink: 0;">${Icons.link({ size: 16 })}</div>
-            <div style="font-size: 0.84rem; color: #c7d2fe; font-family: monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-              ${bookingUrl}
+        <!-- Realtime KPI Metric Stats Grid -->
+        <div class="profile-kpi-grid">
+          <div class="profile-kpi-card">
+            <div class="profile-kpi-icon" style="background: rgba(99, 102, 241, 0.15); color: #818cf8;">
+              ${Icons.users({ size: 18 })}
+            </div>
+            <div class="profile-kpi-content">
+              <div class="profile-kpi-label">Stylist Staff</div>
+              <div class="profile-kpi-value">${staffCount} <span class="profile-kpi-unit">Specialists</span></div>
             </div>
           </div>
-          <div style="display: flex; gap: 8px; flex-shrink: 0;">
-            <button class="btn btn-secondary btn-sm" id="btn-copy-invite" style="gap: 6px; font-size: 0.78rem;">
-              ${Icons.copy({ size: 13 })}
-              <span>Copy Link</span>
-            </button>
-            <button class="btn btn-primary btn-sm" id="btn-open-qr" style="gap: 6px; font-size: 0.78rem;">
-              ${Icons.qrCode({ size: 13 })}
-              <span>QR Poster</span>
-            </button>
-          </div>
-        </div>
 
-        <!-- Business Telemetry -->
-        <div class="profile-metrics-strip">
-          <div class="profile-metric-pill">
-            <div style="font-size: 0.7rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Stylist Staff</div>
-            <div style="font-size: 1.3rem; font-weight: 800; color: #fff; font-family: var(--font-heading); margin-top: 2px;">${staffCount} Specialists</div>
+          <div class="profile-kpi-card">
+            <div class="profile-kpi-icon" style="background: rgba(16, 185, 129, 0.15); color: #34d399;">
+              ${Icons.scissors({ size: 18 })}
+            </div>
+            <div class="profile-kpi-content">
+              <div class="profile-kpi-label">Service Catalog</div>
+              <div class="profile-kpi-value">${servicesCount} <span class="profile-kpi-unit">Offerings</span></div>
+            </div>
           </div>
-          <div class="profile-metric-pill">
-            <div style="font-size: 0.7rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Service Catalog</div>
-            <div style="font-size: 1.3rem; font-weight: 800; color: #fff; font-family: var(--font-heading); margin-top: 2px;">${servicesCount} Offerings</div>
+
+          <div class="profile-kpi-card">
+            <div class="profile-kpi-icon" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24;">
+              ${Icons.whatsapp({ size: 18, color: '#fbbf24' })}
+            </div>
+            <div class="profile-kpi-content">
+              <div class="profile-kpi-label">Meta Free Quota</div>
+              <div class="profile-kpi-value" style="color: #34d399;">${freeChatsLeft} <span class="profile-kpi-unit">Left</span></div>
+            </div>
           </div>
-          <div class="profile-metric-pill">
-            <div style="font-size: 0.7rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Meta Free Quota</div>
-            <div style="font-size: 1.3rem; font-weight: 800; color: #34d399; font-family: var(--font-heading); margin-top: 2px;">${freeChatsLeft} Left</div>
-          </div>
-          <div class="profile-metric-pill">
-            <div style="font-size: 0.7rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Store Status</div>
-            <div style="font-size: 1.15rem; font-weight: 800; color: ${isClosedToday ? '#f87171' : '#34d399'}; font-family: var(--font-heading); margin-top: 2px;">${isClosedToday ? `🚨 STORE CLOSED (${todayClosure.closureType})` : '🟢 Live & Online'}</div>
+
+          <div class="profile-kpi-card">
+            <div class="profile-kpi-icon" style="background: ${isClosedToday ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)'}; color: ${isClosedToday ? '#f87171' : '#34d399'};">
+              ${isClosedToday ? (Icons.alertTriangle ? Icons.alertTriangle({ size: 18, color: '#f87171' }) : '🚨') : '🟢'}
+            </div>
+            <div class="profile-kpi-content">
+              <div class="profile-kpi-label">Store Status</div>
+              <div class="profile-kpi-value" style="color: ${isClosedToday ? '#f87171' : '#34d399'}; font-size: 0.98rem;">
+                ${isClosedToday ? `Closed (${todayClosure.closureType})` : 'Live & Online'}
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- Features Launchpad & Intelligence Suite -->
-      <div class="glass-panel">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-          <div>
-            <h3 style="font-size: 1.2rem; font-weight: 800; color: #fff;">Salon Features & Command Tools</h3>
-            <p style="color: var(--text-secondary); font-size: 0.82rem; margin-top: 2px;">Advanced telemetry, customer intelligence, and automated marketing tools.</p>
-          </div>
-        </div>
+      <!-- Categorized Command Hub Sections -->
+      <div class="profile-hub-sections">
 
-        <div class="profile-hub-grid">
-          <!-- 1. Customer Management & Strike Hub -->
-          <div class="profile-tool-card" id="card-feature-crm">
-            <div class="profile-tool-icon" style="background: rgba(99,102,241,0.15); border: 1px solid rgba(99,102,241,0.3);">
-              ${Icons.users({ size: 22, color: '#818cf8' })}
+        <!-- Section 1: Store Operations & Schedules -->
+        <div class="profile-hub-group">
+          <div class="profile-group-header">
+            <div class="profile-group-icon" style="background: rgba(99, 102, 241, 0.15); color: #818cf8;">
+              ${Icons.calendar({ size: 16 })}
             </div>
-            <div style="flex: 1;">
-              <div style="font-weight: 700; color: #fff; font-size: 0.98rem;">Customer Management & Strike Hub</div>
-              <div style="font-size: 0.78rem; color: var(--text-secondary); margin-top: 3px;">Track customer visit history, penalty strikes (0–3), and block/unblock controls.</div>
+            <div>
+              <h3 class="profile-group-title">Store Operations & Schedules</h3>
+              <p class="profile-group-subtitle">Configure business hours, staff shifts, and emergency store closures.</p>
             </div>
-            <div style="color: var(--text-muted);">${Icons.chevronRight({ size: 16 })}</div>
           </div>
 
-          <!-- 2. WhatsApp Bot Logs -->
-          <div class="profile-tool-card" id="card-feature-whatsapp">
-            <div class="profile-tool-icon" style="background: rgba(37,211,102,0.12); border: 1px solid rgba(37,211,102,0.3);">
-              ${Icons.whatsapp({ size: 22, color: '#25D366' })}
-            </div>
-            <div style="flex: 1;">
-              <div style="font-weight: 700; color: #fff; font-size: 0.98rem;">WhatsApp Bot & Audit Logs</div>
-              <div style="font-size: 0.78rem; color: var(--text-secondary); margin-top: 3px;">Live PostgreSQL audit trail of inbound chats and instant booking triggers.</div>
-            </div>
-            <div style="color: var(--text-muted);">${Icons.chevronRight({ size: 16 })}</div>
-          </div>
-
-          <!-- 3. QR Booking Poster -->
-          <div class="profile-tool-card" id="card-feature-qr">
-            <div class="profile-tool-icon" style="background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.3);">
-              ${Icons.qrCode({ size: 22, color: '#fbbf24' })}
-            </div>
-            <div style="flex: 1;">
-              <div style="font-weight: 700; color: #fff; font-size: 0.98rem;">Mirror & Desk QR Posters</div>
-              <div style="font-size: 0.78rem; color: var(--text-secondary); margin-top: 3px;">Generate high-resolution printable QR codes for salon mirrors and counter.</div>
-            </div>
-            <div style="color: var(--text-muted);">${Icons.chevronRight({ size: 16 })}</div>
-          </div>
-
-          <!-- 4. Salon Weekly Operating Schedule -->
-          <div class="profile-tool-card" id="card-feature-salon-schedule">
-            <div class="profile-tool-icon" style="background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.3);">
-              ${Icons.calendar({ size: 22, color: '#34d399' })}
-            </div>
-            <div style="flex: 1;">
-              <div style="font-weight: 700; color: #fff; font-size: 0.98rem;">Weekly Operating Schedule</div>
-              <div style="font-size: 0.78rem; color: var(--text-secondary); margin-top: 3px;">This schedule repeats every week. Configure opening hours and default breaks.</div>
-            </div>
-            <div style="color: var(--text-muted);">${Icons.chevronRight({ size: 16 })}</div>
-          </div>
-
-          <!-- 4B. Store Closures & Holiday Calendar -->
-          <div class="profile-tool-card" id="card-feature-closures" style="background: rgba(239, 68, 68, 0.08); border-color: rgba(239, 68, 68, 0.3);">
-            <div class="profile-tool-icon" style="background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.4);">
-              ${Icons.alertTriangle ? Icons.alertTriangle({ size: 22, color: '#f87171' }) : '🚨'}
-            </div>
-            <div style="flex: 1;">
-              <div style="font-weight: 700; color: #fff; font-size: 0.98rem; display: flex; align-items: center; gap: 8px;">
-                <span>Store Closures & Holiday Calendar</span>
-                <span style="background: rgba(239, 68, 68, 0.2); color: #f87171; font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; font-weight: 800;">HOLIDAYS & EMERGENCIES</span>
+          <div class="profile-tools-grid">
+            <!-- Weekly Operating Schedule -->
+            <div class="profile-tool-card" id="card-feature-salon-schedule">
+              <div class="profile-tool-icon" style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.25);">
+                ${Icons.calendar({ size: 20, color: '#34d399' })}
               </div>
-              <div style="font-size: 0.78rem; color: var(--text-secondary); margin-top: 3px;">Schedule planned festival holidays or trigger instant 0-penalty emergency store closures.</div>
+              <div class="profile-tool-info">
+                <div class="profile-tool-title">Weekly Operating Schedule</div>
+                <div class="profile-tool-desc">Set recurring weekly opening hours, salon shifts, and lunch breaks.</div>
+              </div>
+              <div class="profile-tool-arrow">${Icons.chevronRight({ size: 16 })}</div>
             </div>
-            <div style="color: var(--text-muted);">${Icons.chevronRight({ size: 16 })}</div>
-          </div>
 
-          <!-- 5. Staff Shifts & Working Hours -->
-          <div class="profile-tool-card" id="card-feature-shifts">
-            <div class="profile-tool-icon" style="background: rgba(56,189,248,0.12); border: 1px solid rgba(56,189,248,0.3);">
-              ${Icons.clock({ size: 22, color: '#38bdf8' })}
+            <!-- Store Closures & Holiday Calendar -->
+            <div class="profile-tool-card profile-tool-card--warning" id="card-feature-closures">
+              <div class="profile-tool-icon" style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3);">
+                ${Icons.alertTriangle ? Icons.alertTriangle({ size: 20, color: '#f87171' }) : '🚨'}
+              </div>
+              <div class="profile-tool-info">
+                <div class="profile-tool-title">
+                  <span>Store Closures & Holidays</span>
+                  <span class="profile-tool-chip chip-danger">EMERGENCY & HOLIDAYS</span>
+                </div>
+                <div class="profile-tool-desc">Schedule festival holidays or trigger instant 0-penalty emergency store closures.</div>
+              </div>
+              <div class="profile-tool-arrow">${Icons.chevronRight({ size: 16 })}</div>
             </div>
-            <div style="flex: 1;">
-              <div style="font-weight: 700; color: #fff; font-size: 0.98rem;">Stylist Shifts & Working Hours</div>
-              <div style="font-size: 0.78rem; color: var(--text-secondary); margin-top: 3px;">Configure working shifts, lunch breaks, and holiday calendar schedules.</div>
-            </div>
-            <div style="color: var(--text-muted);">${Icons.chevronRight({ size: 16 })}</div>
-          </div>
 
-          <!-- 6. Sign Out -->
-          <div class="profile-tool-card" id="card-feature-logout" style="border-color: rgba(244,63,94,0.3); background: rgba(244,63,94,0.04);">
-            <div class="profile-tool-icon" style="background: rgba(244,63,94,0.12); border: 1px solid rgba(244,63,94,0.3);">
-              ${Icons.lock({ size: 22, color: '#fb7185' })}
+            <!-- Stylist Shifts & Working Hours -->
+            <div class="profile-tool-card" id="card-feature-shifts">
+              <div class="profile-tool-icon" style="background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.25);">
+                ${Icons.clock({ size: 20, color: '#38bdf8' })}
+              </div>
+              <div class="profile-tool-info">
+                <div class="profile-tool-title">Stylist Shifts & Working Hours</div>
+                <div class="profile-tool-desc">Manage individual staff shift timings, breaks, and leave requests.</div>
+              </div>
+              <div class="profile-tool-arrow">${Icons.chevronRight({ size: 16 })}</div>
             </div>
-            <div style="flex: 1;">
-              <div style="font-weight: 700; color: #fb7185; font-size: 0.98rem;">Sign Out Store Session</div>
-              <div style="font-size: 0.78rem; color: var(--text-secondary); margin-top: 3px;">Safely end the manager session on this browser or mobile device.</div>
-            </div>
-            <div style="color: #fb7185;">${Icons.chevronRight({ size: 16, color: '#fb7185' })}</div>
           </div>
         </div>
+
+        <!-- Section 2: Marketing, Growth & Audit Tools -->
+        <div class="profile-hub-group">
+          <div class="profile-group-header">
+            <div class="profile-group-icon" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24;">
+              ${Icons.qrCode({ size: 16 })}
+            </div>
+            <div>
+              <h3 class="profile-group-title">Marketing & Customer Intelligence</h3>
+              <p class="profile-group-subtitle">Access QR posters, WhatsApp database audit logs, and customer CRM tools.</p>
+            </div>
+          </div>
+
+          <div class="profile-tools-grid">
+            <!-- Mirror & Desk QR Posters -->
+            <div class="profile-tool-card" id="card-feature-qr">
+              <div class="profile-tool-icon" style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.25);">
+                ${Icons.qrCode({ size: 20, color: '#fbbf24' })}
+              </div>
+              <div class="profile-tool-info">
+                <div class="profile-tool-title">Mirror & Desk QR Posters</div>
+                <div class="profile-tool-desc">Generate printable QR poster templates for salon counter and mirrors.</div>
+              </div>
+              <div class="profile-tool-arrow">${Icons.chevronRight({ size: 16 })}</div>
+            </div>
+
+            <!-- WhatsApp Bot & Audit Logs -->
+            <div class="profile-tool-card" id="card-feature-whatsapp">
+              <div class="profile-tool-icon" style="background: rgba(37, 211, 102, 0.12); border: 1px solid rgba(37, 211, 102, 0.25);">
+                ${Icons.whatsapp({ size: 20, color: '#25D366' })}
+              </div>
+              <div class="profile-tool-info">
+                <div class="profile-tool-title">WhatsApp Bot & Audit Logs</div>
+                <div class="profile-tool-desc">View real-time PostgreSQL database audit trails of WhatsApp customer messages.</div>
+              </div>
+              <div class="profile-tool-arrow">${Icons.chevronRight({ size: 16 })}</div>
+            </div>
+
+            <!-- Customer Management & Strike Hub -->
+            <div class="profile-tool-card" id="card-feature-crm">
+              <div class="profile-tool-icon" style="background: rgba(99, 102, 241, 0.12); border: 1px solid rgba(99, 102, 241, 0.25);">
+                ${Icons.users({ size: 20, color: '#818cf8' })}
+              </div>
+              <div class="profile-tool-info">
+                <div class="profile-tool-title">Customer CRM & Strike Hub</div>
+                <div class="profile-tool-desc">View client visit history, penalty strikes (0–3), and block/unblock controls.</div>
+              </div>
+              <div class="profile-tool-arrow">${Icons.chevronRight({ size: 16 })}</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 3: Account & Session Security -->
+        <div class="profile-hub-group">
+          <div class="profile-group-header">
+            <div class="profile-group-icon" style="background: rgba(244, 63, 94, 0.15); color: #fb7185;">
+              ${Icons.lock({ size: 16 })}
+            </div>
+            <div>
+              <h3 class="profile-group-title">Session & Security</h3>
+              <p class="profile-group-subtitle">Manager session controls and sign-out actions.</p>
+            </div>
+          </div>
+
+          <div class="profile-tools-grid">
+            <!-- Sign Out -->
+            <div class="profile-tool-card profile-tool-card--logout" id="card-feature-logout">
+              <div class="profile-tool-icon" style="background: rgba(244, 63, 94, 0.15); border: 1px solid rgba(244, 63, 94, 0.3);">
+                ${Icons.lock({ size: 20, color: '#fb7185' })}
+              </div>
+              <div class="profile-tool-info">
+                <div class="profile-tool-title" style="color: #fb7185;">Sign Out Store Session</div>
+                <div class="profile-tool-desc">Safely terminate manager active session on this device.</div>
+              </div>
+              <div class="profile-tool-arrow" style="color: #fb7185;">${Icons.chevronRight({ size: 16, color: '#fb7185' })}</div>
+            </div>
+          </div>
+        </div>
+
       </div>
     `;
   }
