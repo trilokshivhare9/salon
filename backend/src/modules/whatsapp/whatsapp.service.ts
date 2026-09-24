@@ -98,7 +98,7 @@ export class WhatsAppService {
     input: string,
   ): boolean {
     // Navigation buttons are always valid globally
-    if (['btn_menu', 'btn_start', 'btn_services', 'btn_quick_book'].includes(input)) {
+    if (['btn_menu', 'btn_start', 'btn_services', 'btn_quick_book', 'btn_book'].includes(input)) {
       return true;
     }
     
@@ -107,7 +107,6 @@ export class WhatsAppService {
     if (['btn_confirm_yes', 'btn_confirm_no', 'btn_confirm'].includes(input) && conversationState === ConversationState.CONFIRMATION) return true;
     if (['btn_confirm_quick', 'confirm'].includes(input) && conversationState === ConversationState.QUICK_BOOK_CONFIRM) return true;
     if (['btn_reschedule', 'btn_change_stylist', 'btn_keep_appt'].includes(input) && conversationState === ConversationState.ADDON_CONFLICT) return true;
-    if (['btn_book'].includes(input) && (conversationState === ConversationState.START || conversationState === ConversationState.COMPLETED)) return true;
 
     if (stage === BookingLifecycleStage.PRE_BOOKING) {
       // Allowed Pre-booking actions
