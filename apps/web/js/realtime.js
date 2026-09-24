@@ -281,7 +281,9 @@ export class RealtimeNotifier {
         if (payload.type === 'NEW_BOOKING') {
           const appt = payload.data;
           const clientName = appt?.customer?.name || 'New Client';
-          const serviceName = appt?.service?.name || appt?.serviceNameSnapshot || 'Salon Service';
+          const serviceName = (Array.isArray(appt?.services) && appt.services.length > 0)
+            ? appt.services.map((s) => s.serviceNameSnapshot || s.service?.name || 'Service').join(' + ')
+            : (appt?.service?.name || appt?.serviceNameSnapshot || 'Salon Service');
           const specialistName = appt?.staff?.name || appt?.stylist?.name || 'Assigned Specialist';
           const timeStr = appt?.startTime ? formatTime12h(appt.startTime) : 'Today';
           const price = appt?.price ? ` • ₹${appt.price}` : '';
@@ -329,6 +331,15 @@ export class RealtimeNotifier {
 
           if (window.salonDashboard && typeof window.salonDashboard.loadData === 'function') {
             window.salonDashboard.loadData(true);
+          }
+
+          // Auto-refresh the quick requests modal if it's already open
+          if (isQuickRequest && document.getElementById('modal-quick-requests')) {
+            setTimeout(() => {
+              if (window.salonDashboard?.openQuickRequestsModal) {
+                window.salonDashboard.openQuickRequestsModal();
+              }
+            }, 500);
           }
 
         } else if (

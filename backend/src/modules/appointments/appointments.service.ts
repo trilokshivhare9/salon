@@ -6,6 +6,7 @@ import {
   Logger,
   Inject,
   forwardRef,
+  OnModuleInit,
 } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 import { AvailabilityService } from '../availability/availability.service';
@@ -89,7 +90,7 @@ export interface InternalCreateAppointmentOptions {
 }
 
 @Injectable()
-export class AppointmentsService {
+export class AppointmentsService implements OnModuleInit {
   private readonly logger = new Logger(AppointmentsService.name);
   private readonly events$ = new Subject<SalonRealtimeEvent>();
 
@@ -100,6 +101,75 @@ export class AppointmentsService {
     @Inject(forwardRef(() => WhatsAppService))
     private whatsappService: WhatsAppService,
   ) { }
+
+  onModuleInit() {
+    // Background interval: auto-decline expired PENDING_ACCEPTANCE requests every 60 seconds
+    setInterval(async () => {
+      try {
+        const activeSalons = await this.prisma.salon.findMany({ select: { id: true } });
+        for (const s of activeSalons) {
+          await this.autoDeclineExpiredQuickBookings(s.id);
+        }
+      } catch (e) {
+        // Suppress background task errors
+      }
+    }, 60 * 1000);
+  }
+
+  async autoDeclineExpiredQuickBookings(salonId: string) {
+    const now = new Date();
+    try {
+      const expiredAppts = await this.prisma.appointment.findMany({
+        where: {
+          salonId,
+          status: AppointmentStatus.PENDING_ACCEPTANCE,
+          startAt: { lt: now },
+        },
+        include: appointmentInclude,
+      });
+
+      if (expiredAppts.length === 0) return;
+
+      for (const appt of expiredAppts) {
+        const updated = await this.prisma.appointment.update({
+          where: { id: appt.id },
+          data: {
+            status: AppointmentStatus.CANCELLED,
+            notes: 'Auto-declined: Appointment start time passed without salon check-in approval',
+          },
+          include: appointmentInclude,
+        });
+
+        const formatted = this.formatAppointment(updated);
+        this.emitSalonEvent(salonId, 'STATUS_UPDATED', formatted);
+        this.emitSalonEvent(salonId, 'BOOKING_CANCELLED', formatted);
+
+        const userPhone = appt.salonUser?.user?.phone;
+        const salon = await this.prisma.salon.findUnique({
+          where: { id: salonId },
+          include: { whatsappAccount: true },
+        });
+
+        if (salon && userPhone && salon.whatsappAccount?.phoneNumberId) {
+          const tz = salon.timezone || 'Asia/Kolkata';
+          const timeStr = DateTime.fromJSDate(new Date(appt.startAt), { zone: tz }).toFormat('hh:mm a');
+          const msg = `⏳ *QUICK BOOKING EXPIRED*\n\nYour quick booking request for *${timeStr}* at *${salon.name}* was not checked in before the start time and has automatically expired.\n\nPlease speak to the front desk for walk-in availability. 🙏`;
+          await this.whatsappService.sendMetaMessage(
+            userPhone,
+            {
+              bodyText: msg,
+              interactiveType: 'button',
+              buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
+            },
+            salon.whatsappAccount.phoneNumberId,
+            salonId,
+          ).catch(() => { });
+        }
+      }
+    } catch (err) {
+      this.logger.error(`Error in autoDeclineExpiredQuickBookings: ${err.message}`);
+    }
+  }
 
   getSalonEvents(salonId: string): Observable<SalonRealtimeEvent> {
     return this.events$.asObservable().pipe(
@@ -144,6 +214,7 @@ export class AppointmentsService {
       userId?: string;
     },
   ) {
+    await this.autoDeclineExpiredQuickBookings(salonId);
     const whereClause: any = { salonId };
 
     if (filters.status) {

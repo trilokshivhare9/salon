@@ -41,13 +41,11 @@ export class AppointmentsController {
   }
 
   @Public()
-  @Get('sse')
-  sse(
-    @CurrentSalonId() salonId: string,
-    @Query('salonId') querySalonId?: string,
+  @Sse('stream/:salonId')
+  stream(
+    @Param('salonId') salonId: string,
   ): Observable<MessageEvent> {
-    const effectiveSalonId = salonId || querySalonId;
-    return this.appointmentsService.getSalonEvents(effectiveSalonId).pipe(
+    return this.appointmentsService.getSalonEvents(salonId).pipe(
       map((event) => ({
         data: event,
       })),

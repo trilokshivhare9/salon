@@ -407,7 +407,160 @@ export class WhatsAppService {
     };
   }
 
-  // Helper: Prompt Date Selection (3 Quick Date Buttons)
+  // Helper: Find Next Available Open Dates (Prevents Deadlock Loops)
+  private async findNextAvailableDates(
+    salonId: string,
+    serviceIds: string[],
+    staffId?: string,
+    startDateStr?: string,
+    timezone: string = 'Asia/Kolkata',
+    maxDaysToScan: number = 7,
+    limit: number = 2,
+    excludeApptId?: string,
+  ): Promise<{ dateStr: string; displayTitle: string }[]> {
+    const startDt = startDateStr
+      ? DateTime.fromISO(startDateStr, { zone: timezone })
+      : DateTime.now().setZone(timezone);
+
+    const results: { dateStr: string; displayTitle: string }[] = [];
+    const todayStr = DateTime.now().setZone(timezone).toISODate();
+    const tomorrowStr = DateTime.now().setZone(timezone).plus({ days: 1 }).toISODate();
+
+    for (let i = 0; i < maxDaysToScan && results.length < limit; i++) {
+      const targetDt = startDt.plus({ days: i });
+      const dateStr = targetDt.toISODate()!;
+      try {
+        const avail = await this.availabilityService.getAvailableSlots(
+          salonId,
+          serviceIds,
+          dateStr,
+          staffId,
+          excludeApptId,
+        );
+        if (avail.availableSlots && avail.availableSlots.length > 0) {
+          let title = targetDt.toFormat('EEE dd LLL');
+          if (dateStr === todayStr) {
+            title = `Today (${targetDt.toFormat('dd LLL')})`;
+          } else if (dateStr === tomorrowStr) {
+            title = `Tmrw (${targetDt.toFormat('dd LLL')})`;
+          }
+          results.push({
+            dateStr,
+            displayTitle: title,
+          });
+        }
+      } catch (err) {
+        // Skip invalid/error dates during scan
+      }
+    }
+
+    return results;
+  }
+
+  // Helper: Send Smart Date Fallback on Availability Failure
+  private async sendSmartDateFallback(
+    cleanNumber: string,
+    phoneNumberId: string | undefined,
+    salonId: string,
+    serviceIds: string[],
+    staffId: string | undefined,
+    timezone: string,
+    baseReply: string,
+    isReschedule: boolean = false,
+    excludeApptId?: string,
+  ) {
+    const openDates = await this.findNextAvailableDates(
+      salonId,
+      serviceIds,
+      staffId,
+      DateTime.now().setZone(timezone).toISODate()!,
+      timezone,
+      7,
+      2,
+      excludeApptId,
+    );
+
+    const prefix = isReschedule ? 'rdate_' : 'date_';
+    const buttons: { id: string; title: string }[] = openDates.map((od) => ({
+      id: `${prefix}${od.dateStr}`,
+      title: od.displayTitle,
+    }));
+
+    buttons.push({ id: 'btn_start', title: '🏠 Main Menu' });
+
+    let text = baseReply;
+    if (openDates.length > 0) {
+      text += `\n\nNext available open dates:`;
+    } else {
+      text += `\n\nNo available slots found in the next 7 days for this selection.`;
+    }
+
+    await this.sendMetaMessage(
+      cleanNumber,
+      {
+        bodyText: text,
+        interactiveType: 'button',
+        buttons,
+      },
+      phoneNumberId,
+      salonId,
+    );
+
+    return text;
+  }
+
+  // Helper: Check if customer already has a pending quick booking request
+  private async checkExistingPendingQuickBooking(
+    salon: any,
+    cleanNumber: string,
+    conversationId: string,
+    phoneNumberId?: string,
+  ): Promise<{ hasPending: boolean; replyMessage?: string }> {
+    const tz = salon.timezone || 'Asia/Kolkata';
+    const now = new Date();
+
+    const existingPending = await this.prisma.appointment.findFirst({
+      where: {
+        salonId: salon.id,
+        salonUser: { user: { phone: cleanNumber } },
+        status: AppointmentStatus.PENDING_ACCEPTANCE,
+        startAt: { gte: now },
+      },
+      include: { service: true, services: true },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (existingPending) {
+      const formattedTime = DateTime.fromJSDate(new Date(existingPending.startAt), { zone: tz }).toFormat('hh:mm a');
+      const svcName = (Array.isArray(existingPending.services) && existingPending.services.length > 0)
+        ? existingPending.services.map((s: any) => s.serviceNameSnapshot || s.service?.name || 'Service').join(' + ')
+        : (existingPending.service?.name || existingPending.serviceNameSnapshot || 'Quick Service');
+
+      const reply = `⏳ *PENDING REQUEST ALREADY EXISTS*\n\nYou already have an active Quick Booking request pending salon reception check-in approval at *${salon.name}*:\n\n• *Booking #:* *#${existingPending.appointmentNumber}*\n• *Service:* *${svcName}*\n• *Time:* *${formattedTime}*\n• *Status:* *Pending Reception Approval*\n\nPlease wait for the front desk to accept your request before creating a new one. 🙏`;
+
+      await this.sendMetaMessage(
+        cleanNumber,
+        {
+          bodyText: reply,
+          interactiveType: 'button',
+          buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
+        },
+        phoneNumberId,
+        salon.id,
+      );
+
+      await this.prisma.conversation.update({
+        where: { id: conversationId },
+        data: { state: ConversationState.START, quickCodeVerifiedAt: null },
+      });
+
+      return { hasPending: true, replyMessage: reply };
+    }
+
+    return { hasPending: false };
+  }
+
+  // Helper: Prompt Date Selection (Smart Availability-Aware Quick Date Buttons)
   private async promptDateSelection(
     conversationId: string,
     cleanNumber: string,
@@ -422,23 +575,45 @@ export class WhatsAppService {
     });
 
     const tz = salon.timezone || 'Asia/Kolkata';
-    const today = DateTime.now().setZone(tz);
-    const tomorrow = today.plus({ days: 1 });
-    const dayAfter = today.plus({ days: 2 });
+    const conv = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { selectedStaffId: true },
+    });
+
+    const openDates = await this.findNextAvailableDates(
+      salon.id,
+      [selectedService.id],
+      conv?.selectedStaffId || undefined,
+      DateTime.now().setZone(tz).toISODate()!,
+      tz,
+      7,
+      3,
+    );
 
     const reply = `📅 *Choose Appointment Date*\n\n✂️ Service: *${selectedService.name}* (₹${selectedService.price})\n👤 Specialist: *${selectedStaffName}*\n\nSelect a date for your visit below:`;
+
+    const buttons: { id: string; title: string }[] = openDates.map((od) => ({
+      id: `date_${od.dateStr}`,
+      title: od.displayTitle,
+    }));
+
+    if (buttons.length === 0) {
+      const today = DateTime.now().setZone(tz);
+      buttons.push(
+        { id: 'date_1', title: `Today (${today.toFormat('dd LLL')})` },
+        { id: 'date_2', title: `Tmrw (${today.plus({ days: 1 }).toFormat('dd LLL')})` },
+      );
+    }
+
     await this.sendMetaMessage(
       cleanNumber,
       {
         bodyText: reply,
         interactiveType: 'button',
-        buttons: [
-          { id: 'date_1', title: `Today (${today.toFormat('dd LLL')})` },
-          { id: 'date_2', title: `Tmrw (${tomorrow.toFormat('dd LLL')})` },
-          { id: 'date_3', title: dayAfter.toFormat('EEE dd LLL') },
-        ],
+        buttons,
       },
       phoneNumberId,
+      salon.id,
     );
 
     return { replyMessage: reply, state: ConversationState.SELECT_DATE };
@@ -660,7 +835,15 @@ export class WhatsAppService {
       );
 
       if (!availability.availableSlots || availability.availableSlots.length === 0) {
-        const reply = `😔 *Fully Booked Today!*\n\nWe don't have any available Quick Booking slots left for today (${todayDateStr}). Please check with our front desk for walk-in availability.`;
+        let reply: string;
+        if (availability.status === 'SALON_CLOSED' || (availability as any).status === 'STORE_CLOSED') {
+          const closureReason = availability.statusReason || 'The salon is closed today.';
+          reply = `🚫 *Salon Closed Today!*\n\n*${salon.name}* is not open today (${todayDateStr}).\n\n📋 *Reason:* ${closureReason}\n\nPlease visit us on our next working day. We look forward to seeing you! 🙏`;
+        } else if (availability.status === 'NO_QUALIFIED_STAFF' || availability.status === 'STAFF_UNAVAILABLE') {
+          reply = `💈 *Specialist Unavailable Today!*\n\nAll specialists for this service at *${salon.name}* are currently on leave or unavailable today (${todayDateStr}).\n\nPlease try a different service or visit us on our next working day. 🙏`;
+        } else {
+          reply = `😔 *Fully Booked Today!*\n\nWe don't have any available Quick Booking slots left for today (${todayDateStr}). Please check with our front desk for walk-in availability.`;
+        }
         await this.sendMetaMessage(
           cleanNumber,
           {
@@ -2373,6 +2556,11 @@ We look forward to seeing you earlier today.`;
     // -------------------------------------------------------------
     switch (conversation.state) {
       case ConversationState.QUICK_BOOK_CODE: {
+        const pendingCheck = await this.checkExistingPendingQuickBooking(salon, cleanNumber, conversation.id, phoneNumberId);
+        if (pendingCheck.hasPending) {
+          return { replyMessage: pendingCheck.replyMessage!, state: ConversationState.START };
+        }
+
         const verifyResult = await this.quickCodeService.verifyCode(
           salonId,
           cleanNumber,
@@ -2431,6 +2619,11 @@ We look forward to seeing you earlier today.`;
       }
 
       case ConversationState.QUICK_BOOK_CONFIRM: {
+        const pendingCheck = await this.checkExistingPendingQuickBooking(salon, cleanNumber, conversation.id, phoneNumberId);
+        if (pendingCheck.hasPending) {
+          return { replyMessage: pendingCheck.replyMessage!, state: ConversationState.START };
+        }
+
         const now = new Date();
         const isContextValid =
           conversation.quickCodeVerifiedAt &&
@@ -2921,11 +3114,20 @@ We look forward to seeing you earlier today.`;
         const today = DateTime.now().setZone(tz);
         let targetDate = today;
 
-        if (input === 'rdate_1' || input === 'date_1' || input === '1' || normalized.includes('today')) {
+        if (input.startsWith('rdate_') || input.startsWith('date_')) {
+          const rawDateStr = input.replace('rdate_', '').replace('date_', '');
+          if (rawDateStr === '1') targetDate = today;
+          else if (rawDateStr === '2') targetDate = today.plus({ days: 1 });
+          else if (rawDateStr === '3') targetDate = today.plus({ days: 2 });
+          else {
+            const parsed = DateTime.fromISO(rawDateStr, { zone: tz });
+            if (parsed.isValid) targetDate = parsed;
+          }
+        } else if (input === '1' || normalized.includes('today')) {
           targetDate = today;
-        } else if (input === 'rdate_2' || input === 'date_2' || input === '2' || normalized.includes('tmrw') || normalized.includes('tomorrow')) {
+        } else if (input === '2' || normalized.includes('tmrw') || normalized.includes('tomorrow')) {
           targetDate = today.plus({ days: 1 });
-        } else if (input === 'rdate_3' || input === 'date_3' || input === '3') {
+        } else if (input === '3') {
           targetDate = today.plus({ days: 2 });
         } else {
           const parsed = DateTime.fromISO(input, { zone: tz });
@@ -2957,7 +3159,6 @@ We look forward to seeing you earlier today.`;
           conversation.activeAppointmentId || undefined,
         );
 
-
         if (availability.availableSlots.length === 0) {
           let reply = `⚠️ No available slots on *${targetDate.toFormat('dd LLL, EEEE')}*. Please choose another date:`;
           if (availability.status === 'SALON_CLOSED') {
@@ -2970,19 +3171,18 @@ We look forward to seeing you earlier today.`;
             reply = `⚠️ This service is currently unavailable for booking. Please choose another date or service:`;
           }
 
-          await this.sendMetaMessage(
+          const replyMsg = await this.sendSmartDateFallback(
             cleanNumber,
-            {
-              bodyText: reply,
-              interactiveType: 'button',
-              buttons: [
-                { id: 'rdate_1', title: 'Today' },
-                { id: 'rdate_2', title: 'Tomorrow' },
-              ],
-            },
             phoneNumberId,
+            salonId,
+            Array.isArray(rescheduleServiceIds) ? rescheduleServiceIds : [rescheduleServiceIds],
+            conversation.selectedStaffId || undefined,
+            tz,
+            reply,
+            true,
+            conversation.activeAppointmentId || undefined,
           );
-          return { replyMessage: reply, state: ConversationState.SELECT_RESCHEDULE_DATE };
+          return { replyMessage: replyMsg, state: ConversationState.SELECT_RESCHEDULE_DATE };
         }
 
         await this.prisma.conversation.update({
@@ -3515,11 +3715,25 @@ We look forward to seeing you earlier today.`;
         const today = DateTime.now().setZone(tz);
         let targetDate = today;
 
-        if (input === 'date_1' || input === '1' || normalized.includes('today')) {
+        if (input.startsWith('date_') || input.startsWith('rdate_')) {
+          const rawDateStr = input.replace('date_', '').replace('rdate_', '');
+          if (rawDateStr === '1') {
+            targetDate = today;
+          } else if (rawDateStr === '2') {
+            targetDate = today.plus({ days: 1 });
+          } else if (rawDateStr === '3') {
+            targetDate = today.plus({ days: 2 });
+          } else {
+            const parsed = DateTime.fromISO(rawDateStr, { zone: tz });
+            if (parsed.isValid) {
+              targetDate = parsed;
+            }
+          }
+        } else if (input === '1' || normalized.includes('today')) {
           targetDate = today;
-        } else if (input === 'date_2' || input === '2' || normalized.includes('tmrw') || normalized.includes('tomorrow')) {
+        } else if (input === '2' || normalized.includes('tmrw') || normalized.includes('tomorrow')) {
           targetDate = today.plus({ days: 1 });
-        } else if (input === 'date_3' || input === '3') {
+        } else if (input === '3') {
           targetDate = today.plus({ days: 2 });
         } else {
           const parsed = DateTime.fromISO(input, { zone: tz });
@@ -3586,19 +3800,17 @@ We look forward to seeing you earlier today.`;
             reply = `⚠️ Our specialists are not available on *${targetDate.toFormat('dd LLL, EEEE')}*. Please pick another date:`;
           }
 
-          await this.sendMetaMessage(
+          const replyMsg = await this.sendSmartDateFallback(
             cleanNumber,
-            {
-              bodyText: reply,
-              interactiveType: 'button',
-              buttons: [
-                { id: 'date_1', title: 'Today' },
-                { id: 'date_2', title: 'Tomorrow' },
-              ],
-            },
             phoneNumberId,
+            salonId,
+            [conversation.selectedServiceId!],
+            conversation.selectedStaffId || undefined,
+            tz,
+            reply,
+            false,
           );
-          return { replyMessage: reply, state: ConversationState.SELECT_DATE };
+          return { replyMessage: replyMsg, state: ConversationState.SELECT_DATE };
         }
 
         await this.prisma.conversation.update({
@@ -3685,19 +3897,17 @@ We look forward to seeing you earlier today.`;
             reply = `⚠️ *Service Unavailable*\n\nThis service is currently unavailable for online booking. Please choose another service:`;
           }
 
-          await this.sendMetaMessage(
+          const replyMsg = await this.sendSmartDateFallback(
             cleanNumber,
-            {
-              bodyText: reply,
-              interactiveType: 'button',
-              buttons: [
-                { id: 'date_1', title: 'Today' },
-                { id: 'date_2', title: 'Tomorrow' },
-              ],
-            },
             phoneNumberId,
+            salonId,
+            [conversation.selectedServiceId!],
+            conversation.selectedStaffId || undefined,
+            tz,
+            reply,
+            false,
           );
-          return { replyMessage: reply, state: ConversationState.SELECT_DATE };
+          return { replyMessage: replyMsg, state: ConversationState.SELECT_DATE };
         }
 
         const cleanInput = input.trim().toLowerCase();
