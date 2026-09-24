@@ -1793,22 +1793,22 @@ You have accumulated *3 penalty strikes* this year for missed appointments. Auto
 
     if (input === 'remind_10m_on_way' || input.startsWith('late_on_way')) {
       const activeAppts = await this.findActiveUpcomingAppointments(salonId, cleanNumber);
-      if (activeAppts.length === 0) {
-        const reply = `This option has expired. You can check your last booking or start a new one.`;
+      if (activeAppts.length === 0 || activeAppts[0].clientEtaStatus === ClientEtaStatus.ON_THE_WAY) {
+        const reply = `This option has expired. You can check your active booking or start a new one.`;
         await this.sendMetaMessage(
           cleanNumber,
           {
             bodyText: reply,
             interactiveType: 'button',
             buttons: [
-              { id: 'btn_book', title: '📋 Check Last Booking' },
+              { id: 'btn_book', title: '📋 Check Active Booking' },
               { id: 'btn_start', title: '📅 New Booking' },
             ],
           },
           phoneNumberId,
           salonId,
         );
-        return { replyMessage: reply, state: ConversationState.START };
+        return { replyMessage: reply, state: conversation.state };
       }
 
       await this.prisma.appointment.update({
@@ -1843,22 +1843,22 @@ You have accumulated *3 penalty strikes* this year for missed appointments. Auto
         if (activeAppts.length > 0) targetAppt = activeAppts[0];
       }
 
-      if (!targetAppt) {
-        const reply = `This option has expired. You can check your last booking or start a new one.`;
+      if (!targetAppt || targetAppt.clientEtaStatus === ClientEtaStatus.ON_THE_WAY) {
+        const reply = `This option has expired. You can check your active booking or start a new one.`;
         await this.sendMetaMessage(
           cleanNumber,
           {
             bodyText: reply,
             interactiveType: 'button',
             buttons: [
-              { id: 'btn_book', title: '📋 Check Last Booking' },
+              { id: 'btn_book', title: '📋 Check Active Booking' },
               { id: 'btn_start', title: '📅 New Booking' },
             ],
           },
           phoneNumberId,
           salonId,
         );
-        return { replyMessage: reply, state: ConversationState.START };
+        return { replyMessage: reply, state: conversation.state };
       }
 
       await this.appointmentsService.updateStatus(
@@ -2425,7 +2425,6 @@ We look forward to seeing you earlier today.`;
     // -------------------------------------------------------------
     const isGlobalButton =
       ['btn_menu', 'btn_start', 'btn_book', 'btn_quick_book', 'btn_services'].includes(input) ||
-      input.startsWith('remind_') ||
       input.startsWith('propose_') ||
       input.startsWith('late_') ||
       input.startsWith('move_up_');
@@ -2458,7 +2457,7 @@ We look forward to seeing you earlier today.`;
             isAllowedForState = ['btn_confirm_yes', 'btn_confirm_no', 'btn_confirm'].includes(input);
             break;
           case ConversationState.ACTIVE_HUB:
-            isAllowedForState = ['btn_add_service', 'btn_add_addon', 'btn_reschedule', 'btn_cancel_appt', 'btn_running_late', 'btn_eta_late_15'].includes(input) || input.startsWith('svc_');
+            isAllowedForState = ['btn_add_service', 'btn_add_addon', 'btn_reschedule', 'btn_cancel_appt', 'btn_running_late', 'btn_eta_late_15'].includes(input) || input.startsWith('svc_') || input.startsWith('remind_');
             break;
           case ConversationState.CONFIRM_CANCEL:
             isAllowedForState = ['btn_cancel_yes', 'btn_cancel_no'].includes(input);
