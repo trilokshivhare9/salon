@@ -281,9 +281,10 @@ export class RealtimeNotifier {
         if (payload.type === 'NEW_BOOKING') {
           const appt = payload.data;
           const clientName = appt?.customer?.name || 'New Client';
-          const serviceName = (Array.isArray(appt?.services) && appt.services.length > 0)
-            ? appt.services.map((s) => s.serviceNameSnapshot || s.service?.name || 'Service').join(' + ')
-            : (appt?.service?.name || appt?.serviceNameSnapshot || 'Salon Service');
+          const svcs = (typeof window !== 'undefined' && window.getApptServices) ? window.getApptServices(appt) : [];
+          const serviceName = svcs.length > 0
+            ? svcs.map((s) => s.name).join(' + ')
+            : (appt?.serviceNameSnapshot || appt?.service?.name || 'Salon Service');
           const specialistName = appt?.staff?.name || appt?.stylist?.name || 'Assigned Specialist';
           const timeStr = appt?.startTime ? formatTime12h(appt.startTime) : 'Today';
           const price = appt?.price ? ` • ₹${appt.price}` : '';
@@ -349,7 +350,10 @@ export class RealtimeNotifier {
         ) {
           const appt = payload.data;
           const clientName = appt?.customer?.name || 'Client';
-          const serviceName = appt?.service?.name || appt?.serviceNameSnapshot || 'Service';
+          const svcs = (typeof window !== 'undefined' && window.getApptServices) ? window.getApptServices(appt) : [];
+          const serviceName = svcs.length > 0
+            ? svcs.map((s) => s.name).join(' + ')
+            : (appt?.serviceNameSnapshot || appt?.service?.name || 'Service');
           const timeStr = appt?.startTime ? formatTime12h(appt.startTime) : '';
           const reason = appt?.cancellationReason || appt?.reason || 'Reservation cancelled';
           const eventKey = `cancel:${appt?.id}:${Date.now()}`;
