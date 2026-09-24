@@ -1709,6 +1709,109 @@ export class SalonDashboard {
           statusText = `In Chair: ${inService.customer?.name || 'Client'}`;
         }
 
+        const parseTime = (timeStr) => {
+          if (!timeStr) return 0;
+          const [h, m] = timeStr.split(':').map(Number);
+          return h * 60 + m;
+        };
+        const formatTimeMins = (mins) => {
+          const h = Math.floor(mins / 60);
+          const m = mins % 60;
+          const ampm = h >= 12 ? 'PM' : 'AM';
+          const h12 = h % 12 || 12;
+          return `${h12}:${m.toString().padStart(2, '0')} ${ampm}`;
+        };
+
+        const daysArr = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
+        const dayOfWeek = daysArr[new Date(todayIso).getDay()];
+
+        let shiftStart = '09:00';
+        let shiftEnd = '21:00';
+        let shiftBreaks = [];
+        let isOffDay = false;
+
+        if (st.workingHours && st.workingHours.length > 0) {
+          const stHours = st.workingHours.find(h => h.dayOfWeek === dayOfWeek);
+          if (stHours) {
+            isOffDay = stHours.isOff;
+            if (!isOffDay) {
+              shiftStart = stHours.startTime || shiftStart;
+              shiftEnd = stHours.endTime || shiftEnd;
+            }
+            shiftBreaks = Array.isArray(stHours.breaks) ? stHours.breaks : [];
+          }
+        } else if (this.salonProfile && this.salonProfile.workingHours) {
+          const salonHours = this.salonProfile.workingHours.find(h => h.dayOfWeek === dayOfWeek);
+          if (salonHours) {
+            isOffDay = salonHours.isOff;
+            if (!isOffDay) {
+              shiftStart = salonHours.startTime || shiftStart;
+              shiftEnd = salonHours.endTime || shiftEnd;
+            }
+            shiftBreaks = Array.isArray(salonHours.breaks) ? salonHours.breaks : [];
+          }
+        }
+
+        if (st.breaks && st.breaks.length > 0) {
+           shiftBreaks = st.breaks;
+        }
+
+        let startMins = parseTime(shiftStart);
+        let endMins = parseTime(shiftEnd);
+        if (endMins <= startMins) endMins = startMins + 720;
+        let totalShiftMins = endMins - startMins;
+        if (totalShiftMins <= 0) totalShiftMins = 720; 
+
+        const breakBlocks = shiftBreaks.map(b => {
+          const bStart = parseTime(b.startTime);
+          const bEnd = parseTime(b.endTime);
+          let leftPerc = ((bStart - startMins) / totalShiftMins) * 100;
+          let widthPerc = ((bEnd - bStart) / totalShiftMins) * 100;
+          if (leftPerc < 0) { widthPerc += leftPerc; leftPerc = 0; }
+          if (leftPerc + widthPerc > 100) widthPerc = 100 - leftPerc;
+          if (widthPerc <= 0 || leftPerc >= 100) return '';
+          return `<div style="position: absolute; top: 0; bottom: 0; left: ${leftPerc}%; width: ${widthPerc}%; background: repeating-linear-gradient(45deg, rgba(251,113,133,0.3), rgba(251,113,133,0.3) 4px, transparent 4px, transparent 8px); border-radius: 4px; border-left: 1px solid #fb7185; border-right: 1px solid #fb7185; z-index: 2;" title="${b.title || 'Break'} (${formatTimeMins(bStart)} - ${formatTimeMins(bEnd)})"></div>`;
+        }).join('');
+
+        const apptBlocks = todayAppts
+          .filter(a => ['CONFIRMED', 'CHECKED_IN', 'IN_SERVICE', 'COMPLETED'].includes(a.status))
+          .map(a => {
+            const aDate = new Date(a.startAt || a.startTime);
+            const aStartMins = aDate.getHours() * 60 + aDate.getMinutes();
+            const duration = a.duration || a.service?.duration || 30;
+            const aEndMins = aStartMins + duration;
+            
+            let leftPerc = ((aStartMins - startMins) / totalShiftMins) * 100;
+            let widthPerc = (duration / totalShiftMins) * 100;
+            if (leftPerc < 0) { widthPerc += leftPerc; leftPerc = 0; }
+            if (leftPerc + widthPerc > 100) widthPerc = 100 - leftPerc;
+            if (widthPerc <= 0 || leftPerc >= 100) return '';
+            
+            let color = '#3b82f6';
+            if (a.status === 'IN_SERVICE') color = '#eab308';
+            if (a.status === 'COMPLETED') color = '#22c55e';
+            
+            return `<div style="position: absolute; top: 0; bottom: 0; left: ${leftPerc}%; width: ${widthPerc}%; background: ${color}; border-radius: 4px; opacity: 0.9; box-shadow: 0 0 0 1px rgba(0,0,0,0.5); z-index: 3; cursor: help;" title="${a.service?.name || 'Service'} (${formatTimeMins(aStartMins)} - ${formatTimeMins(aEndMins)}) - ${a.status}"></div>`;
+          }).join('');
+
+        const timelineHtml = `
+          <div style="margin-top: 14px;">
+            <div style="display: flex; justify-content: space-between; font-size: 0.65rem; color: var(--text-muted); margin-bottom: 6px; font-weight: 600;">
+              <span>${formatTimeMins(startMins)}</span>
+              <span>${isOffDay ? 'DAY OFF' : formatTimeMins(endMins)}</span>
+            </div>
+            <div style="position: relative; width: 100%; height: 22px; background: rgba(0,0,0,0.4); border-radius: 6px; overflow: hidden; border: 1px solid var(--border-subtle); box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);">
+              ${isOffDay ? `<div style="position: absolute; inset: 0; background: rgba(251,113,133,0.1); display: flex; align-items: center; justify-content: center; font-size: 0.65rem; color: #fb7185;">No Working Hours Scheduled</div>` : breakBlocks + apptBlocks}
+            </div>
+            <div style="display: flex; gap: 12px; margin-top: 8px; font-size: 0.65rem; color: var(--text-muted); justify-content: center;">
+              <div style="display: flex; align-items: center; gap: 4px;"><span style="display:inline-block;width:8px;height:8px;background:#3b82f6;border-radius:2px;"></span>Booked</div>
+              <div style="display: flex; align-items: center; gap: 4px;"><span style="display:inline-block;width:8px;height:8px;background:#eab308;border-radius:2px;"></span>In Chair</div>
+              <div style="display: flex; align-items: center; gap: 4px;"><span style="display:inline-block;width:8px;height:8px;background:#22c55e;border-radius:2px;"></span>Done</div>
+              <div style="display: flex; align-items: center; gap: 4px;"><span style="display:inline-block;width:8px;height:8px;background:repeating-linear-gradient(45deg, rgba(251,113,133,0.4), rgba(251,113,133,0.4) 3px, transparent 3px, transparent 6px);border-radius:2px;border:1px solid #fb7185;"></span>Break</div>
+            </div>
+          </div>
+        `;
+
         return `
                   <div class="staff-card" style="display: flex; flex-direction: column; justify-content: space-between;">
                     <div>
@@ -1740,9 +1843,7 @@ export class SalonDashboard {
                         <div style="display: flex; justify-content: space-between; font-size: 0.74rem; color: var(--text-muted); margin-top: 6px;">
                           <span>Today: <strong>${confirmedCount}</strong> Active • <strong>${completedCount}</strong> Done</span>
                         </div>
-                        <div class="progress-bar-bg" style="margin-top: 6px; height: 4px;">
-                          <div class="progress-bar-fill" style="width: ${Math.min(todayAppts.length * 20, 100)}%;"></div>
-                        </div>
+                        ${timelineHtml}
                       </div>
 
                       <div style="margin-bottom: 12px;">
