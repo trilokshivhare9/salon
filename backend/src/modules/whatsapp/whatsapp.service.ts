@@ -213,14 +213,13 @@ export class WhatsAppService {
     },
     phoneNumberId?: string,
     salonId?: string,
-  ) {
+  ): Promise<boolean> {
     let accessToken =
       this.configService.get<string>('whatsapp.accessToken') ||
       process.env.WHATSAPP_ACCESS_TOKEN;
     let phoneId =
       phoneNumberId ||
-      this.configService.get<string>('whatsapp.phoneNumberId') ||
-      process.env.WHATSAPP_PHONE_NUMBER_ID;
+      this.configService.get<string>('whatsapp.phoneNumberId');
 
     // Strict Multi-Tenant DB Resolution: Use salon's own linked WhatsApp account from DB
     if (salonId) {
@@ -250,11 +249,11 @@ export class WhatsAppService {
             messageText: payload.bodyText || payload.textBody || '',
             interactiveId: payload.interactiveType || null,
             status: 'FAILED',
-            errorMessage: 'No WhatsApp Phone ID registered for this salon.',
+            errorMessage: 'No WhatsApp Phone ID registered for this salon in DB.',
           },
         })
         .catch(() => { });
-      return;
+      return false;
     }
 
     if (!accessToken) {
@@ -274,7 +273,7 @@ export class WhatsAppService {
           },
         })
         .catch(() => { });
-      return;
+      return false;
     }
 
     try {
@@ -424,8 +423,10 @@ export class WhatsAppService {
           `[WhatsAppService] ✅ Outbound WhatsApp successfully sent to ${toPhone} | Message ID: ${data?.messages?.[0]?.id}`,
         );
       }
+      return res.ok;
     } catch (err) {
       this.logger.error('[WhatsAppService] Network exception sending Meta Cloud API message:', err);
+      return false;
     }
   }
 

@@ -242,12 +242,6 @@ export class SalonsService {
     }
 
     // 2. Uniqueness check & Live Meta Verification: WhatsApp Phone ID (if provided)
-    const platformPhoneId =
-      this.configService.get<string>('whatsapp.phoneNumberId') ||
-      process.env.WHATSAPP_PHONE_NUMBER_ID ||
-      '1266237649907696';
-
-    let shouldCreateWhatsAppAccount = false;
     let waId = dto.whatsappPhoneNumberId?.trim() || null;
     if (waId) {
       // Verify against Meta Graph API in real-time
@@ -257,16 +251,9 @@ export class SalonsService {
         where: { phoneNumberId: waId },
       });
       if (existingWa) {
-        if (waId === platformPhoneId) {
-          // Central shared platform bot is already present in DB
-          shouldCreateWhatsAppAccount = false;
-        } else {
-          throw new ConflictException(
-            `Meta WhatsApp Phone Number ID '${waId}' is already linked to another salon.`,
-          );
-        }
-      } else {
-        shouldCreateWhatsAppAccount = true;
+        throw new ConflictException(
+          `Meta WhatsApp Phone Number ID '${waId}' is already linked to another salon.`,
+        );
       }
     }
 
@@ -347,8 +334,8 @@ export class SalonsService {
         });
       }
 
-      // 4. Configure WhatsApp Meta Account if waId is present and not shared duplicate
-      if (waId && shouldCreateWhatsAppAccount) {
+      // 4. Configure WhatsApp Meta Account if waId is present
+      if (waId) {
         await tx.whatsAppAccount.create({
           data: {
             salonId: salon.id,

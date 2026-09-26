@@ -98,7 +98,7 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
 
           const message = `⏰ *APPOINTMENT REMINDER*\n\nHello *${user.name || 'Customer'}*, your upcoming visit at *${salon.name}* is in ~2 hours:\n\n• *Service:* *${appt.serviceNameSnapshot || appt.service?.name}* (₹${appt.price})\n• *Stylist:* *${appt.stylist?.name || 'Stylist'}*\n• *Date:* *${dateStr}*\n• *Time:* *${timeStr}*\n\n📍 *${salon.name}*\n${salon.address || ''}\n\nPlease confirm your arrival so we keep your chair ready!`;
 
-          await this.whatsAppService.sendMetaMessage(
+          const sent = await this.whatsAppService.sendMetaMessage(
             user.phone,
             {
               bodyText: message,
@@ -113,12 +113,13 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
             salon.id,
           );
 
-          await this.prisma.appointment.update({
-            where: { id: appt.id },
-            data: { reminder2hSentAt: new Date() },
-          });
-
-          stage1Count++;
+          if (sent) {
+            await this.prisma.appointment.update({
+              where: { id: appt.id },
+              data: { reminder2hSentAt: new Date() },
+            });
+            stage1Count++;
+          }
         }
 
         // -----------------------------------------------------------------------
@@ -160,7 +161,7 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
 
           const message = `🚨 *URGENT: ARRIVAL CHECK-IN REQUIRED*\n\nHi *${user.name || 'Customer'}*, your appointment at *${salon.name}* with *${appt.stylist?.name || 'Stylist'}* starts in ~15 mins (*${timeStr}*).\n\n⚠️ *Arrival Notice:* We hold your chair strictly for 5 minutes after start time before automatic slot cancellation.\n\nPlease update your status below:`;
 
-          await this.whatsAppService.sendMetaMessage(
+          const sent = await this.whatsAppService.sendMetaMessage(
             user.phone,
             {
               bodyText: message,
@@ -175,12 +176,13 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
             salon.id,
           );
 
-          await this.prisma.appointment.update({
-            where: { id: appt.id },
-            data: { reminder10mSentAt: new Date() },
-          });
-
-          stage2Count++;
+          if (sent) {
+            await this.prisma.appointment.update({
+              where: { id: appt.id },
+              data: { reminder10mSentAt: new Date() },
+            });
+            stage2Count++;
+          }
         }
 
         // -----------------------------------------------------------------------
