@@ -172,11 +172,7 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
       this.prisma.appointment.findMany({
         where: {
           salonId,
-          OR: [
-            { startAt: { gte: dayStart, lte: dayEnd } },
-            { appointmentDate: dateUtcMidnight },
-            { appointmentDate: dayStart },
-          ],
+          startAt: { gte: dayStart, lte: dayEnd },
         },
         include: {
           salonUser: {

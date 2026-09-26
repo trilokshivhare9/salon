@@ -446,7 +446,7 @@ export class ApiClient {
   // Salon Dashboard & Appointments
   static async getDashboardSummary(dateStr, bypassCache = false) {
     const endpoint = dateStr ? `/reports/dashboard?date=${dateStr}` : '/reports/dashboard';
-    return this.request(endpoint, {}, bypassCache ? 0 : 20000); // 20-sec cache for superfast date flipping
+    return this.request(endpoint, {}, (bypassCache || dateStr) ? 0 : 5000);
   }
 
   static async getAppointments(filters = {}) {
