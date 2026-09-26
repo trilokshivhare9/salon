@@ -471,7 +471,7 @@ export class SalonDashboard {
       }
     } else {
       try {
-        const summary = await ApiClient.getDashboardSummary(this.selectedDate);
+        const summary = await ApiClient.getDashboardSummary(this.selectedDate, true);
         this.summaryData = summary || fallbackSummary;
       } catch (err) {
         console.warn('[Dashboard] date switch error:', err);
@@ -3265,18 +3265,7 @@ export class SalonDashboard {
       });
     });
 
-    // Date Navigation Controls
-    const handleDateChange = async (newDate) => {
-      if (!newDate || this.selectedDate === newDate) return;
-      this.selectedDate = newDate;
-      try { await this.loadData(); } finally { this.render(); }
-    };
-    document.getElementById('btn-date-prev')?.addEventListener('click', () => handleDateChange(this.addDaysToDateString(this.selectedDate, -1)));
-    document.getElementById('btn-date-next')?.addEventListener('click', () => handleDateChange(this.addDaysToDateString(this.selectedDate, 1)));
-    document.getElementById('btn-date-today')?.addEventListener('click', () => handleDateChange(this.getLocalDateString()));
-    document.getElementById('dashboard-date-picker')?.addEventListener('change', (e) => {
-      if (e.target.value) handleDateChange(e.target.value);
-    });
+    // Date Navigation Controls handled above
 
     // Refresh queue
     document.getElementById('btn-refresh-queue')?.addEventListener('click', async () => {
