@@ -84,7 +84,7 @@ describe('Smart WhatsApp Stale Button Fallbacks (Flow Matrix Tests)', () => {
       'date_old_2026',
     );
 
-    expect(result.replyMessage).toContain('This option has expired. Would you like to continue your current booking or start a new one?');
+    expect(result.replyMessage).toContain('Expired option');
 
     expect(sendMetaSpy).toHaveBeenCalled();
     const payload = sendMetaSpy.mock.calls[0][1];

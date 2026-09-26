@@ -1626,8 +1626,9 @@ export class SalonDashboard {
       const appts = this.summaryData?.todayAppointments || [];
       const todayClosure = this.getTodayClosure();
 
-      return `
-        ${todayClosure ? `
+      let closureHtml = '';
+      if (todayClosure) {
+        closureHtml = `
           <div style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: var(--radius-md); padding: 14px 18px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; box-shadow: 0 8px 24px rgba(239, 68, 68, 0.15);">
             <div style="display: flex; align-items: center; gap: 10px; color: #f87171; font-size: 0.88rem; font-weight: 700;">
               <span style="font-size: 1.2rem;">🚨</span>
@@ -1637,8 +1638,393 @@ export class SalonDashboard {
               Manage Closures & Holidays →
             </button>
           </div>
-        ` : ''}
+        `;
+      }
 
+      let contentHtml = '';
+      if (staff.length === 0) {
+        contentHtml = `
+            <div style="text-align: center; padding: 48px 20px; background: rgba(0,0,0,0.2); border-radius: var(--radius-md); border: 1px dashed var(--border-subtle);">
+              <div style="margin-bottom: 14px;">
+                ${Icons.users({ size: 44, color: '#64748b' })}
+              </div>
+              <h4 style="color: #fff; margin-bottom: 6px; font-weight: 700;">No Stylists Added Yet</h4>
+              <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 16px;">Add your first staff member to start scheduling appointments and taking bookings.</p>
+              <button class="btn btn-primary btn-sm" id="btn-empty-add-staff" style="gap: 6px;">
+                ${Icons.plus({ size: 14 })}
+                <span>Add Stylist Member</span>
+              </button>
+            </div>
+        `;
+      } else {
+        const staffCardsHtml = staff.map((st) => {
+          const todayAppts = appts.filter((a) => (a.staff?.id || a.staffId) === st.id);
+          const inService = todayAppts.find((a) => a.status === 'IN_SERVICE');
+          const confirmedCount = todayAppts.filter((a) => ['CONFIRMED', 'CHECKED_IN', 'IN_SERVICE'].includes(a.status)).length;
+          const completedCount = todayAppts.filter((a) => a.status === 'COMPLETED').length;
+  
+          const todayIso = (this.selectedDate || new Date().toISOString().split('T')[0]);
+          const activeAbsence = (st.absences || []).find((ab) => {
+            if (ab.status !== 'ACTIVE') return false;
+            const sDate = (ab.startDate || ab.absenceDate || '').split('T')[0];
+            const eDate = (ab.endDate || ab.absenceDate || '').split('T')[0];
+            return todayIso >= sDate && todayIso <= eDate;
+          });
+          const isAbsentToday = !!activeAbsence;
+  
+          let statusDot = 'status-dot-free';
+          let statusText = 'Available / Free for Walk-ins';
+          if (todayClosure) {
+            statusDot = 'status-dot-busy';
+            statusText = `🚨 Store Closed Today (${todayClosure.reason})`;
+          } else if (isAbsentToday) {
+            statusDot = 'status-dot-busy';
+            const portionText = activeAbsence.leavePortion === 'FIRST_HALF' ? 'First Half'
+              : activeAbsence.leavePortion === 'SECOND_HALF' ? 'Second Half'
+              : activeAbsence.leavePortion === 'CUSTOM_HOURS' ? `Custom (${activeAbsence.customStartTime || ''}-${activeAbsence.customEndTime || ''})`
+              : 'Full Day';
+            statusText = `🚫 On Leave (${portionText})`;
+          } else if (st.status !== 'ACTIVE') {
+            statusDot = 'status-dot-off';
+            statusText = 'Inactive / Off-Duty';
+          } else if (inService) {
+            statusDot = 'status-dot-busy';
+            statusText = `In Chair: ${inService.customer?.name || 'Client'}`;
+          }
+  
+          const parseTime = (timeStr) => {
+            if (!timeStr) return 0;
+            const [h, m] = timeStr.split(':').map(Number);
+            return h * 60 + m;
+          };
+          const formatTimeMins = (mins) => {
+            const h = Math.floor(mins / 60);
+            const m = mins % 60;
+            const ampm = h >= 12 ? 'PM' : 'AM';
+            const h12 = h % 12 || 12;
+            return `${h12}:${m.toString().padStart(2, '0')} ${ampm}`;
+          };
+  
+          const daysArr = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
+          const dayOfWeek = daysArr[new Date(todayIso).getDay()];
+  
+          let shiftStart = '09:00';
+          let shiftEnd = '21:00';
+          let shiftBreaks = [];
+          let isOffDay = false;
+  
+          if (st.workingHours && st.workingHours.length > 0) {
+            const stHours = st.workingHours.find(h => h.dayOfWeek === dayOfWeek);
+            if (stHours) {
+              isOffDay = stHours.isOff;
+              if (!isOffDay) {
+                shiftStart = stHours.startTime || shiftStart;
+                shiftEnd = stHours.endTime || shiftEnd;
+              }
+              if (Array.isArray(stHours.breaks) && stHours.breaks.length > 0) {
+                shiftBreaks = stHours.breaks;
+              } else if (stHours.breakStartTime && stHours.breakEndTime) {
+                shiftBreaks = [{ startTime: stHours.breakStartTime, endTime: stHours.breakEndTime, title: 'Lunch' }];
+              }
+            }
+          } else if (this.salonProfile && this.salonProfile.workingHours) {
+            const salonHours = this.salonProfile.workingHours.find(h => h.dayOfWeek === dayOfWeek);
+            if (salonHours) {
+              isOffDay = salonHours.isOff;
+              if (!isOffDay) {
+                shiftStart = salonHours.startTime || shiftStart;
+                shiftEnd = salonHours.endTime || shiftEnd;
+              }
+              if (Array.isArray(salonHours.breaks) && salonHours.breaks.length > 0) {
+                shiftBreaks = salonHours.breaks;
+              } else if (salonHours.breakStartTime && salonHours.breakEndTime) {
+                shiftBreaks = [{ startTime: salonHours.breakStartTime, endTime: salonHours.breakEndTime, title: 'Lunch' }];
+              }
+            }
+          }
+  
+          let startMins = parseTime(shiftStart);
+          let endMins = parseTime(shiftEnd);
+          if (endMins <= startMins) endMins = startMins + 720;
+          let totalShiftMins = endMins - startMins;
+          if (totalShiftMins <= 0) totalShiftMins = 720; 
+  
+          // Premium Design Constants
+          const PIXELS_PER_MIN = 2.5;
+          const trackWidth = totalShiftMins * PIXELS_PER_MIN;
+  
+          // Axis Grid
+          let axisHtml = '';
+          for (let m = startMins; m <= endMins; m += 30) {
+              let leftPx = (m - startMins) * PIXELS_PER_MIN;
+              let isHour = (m % 60 === 0);
+              
+              if (isHour) {
+                 axisHtml += `<div style="position: absolute; left: ${leftPx}px; top: 20px; bottom: 0; width: 1px; background: rgba(255,255,255,0.15); z-index: 0;"></div>
+                              <div style="position: absolute; left: ${leftPx}px; top: 0px; transform: translateX(-50%); font-size: 0.7rem; color: #d4d4d8; font-weight: 600;">${formatTimeMins(m)}</div>`;
+              } else {
+                 axisHtml += `<div style="position: absolute; left: ${leftPx}px; top: 25px; height: 10px; width: 1px; background: rgba(255,255,255,0.1); z-index: 0;"></div>`;
+              }
+          }
+  
+          // Events
+          let dailyEvents = [];
+          shiftBreaks.forEach(b => {
+            dailyEvents.push({
+              type: 'break',
+              startMins: parseTime(b.startTime),
+              endMins: parseTime(b.endTime),
+              title: b.title || 'Break',
+            });
+          });
+  
+          todayAppts.filter(a => ['CONFIRMED', 'CHECKED_IN', 'IN_SERVICE', 'COMPLETED'].includes(a.status)).forEach(a => {
+              const aDate = new Date(a.startAt || a.startTime);
+              const aStartMins = aDate.getHours() * 60 + aDate.getMinutes();
+              const duration = a.duration || a.service?.duration || 30;
+              dailyEvents.push({
+                type: 'service',
+                startMins: aStartMins,
+                endMins: aStartMins + duration,
+                title: a.service?.name || 'Service',
+                customer: a.user?.name || a.customerName || 'Walk-in',
+                status: a.status
+              });
+          });
+  
+          // Sort events
+          dailyEvents.sort((a, b) => a.startMins - b.startMins);
+  
+          // Blocks and Gaps
+          let blocksHtml = '';
+          let gapsHtml = '';
+          let currentMins = startMins;
+          let serviceCounter = 1;
+  
+          let maxGap = 0;
+          let gapData = [];
+  
+          dailyEvents.forEach(ev => {
+             if (ev.startMins > currentMins) {
+                let gapDuration = ev.startMins - currentMins;
+                if (gapDuration >= 15) {
+                   gapData.push({ start: currentMins, end: ev.startMins, duration: gapDuration });
+                   if (gapDuration > maxGap) maxGap = gapDuration;
+                }
+             }
+             
+             if (ev.endMins > currentMins) {
+               const trueStart = Math.max(currentMins, ev.startMins);
+               let duration = ev.endMins - trueStart;
+               let leftPx = (trueStart - startMins) * PIXELS_PER_MIN;
+               let widthPx = duration * PIXELS_PER_MIN;
+               
+               if (leftPx < 0) { widthPx += leftPx; leftPx = 0; }
+               if (leftPx + widthPx > trackWidth) widthPx = trackWidth - leftPx;
+  
+               if (widthPx > 0) {
+                   if (ev.type === 'break') {
+                      blocksHtml += `<div style="position: absolute; top: 35px; left: ${leftPx}px; width: ${widthPx}px; height: 65px; background: #c4b5fd; border-radius: 10px; z-index: 2; padding: 6px 8px; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.3);">
+                         <div style="display: flex; justify-content: space-between; align-items: flex-start; width: 100%;">
+                           <span style="font-size: 0.55rem; font-weight: 800; color: #4c1d95; text-transform: uppercase; letter-spacing: 0.5px;">LUNCH BREAK</span>
+                           <span style="font-size: 0.55rem; font-weight: 700; color: #4c1d95; background: rgba(255,255,255,0.4); padding: 1px 4px; border-radius: 4px;">${duration}m</span>
+                         </div>
+                         <span style="font-size: 0.75rem; font-weight: 700; color: #4c1d95; margin-top: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">☕ ${ev.title}</span>
+                         <span style="font-size: 0.55rem; color: rgba(76,29,149,0.8); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Rest & Refuel</span>
+                      </div>`;
+                   } else {
+                      let bg = '#1e293b'; let text = '#f8fafc'; let subtext = '#94a3b8'; let pillBg = 'rgba(255,255,255,0.1)';
+                      if (ev.status === 'COMPLETED') { bg = '#6ee7b7'; text = '#064e3b'; subtext = '#065f46'; pillBg = 'rgba(255,255,255,0.4)'; }
+                      if (ev.status === 'IN_SERVICE') { bg = '#fcd34d'; text = '#78350f'; subtext = '#92400e'; pillBg = 'rgba(255,255,255,0.4)'; }
+                      
+                      blocksHtml += `<div style="position: absolute; top: 35px; left: ${leftPx}px; width: ${widthPx}px; height: 65px; background: ${bg}; border-radius: 10px; z-index: 3; padding: 6px 8px; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1);">
+                         <div style="display: flex; justify-content: space-between; align-items: flex-start; width: 100%;">
+                           <span style="font-size: 0.55rem; font-weight: 800; color: ${text}; text-transform: uppercase; letter-spacing: 0.5px;">SERVICE ${serviceCounter++}</span>
+                           <span style="font-size: 0.55rem; font-weight: 700; color: ${text}; background: ${pillBg}; padding: 1px 4px; border-radius: 4px;">${duration}m</span>
+                         </div>
+                         <span style="font-size: 0.75rem; font-weight: 700; color: ${text}; margin-top: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${ev.title}</span>
+                         <span style="font-size: 0.55rem; color: ${subtext}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">👤 ${ev.customer}</span>
+                      </div>`;
+                   }
+               }
+               currentMins = Math.max(currentMins, ev.endMins);
+             }
+          });
+  
+          if (currentMins < endMins) {
+              let gapDuration = endMins - currentMins;
+              if (gapDuration >= 15) {
+                  gapData.push({ start: currentMins, end: endMins, duration: gapDuration });
+                  if (gapDuration > maxGap) maxGap = gapDuration;
+              }
+          }
+  
+          gapData.forEach(g => {
+              let leftPx = (g.start - startMins) * PIXELS_PER_MIN;
+              let widthPx = g.duration * PIXELS_PER_MIN;
+              let isLargest = g.duration === maxGap && maxGap > 0;
+              
+              let color = isLargest ? '#fbbf24' : '#fb923c';
+              let title = isLargest ? '⚠️ LARGEST GAP' : 'WASTAGE TIME';
+              let subtitle = isLargest ? 'Opportunity Slot' : 'Chair Empty';
+              
+              gapsHtml += `
+              <div style="position: absolute; left: ${leftPx + 10}px; width: ${widthPx - 20}px; top: 105px; display: flex; flex-direction: column; align-items: center; z-index: 1;">
+                 <div style="width: 100%; height: 6px; border-left: 1.5px solid ${color}; border-right: 1.5px solid ${color}; border-top: 1.5px solid ${color}; border-radius: 3px 3px 0 0; opacity: 0.7;"></div>
+                 <div style="background: ${color}; width: 1.5px; height: 6px; opacity: 0.7;"></div>
+                 <span style="color: ${color}; font-size: 0.55rem; font-weight: 800; margin-top: 2px; letter-spacing: 0.5px; white-space: nowrap;">${title}</span>
+                 <span style="color: #e2e8f0; font-size: 0.65rem; font-weight: 600;">${g.duration >= 60 ? Math.floor(g.duration/60) + 'h ' + (g.duration%60) + 'm' : g.duration + ' min'}</span>
+                 <span style="color: #94a3b8; font-size: 0.5rem; font-weight: 500;">${subtitle}</span>
+              </div>
+              `;
+          });
+  
+          const now = new Date();
+          const nowMins = now.getHours() * 60 + now.getMinutes();
+          let currentTimeHtml = '';
+          if (nowMins >= startMins && nowMins <= endMins) {
+             let nowLeftPx = (nowMins - startMins) * PIXELS_PER_MIN;
+             currentTimeHtml = `
+               <div style="position: absolute; left: ${nowLeftPx}px; top: 20px; bottom: 0px; width: 1.5px; background: #fca5a5; z-index: 10; box-shadow: 0 0 8px rgba(252,165,165,0.8);">
+                  <div style="position: absolute; bottom: 0; left: -2.5px; width: 6px; height: 6px; border-radius: 50%; background: #fca5a5;"></div>
+               </div>
+               <div style="position: absolute; left: ${nowLeftPx}px; top: -10px; transform: translateX(-50%); background: #fca5a5; color: #7f1d1d; font-size: 0.55rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; z-index: 10; border: 1px solid #f87171;">NOW ${formatTimeMins(nowMins)}</div>
+             `;
+          }
+  
+          let trackAreaHtml = '';
+          if (isOffDay) {
+            trackAreaHtml = `
+              <div style="padding: 40px; text-align: center; font-size: 0.9rem; color: #fb7185; font-weight: 600;">
+                🚫 Not Scheduled / Day Off
+              </div>
+            `;
+          } else {
+            trackAreaHtml = `
+              <div style="width: 100%; overflow-x: auto; padding: 24px 20px 30px 20px; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.1) transparent; cursor: grab;">
+                 <div style="position: relative; width: ${trackWidth}px; height: 160px; background: #0f111a; border-radius: 8px; border: 1px solid rgba(255,255,255,0.03);">
+                    <div style="position: absolute; top: 20px; left: 0; right: 0; height: 1px; background: rgba(255,255,255,0.15);"></div>
+                    ${axisHtml}
+                    ${blocksHtml}
+                    ${gapsHtml}
+                    ${currentTimeHtml}
+                 </div>
+              </div>
+            `;
+          }
+
+          const timelineHtml = `
+            <div style="margin-top: 24px; margin-bottom: 12px; background: #151821; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05); overflow: hidden;">
+              <div style="padding: 16px 20px 0 20px;">
+                  <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px;">
+                      <div>
+                          <div style="display: flex; align-items: center; gap: 8px;">
+                              <span style="display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: rgba(52, 211, 153, 0.1); color: #34d399; border-radius: 6px;"><i class="fas fa-project-diagram" style="font-size: 10px;"></i></span>
+                              <h3 style="margin: 0; color: #f8fafc; font-size: 1.05rem; font-weight: 700;">Continuous Atelier Timeline & Wastage Matrix</h3>
+                              <span style="background: rgba(255,255,255,0.1); color: #cbd5e1; font-size: 0.55rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px;">PRO DESIGN</span>
+                          </div>
+                          <p style="margin: 4px 0 0 32px; color: #94a3b8; font-size: 0.65rem; max-width: 500px; line-height: 1.4;">Continuous linear temporal axis spanning exactly ${formatTimeMins(startMins)} to ${formatTimeMins(endMins)} with explicit service intervals, duration annotations, and idle wastage bracket indicators.</p>
+                      </div>
+                      <div style="display: flex; gap: 12px; flex-wrap: wrap; font-size: 0.6rem; font-weight: 600; color: #cbd5e1;">
+                          <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 12px; height: 12px; background: #6ee7b7; border-radius: 2px;"></div> Completed Service</div>
+                          <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 12px; height: 12px; background: #fcd34d; border-radius: 2px;"></div> Active In-Progress</div>
+                          <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 12px; height: 12px; background: #c4b5fd; border-radius: 2px;"></div> Repose / Lunch</div>
+                          <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 12px; height: 12px; background: #1e293b; border-radius: 2px; border: 1px solid #334155;"></div> Future / Booked</div>
+                      </div>
+                  </div>
+              </div>
+              ${trackAreaHtml}
+            </div>
+          `;
+  
+          return `
+                    <div class="staff-card" style="display: flex; flex-direction: column; justify-content: space-between;">
+                      <div>
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+                          <div style="display: flex; align-items: center; gap: 12px;">
+                            <img src="${st.profileImageUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'}" style="width: 44px; height: 44px; border-radius: 50%; object-fit: cover; border: 2px solid rgba(255,255,255,0.12);" />
+                            <div>
+                              <div style="font-weight: 700; font-size: 1.05rem; color: #fff; line-height: 1.2;">${st.name || 'Specialist'}</div>
+                              <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">${st.phone || 'No phone'}</div>
+                            </div>
+                          </div>
+                          <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
+                            <span class="badge ${st.status === 'ACTIVE' ? 'badge-completed' : 'badge-cancelled'}" style="font-size: 0.65rem;">
+                              ${st.status || 'ACTIVE'}
+                            </span>
+                            ${isAbsentToday ? `
+                              <span class="badge" style="background: rgba(251, 113, 133, 0.15); color: #fb7185; border: 1px solid rgba(251,113,133,0.3); font-size: 0.62rem; font-weight: 700;">
+                                🚫 ON LEAVE
+                              </span>
+                            ` : ''}
+                          </div>
+                        </div>
+  
+                        <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 12px;">
+                          <div style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; font-weight: 600;">
+                            <span class="status-dot ${statusDot}"></span>
+                            <span style="color: #fff;">${statusText}</span>
+                          </div>
+                          <div style="display: flex; justify-content: space-between; font-size: 0.74rem; color: var(--text-muted); margin-top: 6px;">
+                            <span>Today: <strong>${confirmedCount}</strong> Active • <strong>${completedCount}</strong> Done</span>
+                          </div>
+                          ${timelineHtml}
+                        </div>
+  
+                        <div style="margin-bottom: 12px;">
+                          <div class="meta-bullet-row">
+                            <span style="color: var(--text-muted); font-size: 0.75rem;">QUALIFIED SERVICES (${st.services?.length || 0}):</span>
+                            <span style="color: var(--text-secondary); font-size: 0.78rem; font-weight: 500;">
+                              ${(st.services && st.services.length > 0)
+                                ? st.services.map((svc) => svc.service?.name || 'Service').join(', ')
+                                : 'None assigned'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+  
+                      <div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px;">
+                          <button class="btn btn-secondary btn-sm btn-edit-staff" data-id="${st.id}" data-name="${st.name || ''}" data-phone="${st.phone || ''}" data-email="${st.email || ''}" data-img="${st.profileImageUrl || ''}" style="font-size: 0.76rem; gap: 4px; justify-content: center;">
+                            ${Icons.edit({ size: 13 })}
+                            <span>Edit Info</span>
+                          </button>
+                          <button class="btn btn-secondary btn-sm btn-assign-services" data-id="${st.id}" data-name="${st.name || ''}" style="font-size: 0.76rem; gap: 4px; justify-content: center;">
+                            ${Icons.scissors({ size: 13 })}
+                            <span>Services</span>
+                          </button>
+                        </div>
+  
+                        <div class="segmented-action-bar">
+                          <button class="segmented-action-btn btn-edit-hours" data-id="${st.id}" data-name="${st.name || ''}" title="Shift Working Hours">
+                            <span>Hours</span>
+                          </button>
+                          <button class="segmented-action-btn btn-add-break" data-id="${st.id}" data-name="${st.name || ''}" title="Shift Breaks">
+                            <span>Break</span>
+                          </button>
+                          <button class="segmented-action-btn btn-mark-absent" data-id="${st.id}" data-name="${st.name || ''}" style="color: #fb7185;" title="Record Leave">
+                            <span>Leave</span>
+                          </button>
+                          <button class="segmented-action-btn btn-leave-history" data-id="${st.id}" data-name="${st.name || ''}" style="color: #818cf8;" title="Leave History & Actions">
+                            <span>History</span>
+                          </button>
+                          <button class="segmented-action-btn danger-btn btn-delete-staff" data-id="${st.id}" data-name="${st.name || ''}" title="Delete Stylist">
+                            ${Icons.trash({ size: 12 })}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  `;
+        }).join('');
+        
+        contentHtml = `
+            <div class="staff-capacity-grid">
+              ${staffCardsHtml}
+            </div>
+        `;
+      }
+
+      return closureHtml + `
         <div class="glass-panel">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
             <div>
@@ -1659,257 +2045,21 @@ export class SalonDashboard {
               </button>
             </div>
           </div>
-
-          ${staff.length === 0 ? `
-            <div style="text-align: center; padding: 48px 20px; background: rgba(0,0,0,0.2); border-radius: var(--radius-md); border: 1px dashed var(--border-subtle);">
-              <div style="margin-bottom: 14px;">
-                ${Icons.users({ size: 44, color: '#64748b' })}
-              </div>
-              <h4 style="color: #fff; margin-bottom: 6px; font-weight: 700;">No Stylists Added Yet</h4>
-              <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 16px;">Add your first staff member to start scheduling appointments and taking bookings.</p>
-              <button class="btn btn-primary btn-sm" id="btn-empty-add-staff" style="gap: 6px;">
-                ${Icons.plus({ size: 14 })}
-                <span>Add Stylist Member</span>
-              </button>
-            </div>
-          ` : `
-            <div class="staff-capacity-grid">
-              ${staff.map((st) => {
-        const todayAppts = appts.filter((a) => (a.staff?.id || a.staffId) === st.id);
-        const inService = todayAppts.find((a) => a.status === 'IN_SERVICE');
-        const confirmedCount = todayAppts.filter((a) => ['CONFIRMED', 'CHECKED_IN', 'IN_SERVICE'].includes(a.status)).length;
-        const completedCount = todayAppts.filter((a) => a.status === 'COMPLETED').length;
-
-        const todayIso = (this.selectedDate || new Date().toISOString().split('T')[0]);
-        const activeAbsence = (st.absences || []).find((ab) => {
-          if (ab.status !== 'ACTIVE') return false;
-          const sDate = (ab.startDate || ab.absenceDate || '').split('T')[0];
-          const eDate = (ab.endDate || ab.absenceDate || '').split('T')[0];
-          return todayIso >= sDate && todayIso <= eDate;
-        });
-        const isAbsentToday = !!activeAbsence;
-
-        let statusDot = 'status-dot-free';
-        let statusText = 'Available / Free for Walk-ins';
-        if (todayClosure) {
-          statusDot = 'status-dot-busy';
-          statusText = `🚨 Store Closed Today (${todayClosure.reason})`;
-        } else if (isAbsentToday) {
-          statusDot = 'status-dot-busy';
-          const portionText = activeAbsence.leavePortion === 'FIRST_HALF' ? 'First Half'
-            : activeAbsence.leavePortion === 'SECOND_HALF' ? 'Second Half'
-            : activeAbsence.leavePortion === 'CUSTOM_HOURS' ? `Custom (${activeAbsence.customStartTime || ''}-${activeAbsence.customEndTime || ''})`
-            : 'Full Day';
-          statusText = `🚫 On Leave (${portionText})`;
-        } else if (st.status !== 'ACTIVE') {
-          statusDot = 'status-dot-off';
-          statusText = 'Inactive / Off-Duty';
-        } else if (inService) {
-          statusDot = 'status-dot-busy';
-          statusText = `In Chair: ${inService.customer?.name || 'Client'}`;
-        }
-
-        const parseTime = (timeStr) => {
-          if (!timeStr) return 0;
-          const [h, m] = timeStr.split(':').map(Number);
-          return h * 60 + m;
-        };
-        const formatTimeMins = (mins) => {
-          const h = Math.floor(mins / 60);
-          const m = mins % 60;
-          const ampm = h >= 12 ? 'PM' : 'AM';
-          const h12 = h % 12 || 12;
-          return `${h12}:${m.toString().padStart(2, '0')} ${ampm}`;
-        };
-
-        const daysArr = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
-        const dayOfWeek = daysArr[new Date(todayIso).getDay()];
-
-        let shiftStart = '09:00';
-        let shiftEnd = '21:00';
-        let shiftBreaks = [];
-        let isOffDay = false;
-
-        if (st.workingHours && st.workingHours.length > 0) {
-          const stHours = st.workingHours.find(h => h.dayOfWeek === dayOfWeek);
-          if (stHours) {
-            isOffDay = stHours.isOff;
-            if (!isOffDay) {
-              shiftStart = stHours.startTime || shiftStart;
-              shiftEnd = stHours.endTime || shiftEnd;
-            }
-            shiftBreaks = Array.isArray(stHours.breaks) ? stHours.breaks : [];
-          }
-        } else if (this.salonProfile && this.salonProfile.workingHours) {
-          const salonHours = this.salonProfile.workingHours.find(h => h.dayOfWeek === dayOfWeek);
-          if (salonHours) {
-            isOffDay = salonHours.isOff;
-            if (!isOffDay) {
-              shiftStart = salonHours.startTime || shiftStart;
-              shiftEnd = salonHours.endTime || shiftEnd;
-            }
-            shiftBreaks = Array.isArray(salonHours.breaks) ? salonHours.breaks : [];
-          }
-        }
-
-        if (st.breaks && st.breaks.length > 0) {
-           shiftBreaks = st.breaks;
-        }
-
-        let startMins = parseTime(shiftStart);
-        let endMins = parseTime(shiftEnd);
-        if (endMins <= startMins) endMins = startMins + 720;
-        let totalShiftMins = endMins - startMins;
-        if (totalShiftMins <= 0) totalShiftMins = 720; 
-
-        const breakBlocks = shiftBreaks.map(b => {
-          const bStart = parseTime(b.startTime);
-          const bEnd = parseTime(b.endTime);
-          let leftPerc = ((bStart - startMins) / totalShiftMins) * 100;
-          let widthPerc = ((bEnd - bStart) / totalShiftMins) * 100;
-          if (leftPerc < 0) { widthPerc += leftPerc; leftPerc = 0; }
-          if (leftPerc + widthPerc > 100) widthPerc = 100 - leftPerc;
-          if (widthPerc <= 0 || leftPerc >= 100) return '';
-          return `<div style="position: absolute; top: 0; bottom: 0; left: ${leftPerc}%; width: ${widthPerc}%; background: repeating-linear-gradient(45deg, rgba(251,113,133,0.3), rgba(251,113,133,0.3) 4px, transparent 4px, transparent 8px); border-radius: 4px; border-left: 1px solid #fb7185; border-right: 1px solid #fb7185; z-index: 2;" title="${b.title || 'Break'} (${formatTimeMins(bStart)} - ${formatTimeMins(bEnd)})"></div>`;
-        }).join('');
-
-        const apptBlocks = todayAppts
-          .filter(a => ['CONFIRMED', 'CHECKED_IN', 'IN_SERVICE', 'COMPLETED'].includes(a.status))
-          .map(a => {
-            const aDate = new Date(a.startAt || a.startTime);
-            const aStartMins = aDate.getHours() * 60 + aDate.getMinutes();
-            const duration = a.duration || a.service?.duration || 30;
-            const aEndMins = aStartMins + duration;
-            
-            let leftPerc = ((aStartMins - startMins) / totalShiftMins) * 100;
-            let widthPerc = (duration / totalShiftMins) * 100;
-            if (leftPerc < 0) { widthPerc += leftPerc; leftPerc = 0; }
-            if (leftPerc + widthPerc > 100) widthPerc = 100 - leftPerc;
-            if (widthPerc <= 0 || leftPerc >= 100) return '';
-            
-            let color = '#3b82f6';
-            if (a.status === 'IN_SERVICE') color = '#eab308';
-            if (a.status === 'COMPLETED') color = '#22c55e';
-            
-            return `<div style="position: absolute; top: 0; bottom: 0; left: ${leftPerc}%; width: ${widthPerc}%; background: ${color}; border-radius: 4px; opacity: 0.9; box-shadow: 0 0 0 1px rgba(0,0,0,0.5); z-index: 3; cursor: help;" title="${a.service?.name || 'Service'} (${formatTimeMins(aStartMins)} - ${formatTimeMins(aEndMins)}) - ${a.status}"></div>`;
-          }).join('');
-
-        const timelineHtml = `
-          <div style="margin-top: 14px;">
-            <div style="display: flex; justify-content: space-between; font-size: 0.65rem; color: var(--text-muted); margin-bottom: 6px; font-weight: 600;">
-              <span>${formatTimeMins(startMins)}</span>
-              <span>${isOffDay ? 'DAY OFF' : formatTimeMins(endMins)}</span>
-            </div>
-            <div style="position: relative; width: 100%; height: 22px; background: rgba(0,0,0,0.4); border-radius: 6px; overflow: hidden; border: 1px solid var(--border-subtle); box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);">
-              ${isOffDay ? `<div style="position: absolute; inset: 0; background: rgba(251,113,133,0.1); display: flex; align-items: center; justify-content: center; font-size: 0.65rem; color: #fb7185;">No Working Hours Scheduled</div>` : breakBlocks + apptBlocks}
-            </div>
-            <div style="display: flex; gap: 12px; margin-top: 8px; font-size: 0.65rem; color: var(--text-muted); justify-content: center;">
-              <div style="display: flex; align-items: center; gap: 4px;"><span style="display:inline-block;width:8px;height:8px;background:#3b82f6;border-radius:2px;"></span>Booked</div>
-              <div style="display: flex; align-items: center; gap: 4px;"><span style="display:inline-block;width:8px;height:8px;background:#eab308;border-radius:2px;"></span>In Chair</div>
-              <div style="display: flex; align-items: center; gap: 4px;"><span style="display:inline-block;width:8px;height:8px;background:#22c55e;border-radius:2px;"></span>Done</div>
-              <div style="display: flex; align-items: center; gap: 4px;"><span style="display:inline-block;width:8px;height:8px;background:repeating-linear-gradient(45deg, rgba(251,113,133,0.4), rgba(251,113,133,0.4) 3px, transparent 3px, transparent 6px);border-radius:2px;border:1px solid #fb7185;"></span>Break</div>
-            </div>
-          </div>
-        `;
-
-        return `
-                  <div class="staff-card" style="display: flex; flex-direction: column; justify-content: space-between;">
-                    <div>
-                      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
-                        <div style="display: flex; align-items: center; gap: 12px;">
-                          <img src="${st.profileImageUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'}" style="width: 44px; height: 44px; border-radius: 50%; object-fit: cover; border: 2px solid rgba(255,255,255,0.12);" />
-                          <div>
-                            <div style="font-weight: 700; font-size: 1.05rem; color: #fff; line-height: 1.2;">${st.name || 'Specialist'}</div>
-                            <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">${st.phone || 'No phone'}</div>
-                          </div>
-                        </div>
-                        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
-                          <span class="badge ${st.status === 'ACTIVE' ? 'badge-completed' : 'badge-cancelled'}" style="font-size: 0.65rem;">
-                            ${st.status || 'ACTIVE'}
-                          </span>
-                          ${isAbsentToday ? `
-                            <span class="badge" style="background: rgba(251, 113, 133, 0.15); color: #fb7185; border: 1px solid rgba(251,113,133,0.3); font-size: 0.62rem; font-weight: 700;">
-                              🚫 ON LEAVE
-                            </span>
-                          ` : ''}
-                        </div>
-                      </div>
-
-                      <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 12px;">
-                        <div style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; font-weight: 600;">
-                          <span class="status-dot ${statusDot}"></span>
-                          <span style="color: #fff;">${statusText}</span>
-                        </div>
-                        <div style="display: flex; justify-content: space-between; font-size: 0.74rem; color: var(--text-muted); margin-top: 6px;">
-                          <span>Today: <strong>${confirmedCount}</strong> Active • <strong>${completedCount}</strong> Done</span>
-                        </div>
-                        ${timelineHtml}
-                      </div>
-
-                      <div style="margin-bottom: 12px;">
-                        <div class="meta-bullet-row">
-                          <span style="color: var(--text-muted); font-size: 0.75rem;">QUALIFIED SERVICES (${st.services?.length || 0}):</span>
-                          <span style="color: var(--text-secondary); font-size: 0.78rem; font-weight: 500;">
-                            ${(st.services && st.services.length > 0)
-                              ? st.services.map((svc) => svc.service?.name || 'Service').join(', ')
-                              : 'None assigned'}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div>
-                      <!-- Primary Actions -->
-                      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px;">
-                        <button class="btn btn-secondary btn-sm btn-edit-staff" data-id="${st.id}" data-name="${st.name || ''}" data-phone="${st.phone || ''}" data-email="${st.email || ''}" data-img="${st.profileImageUrl || ''}" style="font-size: 0.76rem; gap: 4px; justify-content: center;">
-                          ${Icons.edit({ size: 13 })}
-                          <span>Edit Info</span>
-                        </button>
-                        <button class="btn btn-secondary btn-sm btn-assign-services" data-id="${st.id}" data-name="${st.name || ''}" style="font-size: 0.76rem; gap: 4px; justify-content: center;">
-                          ${Icons.scissors({ size: 13 })}
-                          <span>Services</span>
-                        </button>
-                      </div>
-
-                      <!-- Secondary Operations Toolbar -->
-                      <div class="segmented-action-bar">
-                        <button class="segmented-action-btn btn-edit-hours" data-id="${st.id}" data-name="${st.name || ''}" title="Shift Working Hours">
-                          <span>Hours</span>
-                        </button>
-                        <button class="segmented-action-btn btn-add-break" data-id="${st.id}" data-name="${st.name || ''}" title="Shift Breaks">
-                          <span>Break</span>
-                        </button>
-                        <button class="segmented-action-btn btn-mark-absent" data-id="${st.id}" data-name="${st.name || ''}" style="color: #fb7185;" title="Record Leave">
-                          <span>Leave</span>
-                        </button>
-                        <button class="segmented-action-btn btn-leave-history" data-id="${st.id}" data-name="${st.name || ''}" style="color: #818cf8;" title="Leave History & Actions">
-                          <span>History</span>
-                        </button>
-                        <button class="segmented-action-btn danger-btn btn-delete-staff" data-id="${st.id}" data-name="${st.name || ''}" title="Delete Stylist">
-                          ${Icons.trash({ size: 12 })}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                `;
-      }).join('')}
-            </div>
-          `}
+          ${contentHtml}
         </div>
       `;
     } catch (err) {
-      return `
-        <div class="glass-panel text-center" style="padding: 40px; color: var(--danger);">
-          <h4>Error loading stylists</h4>
-          <p style="color: var(--text-secondary); font-size: 0.85rem; margin-top: 8px;">${err.message}</p>
-        </div>
-      `;
+      console.error('[Dashboard] renderStaffTab error:', err);
+      return `<div class="glass-panel text-center" style="padding: 40px; color: var(--danger);">
+        <i class="fas fa-exclamation-triangle" style="font-size: 2rem; margin-bottom: 12px;"></i>
+        <h5>Failed to load Stylist Dashboard</h5>
+        <p style="font-size: 0.85rem;">${err?.message || 'An unexpected error occurred.'}</p>
+        <button class="btn btn-primary btn-sm" onclick="window.salonDashboard?.loadData(true).then(() => window.salonDashboard?.render())">
+          Retry Loading
+        </button>
+      </div>`;
     }
   }
-
-  // =========================================================================
-  // TAB 3: SERVICE MENU CRUD
-  // =========================================================================
   renderServicesTab() {
     try {
       const services = Array.isArray(this.servicesList) ? this.servicesList : [];
