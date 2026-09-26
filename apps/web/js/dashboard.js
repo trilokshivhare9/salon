@@ -434,7 +434,7 @@ export class SalonDashboard {
         const [summary, staff, services, profile, categories, closures] = await Promise.all([
           ApiClient.getDashboardSummary(this.selectedDate, true).catch((err) => {
             console.warn('[Dashboard] Summary fetch error:', err);
-            return this.summaryData || fallbackSummary;
+            return fallbackSummary;
           }),
           ApiClient.getStaff(true).catch((err) => {
             console.warn('[Dashboard] Staff fetch error:', err);
@@ -2875,12 +2875,12 @@ export class SalonDashboard {
 
     // Date Navigation Controls (Prev, Next, Today) with Smooth State Management
     const handleDateChange = async (newDate) => {
-      if (!newDate || this.selectedDate === newDate) return;
+      if (!newDate) return;
       this.selectedDate = newDate;
       const syncBtn = document.getElementById('btn-refresh-queue');
       syncBtn?.classList.add('syncing');
       try {
-        await this.loadData(false);
+        await this.loadData(true);
       } finally {
         this.render();
       }
@@ -2900,8 +2900,23 @@ export class SalonDashboard {
       handleDateChange(this.getLocalDateString());
     });
 
-    // Date Picker
+    // Date Picker Trigger on Badge Click
     const datePicker = document.getElementById('dashboard-date-picker');
+    const dateBadge = this.container.querySelector('.q-date-badge');
+    dateBadge?.addEventListener('click', (e) => {
+      if (e.target !== datePicker) {
+        try {
+          if (typeof datePicker?.showPicker === 'function') {
+            datePicker.showPicker();
+          } else {
+            datePicker?.click();
+          }
+        } catch (err) {
+          datePicker?.focus();
+        }
+      }
+    });
+
     datePicker?.addEventListener('change', (e) => {
       if (e.target.value) {
         handleDateChange(e.target.value);
