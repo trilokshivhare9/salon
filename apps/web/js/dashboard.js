@@ -3280,7 +3280,54 @@ export class SalonDashboard {
       });
     });
 
-    // Date Navigation Controls handled above
+    // Date Navigation Controls (Prev, Next, Today, Date Picker)
+    const handleDateChange = async (newDate) => {
+      if (!newDate) return;
+      this.selectedDate = newDate;
+      const syncBtn = document.getElementById('btn-refresh-queue');
+      syncBtn?.classList.add('syncing');
+      try {
+        await this.loadData(true);
+      } finally {
+        this.render();
+      }
+    };
+
+    document.getElementById('btn-date-prev')?.addEventListener('click', () => {
+      const prevDate = this.addDaysToDateString(this.selectedDate, -1);
+      handleDateChange(prevDate);
+    });
+
+    document.getElementById('btn-date-next')?.addEventListener('click', () => {
+      const nextDate = this.addDaysToDateString(this.selectedDate, 1);
+      handleDateChange(nextDate);
+    });
+
+    document.getElementById('btn-date-today')?.addEventListener('click', () => {
+      handleDateChange(this.getLocalDateString());
+    });
+
+    const datePicker = document.getElementById('dashboard-date-picker');
+    const dateBadge = tabContent.querySelector('.q-date-badge');
+    dateBadge?.addEventListener('click', (e) => {
+      if (e.target !== datePicker) {
+        try {
+          if (typeof datePicker?.showPicker === 'function') {
+            datePicker.showPicker();
+          } else {
+            datePicker?.click();
+          }
+        } catch (err) {
+          datePicker?.focus();
+        }
+      }
+    });
+
+    datePicker?.addEventListener('change', (e) => {
+      if (e.target.value) {
+        handleDateChange(e.target.value);
+      }
+    });
 
     // Refresh queue
     document.getElementById('btn-refresh-queue')?.addEventListener('click', async () => {
