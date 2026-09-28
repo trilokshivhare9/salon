@@ -4,7 +4,7 @@ import * as request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/database/prisma.service';
 import { AllExceptionsFilter } from '../src/common/filters/http-exception.filter';
-import { ErrorLogService } from '../src/modules/error-logs/error-log.service';
+import { ErrorLogService } from '../src/modules/super-admin/error-logs/error-log.service';
 import { SanitizationUtility } from '../src/common/utils/sanitization.utility';
 import { ErrorStatus, ErrorSeverity, AdminRole } from '@prisma/client';
 

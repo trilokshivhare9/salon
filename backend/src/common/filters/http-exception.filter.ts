@@ -9,7 +9,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
-import { ErrorLogService } from '../../modules/error-logs/error-log.service';
+import { ErrorLogService } from '../../modules/super-admin/error-logs/error-log.service';
 
 @Injectable()
 @Catch()

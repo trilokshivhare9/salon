@@ -2,20 +2,28 @@ import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import configuration from './config/configuration';
 import { DatabaseModule } from './database/database.module';
-import { AuthModule } from './modules/auth/auth.module';
-import { SalonsModule } from './modules/salons/salons.module';
-import { StaffModule } from './modules/staff/staff.module';
-import { ServicesModule } from './modules/services/services.module';
-import { AvailabilityModule } from './modules/availability/availability.module';
-import { AppointmentsModule } from './modules/appointments/appointments.module';
-import { BookingModule } from './modules/booking/booking.module';
-import { CustomersModule } from './modules/customers/customers.module';
-import { ReportsModule } from './modules/reports/reports.module';
-import { HealthModule } from './modules/health/health.module';
-import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
-import { MasterCategoriesModule } from './modules/master-categories/master-categories.module';
-import { ErrorLogModule } from './modules/error-logs/error-log.module';
-import { QuickBookingModule } from './modules/quick-booking/quick-booking.module';
+// Core & Infrastructure
+import { AuthModule } from './modules/core/auth/auth.module';
+import { HealthModule } from './modules/core/health/health.module';
+
+// Super Admin Domain
+import { MasterCategoriesModule } from './modules/super-admin/master-categories/master-categories.module';
+import { ErrorLogModule } from './modules/super-admin/error-logs/error-log.module';
+
+// Salon Admin Domain
+import { SalonsModule } from './modules/salon-admin/salons/salons.module';
+import { StaffModule } from './modules/salon-admin/staff/staff.module';
+import { ServicesModule } from './modules/salon-admin/services/services.module';
+import { AvailabilityModule } from './modules/salon-admin/availability/availability.module';
+import { AppointmentsModule } from './modules/salon-admin/appointments/appointments.module';
+import { CustomersModule } from './modules/salon-admin/customers/customers.module';
+import { ReportsModule } from './modules/salon-admin/reports/reports.module';
+import { QuickBookingModule } from './modules/salon-admin/quick-booking/quick-booking.module';
+
+// Customer Channels
+import { WhatsAppModule } from './modules/channels/whatsapp/whatsapp.module';
+import { BookingModule } from './modules/channels/booking/booking.module';
+
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
 
 @Module({
@@ -31,20 +39,28 @@ import { CorrelationIdMiddleware } from './common/middleware/correlation-id.midd
       load: [configuration],
     }),
     DatabaseModule,
-    ErrorLogModule,
+
+    // Core & Infrastructure
     AuthModule,
+    HealthModule,
+
+    // Super Admin Domain
+    MasterCategoriesModule,
+    ErrorLogModule,
+
+    // Salon Admin Domain
     SalonsModule,
     StaffModule,
     ServicesModule,
     AvailabilityModule,
     AppointmentsModule,
-    BookingModule,
     CustomersModule,
     ReportsModule,
-    HealthModule,
-    WhatsAppModule,
-    MasterCategoriesModule,
     QuickBookingModule,
+
+    // Customer Channels
+    WhatsAppModule,
+    BookingModule,
   ],
 })
 export class AppModule implements NestModule {

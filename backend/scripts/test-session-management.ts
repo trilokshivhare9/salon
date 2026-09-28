@@ -1,8 +1,8 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/database/prisma.service';
-import { AuthService } from '../src/modules/auth/auth.service';
-import { TokenService } from '../src/modules/auth/services/token.service';
+import { AuthService } from '../src/modules/core/auth/auth.service';
+import { TokenService } from '../src/modules/core/auth/services/token.service';
 import { JwtService } from '@nestjs/jwt';
 import { UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';

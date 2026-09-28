@@ -3821,10 +3821,13 @@ export class SalonDashboard {
 
       const reasonCategory = document.getElementById('cancel-category-select').value;
       const reasonNote = document.getElementById('cancel-reason-note').value || '';
-      const status = reasonCategory === 'CLIENT_UNRESPONSIVE' ? 'NO_SHOW' : 'CANCELLED';
 
       try {
-        await ApiClient.updateAppointmentStatus(appointmentId, status, reasonNote || reasonCategory, reasonCategory);
+        await ApiClient.cancelBooking(appointmentId, {
+          source: 'ADMIN_DASHBOARD',
+          fault: reasonCategory === 'SALON_EMERGENCY' ? 'SALON' : 'CLIENT',
+          reason: reasonNote || reasonCategory,
+        });
         modalContainer.innerHTML = '';
         await this.loadData();
         this.render();

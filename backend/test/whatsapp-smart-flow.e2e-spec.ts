@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/database/prisma.service';
-import { WhatsAppService } from '../src/modules/whatsapp/whatsapp.service';
+import { WhatsAppService } from '../src/modules/channels/whatsapp/whatsapp.service';
 import { ConversationState } from '@prisma/client';
 
 describe('WhatsApp Smart Frictionless Flow (E2E Tests)', () => {

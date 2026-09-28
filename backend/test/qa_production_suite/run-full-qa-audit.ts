@@ -6,12 +6,12 @@ import {
   seedBasePlatform,
   auditAll17Invariants,
 } from './qa-helper';
-import { AppointmentsService, VALID_STATUS_TRANSITIONS } from '../../src/modules/appointments/appointments.service';
-import { AvailabilityService } from '../../src/modules/availability/availability.service';
-import { SalonsService } from '../../src/modules/salons/salons.service';
-import { StaffService } from '../../src/modules/staff/staff.service';
-import { ServicesService } from '../../src/modules/services/services.service';
-import { WhatsAppService } from '../../src/modules/whatsapp/whatsapp.service';
+import { AppointmentsService, VALID_STATUS_TRANSITIONS } from '../../src/modules/salon-admin/appointments/appointments.service';
+import { AvailabilityService } from '../../src/modules/salon-admin/availability/availability.service';
+import { SalonsService } from '../../src/modules/salon-admin/salons/salons.service';
+import { StaffService } from '../../src/modules/salon-admin/staff/staff.service';
+import { ServicesService } from '../../src/modules/salon-admin/services/services.service';
+import { WhatsAppService } from '../../src/modules/channels/whatsapp/whatsapp.service';
 import { ConfigService } from '@nestjs/config';
 import { DayOfWeek, AppointmentStatus, BookingSource, StylistStatus, ServiceStatus, AdminRole, ConversationState } from '@prisma/client';
 import { DateTime } from 'luxon';

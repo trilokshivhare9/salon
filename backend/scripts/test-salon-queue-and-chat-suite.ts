@@ -1,8 +1,8 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/database/prisma.service';
-import { AppointmentsService } from '../src/modules/appointments/appointments.service';
-import { WhatsAppService } from '../src/modules/whatsapp/whatsapp.service';
+import { AppointmentsService } from '../src/modules/salon-admin/appointments/appointments.service';
+import { WhatsAppService } from '../src/modules/channels/whatsapp/whatsapp.service';
 import { AppointmentStatus, AdminRole, AdminStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 

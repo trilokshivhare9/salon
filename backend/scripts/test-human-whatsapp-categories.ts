@@ -1,11 +1,11 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/database/prisma.service';
-import { MasterCategoriesService } from '../src/modules/master-categories/master-categories.service';
-import { SalonsService } from '../src/modules/salons/salons.service';
-import { ServicesService } from '../src/modules/services/services.service';
-import { StaffService } from '../src/modules/staff/staff.service';
-import { WhatsAppService } from '../src/modules/whatsapp/whatsapp.service';
+import { MasterCategoriesService } from '../src/modules/super-admin/master-categories/master-categories.service';
+import { SalonsService } from '../src/modules/salon-admin/salons/salons.service';
+import { ServicesService } from '../src/modules/salon-admin/services/services.service';
+import { StaffService } from '../src/modules/salon-admin/staff/staff.service';
+import { WhatsAppService } from '../src/modules/channels/whatsapp/whatsapp.service';
 import { AdminRole, ServiceGender, StylistStatus } from '@prisma/client';
 
 async function runHumanWhatsAppCategoryAudit() {

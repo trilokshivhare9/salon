@@ -1,10 +1,10 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/database/prisma.service';
-import { RemindersService } from '../src/modules/appointments/reminders.service';
-import { AppointmentsService } from '../src/modules/appointments/appointments.service';
-import { WhatsAppService } from '../src/modules/whatsapp/whatsapp.service';
-import { CustomersService } from '../src/modules/customers/customers.service';
+import { RemindersService } from '../src/modules/salon-admin/appointments/reminders/reminders.service';
+import { AppointmentsService } from '../src/modules/salon-admin/appointments/appointments.service';
+import { WhatsAppService } from '../src/modules/channels/whatsapp/whatsapp.service';
+import { CustomersService } from '../src/modules/salon-admin/customers/customers.service';
 import { AppointmentStatus, ClientEtaStatus, AdminRole, AdminStatus } from '@prisma/client';
 import { DateTime } from 'luxon';
 import * as bcrypt from 'bcrypt';

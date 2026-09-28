@@ -1,7 +1,7 @@
 import { PrismaClient, AdminRole, AdminStatus, AppointmentStatus, BookingSource, StylistStatus, ServiceStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { DateTime } from 'luxon';
-import { AvailabilityService } from '../src/modules/availability/availability.service';
+import { AvailabilityService } from '../src/modules/salon-admin/availability/availability.service';
 
 const prisma = new PrismaClient();
 const API_BASE = 'http://localhost:3000/api/v1';

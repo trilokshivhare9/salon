@@ -1,7 +1,7 @@
 import { NestFactory, Reflector } from '@nestjs/core';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/database/prisma.service';
-import { TenantContextGuard } from '../src/modules/auth/guards/tenant-context.guard';
+import { TenantContextGuard } from '../src/modules/core/auth/guards/tenant-context.guard';
 import { AdminRole, SalonStatus, AdminStatus } from '@prisma/client';
 import { ExecutionContext, ForbiddenException, NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';

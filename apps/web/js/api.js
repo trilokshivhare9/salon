@@ -476,6 +476,15 @@ export class ApiClient {
     });
   }
 
+  static async cancelBooking(id, context) {
+    this.invalidateCache('/reports');
+    this.invalidateCache('/appointments');
+    return this.request(`/appointments/${id}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify(context),
+    });
+  }
+
 
   static async rescheduleAppointment(id, payload) {
     this.invalidateCache('/reports');

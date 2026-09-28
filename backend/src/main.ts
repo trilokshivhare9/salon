@@ -7,9 +7,9 @@ import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
-import { TenantContextGuard } from './modules/auth/guards/tenant-context.guard';
+import { TenantContextGuard } from './modules/core/auth/guards/tenant-context.guard';
 import { PrismaService } from './database/prisma.service';
-import { ErrorLogService } from './modules/error-logs/error-log.service';
+import { ErrorLogService } from './modules/super-admin/error-logs/error-log.service';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
