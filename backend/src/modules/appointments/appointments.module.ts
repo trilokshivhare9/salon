@@ -11,4 +11,4 @@ import { WhatsAppModule } from '../whatsapp/whatsapp.module';
   providers: [AppointmentsService, RemindersService],
   exports: [AppointmentsService, RemindersService],
 })
-export class AppointmentsModule {}
+export class AppointmentsModule { }

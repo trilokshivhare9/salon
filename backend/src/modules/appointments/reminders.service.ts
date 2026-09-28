@@ -201,7 +201,7 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
             },
             OR: [
               { clientEtaStatus: null },
-              { clientEtaStatus: { not: ClientEtaStatus.ON_THE_WAY } },
+              { clientEtaStatus: { notIn: [ClientEtaStatus.ON_THE_WAY, ClientEtaStatus.ARRIVED] } },
             ],
           },
           include: {

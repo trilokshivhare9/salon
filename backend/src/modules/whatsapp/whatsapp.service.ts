@@ -130,7 +130,7 @@ export class WhatsAppService {
       }
     } else if (stage === BookingLifecycleStage.POST_BOOKING) {
       // Allowed Post-booking actions
-      if (['btn_add_service', 'btn_add_addon', 'btn_reschedule', 'btn_cancel_appt', 'btn_running_late', 'btn_eta_late_15', 'btn_book', 'btn_cancel_no', 'btn_cancel_yes'].includes(input)) {
+      if (['btn_add_service', 'btn_add_addon', 'btn_reschedule', 'btn_cancel_appt', 'btn_running_late', 'btn_eta_late_15', 'btn_eta_arrived', 'btn_eta_on_the_way', 'btn_eta_cancel', 'remind_confirm', 'remind_reschedule', 'remind_cancel', 'btn_book', 'btn_cancel_no', 'btn_cancel_yes'].includes(input)) {
         return true;
       }
       if (input.startsWith('svc_') || input.startsWith('remind_') || input.startsWith('appt_') || input.startsWith('propose_') || input.startsWith('late_') || input.startsWith('move_up_')) {
@@ -1893,6 +1893,48 @@ You have accumulated *3 penalty strikes* this year for missed appointments. Auto
     // -------------------------------------------------------------------------
     // REMINDER & LATE-ARRIVAL RESPONSES & SMART MOVE-UP
     // -------------------------------------------------------------------------
+    if (input === 'btn_eta_arrived') {
+      const activeAppts = await this.findActiveUpcomingAppointments(salonId, cleanNumber);
+      if (activeAppts.length === 0) {
+        const reply = `This option has expired. You can check your active booking or start a new one.`;
+        await this.sendMetaMessage(
+          cleanNumber,
+          {
+            bodyText: reply,
+            interactiveType: 'button',
+            buttons: [
+              { id: 'btn_book', title: '📋 Check Active Booking' },
+              { id: 'btn_start', title: '📅 New Booking' },
+            ],
+          },
+          phoneNumberId,
+          salonId,
+        );
+        return { replyMessage: reply, state: ConversationState.START };
+      }
+
+      await this.prisma.appointment.update({
+        where: { id: activeAppts[0].id },
+        data: {
+          clientEtaStatus: ClientEtaStatus.ARRIVED,
+          status: AppointmentStatus.CHECKED_IN,
+        },
+      }).catch(() => { });
+
+      const reply = `📍 *Welcome to ${salon.name}!*\n\nYou are checked in! Your stylist has been notified and will be with you shortly.`;
+      await this.sendMetaMessage(
+        cleanNumber,
+        {
+          bodyText: reply,
+          interactiveType: 'button',
+          buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
+        },
+        phoneNumberId,
+        salonId,
+      );
+      return { replyMessage: reply, state: ConversationState.START };
+    }
+
     if (input === 'remind_confirm') {
       const activeAppts = await this.findActiveUpcomingAppointments(salonId, cleanNumber);
       if (activeAppts.length === 0) {
@@ -1927,7 +1969,7 @@ You have accumulated *3 penalty strikes* this year for missed appointments. Auto
       return { replyMessage: reply, state: ConversationState.START };
     }
 
-    if (input === 'remind_10m_on_way' || input.startsWith('late_on_way')) {
+    if (input === 'remind_10m_on_way' || input.startsWith('late_on_way') || input === 'btn_eta_on_the_way') {
       const activeAppts = await this.findActiveUpcomingAppointments(salonId, cleanNumber);
       if (activeAppts.length === 0 || activeAppts[0].clientEtaStatus === ClientEtaStatus.ON_THE_WAY) {
         const reply = `This option has expired. You can check your active booking or start a new one.`;
@@ -1966,7 +2008,7 @@ You have accumulated *3 penalty strikes* this year for missed appointments. Auto
       return { replyMessage: reply, state: ConversationState.START };
     }
 
-    if (input === 'remind_10m_cancel' || input.startsWith('late_cancel') || input === 'remind_cancel') {
+    if (input === 'remind_10m_cancel' || input.startsWith('late_cancel') || input === 'remind_cancel' || input === 'btn_eta_cancel') {
       const apptId = input.startsWith('late_cancel_') ? input.replace('late_cancel_', '') : null;
       let targetAppt: any = null;
       if (apptId) {

@@ -602,8 +602,8 @@ export class AppointmentsService implements OnModuleInit {
 
           const stylistHours = tx.stylistWorkingHours
             ? (await (tx.stylistWorkingHours.findUnique
-                ? tx.stylistWorkingHours.findUnique({ where: { stylistId_dayOfWeek: { stylistId: assignedStylist.id, dayOfWeek } } })
-                : tx.stylistWorkingHours.findFirst({ where: { stylistId: assignedStylist.id, dayOfWeek } })))
+              ? tx.stylistWorkingHours.findUnique({ where: { stylistId_dayOfWeek: { stylistId: assignedStylist.id, dayOfWeek } } })
+              : tx.stylistWorkingHours.findFirst({ where: { stylistId: assignedStylist.id, dayOfWeek } })))
             : null;
 
           const shiftWindow = this.engine.getEffectiveShiftWindow(
@@ -1210,8 +1210,8 @@ Does this new time work for you?`;
 
           const stylistHours = tx.stylistWorkingHours
             ? (await (tx.stylistWorkingHours.findUnique
-                ? tx.stylistWorkingHours.findUnique({ where: { stylistId_dayOfWeek: { stylistId: targetStylist.id, dayOfWeek } } })
-                : tx.stylistWorkingHours.findFirst({ where: { stylistId: targetStylist.id, dayOfWeek } })))
+              ? tx.stylistWorkingHours.findUnique({ where: { stylistId_dayOfWeek: { stylistId: targetStylist.id, dayOfWeek } } })
+              : tx.stylistWorkingHours.findFirst({ where: { stylistId: targetStylist.id, dayOfWeek } })))
             : null;
 
           const shiftWindow = this.engine.getEffectiveShiftWindow(
@@ -1558,8 +1558,8 @@ Would you like to move your *${currentSlotTimeStr}* appointment earlier to *${fr
 
     const stylistHours = tx.stylistWorkingHours
       ? (await (tx.stylistWorkingHours.findUnique
-          ? tx.stylistWorkingHours.findUnique({ where: { stylistId_dayOfWeek: { stylistId: absence.stylistId, dayOfWeek } } })
-          : tx.stylistWorkingHours.findFirst({ where: { stylistId: absence.stylistId, dayOfWeek } })))
+        ? tx.stylistWorkingHours.findUnique({ where: { stylistId_dayOfWeek: { stylistId: absence.stylistId, dayOfWeek } } })
+        : tx.stylistWorkingHours.findFirst({ where: { stylistId: absence.stylistId, dayOfWeek } })))
       : null;
 
     const shiftWindow = this.engine.getEffectiveShiftWindow(
