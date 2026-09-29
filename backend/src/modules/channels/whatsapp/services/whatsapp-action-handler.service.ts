@@ -80,9 +80,8 @@ export class WhatsAppActionHandlerService {
         services: {
           where: {
             status: 'ACTIVE',
-            stylists: { some: { stylist: { status: 'ACTIVE' } } },
           },
-          include: { serviceCategory: true },
+          include: { serviceCategory: true, stylists: { include: { stylist: true } } },
           orderBy: { name: 'asc' },
         },
         stylists: { where: { status: 'ACTIVE' }, include: { services: true } },
@@ -164,7 +163,53 @@ export class WhatsAppActionHandlerService {
       }
     }
 
-    // 5. Stale Button / Lifecycle Stage Validation
+    // ----------------------------------------------------
+    // GLOBAL PRIORITY 1: MAIN MENU, GREETINGS & SALON INFO
+    // Always allowed from ANY screen or state. Never replies "Expired option"!
+    // ----------------------------------------------------
+    const isGreetingOrReset =
+      [WhatsAppButtonId.MENU, WhatsAppButtonId.START, 'hi', 'hello', 'hey', 'start', 'menu', 'restart', 'reset'].includes(normalized) ||
+      ['hi', 'hello', 'hey', 'start', 'menu'].some((kw) => normalized === kw || normalized.startsWith('hi ') || normalized.startsWith('hello '));
+
+    if (isGreetingOrReset) {
+      await this.session.updateConversationState(conversation.id, ConversationState.START);
+      const welcome = this.templates.buildWelcomeMessage(salon, activeAppointment);
+      await this.sendMessage(cleanNumber, welcome, phoneNumberId, salonId);
+      return { replyMessage: welcome.bodyText, state: ConversationState.START };
+    }
+
+    if (input === WhatsAppButtonId.INFO) {
+      const infoMsg = this.templates.buildSalonInfoMessage(salon);
+      await this.sendMessage(cleanNumber, infoMsg, phoneNumberId, salonId);
+      return { replyMessage: infoMsg.bodyText, state: conversation.state };
+    }
+
+    // ----------------------------------------------------
+    // GLOBAL PRIORITY 2: STALE RECOVERY ACTIONS (RESUME & NEW BOOKING)
+    // Triggered when user clicks [ ▶️ Continue Booking ] or [ 📅 New Booking ]
+    // ----------------------------------------------------
+    if (input === WhatsAppButtonId.NEW_BOOKING || input === 'btn_new_booking') {
+      await this.session.updateConversationState(conversation.id, ConversationState.START, null, {
+        selectedCategoryId: null,
+        selectedServiceId: null,
+        selectedStaffId: null,
+        selectedDate: null,
+        selectedStartTime: null,
+        quickCodeVerifiedAt: null,
+      });
+      const welcome = this.templates.buildWelcomeMessage(salon, activeAppointment);
+      await this.sendMessage(cleanNumber, welcome, phoneNumberId, salonId);
+      return { replyMessage: welcome.bodyText, state: ConversationState.START };
+    }
+
+    if (input === WhatsAppButtonId.RESUME_BOOKING || input === 'btn_resume_booking') {
+      return this.resumeIncompleteBooking(conversation, salon, cleanNumber, phoneNumberId, salonId);
+    }
+
+    // ----------------------------------------------------
+    // GLOBAL PRIORITY 3: STALE BUTTON / LIFECYCLE STAGE VALIDATION
+    // Guardrail against clicking historical chat buttons
+    // ----------------------------------------------------
     const lifecycleStage = this.session.determineLifecycleStage(conversation, activeAppointment);
     const isValidAction = this.session.isActionValidForLifecycle(lifecycleStage, conversation.state as ConversationState, input);
 
@@ -178,22 +223,6 @@ export class WhatsAppActionHandlerService {
         this.whatsAppService,
       );
       return { replyMessage: expireReply, state: conversation.state as ConversationState };
-    }
-
-    // ----------------------------------------------------
-    // GLOBAL ROUTING: MAIN MENU & SALON INFO
-    // ----------------------------------------------------
-    if ([WhatsAppButtonId.MENU, WhatsAppButtonId.START, 'hi', 'hello', 'start', 'menu'].includes(normalized)) {
-      await this.session.updateConversationState(conversation.id, ConversationState.START);
-      const welcome = this.templates.buildWelcomeMessage(salon, activeAppointment);
-      await this.sendMessage(cleanNumber, welcome, phoneNumberId, salonId);
-      return { replyMessage: welcome.bodyText, state: ConversationState.START };
-    }
-
-    if (input === WhatsAppButtonId.INFO) {
-      const infoMsg = this.templates.buildSalonInfoMessage(salon);
-      await this.sendMessage(cleanNumber, infoMsg, phoneNumberId, salonId);
-      return { replyMessage: infoMsg.bodyText, state: conversation.state };
     }
 
     // ----------------------------------------------------
@@ -704,11 +733,51 @@ export class WhatsAppActionHandlerService {
       return { replyMessage: pendingReply.bodyText, state: ConversationState.COMPLETED };
     }
 
-    // Step A: Start Booking / Services
-    if (['btn_book', 'btn_services', 'btn_book_now'].includes(input)) {
+    // Step A: Start Booking / Services / Quick Book
+    if (['btn_book', 'btn_services', 'btn_book_now', 'btn_quick_book'].includes(input)) {
+      const isQuick = input === 'btn_quick_book';
       await this.session.updateConversationState(conversation.id, ConversationState.SELECT_CATEGORY, undefined, {
-        quickCodeVerifiedAt: null,
+        quickCodeVerifiedAt: isQuick ? new Date() : null,
       });
+
+      // 1. Single-Prompt Gender Check:
+      // If user has already chosen gender in this session, DO NOT ASK AGAIN!
+      let effectiveGender = conversation.tempBookingGender;
+
+      // 2. Auto-detect if salon serves only a single target gender (e.g. Barber shop or Women-only salon)
+      if (!effectiveGender && salon.services && salon.services.length > 0) {
+        const activeTargetGenders = new Set(
+          salon.services.map((s: any) => s.targetGender || s.gender).filter((g: any) => g && g !== 'UNISEX'),
+        );
+        if (activeTargetGenders.size === 1) {
+          effectiveGender = Array.from(activeTargetGenders)[0] as ServiceGender;
+          await this.session.updateConversationState(conversation.id, ConversationState.SELECT_CATEGORY, undefined, {
+            tempBookingGender: effectiveGender,
+          });
+        }
+      }
+
+      // If gender is already known or single-gender salon: skip gender selection menu!
+      if (effectiveGender) {
+        const categories = (salon.serviceCategories || []).filter((cat: any) => {
+          if (effectiveGender === 'UNISEX') return true;
+          return salon.services.some(
+            (s: any) =>
+              (s.categoryId || s.serviceCategoryId) === cat.id &&
+              ((s.targetGender || s.gender) === effectiveGender || (s.targetGender || s.gender) === 'UNISEX'),
+          );
+        });
+
+        const genderLabel = effectiveGender !== 'UNISEX' ? effectiveGender : undefined;
+        const categoryMenu = this.templates.buildCategoryMenu(
+          categories.length > 0 ? categories : salon.serviceCategories || [],
+          genderLabel,
+        );
+        await this.sendMessage(cleanNumber, categoryMenu, phoneNumberId, salonId);
+        return { replyMessage: categoryMenu.bodyText, state: ConversationState.SELECT_CATEGORY };
+      }
+
+      // Otherwise, prompt gender selection ONCE:
       const genderMenu = this.templates.buildGenderSelectionMenu();
       await this.sendMessage(cleanNumber, genderMenu, phoneNumberId, salonId);
       return { replyMessage: genderMenu.bodyText, state: ConversationState.SELECT_CATEGORY };
@@ -729,12 +798,17 @@ export class WhatsAppActionHandlerService {
       const categories = (salon.serviceCategories || []).filter((cat: any) => {
         if (tempBookingGender === 'UNISEX') return true;
         return salon.services.some(
-          (s: any) => s.serviceCategoryId === cat.id && (s.gender === tempBookingGender || s.gender === 'UNISEX'),
+          (s: any) =>
+            (s.categoryId || s.serviceCategoryId) === cat.id &&
+            ((s.targetGender || s.gender) === tempBookingGender || (s.targetGender || s.gender) === 'UNISEX'),
         );
       });
 
       const genderLabel = tempBookingGender !== 'UNISEX' ? tempBookingGender : undefined;
-      const categoryMenu = this.templates.buildCategoryMenu(categories.length > 0 ? categories : salon.serviceCategories || [], genderLabel);
+      const categoryMenu = this.templates.buildCategoryMenu(
+        categories.length > 0 ? categories : salon.serviceCategories || [],
+        genderLabel,
+      );
       await this.sendMessage(cleanNumber, categoryMenu, phoneNumberId, salonId);
       return { replyMessage: categoryMenu.bodyText, state: ConversationState.SELECT_CATEGORY };
     }
@@ -746,11 +820,16 @@ export class WhatsAppActionHandlerService {
       const categories = (salon.serviceCategories || []).filter((cat: any) => {
         if (!gender || gender === 'UNISEX') return true;
         return salon.services.some(
-          (s: any) => s.serviceCategoryId === cat.id && (s.gender === gender || s.gender === 'UNISEX'),
+          (s: any) =>
+            (s.categoryId || s.serviceCategoryId) === cat.id &&
+            ((s.targetGender || s.gender) === gender || (s.targetGender || s.gender) === 'UNISEX'),
         );
       });
       const genderLabel = gender && gender !== 'UNISEX' ? gender : undefined;
-      const categoryMenu = this.templates.buildCategoryMenu(categories.length > 0 ? categories : salon.serviceCategories || [], genderLabel);
+      const categoryMenu = this.templates.buildCategoryMenu(
+        categories.length > 0 ? categories : salon.serviceCategories || [],
+        genderLabel,
+      );
       await this.sendMessage(cleanNumber, categoryMenu, phoneNumberId, salonId);
       return { replyMessage: categoryMenu.bodyText, state: ConversationState.SELECT_CATEGORY };
     }
@@ -762,15 +841,23 @@ export class WhatsAppActionHandlerService {
       const gender = conversation.tempBookingGender;
 
       const categoryServices = salon.services.filter((s: any) => {
-        const inCat = s.serviceCategoryId === catId || (catId === 'uncategorized' && !s.serviceCategoryId);
+        const inCat = (s.categoryId || s.serviceCategoryId) === catId || (catId === 'uncategorized' && !s.categoryId && !s.serviceCategoryId);
         if (!inCat) return false;
         if (!gender || gender === 'UNISEX') return true;
-        return s.gender === gender || s.gender === 'UNISEX';
+        return (s.targetGender || s.gender) === gender || (s.targetGender || s.gender) === 'UNISEX';
       });
 
       if (categoryServices.length === 0) {
         const reply = `⚠️ No services found in this category for the selected section. Please pick another category:`;
-        const categoryMenu = this.templates.buildCategoryMenu(salon.serviceCategories || []);
+        const categories = (salon.serviceCategories || []).filter((cat: any) => {
+          if (!gender || gender === 'UNISEX') return true;
+          return salon.services.some(
+            (s: any) =>
+              (s.categoryId || s.serviceCategoryId) === cat.id &&
+              ((s.targetGender || s.gender) === gender || (s.targetGender || s.gender) === 'UNISEX'),
+          );
+        });
+        const categoryMenu = this.templates.buildCategoryMenu(categories.length > 0 ? categories : salon.serviceCategories || []);
         categoryMenu.bodyText = reply;
         await this.sendMessage(cleanNumber, categoryMenu, phoneNumberId, salonId);
         return { replyMessage: reply, state: ConversationState.SELECT_CATEGORY };
@@ -1057,6 +1144,117 @@ export class WhatsAppActionHandlerService {
     const defaultWelcome = this.templates.buildWelcomeMessage(salon, activeAppointment);
     await this.sendMessage(cleanNumber, defaultWelcome, phoneNumberId, salonId);
     return { replyMessage: defaultWelcome.bodyText, state: ConversationState.START };
+  }
+
+  /**
+   * Intelligently resumes an incomplete draft session when the user clicks [ ▶️ Continue Booking ]
+   */
+  private async resumeIncompleteBooking(
+    conversation: any,
+    salon: any,
+    cleanNumber: string,
+    phoneNumberId?: string,
+    salonId?: string,
+  ): Promise<{ replyMessage: string; state: ConversationState }> {
+    const tz = salon.timezone || 'Asia/Kolkata';
+
+    // 1. If at Confirmation step and date/time/service present
+    if (
+      conversation.state === ConversationState.CONFIRMATION &&
+      conversation.selectedServiceId &&
+      conversation.selectedStartTime
+    ) {
+      const selectedService = salon.services.find((s: any) => s.id === conversation.selectedServiceId);
+      const selectedStaff = salon.stylists?.find((st: any) => st.id === conversation.selectedStaffId);
+      const datePart = conversation.selectedDate || new Date();
+      const timeStr = TimeUtility.formatTime24h(conversation.selectedStartTime, tz);
+      const formattedDate = TimeUtility.formatDateFriendly(datePart, tz, 'dd LLL, EEEE');
+      const formattedTime = TimeUtility.formatTime12h(timeStr);
+
+      const confirmPrompt = this.templates.buildBookingConfirmationPrompt({
+        serviceName: selectedService?.name || 'Service',
+        staffName: selectedStaff?.name || 'Any Specialist',
+        dateStr: formattedDate,
+        timeStr: formattedTime,
+        price: selectedService?.price || 0,
+      });
+      await this.sendMessage(cleanNumber, confirmPrompt, phoneNumberId, salonId);
+      return { replyMessage: confirmPrompt.bodyText, state: ConversationState.CONFIRMATION };
+    }
+
+    // 2. If at Select Time step and date is selected
+    if (conversation.selectedDate && conversation.selectedServiceId) {
+      const dateStr = TimeUtility.formatDateToISO(conversation.selectedDate, tz);
+      const availability = await this.availabilityService.getAvailableSlots(
+        salon.id,
+        conversation.selectedServiceId,
+        dateStr,
+        conversation.selectedStaffId || undefined,
+      );
+      if (availability.availableSlots && availability.availableSlots.length > 0) {
+        const slotRows = availability.availableSlots.map((s: any) => ({
+          timeStr: s.startTime,
+          displayTime: this.formatTime12h(s.startTime),
+        }));
+        const slotMenu = this.templates.buildTimeSlotMenu(slotRows);
+        await this.sendMessage(cleanNumber, slotMenu, phoneNumberId, salonId);
+        return { replyMessage: slotMenu.bodyText, state: ConversationState.SELECT_TIME };
+      }
+    }
+
+    // 3. If at Select Date step and service is selected
+    if (conversation.selectedServiceId) {
+      const openDates = await this.availabilityService.findAvailableDates(
+        salon.id,
+        conversation.selectedServiceId,
+        conversation.selectedStaffId,
+        2,
+      );
+      if (openDates.length > 0) {
+        const dateMenu = this.templates.buildDateSelectionMenu(openDates);
+        await this.sendMessage(cleanNumber, dateMenu, phoneNumberId, salonId);
+        return { replyMessage: dateMenu.bodyText, state: ConversationState.SELECT_DATE };
+      }
+    }
+
+    // 4. If at Select Service step and category is selected
+    if (conversation.selectedCategoryId) {
+      const catId = conversation.selectedCategoryId;
+      const selectedCategory = salon.serviceCategories.find((c: any) => c.id === catId);
+      const gender = conversation.tempBookingGender;
+      const categoryServices = salon.services.filter((s: any) => {
+        const inCat =
+          (s.categoryId || s.serviceCategoryId) === catId ||
+          (catId === 'uncategorized' && !s.categoryId && !s.serviceCategoryId);
+        if (!inCat) return false;
+        if (!gender || gender === 'UNISEX') return true;
+        return (s.targetGender || s.gender) === gender || (s.targetGender || s.gender) === 'UNISEX';
+      });
+      if (categoryServices.length > 0) {
+        const serviceMenu = this.templates.buildServiceMenu(categoryServices, selectedCategory?.name || 'Services');
+        await this.sendMessage(cleanNumber, serviceMenu, phoneNumberId, salonId);
+        return { replyMessage: serviceMenu.bodyText, state: ConversationState.SELECT_SERVICE };
+      }
+    }
+
+    // 5. Fallback: Re-render Category Menu
+    await this.session.updateConversationState(conversation.id, ConversationState.SELECT_CATEGORY);
+    const gender = conversation.tempBookingGender;
+    const categories = (salon.serviceCategories || []).filter((cat: any) => {
+      if (!gender || gender === 'UNISEX') return true;
+      return salon.services.some(
+        (s: any) =>
+          (s.categoryId || s.serviceCategoryId) === cat.id &&
+          ((s.targetGender || s.gender) === gender || (s.targetGender || s.gender) === 'UNISEX'),
+      );
+    });
+    const genderLabel = gender && gender !== 'UNISEX' ? gender : undefined;
+    const categoryMenu = this.templates.buildCategoryMenu(
+      categories.length > 0 ? categories : salon.serviceCategories || [],
+      genderLabel,
+    );
+    await this.sendMessage(cleanNumber, categoryMenu, phoneNumberId, salonId);
+    return { replyMessage: categoryMenu.bodyText, state: ConversationState.SELECT_CATEGORY };
   }
 
   async handleServiceChosen(

@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WhatsApp Bot Flow — Visual Architecture Simulator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --wa-bg: #0b141a;
+      --wa-header: #202c33;
+      --wa-bubble-in: #202c33;
+      --wa-bubble-out: #005c4b;
+      --wa-btn-bg: #233138;
+      --wa-btn-text: #00a884;
+      --wa-text: #e9edef;
+      --wa-muted: #8696a0;
+      --wa-accent: #25d366;
+      --border: rgba(255, 255, 255, 0.08);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #090d10;
+      color: #f1f5f9;
+      font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+      padding: 30px 20px;
+      min-height: 100vh;
+    }
+    .container { max-width: 1360px; margin: 0 auto; }
+    header {
+      text-align: center;
+      margin-bottom: 36px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(37, 211, 102, 0.15);
+      border: 1px solid rgba(37, 211, 102, 0.35);
+      color: #25d366;
+      padding: 6px 14px;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    h1 {
+      font-size: 2.2rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      margin-bottom: 8px;
+      background: linear-gradient(135deg, #fff 0%, #cbd5e1 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    p.subtitle {
+      color: var(--wa-muted);
+      font-size: 0.95rem;
+      max-width: 650px;
+      margin: 0 auto 24px;
+    }
+
+    /* Tabs */
+    .nav-tabs {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      margin-bottom: 36px;
+      flex-wrap: wrap;
+    }
+    .tab-btn {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border);
+      color: var(--wa-muted);
+      padding: 10px 20px;
+      border-radius: 12px;
+      font-size: 0.9rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .tab-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: #fff;
+    }
+    .tab-btn.active {
+      background: #005c4b;
+      border-color: #00a884;
+      color: #fff;
+      box-shadow: 0 8px 24px rgba(0, 92, 75, 0.4);
+    }
+
+    /* Phone Frames Grid */
+    .flow-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+      gap: 24px;
+      align-items: start;
+    }
+
+    .phone-card {
+      background: #111b21;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 28px;
+      overflow: hidden;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+    .phone-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, #25d366, #128c7e);
+    }
+    .step-tag {
+      background: rgba(0, 168, 132, 0.15);
+      border-bottom: 1px solid rgba(0, 168, 132, 0.25);
+      color: #25d366;
+      font-size: 0.76rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 8px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .phone-header {
+      background: var(--wa-header);
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      border-bottom: 1px solid rgba(0, 0, 0, 0.3);
+    }
+    .phone-avatar {
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #00a884, #005c4b);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: #fff;
+    }
+    .phone-meta h4 {
+      font-size: 0.9rem;
+      font-weight: 700;
+      color: var(--wa-text);
+      line-height: 1.2;
+    }
+    .phone-meta span {
+      font-size: 0.72rem;
+      color: #25d366;
+    }
+    .phone-screen {
+      background: var(--wa-bg);
+      background-image: radial-gradient(rgba(255,255,255,0.03) 1px, transparent 0);
+      background-size: 20px 20px;
+      padding: 16px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-height: 480px;
+    }
+
+    /* Message Bubbles */
+    .msg-out {
+      align-self: flex-end;
+      background: var(--wa-bubble-out);
+      color: var(--wa-text);
+      padding: 8px 12px;
+      border-radius: 12px 0 12px 12px;
+      max-width: 80%;
+      font-size: 0.88rem;
+      position: relative;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+    }
+    .msg-time {
+      font-size: 0.65rem;
+      color: rgba(255, 255, 255, 0.6);
+      text-align: right;
+      margin-top: 4px;
+    }
+
+    .msg-in {
+      align-self: flex-start;
+      background: var(--wa-bubble-in);
+      color: var(--wa-text);
+      border-radius: 0 12px 12px 12px;
+      max-width: 90%;
+      font-size: 0.86rem;
+      line-height: 1.45;
+      overflow: hidden;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+    }
+    .msg-in-body {
+      padding: 10px 12px 8px;
+      white-space: pre-line;
+    }
+    .interactive-btn {
+      background: var(--wa-btn-bg);
+      color: var(--wa-btn-text);
+      padding: 10px 12px;
+      font-size: 0.84rem;
+      font-weight: 700;
+      text-align: center;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: background 0.15s ease;
+    }
+    .interactive-btn:hover {
+      background: rgba(0, 168, 132, 0.15);
+    }
+    .interactive-btn.highlight {
+      background: rgba(37, 211, 102, 0.18);
+      color: #25d366;
+    }
+
+    .interactive-list-btn {
+      background: var(--wa-btn-bg);
+      color: var(--wa-btn-text);
+      padding: 10px 12px;
+      font-size: 0.84rem;
+      font-weight: 700;
+      text-align: center;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    /* Flow description block below phone */
+    .flow-desc {
+      background: rgba(255, 255, 255, 0.02);
+      border-top: 1px solid var(--border);
+      padding: 14px 16px;
+      font-size: 0.8rem;
+      color: #94a3b8;
+      line-height: 1.5;
+    }
+    .flow-desc strong { color: #f1f5f9; }
+
+    .arrow-divider {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #25d366;
+      font-size: 1.5rem;
+      padding: 10px;
+    }
+
+    /* Section highlight callout */
+    .callout {
+      background: rgba(99, 102, 241, 0.08);
+      border: 1px solid rgba(99, 102, 241, 0.25);
+      border-radius: 14px;
+      padding: 16px 20px;
+      margin-top: 30px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .callout-icon { font-size: 1.6rem; }
+    .callout-text h4 { font-size: 0.95rem; font-weight: 700; color: #fff; margin-bottom: 2px; }
+    .callout-text p { font-size: 0.84rem; color: #94a3b8; margin: 0; line-height: 1.4; }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <header>
+      <div class="badge">Architecture Visualization</div>
+      <h1>WhatsApp Bot Conversational Flow</h1>
+      <p class="subtitle">Pixel-perfect state machine showing every message, screen transition, decision rule, and edge case from initial "Hi" to final confirmation.</p>
+
+      <div class="nav-tabs">
+        <button class="tab-btn active" onclick="switchView('all')">🌐 Complete System Overview</button>
+        <button class="tab-btn" onclick="switchView('branch-a')">📅 Branch A: Book Slot (Full Walkthrough)</button>
+        <button class="tab-btn" onclick="switchView('branch-b')">⚡ Branch B: Quick Book (Express Walkthrough)</button>
+        <button class="tab-btn" onclick="switchView('stale')">🛡️ Stale Button Protection & Resume</button>
+      </div>
+    </header>
+
+    <!-- SECTION 1: ROOT ("Hi") TO 3 OPTIONS -->
+    <div id="view-root" style="margin-bottom: 40px;">
+      <h2 style="font-size: 1.3rem; font-weight: 800; margin-bottom: 16px; display: flex; align-items: center; gap: 8px;">
+        <span>🎯 Step 1: Initial Entry ("Hi") & 3-Button Welcome Menu</span>
+      </h2>
+
+      <div class="flow-grid" style="grid-template-columns: minmax(320px, 380px) 1fr;">
+        <!-- Phone 1: Welcome Menu -->
+        <div class="phone-card">
+          <div class="step-tag">
+            <span>Root Entry</span>
+            <span>State: START</span>
+          </div>
+          <div class="phone-header">
+            <div class="phone-avatar">✂️</div>
+            <div class="phone-meta">
+              <h4>dbtech Official</h4>
+              <span>WhatsApp Verified Bot</span>
+            </div>
+          </div>
+          <div class="phone-screen">
+            <div class="msg-out">
+              Hi
+              <div class="msg-time">6:18 PM ✓✓</div>
+            </div>
+
+            <div class="msg-in">
+              <div class="msg-in-body">👋 Welcome to *dbtech*!
+
+Book your appointment in a few quick taps or get an immediate chair check-in.</div>
+              <div class="interactive-btn highlight">📅 Book Slot</div>
+              <div class="interactive-btn highlight">⚡ Quick Book</div>
+              <div class="interactive-btn">📍 Salon Info</div>
+            </div>
+          </div>
+          <div class="flow-desc">
+            <strong>System Checks on "Hi":</strong><br/>
+            1. Customer strike check (if 3 strikes &rarr; restricted).<br/>
+            2. Active reservation check (if exists &rarr; show active card).<br/>
+            3. Otherwise &rarr; displays clean 3 buttons with <strong>⚡ Quick Book</strong> directly under <strong>📅 Book Slot</strong>.
+          </div>
+        </div>
+
+        <!-- Logic Card beside phone -->
+        <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 20px; padding: 24px; display: flex; flex-direction: column; justify-content: center; gap: 16px;">
+          <h3 style="font-size: 1.15rem; color: #fff;">Branch Decision Logic from Welcome Menu</h3>
+          <div style="display: grid; gap: 12px;">
+            <div style="background: rgba(37, 211, 102, 0.08); border: 1px solid rgba(37, 211, 102, 0.25); padding: 14px; border-radius: 12px;">
+              <strong style="color: #25d366;">1. Tap [ 📅 Book Slot ] &rarr; Branch A:</strong>
+              <p style="font-size: 0.84rem; color: #cbd5e1; margin-top: 4px;">Advance appointment booking with custom date, time slot, and preferred stylist.</p>
+            </div>
+            <div style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.25); padding: 14px; border-radius: 12px;">
+              <strong style="color: #a5b4fc;">2. Tap [ ⚡ Quick Book ] &rarr; Branch B:</strong>
+              <p style="font-size: 0.84rem; color: #cbd5e1; margin-top: 4px;">Walk-in / immediate desk check-in. <strong>Skips stylist, date, and time slots completely!</strong> Customer joins live chair queue.</p>
+            </div>
+            <div style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25); padding: 14px; border-radius: 12px;">
+              <strong style="color: #fbbf24;">3. Tap [ 📍 Salon Info ] &rarr; Branch C:</strong>
+              <p style="font-size: 0.84rem; color: #cbd5e1; margin-top: 4px;">Displays physical salon address, contact desk phone, and 7-day operating hours.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION 2: BRANCH A (BOOK SLOT SEQUENCE) -->
+    <div id="view-branch-a" style="margin-bottom: 40px;">
+      <h2 style="font-size: 1.3rem; font-weight: 800; margin-bottom: 16px; color: #25d366; display: flex; align-items: center; gap: 8px;">
+        <span>📅 Branch A: Scheduled Advance Booking (Step-by-Step Flow)</span>
+      </h2>
+
+      <div class="flow-grid">
+        <!-- Screen A1: Gender & Categories -->
+        <div class="phone-card">
+          <div class="step-tag">
+            <span>Step A1 & A2</span>
+            <span>Gender & Categories</span>
+          </div>
+          <div class="phone-screen">
+            <div class="msg-out">📅 Book Slot</div>
+
+            <!-- Gender Menu (Shown ONLY if gender not already selected!) -->
+            <div class="msg-in">
+              <div class="msg-in-body">💈 *Choose Section*
+
+Please select a gender section:</div>
+              <div class="interactive-list-btn">☰ Select Section</div>
+            </div>
+
+            <div class="msg-out">Men</div>
+
+            <!-- Category Menu -->
+            <div class="msg-in">
+              <div class="msg-in-body">✂️ *Categories (MALE)*
+
+Please choose a service category below:</div>
+              <div class="interactive-list-btn">☰ View Categories</div>
+            </div>
+          </div>
+          <div class="flow-desc">
+            <strong>Gender Rule:</strong><br/>
+            Once "Men" is tapped, <code>tempBookingGender = MALE</code> is <strong>permanently locked</strong> in DB! The bot will <strong>NEVER</strong> prompt for gender again in this session.
+          </div>
+        </div>
+
+        <!-- Screen A2: Services & Stylist -->
+        <div class="phone-card">
+          <div class="step-tag">
+            <span>Step A3 & A4</span>
+            <span>Service & Stylist</span>
+          </div>
+          <div class="phone-screen">
+            <div class="msg-out">Hair Cut</div>
+
+            <!-- Service Menu (Fixed Query: categoryId & targetGender) -->
+            <div class="msg-in">
+              <div class="msg-in-body">✂️ *Hair Cut Services*
+
+Please select a service:</div>
+              <div class="interactive-list-btn">☰ Select Service</div>
+            </div>
+
+            <div class="msg-out">Classic Haircut (₹300)</div>
+
+            <!-- Stylist Selection Menu -->
+            <div class="msg-in">
+              <div class="msg-in-body">✂️ *Choose Your Stylist*
+
+Select a stylist or pick any available:</div>
+              <div class="interactive-btn highlight">⭐ Any Available Stylist</div>
+              <div class="interactive-btn">👤 Stylist Vikram</div>
+              <div class="interactive-btn">👤 Stylist Rahul</div>
+            </div>
+          </div>
+          <div class="flow-desc">
+            <strong>Fixed Query Bug:</strong><br/>
+            Now queries <code>(s.categoryId || s.serviceCategoryId)</code> and <code>(s.targetGender || s.gender)</code>, ensuring active services are <strong>never</strong> marked missing.
+          </div>
+        </div>
+
+        <!-- Screen A3: Date & Time -->
+        <div class="phone-card">
+          <div class="step-tag">
+            <span>Step A5 & A6</span>
+            <span>Date & Time Slots</span>
+          </div>
+          <div class="phone-screen">
+            <div class="msg-out">⭐ Any Available Stylist</div>
+
+            <!-- Date Selection Menu -->
+            <div class="msg-in">
+              <div class="msg-in-body">📅 *Choose Appointment Date*
+
+Select your preferred day:</div>
+              <div class="interactive-list-btn">☰ Select Date (Next 7 Days)</div>
+            </div>
+
+            <div class="msg-out">Tomorrow, 30 Sep</div>
+
+            <!-- Real-time Time Slots -->
+            <div class="msg-in">
+              <div class="msg-in-body">🕒 *Available Slots on 30 Sep*
+
+Computed live from working hours & breaks:</div>
+              <div class="interactive-list-btn">☰ Select Time Slot</div>
+            </div>
+          </div>
+          <div class="flow-desc">
+            <strong>Availability Engine:</strong><br/>
+            Excludes salon closed days (Tuesdays), stylist absences, and already-booked slots.
+          </div>
+        </div>
+
+        <!-- Screen A4: Summary & Ticket -->
+        <div class="phone-card">
+          <div class="step-tag">
+            <span>Step A7 & A8</span>
+            <span>Confirm & Ticket</span>
+          </div>
+          <div class="phone-screen">
+            <div class="msg-out">10:30 AM</div>
+
+            <!-- Review Card -->
+            <div class="msg-in">
+              <div class="msg-in-body">📋 *Review & Confirm Booking*
+
+💈 *Service:* Classic Haircut (₹300)
+✂️ *Stylist:* Stylist Vikram
+📅 *Date:* Tomorrow, 30 Sep
+🕒 *Time:* 10:30 AM
+📍 *Location:* dbtech Main Store</div>
+              <div class="interactive-btn highlight">✅ Confirm Booking</div>
+              <div class="interactive-btn">✕ Cancel</div>
+            </div>
+
+            <!-- Final Ticket -->
+            <div class="msg-in" style="background: rgba(0, 92, 75, 0.35); border: 1px solid rgba(37, 211, 102, 0.3);">
+              <div class="msg-in-body">🎉 *Booking Confirmed!*
+
+🔖 Ticket #APT-8402
+📅 Tomorrow at 10:30 AM
+Status: *BOOKED*</div>
+              <div class="interactive-btn">🔄 Reschedule</div>
+              <div class="interactive-btn">✕ Cancel</div>
+            </div>
+          </div>
+          <div class="flow-desc">
+            <strong>Real-Time Sync:</strong><br/>
+            Creates DB appointment and dispatches real-time SSE push to the Salon Dashboard immediately.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION 3: BRANCH B (QUICK BOOK SEQUENCE) -->
+    <div id="view-branch-b" style="margin-bottom: 40px;">
+      <h2 style="font-size: 1.3rem; font-weight: 800; margin-bottom: 16px; color: #a5b4fc; display: flex; align-items: center; gap: 8px;">
+        <span>⚡ Branch B: Quick Book (Express Walk-In / Desk Check-In)</span>
+      </h2>
+
+      <div class="flow-grid" style="grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); max-width: 800px;">
+        <!-- Quick Book Screen 1 -->
+        <div class="phone-card">
+          <div class="step-tag">
+            <span>Quick Step 1</span>
+            <span>Category & Service</span>
+          </div>
+          <div class="phone-screen">
+            <div class="msg-out">⚡ Quick Book</div>
+
+            <div class="msg-in">
+              <div class="msg-in-body">⚡ *Express In-Salon Booking*
+
+Pick your service to join the live chair queue:</div>
+              <div class="interactive-list-btn">☰ Select Service Category</div>
+            </div>
+
+            <div class="msg-out">Hair Cut &rarr; Skin Fade & Style</div>
+
+            <div class="msg-in">
+              <div class="msg-in-body">⚡ *Confirm Quick Booking*
+
+💈 *Service:* Skin Fade & Style
+💰 *Price:* ₹450
+⏱️ *Est. Wait Time:* ~10-15 mins
+📍 *Location:* Front Desk Check-in
+
+Tap below to notify the desk:</div>
+              <div class="interactive-btn highlight">⚡ Confirm Quick Book</div>
+              <div class="interactive-btn">✂️ Other Service</div>
+              <div class="interactive-btn">🏠 Main Menu</div>
+            </div>
+          </div>
+          <div class="flow-desc">
+            <strong>Express Advantage:</strong><br/>
+            Completely skips Stylist, Date, and Time slots. Directly generates instant walk-in check-in.
+          </div>
+        </div>
+
+        <!-- Quick Book Screen 2 -->
+        <div class="phone-card">
+          <div class="step-tag">
+            <span>Quick Step 2</span>
+            <span>Live Reception Queue</span>
+          </div>
+          <div class="phone-screen">
+            <div class="msg-out">⚡ Confirm Quick Book</div>
+
+            <div class="msg-in" style="background: rgba(99, 102, 241, 0.18); border: 1px solid rgba(99, 102, 241, 0.4);">
+              <div class="msg-in-body">🎉 *Quick Booking Request Sent!*
+
+🎫 *Ticket #QB-104*
+💈 *Service:* Skin Fade & Style (₹450)
+⏱️ *Est. Wait:* ~10-15 mins
+
+Please walk up to the reception desk. Our staff has been alerted!</div>
+              <div class="interactive-btn">📋 Check Status</div>
+              <div class="interactive-btn">🏠 Main Menu</div>
+            </div>
+          </div>
+          <div class="flow-desc">
+            <strong>Reception Integration:</strong><br/>
+            Audio ding triggers on Salon Dashboard and booking appears in <strong>Pending Acceptance Queue</strong> for immediate chair seating.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION 4: STALE BUTTON PROTECTION -->
+    <div id="view-stale" style="margin-bottom: 40px;">
+      <h2 style="font-size: 1.3rem; font-weight: 800; margin-bottom: 16px; color: #f43f5e; display: flex; align-items: center; gap: 8px;">
+        <span>🛡️ Cross-Cutting: Stale / Outdated Button Protection & Resume Flow</span>
+      </h2>
+
+      <div class="flow-grid" style="grid-template-columns: minmax(320px, 380px) 1fr;">
+        <div class="phone-card">
+          <div class="step-tag" style="background: rgba(244,63,94,0.15); color: #fb7185;">
+            <span>Stale Handler</span>
+            <span>Resume Guard</span>
+          </div>
+          <div class="phone-screen">
+            <div style="font-size: 0.75rem; text-align: center; color: var(--wa-muted); margin: 6px 0;">-- User scrolled up 10 messages --</div>
+            <div class="msg-out" style="background: #374151;">📅 Book Slot (Old Button)</div>
+
+            <div class="msg-in" style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.3);">
+              <div class="msg-in-body">⚠️ You clicked an earlier option, but you already have an incomplete booking in progress!
+
+📋 *In-Progress:*
+💈 Service: Classic Haircut
+✂️ Stylist: Stylist Vikram
+
+Would you like to continue or start fresh?</div>
+              <div class="interactive-btn highlight">▶️ Continue Booking</div>
+              <div class="interactive-btn">📅 New Booking</div>
+            </div>
+          </div>
+          <div class="flow-desc">
+            <strong>Two Clean Outcomes:</strong><br/>
+            • <code>[ ▶️ Continue Booking ]</code>: Re-renders the Time Slot menu (keeps selected service and stylist intact).<br/>
+            • <code>[ 📅 New Booking ]</code>: Wipes temporary state and starts clean.
+          </div>
+        </div>
+
+        <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 20px; padding: 24px; display: flex; flex-direction: column; justify-content: center; gap: 14px;">
+          <h3 style="font-size: 1.15rem; color: #fff;">Why the Bot Said "Expired Option" to "Hi" Earlier</h3>
+          <p style="font-size: 0.88rem; color: #cbd5e1; line-height: 1.5;">
+            In the previous code, the stale button validation ran <em>before</em> checking if the message was "Hi".
+          </p>
+          <div style="background: rgba(244,63,94,0.08); border: 1px solid rgba(244,63,94,0.25); padding: 14px; border-radius: 12px; font-size: 0.84rem; color: #fda4af;">
+            <strong>The Fix:</strong> Greetings (<code>hi</code>, <code>hello</code>, <code>menu</code>, <code>start</code>) are now checked at <strong>Line 1</strong> of the handler. A customer sending "Hi" will <strong>NEVER</strong> be told their message is an expired option again!
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    function switchView(tab) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      event.currentTarget.classList.add('active');
+
+      const root = document.getElementById('view-root');
+      const branchA = document.getElementById('view-branch-a');
+      const branchB = document.getElementById('view-branch-b');
+      const stale = document.getElementById('view-stale');
+
+      if (tab === 'all') {
+        root.style.display = 'block';
+        branchA.style.display = 'block';
+        branchB.style.display = 'block';
+        stale.style.display = 'block';
+      } else if (tab === 'branch-a') {
+        root.style.display = 'block';
+        branchA.style.display = 'block';
+        branchB.style.display = 'none';
+        stale.style.display = 'none';
+      } else if (tab === 'branch-b') {
+        root.style.display = 'block';
+        branchA.style.display = 'none';
+        branchB.style.display = 'block';
+        stale.style.display = 'none';
+      } else if (tab === 'stale') {
+        root.style.display = 'none';
+        branchA.style.display = 'none';
+        branchB.style.display = 'none';
+        stale.style.display = 'block';
+      }
+    }
+  </script>
+</body>
+</html>

@@ -19,23 +19,40 @@ export class RefreshTransport {
   static getRefreshToken() {
     const isSuperAdminRoute = typeof window !== 'undefined' && window.location.hash?.includes('super-admin');
     if (isSuperAdminRoute) {
-      return localStorage.getItem('super_admin_refresh_token') || localStorage.getItem('salon_refresh_token');
+      return localStorage.getItem('super_admin_refresh_token');
     }
-    return localStorage.getItem('salon_refresh_token') || localStorage.getItem('super_admin_refresh_token');
+    return localStorage.getItem('salon_refresh_token');
   }
 
   static setRefreshToken(token) {
-    if (token) localStorage.setItem('salon_refresh_token', token);
+    const isSuperAdminRoute = typeof window !== 'undefined' && window.location.hash?.includes('super-admin');
+    if (isSuperAdminRoute) {
+      if (token) localStorage.setItem('super_admin_refresh_token', token);
+      else localStorage.removeItem('super_admin_refresh_token');
+    } else {
+      if (token) localStorage.setItem('salon_refresh_token', token);
+      else localStorage.removeItem('salon_refresh_token');
+    }
   }
 
   static clearRefreshToken() {
+    const isSuperAdminRoute = typeof window !== 'undefined' && window.location.hash?.includes('super-admin');
+    if (isSuperAdminRoute) {
+      localStorage.removeItem('super_admin_refresh_token');
+    } else {
+      localStorage.removeItem('salon_refresh_token');
+    }
+  }
+
+  static clearAll() {
     localStorage.removeItem('salon_refresh_token');
     localStorage.removeItem('super_admin_refresh_token');
   }
 }
 
-// Global In-Memory Access Token & Refresh Mutex Queue
-let inMemoryAccessToken = null;
+// Dedicated In-Memory Access Tokens (Fully Isolated)
+let inMemorySalonToken = null;
+let inMemorySuperAdminToken = null;
 let isRefreshing = false;
 let refreshSubscribers = [];
 
@@ -79,17 +96,22 @@ export class ApiClient {
   static getAccessToken() {
     const isSuperAdminRoute = typeof window !== 'undefined' && window.location.hash?.includes('super-admin');
     if (isSuperAdminRoute) {
-      return localStorage.getItem('super_admin_token') || inMemoryAccessToken || localStorage.getItem('salon_access_token');
+      return inMemorySuperAdminToken || localStorage.getItem('super_admin_token');
     }
-    return inMemoryAccessToken || localStorage.getItem('salon_access_token') || localStorage.getItem('super_admin_token');
+    return inMemorySalonToken || localStorage.getItem('salon_access_token');
   }
 
   static setAccessToken(token) {
-    inMemoryAccessToken = token || null;
-    if (token) {
-      localStorage.setItem('salon_access_token', token);
+    const isSuperAdminRoute = typeof window !== 'undefined' && window.location.hash?.includes('super-admin');
+    if (isSuperAdminRoute) {
+      this.setSuperAdminToken(token);
     } else {
-      localStorage.removeItem('salon_access_token');
+      inMemorySalonToken = token || null;
+      if (token) {
+        localStorage.setItem('salon_access_token', token);
+      } else {
+        localStorage.removeItem('salon_access_token');
+      }
     }
   }
 
@@ -101,15 +123,20 @@ export class ApiClient {
   }
 
   static getSuperAdminToken() {
-    return localStorage.getItem('super_admin_token') || inMemoryAccessToken;
+    return inMemorySuperAdminToken || localStorage.getItem('super_admin_token');
   }
 
   static setSuperAdminToken(token) {
-    inMemoryAccessToken = token;
-    if (token) localStorage.setItem('super_admin_token', token);
+    inMemorySuperAdminToken = token || null;
+    if (token) {
+      localStorage.setItem('super_admin_token', token);
+    } else {
+      localStorage.removeItem('super_admin_token');
+    }
   }
 
   static removeSuperAdminToken() {
+    inMemorySuperAdminToken = null;
     localStorage.removeItem('super_admin_token');
     localStorage.removeItem('super_admin_user');
     localStorage.removeItem('super_admin_refresh_token');
@@ -126,6 +153,7 @@ export class ApiClient {
 
   static setSuperAdminUser(user) {
     if (user) localStorage.setItem('super_admin_user', JSON.stringify(user));
+    else localStorage.removeItem('super_admin_user');
   }
 
   static getToken() {
@@ -137,8 +165,13 @@ export class ApiClient {
   }
 
   static removeToken() {
-    inMemoryAccessToken = null;
-    localStorage.removeItem('salon_access_token');
+    const isSuperAdminRoute = typeof window !== 'undefined' && window.location.hash?.includes('super-admin');
+    if (isSuperAdminRoute) {
+      this.removeSuperAdminToken();
+    } else {
+      inMemorySalonToken = null;
+      localStorage.removeItem('salon_access_token');
+    }
   }
 
   static getUser() {
@@ -146,9 +179,9 @@ export class ApiClient {
       const isSuperAdminRoute = typeof window !== 'undefined' && window.location.hash?.includes('super-admin');
       if (isSuperAdminRoute) {
         const superRaw = localStorage.getItem('super_admin_user');
-        if (superRaw) return JSON.parse(superRaw);
+        return superRaw ? JSON.parse(superRaw) : null;
       }
-      const raw = localStorage.getItem('salon_user_data') || localStorage.getItem('super_admin_user');
+      const raw = localStorage.getItem('salon_user_data');
       return raw ? JSON.parse(raw) : null;
     } catch {
       return null;
@@ -156,7 +189,14 @@ export class ApiClient {
   }
 
   static setUser(user) {
-    if (user) {
+    if (!user) {
+      localStorage.removeItem('salon_user_data');
+      return;
+    }
+    const isSuperAdminRoute = typeof window !== 'undefined' && window.location.hash?.includes('super-admin');
+    if (isSuperAdminRoute || user.role === 'SUPER_ADMIN' || user.role === 'PLATFORM_ADMIN') {
+      this.setSuperAdminUser(user);
+    } else {
       localStorage.setItem('salon_user_data', JSON.stringify(user));
       const identifier = user.phone || user.email;
       if (identifier) localStorage.setItem('last_user_identifier', identifier);
@@ -164,14 +204,23 @@ export class ApiClient {
   }
 
   static removeUser() {
-    localStorage.removeItem('salon_user_data');
+    const isSuperAdminRoute = typeof window !== 'undefined' && window.location.hash?.includes('super-admin');
+    if (isSuperAdminRoute) {
+      localStorage.removeItem('super_admin_user');
+    } else {
+      localStorage.removeItem('salon_user_data');
+    }
   }
 
   static clearSession(broadcast = true) {
-    this.removeToken();
-    this.removeUser();
-    RefreshTransport.clearRefreshToken();
-    this.removeSuperAdminToken();
+    const isSuperAdminRoute = typeof window !== 'undefined' && window.location.hash?.includes('super-admin');
+    if (isSuperAdminRoute) {
+      this.removeSuperAdminToken();
+    } else {
+      this.removeToken();
+      this.removeUser();
+      RefreshTransport.clearRefreshToken();
+    }
     this.invalidateCache();
     if (broadcast && authChannel) {
       authChannel.postMessage({ type: 'LOGOUT', timestamp: Date.now() });
@@ -212,19 +261,16 @@ export class ApiClient {
     const data = await response.json();
     const result = data.data !== undefined ? data.data : data;
 
-    if (result.accessToken) {
-      this.setAccessToken(result.accessToken);
-    }
-    if (result.refreshToken) {
-      RefreshTransport.setRefreshToken(result.refreshToken);
-    }
-    if (result.user) {
-      this.setUser(result.user);
-      if (result.user.role === 'SUPER_ADMIN' || result.user.role === 'PLATFORM_ADMIN') {
-        this.setSuperAdminUser(result.user);
-        if (result.accessToken) this.setSuperAdminToken(result.accessToken);
-        if (result.refreshToken) localStorage.setItem('super_admin_refresh_token', result.refreshToken);
-      }
+    const isSuperAdmin = result.user?.role === 'SUPER_ADMIN' || result.user?.role === 'PLATFORM_ADMIN' || (typeof window !== 'undefined' && window.location.hash?.includes('super-admin'));
+
+    if (isSuperAdmin) {
+      if (result.accessToken) this.setSuperAdminToken(result.accessToken);
+      if (result.refreshToken) localStorage.setItem('super_admin_refresh_token', result.refreshToken);
+      if (result.user) this.setSuperAdminUser(result.user);
+    } else {
+      if (result.accessToken) this.setAccessToken(result.accessToken);
+      if (result.refreshToken) RefreshTransport.setRefreshToken(result.refreshToken);
+      if (result.user) this.setUser(result.user);
     }
 
     return result;

@@ -45,6 +45,10 @@ export enum WhatsAppButtonId {
   REMIND_CONFIRM = 'remind_confirm',
   REMIND_CANCEL = 'remind_cancel',
   REMIND_RESCHEDULE = 'remind_reschedule',
+
+  // Incomplete Booking & Stale Action Recovery
+  RESUME_BOOKING = 'btn_resume_booking',
+  NEW_BOOKING = 'btn_new_booking',
 }
 
 export interface InteractiveButton {
@@ -224,6 +228,7 @@ export class WhatsAppSenderService {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(bodyData),
+        signal: AbortSignal.timeout(5000),
       });
 
       const resJson: any = await response.json();

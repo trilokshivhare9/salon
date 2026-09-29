@@ -58,8 +58,12 @@ export class WhatsAppSessionService {
     conversationState: ConversationState,
     input: string,
   ): boolean {
-    // Navigation buttons are always valid globally
-    if (['btn_menu', 'btn_start', 'btn_services', 'btn_quick_book', 'btn_book', 'btn_info'].includes(input)) {
+    // Navigation buttons & greetings are always valid globally
+    const normalizedInput = (input || '').trim().toLowerCase();
+    if (
+      ['btn_menu', 'btn_start', 'btn_services', 'btn_quick_book', 'btn_book', 'btn_info', 'btn_resume_booking', 'btn_new_booking'].includes(input) ||
+      ['hi', 'hello', 'start', 'menu', 'restart', 'reset'].includes(normalizedInput)
+    ) {
       return true;
     }
 

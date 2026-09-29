@@ -89,8 +89,8 @@ describe('Smart WhatsApp Stale Button Fallbacks (Flow Matrix Tests)', () => {
     expect(sendMetaSpy).toHaveBeenCalled();
     const payload = sendMetaSpy.mock.calls[0][1];
     expect(payload.buttons).toEqual([
-      { id: 'btn_book', title: '▶️ Continue Booking' },
-      { id: 'btn_start', title: '📅 New Booking' },
+      { id: 'btn_resume_booking', title: '▶️ Continue Booking' },
+      { id: 'btn_new_booking', title: '📅 New Booking' },
     ]);
   });
 
@@ -127,8 +127,8 @@ describe('Smart WhatsApp Stale Button Fallbacks (Flow Matrix Tests)', () => {
     expect(sendMetaSpy).toHaveBeenCalled();
     const payload = sendMetaSpy.mock.calls[0][1];
     expect(payload.buttons).toEqual([
-      { id: 'btn_book', title: '📋 Check Last Booking' },
-      { id: 'btn_start', title: '📅 New Booking' },
+      { id: 'btn_resume_booking', title: '📋 Check Last Booking' },
+      { id: 'btn_new_booking', title: '📅 New Booking' },
     ]);
   });
 });

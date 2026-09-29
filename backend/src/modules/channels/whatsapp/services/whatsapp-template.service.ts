@@ -25,11 +25,11 @@ export class WhatsAppTemplateService {
     }
 
     return {
-      bodyText: `👋 Welcome to *${salonName}*!\n\nBook your appointment in a few quick taps or explore our service catalog.`,
+      bodyText: `👋 Welcome to *${salonName}*!\n\nBook your appointment in a few quick taps or choose Quick Book for express walk-in check-in.`,
       interactiveType: 'button' as const,
       buttons: [
         { id: WhatsAppButtonId.BOOK, title: '📅 Book Slot' },
-        { id: WhatsAppButtonId.SERVICES, title: '✂️ View Services' },
+        { id: WhatsAppButtonId.QUICK_BOOK, title: '⚡ Quick Book' },
         { id: WhatsAppButtonId.INFO, title: '📍 Salon Info' },
       ],
     };
@@ -353,18 +353,18 @@ export class WhatsAppTemplateService {
         bodyText: `⚠️ This option has expired. You can check your last booking or start a new one.`,
         interactiveType: 'button' as const,
         buttons: [
-          { id: WhatsAppButtonId.BOOK, title: '📋 Check Last Booking' },
-          { id: WhatsAppButtonId.START, title: '📅 New Booking' },
+          { id: WhatsAppButtonId.RESUME_BOOKING, title: '📋 Check Last Booking' },
+          { id: WhatsAppButtonId.NEW_BOOKING, title: '📅 New Booking' },
         ],
       };
     }
 
     return {
-      bodyText: `⚠️ Expired option. Would you like to continue your current booking or start a new one?`,
+      bodyText: `⚠️ Expired option. You tapped an older action from chat history.\n\nWould you like to continue your current booking or start a new one?`,
       interactiveType: 'button' as const,
       buttons: [
-        { id: WhatsAppButtonId.BOOK, title: '▶️ Continue Booking' },
-        { id: WhatsAppButtonId.START, title: '📅 New Booking' },
+        { id: WhatsAppButtonId.RESUME_BOOKING, title: '▶️ Continue Booking' },
+        { id: WhatsAppButtonId.NEW_BOOKING, title: '📅 New Booking' },
       ],
     };
   }
