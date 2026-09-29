@@ -1507,6 +1507,7 @@ export class PlatformAdminPortal {
         closeTime: monState.isClosed ? '19:00' : monState.endTime,
       };
 
+      try {
         // Step A: Prepare custom 7-day schedule to be saved atomically with salon creation
         const hoursPayload = provScheduleState.map((d) => ({
           dayOfWeek: d.dayOfWeek,
