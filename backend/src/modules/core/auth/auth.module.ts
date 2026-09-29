@@ -9,6 +9,7 @@ import { PasswordService } from './services/password.service';
 import { TokenService } from './services/token.service';
 import { SessionService } from './services/session.service';
 import { TenantContextGuard } from './guards/tenant-context.guard';
+import { PlatformBootstrapService } from './services/platform-bootstrap.service';
 
 @Module({
   imports: [
@@ -25,7 +26,8 @@ import { TenantContextGuard } from './guards/tenant-context.guard';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, PasswordService, TokenService, SessionService, TenantContextGuard],
-  exports: [AuthService, JwtStrategy, PasswordService, TokenService, SessionService, TenantContextGuard, PassportModule],
+  providers: [AuthService, JwtStrategy, PasswordService, TokenService, SessionService, TenantContextGuard, PlatformBootstrapService],
+  exports: [AuthService, JwtStrategy, PasswordService, TokenService, SessionService, TenantContextGuard, PlatformBootstrapService, PassportModule],
 })
 export class AuthModule {}
+

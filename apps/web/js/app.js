@@ -282,12 +282,9 @@ class App {
               </button>
             </form>
 
-            <div style="margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--border-subtle); display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem;">
-              <span style="color: var(--text-muted);">Platform Super Admin?</span>
-              <a href="#super-admin" style="color: #a5b4fc; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;">
-                ${Icons.shield({ size: 14, color: '#a5b4fc' })}
-                <span>Master Portal →</span>
-              </a>
+            <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border-subtle); text-align: center; font-size: 0.76rem; color: var(--text-muted); display: flex; align-items: center; justify-content: center; gap: 6px;">
+              ${Icons.lock({ size: 12, color: '#64748b' })}
+              <span>End-to-End Encrypted Salon Operations</span>
             </div>
           </div>
 
@@ -359,7 +356,11 @@ class App {
         const res = await ApiClient.login(rawInput, password);
         clearTimeout(wakeUpTimer);
         this.currentUser = res.user;
-        window.location.hash = '#admin';
+        if (res.user.role === 'SUPER_ADMIN' || res.user.role === 'PLATFORM_ADMIN') {
+          window.location.hash = '#super-admin';
+        } else {
+          window.location.hash = '#admin';
+        }
         this.handleRoute();
       } catch (err) {
         clearTimeout(wakeUpTimer);
@@ -369,6 +370,17 @@ class App {
         submitBtn.removeAttribute('disabled');
       }
     });
+
+    // Discreet Hotkey: Cmd/Ctrl + Shift + S allows platform administrators to switch directly to Master Portal
+    if (!window.__superAdminHotkeyRegistered) {
+      window.__superAdminHotkeyRegistered = true;
+      window.addEventListener('keydown', (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'S' || e.key === 's')) {
+          e.preventDefault();
+          window.location.hash = '#super-admin';
+        }
+      });
+    }
   }
 
   // =========================================================================
@@ -415,12 +427,9 @@ class App {
               </button>
             </form>
 
-            <div style="margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--border-subtle); display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem;">
-              <span style="color: var(--text-muted);">Salon Store Owner?</span>
-              <a href="#admin" style="color: #a5b4fc; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;">
-                ${Icons.scissors({ size: 14, color: '#a5b4fc' })}
-                <span>Salon Owner Portal →</span>
-              </a>
+            <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border-subtle); text-align: center; font-size: 0.76rem; color: var(--text-muted); display: flex; align-items: center; justify-content: center; gap: 6px;">
+              ${Icons.shield({ size: 12, color: '#f59e0b' })}
+              <span>Platform Security · Isolated Root Operations</span>
             </div>
           </div>
 
