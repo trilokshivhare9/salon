@@ -1456,6 +1456,13 @@ export class SalonDashboard {
                     ` : ''}
 
                     <!-- Customer WhatsApp Action Badges -->
+                    ${appt.status === 'BOOKED' ? `
+                      <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.35); font-size: 0.72rem; padding: 4px 8px; border-radius: 6px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
+                        ${Icons.calendar({ size: 13, color: '#60a5fa' })}
+                        <span>📅 Booked</span>
+                      </span>
+                    ` : ''}
+
                     ${appt.status === 'PENDING_RESCHEDULE' ? `
                       <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); font-size: 0.72rem; padding: 4px 8px; border-radius: 6px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
                         ${Icons.calendar({ size: 13, color: '#fbbf24' })}
@@ -1523,7 +1530,7 @@ export class SalonDashboard {
                       </div>
                     ` : ''}
 
-                    ${appt.status === 'CONFIRMED' ? `
+                    ${appt.status === 'CONFIRMED' || appt.status === 'BOOKED' ? `
                       <div class="qc__cta-wrap">
                         <button class="qc__cta qc__cta--checkin btn-status" data-id="${appt.id}" data-status="CHECKED_IN">
                           ${Icons.checkCircle2({ size: 16, color: '#c7d2fe' })}
@@ -3791,10 +3798,19 @@ export class SalonDashboard {
 
           <form id="cancel-form">
             <div class="form-group">
+              <label>Penalty Setting *</label>
+              <select class="form-control" id="cancel-penalty-select" required>
+                <option value="NO_PENALTY">🟢 Cancel WITHOUT Penalty (Waive Strike / 0 Strikes)</option>
+                <option value="APPLY_PENALTY">🔴 Cancel WITH Penalty (+1 Strike to Customer)</option>
+              </select>
+            </div>
+
+            <div class="form-group">
               <label>Cancellation Reason Category *</label>
               <select class="form-control" id="cancel-category-select" required>
-                <option value="CLIENT_UNRESPONSIVE">🔴 Client Unresponsive / Client Mistake (Apply Penalty if <2h)</option>
-                <option value="SALON_EMERGENCY">🔵 Salon Emergency / Barber Unavailable (No Penalty)</option>
+                <option value="SALON_EMERGENCY">🔵 Salon Emergency / Barber Unavailable</option>
+                <option value="CLIENT_UNRESPONSIVE">🔴 Client Unresponsive / Client Mistake</option>
+                <option value="CLIENT_CANCELLED">⚪ Customer Requested Cancellation</option>
               </select>
             </div>
 
@@ -3819,13 +3835,18 @@ export class SalonDashboard {
       submitBtn.textContent = 'Processing Cancellation...';
       submitBtn.setAttribute('disabled', 'true');
 
+      const penaltyMode = document.getElementById('cancel-penalty-select').value;
       const reasonCategory = document.getElementById('cancel-category-select').value;
       const reasonNote = document.getElementById('cancel-reason-note').value || '';
+      const applyPenalty = penaltyMode === 'APPLY_PENALTY';
+      const noPenalty = penaltyMode === 'NO_PENALTY';
 
       try {
         await ApiClient.cancelBooking(appointmentId, {
           source: 'ADMIN_DASHBOARD',
-          fault: reasonCategory === 'SALON_EMERGENCY' ? 'SALON' : 'CLIENT',
+          fault: applyPenalty ? 'CLIENT' : 'SALON',
+          applyPenalty,
+          noPenalty,
           reason: reasonNote || reasonCategory,
         });
         modalContainer.innerHTML = '';

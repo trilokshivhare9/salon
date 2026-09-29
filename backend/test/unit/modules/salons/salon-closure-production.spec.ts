@@ -189,7 +189,7 @@ describe('Production Suite: Salon Closures, Quick Bookings & Auto Service Comple
       expect(mockPrismaService.appointment.findMany).toHaveBeenCalledWith({
         where: {
           salonId: mockSalonId,
-          status: { in: [AppointmentStatus.CHECKED_IN, AppointmentStatus.IN_SERVICE] },
+          status: { in: [AppointmentStatus.CHECKED_IN, AppointmentStatus.SEATED_IN_CHAIR, AppointmentStatus.ON_THE_WAY] },
           endAt: { lte: expect.any(Date) },
         },
         select: expect.anything(),

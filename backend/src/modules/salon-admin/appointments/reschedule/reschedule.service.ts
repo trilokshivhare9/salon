@@ -6,12 +6,14 @@ import {
   BadRequestException,
   Inject,
   forwardRef,
+  Optional,
 } from '@nestjs/common';
 import { PrismaService } from '../../../../database/prisma.service';
 import { AvailabilityService } from '../../availability/availability.service';
 import { AvailabilityEngineService } from '../../availability/availability-engine.service';
 import { AppointmentEventsService } from '../events/appointment-events.service';
 import { WhatsAppService } from '../../../channels/whatsapp/whatsapp.service';
+import { WhatsAppTemplateService } from '../../../channels/whatsapp/services/whatsapp-template.service';
 import { RescheduleAppointmentDto } from '../dto/create-appointment.dto';
 import {
   AppointmentStatus,
@@ -22,6 +24,7 @@ import {
   LeavePortion,
 } from '@prisma/client';
 import { DateTime } from 'luxon';
+import { TimeUtility } from '../../../../common/utils/time.utility';
 import {
   appointmentInclude,
   formatAppointment,
@@ -39,7 +42,13 @@ export class RescheduleService {
     private eventsService: AppointmentEventsService,
     @Inject(forwardRef(() => WhatsAppService))
     private whatsappService: WhatsAppService,
-  ) {}
+    @Inject(forwardRef(() => WhatsAppTemplateService))
+    @Optional() private templates?: WhatsAppTemplateService,
+  ) {
+    if (!this.templates) {
+      this.templates = new WhatsAppTemplateService();
+    }
+  }
 
   /**
    * Dedicated Domain Method: Validates whether an appointment is eligible for rescheduling under salon cutoff rules.
@@ -74,35 +83,35 @@ export class RescheduleService {
       };
     }
 
-    if (appointment.status !== AppointmentStatus.CONFIRMED) {
+    if (!([AppointmentStatus.BOOKED, AppointmentStatus.CONFIRMED] as AppointmentStatus[]).includes(appointment.status)) {
       return {
         allowed: false,
         hoursUntil: 0,
-        cancelWindowHours: 2,
+        cancelWindowHours: 1.5,
         appointment: formatAppointment(appointment),
-        reason: `Only CONFIRMED appointments can be rescheduled. Current status: ${appointment.status}.`,
+        reason: `Only active appointments can be rescheduled. Current status: ${appointment.status}.`,
       };
     }
 
-    const cancelWindowHours = appointment.salon?.cancelWindowHours ?? 2;
     const nowMs = Date.now();
     const apptStartMs = new Date(appointment.startAt).getTime();
-    const hoursUntil = (apptStartMs - nowMs) / (1000 * 60 * 60);
+    const minutesUntil = (apptStartMs - nowMs) / (1000 * 60);
 
-    if (!adminId && hoursUntil < cancelWindowHours && hoursUntil > -1) {
+    // Strict 90-minute rule: Rescheduling only permitted > 90 minutes
+    if (!adminId && minutesUntil <= 90) {
       return {
         allowed: false,
-        hoursUntil,
-        cancelWindowHours,
+        hoursUntil: minutesUntil / 60,
+        cancelWindowHours: 1.5,
         appointment: formatAppointment(appointment),
-        reason: `Appointments cannot be rescheduled within ${cancelWindowHours} hours of the start time.`,
+        reason: 'Rescheduling is only permitted up to 90 minutes before your appointment. You may either attend or cancel.',
       };
     }
 
     return {
       allowed: true,
-      hoursUntil,
-      cancelWindowHours,
+      hoursUntil: minutesUntil / 60,
+      cancelWindowHours: 1.5,
       appointment: formatAppointment(appointment),
     };
   }
@@ -121,9 +130,9 @@ export class RescheduleService {
       ? await appointmentsService.getAppointmentById(salonId, appointmentId)
       : await this.getAppointmentById(salonId, appointmentId);
 
-    if (appointment.status !== AppointmentStatus.CONFIRMED) {
+    if (![AppointmentStatus.BOOKED, AppointmentStatus.CONFIRMED].includes(appointment.status)) {
       throw new BadRequestException(
-        `Only CONFIRMED appointments can be rescheduled. Current status: ${appointment.status}.`,
+        `Only active appointments can be rescheduled. Current status: ${appointment.status}.`,
       );
     }
 
@@ -131,14 +140,14 @@ export class RescheduleService {
     if (!salon) throw new NotFoundException('Salon not found.');
     const timezone = salon.timezone || 'Asia/Kolkata';
 
-    // 2-hour cutoff rule for customers (admin can override)
-    const cancelWindowHours = salon.cancelWindowHours ?? 2;
+    // Strict 90-minute cutoff rule for customers (admin can override)
     if (!adminId) {
       const nowMs = Date.now();
       const apptStartMs = new Date(appointment.startAt).getTime();
-      if (apptStartMs - nowMs < cancelWindowHours * 60 * 60 * 1000) {
+      const minutesUntil = (apptStartMs - nowMs) / (1000 * 60);
+      if (minutesUntil <= 90) {
         throw new BadRequestException(
-          `Appointments cannot be rescheduled within ${cancelWindowHours} hours of the start time.`,
+          'Rescheduling is only permitted up to 90 minutes before your appointment. You may either attend or cancel.',
         );
       }
     }
@@ -172,6 +181,19 @@ export class RescheduleService {
     const endDt = startDt.plus({ minutes: appointment.durationMinutes });
     const dayOfWeek = startDt.toFormat('cccc').toUpperCase() as DayOfWeek;
 
+    const nowLuxon = DateTime.now().setZone(timezone);
+    const proposedLeadTimeMinutes = (startDt.toMillis() - nowLuxon.toMillis()) / (1000 * 60);
+
+    if (adminId) {
+      if (proposedLeadTimeMinutes < 120) {
+        throw new BadRequestException(
+          'Proposed reschedule slot must be at least 2 hours in the future to allow client sufficient time to respond and travel.',
+        );
+      }
+    } else if (proposedLeadTimeMinutes < 0) {
+      throw new BadRequestException('Cannot reschedule to a time in the past.');
+    }
+
     const newDateStr = dto.newDate.includes('T') ? dto.newDate.split('T')[0] : dto.newDate;
 
     // Lock hierarchy for rescheduling:
@@ -202,7 +224,7 @@ export class RescheduleService {
               salonId,
               salonUserId: appointment.salonUserId,
               id: { not: appointmentId },
-              status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN, AppointmentStatus.IN_SERVICE] },
+              status: { in: [AppointmentStatus.BOOKED, AppointmentStatus.CONFIRMED, AppointmentStatus.ON_THE_WAY, AppointmentStatus.CHECKED_IN, AppointmentStatus.SEATED_IN_CHAIR] },
               AND: [
                 { startAt: { lt: endDt.toJSDate() } },
                 { endAt: { gt: startDt.toJSDate() } },
@@ -221,16 +243,23 @@ export class RescheduleService {
             `SELECT pg_advisory_xact_lock(${key1}, ${targetStylistKey2})`,
           );
 
-          // Check stylist overlap
+          // Check stylist overlap (with confirmed appointments or pending proposals)
           const stylistOverlap = await tx.appointment.findFirst({
             where: {
               salonId,
               stylistId: targetStylistId,
               id: { not: appointmentId },
-              status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN, AppointmentStatus.IN_SERVICE] },
-              AND: [
-                { startAt: { lt: endDt.toJSDate() } },
-                { endAt: { gt: startDt.toJSDate() } },
+              OR: [
+                {
+                  status: { in: [AppointmentStatus.BOOKED, AppointmentStatus.CONFIRMED, AppointmentStatus.ON_THE_WAY, AppointmentStatus.CHECKED_IN, AppointmentStatus.SEATED_IN_CHAIR] },
+                  startAt: { lt: endDt.toJSDate() },
+                  endAt: { gt: startDt.toJSDate() },
+                },
+                {
+                  status: AppointmentStatus.PENDING_RESCHEDULE,
+                  proposedStartAt: { lt: endDt.toJSDate() },
+                  proposedEndAt: { gt: startDt.toJSDate() },
+                },
               ],
             },
           });
@@ -369,7 +398,26 @@ export class RescheduleService {
             }
           }
 
-          // In-place mutation of the appointment
+          if (adminId) {
+            // Salon admin initiated reschedule:
+            // Booking status marked PENDING_RESCHEDULE, proposed new slot stored, customer prompted to accept/decline.
+            return tx.appointment.update({
+              where: { id: appointmentId },
+              data: {
+                status: AppointmentStatus.PENDING_RESCHEDULE,
+                proposedStartAt: startDt.toJSDate(),
+                proposedEndAt: endDt.toJSDate(),
+                proposedByAdminId: adminId,
+                notes: `${appointment.notes || ''} [Reschedule proposed by salon admin to ${newDateStr} at ${dto.newStartTime}]`.trim(),
+              },
+              include: appointmentInclude,
+            });
+          }
+
+          const leadTimeMinutes = (startDt.toMillis() - DateTime.now().setZone(timezone).toMillis()) / (1000 * 60);
+          const newStatus = leadTimeMinutes > 120 ? AppointmentStatus.BOOKED : AppointmentStatus.CONFIRMED;
+
+          // In-place mutation of the appointment for customer self-reschedule
           return tx.appointment.update({
             where: { id: appointmentId },
             data: {
@@ -377,7 +425,10 @@ export class RescheduleService {
               startAt: startDt.toJSDate(),
               endAt: endDt.toJSDate(),
               stylistId: targetStylistId,
-              status: AppointmentStatus.CONFIRMED,
+              status: newStatus,
+              reminder2hSentAt: null,
+              reminder10mSentAt: null,
+              clientEtaStatus: null,
             },
             include: appointmentInclude,
           });
@@ -386,6 +437,43 @@ export class RescheduleService {
       );
 
       const formatted = formatAppointment(updated);
+
+      if (adminId) {
+        // Send WhatsApp message to customer asking to Accept or Decline
+        const userPhone = appointment.salonUser?.user?.phone;
+        const salon = await this.prisma.salon.findUnique({
+          where: { id: salonId },
+          include: { whatsappAccount: true },
+        });
+
+        if (userPhone && salon?.whatsappAccount?.phoneNumberId && this.whatsappService) {
+          const dateFriendly = TimeUtility.formatDateFriendly(startDt.toJSDate(), timezone);
+          const timeFriendly = TimeUtility.formatTime12h(startDt.toJSDate(), timezone);
+          const stylistName = updated.stylist?.name || 'Stylist';
+
+          const proposalPayload = this.templates!.buildRescheduleProposalPrompt({
+            salonName: salon.name,
+            customerName: appointment.salonUser?.user?.name || 'Customer',
+            dateFriendly,
+            timeFriendly,
+            stylistName,
+            appointmentId: appointment.id,
+          });
+
+          await this.whatsappService.sendMetaMessage(
+            userPhone,
+            proposalPayload,
+            salon.whatsappAccount.phoneNumberId,
+            salonId,
+          ).catch((err) => {
+            this.logger.warn(`Failed to send reschedule proposal WhatsApp message: ${err.message}`);
+          });
+        }
+
+        this.eventsService.emitSalonEvent(salonId, 'APPOINTMENT_UPDATED', formatted);
+        return formatted;
+      }
+
       this.eventsService.emitSalonEvent(salonId, 'RESCHEDULED', formatted);
       return formatted;
     } catch (err: any) {

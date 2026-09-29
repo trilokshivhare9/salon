@@ -51,15 +51,22 @@ enum SalonUserStatus {
   BLOCKED
 }
 
+enum BookingType {
+  NORMAL
+  QUICK
+}
+
 enum AppointmentStatus {
-  CONFIRMED
-  CHECKED_IN
-  IN_SERVICE
-  COMPLETED
-  CANCELLED
-  NO_SHOW
-  PENDING_RESCHEDULE
   PENDING_ACCEPTANCE
+  REJECTED
+  BOOKED
+  CONFIRMED
+  ON_THE_WAY
+  CHECKED_IN
+  SEATED_IN_CHAIR
+  COMPLETED
+  PENDING_RESCHEDULE
+  CANCELLED
 }
 
 enum BookingSource {
@@ -70,6 +77,12 @@ enum BookingSource {
   WALK_IN
   MANUAL
   QUICK_BOOK
+}
+
+enum CancelledBy {
+  USER
+  SALON
+  SYSTEM
 }
 
 enum DayOfWeek {
@@ -521,8 +534,13 @@ model Appointment {
   appointmentDate     DateTime          @map("appointment_date") @db.Date
 
   // Status & Tracking
-  status              AppointmentStatus @default(CONFIRMED)
+  bookingType         BookingType       @default(NORMAL) @map("booking_type")
+  status              AppointmentStatus @default(BOOKED)
   source              BookingSource     @default(WHATSAPP)
+  cancelledBy         CancelledBy?      @map("cancelled_by")
+  cancellationReason  String?           @map("cancellation_reason")
+  cancelledAt         DateTime?         @map("cancelled_at") @db.Timestamptz
+  penaltyApplied      Boolean           @default(false) @map("penalty_applied")
   expiresAt           DateTime?         @map("expires_at") @db.Timestamptz
   notes               String?
   createdByAdminId    String?           @map("created_by_admin_id")

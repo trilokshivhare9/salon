@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../../database/prisma.service';
 import { DateTime } from 'luxon';
-import { DayOfWeek } from '@prisma/client';
+import { DayOfWeek, AppointmentStatus } from '@prisma/client';
 import { AvailabilityEngineService, MinuteInterval } from './availability-engine.service';
 import { TimeUtility } from '../../../common/utils/time.utility';
 
@@ -254,7 +254,7 @@ export class AvailabilityService {
     const apptWhere: any = {
       salonId,
       appointmentDate: new Date(dateStr),
-      status: { in: ['CONFIRMED', 'CHECKED_IN', 'IN_SERVICE'] },
+      status: { in: ['BOOKED', 'CONFIRMED', 'ON_THE_WAY', 'CHECKED_IN', 'SEATED_IN_CHAIR'] },
     };
     let excludedStartMin: number | null = null;
     let excludedDateStr: string | null = null;
@@ -277,6 +277,23 @@ export class AvailabilityService {
       select: { stylistId: true, startAt: true, endAt: true },
     });
 
+    // Fetch pending proposed reschedule slots on this date to block them from being booked by others
+    const targetDayStart = DateTime.fromISO(dateStr, { zone: timezone }).startOf('day').toJSDate();
+    const targetDayEnd = DateTime.fromISO(dateStr, { zone: timezone }).endOf('day').toJSDate();
+
+    const pendingProposals = await this.prisma.appointment.findMany({
+      where: {
+        salonId,
+        status: AppointmentStatus.PENDING_RESCHEDULE,
+        proposedStartAt: {
+          gte: targetDayStart,
+          lte: targetDayEnd,
+        },
+        ...(excludeAppointmentId ? { id: { not: excludeAppointmentId } } : {}),
+      },
+      select: { stylistId: true, proposedStartAt: true, proposedEndAt: true },
+    });
+
     const appointmentsByStylist = new Map<string, { start: number; end: number }[]>();
     for (const appt of existingAppointments) {
       if (!appt.stylistId) continue;
@@ -288,6 +305,18 @@ export class AvailabilityService {
       const startMin = apptStartDt.hour * 60 + apptStartDt.minute;
       const endMin = apptEndDt.hour * 60 + apptEndDt.minute;
       appointmentsByStylist.get(appt.stylistId)!.push({ start: startMin, end: endMin });
+    }
+
+    for (const prop of pendingProposals) {
+      if (!prop.stylistId || !prop.proposedStartAt || !prop.proposedEndAt) continue;
+      if (!appointmentsByStylist.has(prop.stylistId)) {
+        appointmentsByStylist.set(prop.stylistId, []);
+      }
+      const propStartDt = DateTime.fromJSDate(prop.proposedStartAt).setZone(timezone);
+      const propEndDt = DateTime.fromJSDate(prop.proposedEndAt).setZone(timezone);
+      const startMin = propStartDt.hour * 60 + propStartDt.minute;
+      const endMin = propEndDt.hour * 60 + propEndDt.minute;
+      appointmentsByStylist.get(prop.stylistId)!.push({ start: startMin, end: endMin });
     }
 
     // 5. Continuous Free-Interval Calculation per Stylist via AvailabilityEngineService

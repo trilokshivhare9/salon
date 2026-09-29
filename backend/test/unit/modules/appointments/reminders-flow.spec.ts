@@ -37,7 +37,7 @@ describe('Smart WhatsApp Reminders & Smart Stale Button Handling (Flow Matrix Te
           provide: AppointmentsService,
           useValue: {
             cancelBooking: jest.fn().mockImplementation(async (salonId, id, context) => {
-              const status = context.reasonCategory === 'SALON_EMERGENCY' ? 'CANCELLED' : 'NO_SHOW';
+              const status = AppointmentStatus.CANCELLED;
               await prisma.appointment.update({
                 where: { id },
                 data: { status, notes: context.reason },
@@ -153,7 +153,7 @@ describe('Smart WhatsApp Reminders & Smart Stale Button Handling (Flow Matrix Te
         startAt: future2h,
         endAt: future2hEnd,
         price: testService.price,
-        status: AppointmentStatus.CONFIRMED,
+        status: AppointmentStatus.BOOKED,
       },
     });
 
@@ -239,7 +239,7 @@ describe('Smart WhatsApp Reminders & Smart Stale Button Handling (Flow Matrix Te
     expect(result.stage4).toBeGreaterThanOrEqual(1);
 
     const updatedAppt = await prisma.appointment.findUnique({ where: { id: appt.id } });
-    expect(updatedAppt?.status).toBe(AppointmentStatus.NO_SHOW);
-    expect(updatedAppt?.notes).toContain('5-minute grace period');
+    expect(updatedAppt?.status).toBe(AppointmentStatus.CANCELLED);
+    expect(updatedAppt?.notes).toContain('GHOSTED_15M_ALERT');
   });
 });

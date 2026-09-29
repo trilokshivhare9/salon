@@ -568,8 +568,8 @@ describe('WhatsApp Action Handler - Real Availability & Booking Journey', () => 
     expect(rescheduleService.validateRescheduleEligibility).toHaveBeenCalledWith(testSalonId, activeAppt.id);
     expect(sendSpy).toHaveBeenCalled();
     const payload = sendSpy.mock.calls[0][1];
-    expect(payload.bodyText).toContain('Reschedule Notice');
-    expect(payload.bodyText).toContain('Online rescheduling is closed');
+    expect(payload.bodyText).toContain('Reschedule Cutoff Passed');
+    expect(payload.bodyText).toContain('You cannot reschedule because the time cutoff has passed');
     // Did NOT transition to select reschedule date
     expect(result.state).not.toBe(ConversationState.SELECT_RESCHEDULE_DATE);
   });

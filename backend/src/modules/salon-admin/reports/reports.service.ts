@@ -168,11 +168,14 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
     const dateUtcMidnight = new Date(`${targetDateIso}T00:00:00.000Z`);
 
     const [todayAppointments, salonMetrics, whatsappQuota, salonInfo] = await Promise.all([
-      // 1. Appointments for the day
+      // 1. Appointments for the day (including active appointments or appointments proposed for this day)
       this.prisma.appointment.findMany({
         where: {
           salonId,
-          startAt: { gte: dayStart, lte: dayEnd },
+          OR: [
+            { startAt: { gte: dayStart, lte: dayEnd } },
+            { proposedStartAt: { gte: dayStart, lte: dayEnd } },
+          ],
         },
         include: {
           salonUser: {
@@ -206,13 +209,18 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
 
     const statusCounts = {
       total: todayAppointments.length,
+      booked: 0,
       confirmed: 0,
+      onTheWay: 0,
       checkedIn: 0,
+      seatedInChair: 0,
       inService: 0,
       completed: 0,
       cancelled: 0,
+      rejected: 0,
       noShow: 0,
       pendingAcceptance: 0,
+      pendingReschedule: 0,
     };
 
     let todayRevenue = 0;
@@ -220,16 +228,22 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
 
     for (const appt of todayAppointments) {
       switch (appt.status) {
+        case AppointmentStatus.BOOKED: statusCounts.booked++; break;
         case AppointmentStatus.CONFIRMED: statusCounts.confirmed++; break;
+        case AppointmentStatus.ON_THE_WAY: statusCounts.onTheWay++; break;
         case AppointmentStatus.CHECKED_IN: statusCounts.checkedIn++; break;
-        case AppointmentStatus.IN_SERVICE: statusCounts.inService++; break;
+        case AppointmentStatus.SEATED_IN_CHAIR:
+          statusCounts.seatedInChair++;
+          statusCounts.inService++;
+          break;
         case AppointmentStatus.PENDING_ACCEPTANCE: statusCounts.pendingAcceptance++; break;
+        case AppointmentStatus.PENDING_RESCHEDULE: statusCounts.pendingReschedule++; break;
         case AppointmentStatus.COMPLETED:
           statusCounts.completed++;
           todayRevenue += Number(appt.price);
           break;
         case AppointmentStatus.CANCELLED: statusCounts.cancelled++; break;
-        case AppointmentStatus.NO_SHOW: statusCounts.noShow++; break;
+        case AppointmentStatus.REJECTED: statusCounts.rejected++; break;
       }
       sourceBreakdown[appt.source] = (sourceBreakdown[appt.source] || 0) + 1;
     }

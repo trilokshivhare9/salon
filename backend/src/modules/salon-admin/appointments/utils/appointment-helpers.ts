@@ -2,31 +2,49 @@ import * as crypto from 'crypto';
 import { AppointmentStatus } from '@prisma/client';
 
 export const VALID_STATUS_TRANSITIONS: Record<AppointmentStatus, AppointmentStatus[]> = {
-  [AppointmentStatus.CONFIRMED]: [
-    AppointmentStatus.CHECKED_IN,
-    AppointmentStatus.IN_SERVICE,
+  [AppointmentStatus.BOOKED]: [
+    AppointmentStatus.BOOKED,
+    AppointmentStatus.CONFIRMED,
     AppointmentStatus.CANCELLED,
-    AppointmentStatus.NO_SHOW,
     AppointmentStatus.PENDING_RESCHEDULE,
   ],
-  [AppointmentStatus.CHECKED_IN]: [
-    AppointmentStatus.IN_SERVICE,
+  [AppointmentStatus.CONFIRMED]: [
+    AppointmentStatus.BOOKED,
+    AppointmentStatus.CONFIRMED,
+    AppointmentStatus.ON_THE_WAY,
+    AppointmentStatus.CHECKED_IN,
+    AppointmentStatus.SEATED_IN_CHAIR,
     AppointmentStatus.CANCELLED,
-    AppointmentStatus.NO_SHOW,
-  ],
-  [AppointmentStatus.IN_SERVICE]: [
+    AppointmentStatus.PENDING_RESCHEDULE,
     AppointmentStatus.COMPLETED,
+  ],
+  [AppointmentStatus.ON_THE_WAY]: [
+    AppointmentStatus.CHECKED_IN,
+    AppointmentStatus.SEATED_IN_CHAIR,
+    AppointmentStatus.CANCELLED,
+    AppointmentStatus.COMPLETED,
+  ],
+  [AppointmentStatus.CHECKED_IN]: [
+    AppointmentStatus.SEATED_IN_CHAIR,
+    AppointmentStatus.COMPLETED,
+    AppointmentStatus.CANCELLED,
+  ],
+  [AppointmentStatus.SEATED_IN_CHAIR]: [
+    AppointmentStatus.COMPLETED,
+    AppointmentStatus.CANCELLED,
   ],
   [AppointmentStatus.COMPLETED]: [], // Terminal
   [AppointmentStatus.CANCELLED]: [], // Terminal
-  [AppointmentStatus.NO_SHOW]: [],   // Terminal
+  [AppointmentStatus.REJECTED]: [],  // Terminal
   [AppointmentStatus.PENDING_RESCHEDULE]: [
+    AppointmentStatus.BOOKED,
     AppointmentStatus.CONFIRMED,
     AppointmentStatus.CANCELLED,
   ],
   [AppointmentStatus.PENDING_ACCEPTANCE]: [
-    AppointmentStatus.CHECKED_IN,
     AppointmentStatus.CONFIRMED,
+    AppointmentStatus.CHECKED_IN,
+    AppointmentStatus.REJECTED,
     AppointmentStatus.CANCELLED,
   ],
 };

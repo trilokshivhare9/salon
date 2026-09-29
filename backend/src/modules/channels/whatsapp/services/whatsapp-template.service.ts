@@ -215,7 +215,7 @@ export class WhatsAppTemplateService {
   buildCancelConfirmationPrompt(strikeWarning: boolean) {
     if (strikeWarning) {
       return {
-        bodyText: `⚠️ *Cancellation Warning*\n\nCancelling within 2 hours of your appointment will result in a *Penalty Strike*.\n\nAre you sure you want to cancel?`,
+        bodyText: `⚠️ *Cancellation Warning*\n\nCancelling with less than 90 minutes remaining before your appointment will result in a *Penalty Strike*.\n\nAre you sure you want to cancel?`,
         interactiveType: 'button' as const,
         buttons: [
           { id: WhatsAppButtonId.CANCEL_YES, title: '⚠️ Cancel (1 Strike)' },
@@ -415,7 +415,7 @@ export class WhatsAppTemplateService {
     remainingPenalties: number,
   ) {
     return {
-      bodyText: `⚠️ *LATE CANCELLATION / NO-SHOW PENALTY RECORDED*\n\nHi *${userName || 'Customer'}*, your appointment for *${timeStr}* with *${stylistName}* was canceled with less than 2 hours remaining.\n\n⚠️ *Penalty Strike Recorded:* You have *1 penalty strike* recorded. You have *${remainingPenalties} penalty strike(s) remaining* this year before automatic slot booking is locked.`,
+      bodyText: `⚠️ *LATE CANCELLATION / NO-SHOW PENALTY RECORDED*\n\nHi *${userName || 'Customer'}*, your appointment for *${timeStr}* with *${stylistName}* was canceled with less than 90 minutes remaining.\n\n⚠️ *Penalty Strike Recorded:* You have *1 penalty strike* recorded. You have *${remainingPenalties} penalty strike(s) remaining* this year before automatic slot booking is locked.`,
       interactiveType: 'button' as const,
       buttons: [{ id: WhatsAppButtonId.START, title: '🏠 Main Menu' }],
     };
@@ -424,6 +424,185 @@ export class WhatsAppTemplateService {
   buildAccountLockedPrompt(userName: string) {
     return {
       bodyText: `⚠️ *ACCOUNT BOOKING LOCKED*\n\nHi *${userName || 'Customer'}*, you have accumulated *3 penalty strikes* this year for missed or late-canceled appointments. Automatic slot booking is now locked for your account.\n\n📞 *Please contact the Salon Owner* directly to request access unblock.`,
+      interactiveType: 'button' as const,
+      buttons: [{ id: WhatsAppButtonId.START, title: '🏠 Main Menu' }],
+    };
+  }
+
+  // 17. Reschedule Flow Templates
+  buildRescheduleProposalPrompt(params: {
+    salonName: string;
+    customerName: string;
+    dateFriendly: string;
+    timeFriendly: string;
+    stylistName: string;
+    appointmentId: string;
+  }) {
+    return {
+      bodyText:
+        `📅 *RESCHEDULE REQUEST FROM SALON*\n\n` +
+        `Hi *${params.customerName || 'Customer'}*, *${params.salonName}* has requested to reschedule your appointment to:\n\n` +
+        `• *Date:* *${params.dateFriendly}*\n` +
+        `• *Time:* *${params.timeFriendly}*\n` +
+        `• *Stylist:* *${params.stylistName || 'Specialist'}*\n\n` +
+        `Does this new time work for you?`,
+      interactiveType: 'button' as const,
+      buttons: [
+        { id: `${WhatsAppButtonId.PROPOSE_ACCEPT_PREFIX}${params.appointmentId}`, title: '✅ Accept New Time' },
+        { id: `${WhatsAppButtonId.PROPOSE_DECLINE_PREFIX}${params.appointmentId}`, title: '❌ Decline & Cancel' },
+      ],
+    };
+  }
+
+  buildRescheduleAcceptedReply(params: {
+    salonName: string;
+    stylistName: string;
+    newTimeStr: string;
+  }) {
+    return {
+      bodyText: `🎉 *RESCHEDULE CONFIRMED!*\n\nThank you for accepting! Your appointment with *${params.stylistName || 'Stylist'}* at *${params.salonName}* is now set for *${params.newTimeStr}*.`,
+      interactiveType: 'button' as const,
+      buttons: [{ id: WhatsAppButtonId.START, title: '🏠 Main Menu' }],
+    };
+  }
+
+  buildRescheduleDeclinedReply() {
+    return {
+      bodyText: `❌ *APPOINTMENT CANCELLED*\n\nYour appointment has been cancelled as you declined the rescheduled time. *No penalty* has been applied to your account.\n\nFeel free to book a new appointment whenever you are ready!`,
+      interactiveType: 'button' as const,
+      buttons: [
+        { id: WhatsAppButtonId.BOOK_NOW, title: '📅 Book New Slot' },
+        { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
+      ],
+    };
+  }
+
+  // 18. Cancellation Notice Templates
+  buildAdminCancelledNotice(params: {
+    userName: string;
+    dateStr: string;
+    timeStr: string;
+    salonName: string;
+    penaltyApplied: boolean;
+    remainingStrikes?: number;
+    isBlocked?: boolean;
+  }) {
+    if (!params.penaltyApplied) {
+      return {
+        bodyText: `🙏 *APPOINTMENT CANCELLED*\n\nHi *${params.userName || 'Customer'}*, your appointment for *${params.dateStr} at ${params.timeStr}* at *${params.salonName}* has been cancelled.\n\n✨ *No penalty has been applied* to your account. We look forward to seeing you again soon!`,
+        interactiveType: 'button' as const,
+        buttons: [{ id: WhatsAppButtonId.BOOK, title: '📅 Book New Visit' }],
+      };
+    }
+
+    if (params.isBlocked) {
+      return {
+        bodyText: `⚠️ *ACCOUNT BOOKING LOCKED*\n\nHi *${params.userName || 'Customer'}*, you have accumulated *3 penalty strikes* this year for missed or late-canceled appointments. Automatic slot booking is now locked for your account.\n\n📞 *Please contact the Salon Owner* directly to request access unblock.`,
+        interactiveType: 'button' as const,
+        buttons: [{ id: WhatsAppButtonId.START, title: '🏠 Main Menu' }],
+      };
+    }
+
+    return {
+      bodyText: `⚠️ *LATE CANCELLATION PENALTY RECORDED*\n\nHi *${params.userName || 'Customer'}*, your appointment for *${params.timeStr}* at *${params.salonName}* was canceled with a penalty strike recorded by the salon.\n\n⚠️ *Penalty Strike Recorded:* You have *${params.remainingStrikes ?? 2} penalty strike(s) remaining* this year before automatic slot booking is locked.`,
+      interactiveType: 'button' as const,
+      buttons: [{ id: WhatsAppButtonId.START, title: '🏠 Main Menu' }],
+    };
+  }
+
+  buildSystemAutoCutoffNotice(params: {
+    userName: string;
+    timeStr: string;
+    remainingStrikes: number;
+    isBlocked: boolean;
+  }) {
+    if (params.isBlocked) {
+      return {
+        bodyText: `⚠️ *ACCOUNT BOOKING LOCKED*\n\nHi *${params.userName || 'Customer'}*, you have accumulated *3 penalty strikes* this year for unconfirmed appointments. Automatic slot booking is now locked for your account.\n\n📞 *Please contact the Salon Owner* directly to request access unblock.`,
+        interactiveType: 'button' as const,
+        buttons: [{ id: WhatsAppButtonId.START, title: '🏠 Main Menu' }],
+      };
+    }
+    return {
+      bodyText: `⚠️ *APPOINTMENT AUTO-CANCELED (NO CONFIRMATION)*\n\nHi *${params.userName || 'Customer'}*, your appointment for *${params.timeStr}* was auto-canceled because confirmation was not received 1 hour prior to your slot.\n\n⚠️ *Penalty Strike Recorded:* You have *${params.remainingStrikes} strike(s) remaining* this year before automatic slot booking is locked.`,
+      interactiveType: 'button' as const,
+      buttons: [{ id: WhatsAppButtonId.START, title: '🏠 Main Menu' }],
+    };
+  }
+
+  buildSystemAutoNoShowNotice(params: {
+    userName: string;
+    timeStr: string;
+    remainingStrikes: number;
+    isBlocked: boolean;
+  }) {
+    if (params.isBlocked) {
+      return {
+        bodyText: `⚠️ *ACCOUNT BOOKING LOCKED*\n\nHi *${params.userName || 'Customer'}*, you have accumulated *3 penalty strikes* this year for missed appointments. Automatic slot booking is now locked for your account.\n\n📞 *Please contact the Salon Owner* directly to request access unblock.`,
+        interactiveType: 'button' as const,
+        buttons: [{ id: WhatsAppButtonId.START, title: '🏠 Main Menu' }],
+      };
+    }
+    return {
+      bodyText: `⚠️ *APPOINTMENT AUTO-CANCELED*\n\nHi *${params.userName || 'Customer'}*, your appointment for *${params.timeStr}* was auto-canceled because we did not receive an arrival confirmation.\n\n⚠️ *Penalty Strike Recorded:* You have *${params.remainingStrikes} strike(s) remaining* this year before automatic slot booking is locked.`,
+      interactiveType: 'button' as const,
+      buttons: [{ id: WhatsAppButtonId.START, title: '🏠 Main Menu' }],
+    };
+  }
+
+  buildQuickBookingExpiredNotice(params: { salonName: string; timeStr: string }) {
+    return {
+      bodyText: `⏳ *QUICK BOOKING EXPIRED*\n\nYour quick booking request for *${params.timeStr}* at *${params.salonName}* was not checked in before the start time and has automatically expired.\n\nPlease speak to the front desk for walk-in availability. 🙏`,
+      interactiveType: 'button' as const,
+      buttons: [{ id: WhatsAppButtonId.START, title: '🏠 Main Menu' }],
+    };
+  }
+
+  buildSalonDeactivationNotice(params: {
+    userName: string;
+    salonName: string;
+    dateStr: string;
+    timeStr: string;
+  }) {
+    return {
+      bodyText: `⚠️ *APPOINTMENT CANCELLED*\n\nHi *${params.userName || 'Customer'}*, your appointment for *${params.dateStr} at ${params.timeStr}* at *${params.salonName}* has been cancelled because the salon account was temporarily deactivated for platform maintenance.\n\nWe apologize for any inconvenience. Please contact the salon directly or visit another location for bookings.`,
+      interactiveType: 'button' as const,
+      buttons: [{ id: WhatsAppButtonId.START, title: '🏠 Main Menu' }],
+    };
+  }
+
+  buildSalonClosureNotice(params: { userName: string; salonName: string; timeStr: string }) {
+    return {
+      bodyText: `🙏 *SALON NOTICE: APPOINTMENT CANCELED*\n\nHi *${params.userName || 'Customer'}*, your appointment for *${params.timeStr}* at *${params.salonName}* was canceled due to a salon emergency.\n\n✨ *No penalty has been applied* to your account. We welcome you to rebook at your convenience!`,
+      interactiveType: 'button' as const,
+      buttons: [{ id: WhatsAppButtonId.BOOK, title: '📅 Book New Visit' }],
+    };
+  }
+
+  buildRescheduleCutoffPassedPrompt(salonPhone?: string) {
+    const contactLine = salonPhone ? `\n\n• For urgent desk adjustments, call *${salonPhone}*.` : '';
+    return {
+      bodyText: `⚠️ *Reschedule Cutoff Passed*\n\nRescheduling is only permitted up to 90 minutes before your appointment. You cannot reschedule because the time cutoff has passed.\n\nYou may attend your visit or cancel this booking if you cannot make it.${contactLine}`,
+      interactiveType: 'button' as const,
+      buttons: [
+        { id: WhatsAppButtonId.CANCEL_APPT, title: '❌ Cancel Booking' },
+        { id: WhatsAppButtonId.ETA_ON_THE_WAY, title: '🚗 On My Way' },
+        { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
+      ],
+    };
+  }
+
+  buildRescheduleExpiredNotice(params: { salonName: string; proposedTimeStr: string }) {
+    return {
+      bodyText: `⚠️ *Reschedule Offer Expired*\n\nYour proposed appointment reschedule at *${params.salonName}* for *${params.proposedTimeStr}* has expired because we did not receive a response before the response cutoff.\n\nTo ensure staff availability, your appointment has been cancelled. *No penalty was applied.* We apologize for the inconvenience and look forward to serving you soon!`,
+      interactiveType: 'button' as const,
+      buttons: [{ id: WhatsAppButtonId.START, title: '🏠 Main Menu' }],
+    };
+  }
+
+  buildRescheduleStaleExpiredReply() {
+    return {
+      bodyText: `⚠️ *Offer No Longer Available*\n\nThis reschedule proposal has expired as the response cutoff passed, and the slot was released. Your booking was cancelled with zero penalty.\n\nPlease tap below to return to the main menu.`,
       interactiveType: 'button' as const,
       buttons: [{ id: WhatsAppButtonId.START, title: '🏠 Main Menu' }],
     };

@@ -45,11 +45,11 @@ describe('RemindersService - Absence Immunity & Zero-Penalty Schedulers', () => 
 
     mockAppointmentsService = {
       cancelBooking: jest.fn().mockImplementation(async (salonId, id, context) => {
-        const status = context.reasonCategory === 'SALON_EMERGENCY' ? 'CANCELLED' : 'NO_SHOW';
+        const status = 'CANCELLED';
         if (context.reasonCategory === 'SALON_EMERGENCY') {
           await mockAppointmentsService.updateStatus(salonId, id, { status: 'CANCELLED', reasonCategory: 'SALON_EMERGENCY' }, 'SYSTEM_REMINDERS_WORKER');
         } else {
-          await mockPrisma.appointment.update({ where: { id }, data: { status: 'NO_SHOW' } });
+          await mockPrisma.appointment.update({ where: { id }, data: { status: 'CANCELLED' } });
           await mockPrisma.salonUser.update({
             where: { id: 'user-normal-1' },
             data: { yearlyNoShowCount: 2, isBookingBlocked: false },
@@ -122,11 +122,13 @@ describe('RemindersService - Absence Immunity & Zero-Penalty Schedulers', () => 
         ],
       };
 
-      // Stage 1 & 2 return empty; Stage 4 returns expiredAppt
+      // Stages 1, 1.5, 1.8, 2 return empty; Stage 2.5 (grace period) returns expiredAppt
       mockPrisma.appointment.findMany
         .mockResolvedValueOnce([]) // stage 1
+        .mockResolvedValueOnce([]) // stage 1.5
+        .mockResolvedValueOnce([]) // stage 1.8
         .mockResolvedValueOnce([]) // stage 2
-        .mockResolvedValueOnce([expiredAppt]); // stage 4
+        .mockResolvedValueOnce([expiredAppt]); // stage 2.5 (grace period)
 
       const result = await service.processReminders();
 
@@ -165,8 +167,10 @@ describe('RemindersService - Absence Immunity & Zero-Penalty Schedulers', () => 
 
       mockPrisma.appointment.findMany
         .mockResolvedValueOnce([]) // stage 1
+        .mockResolvedValueOnce([]) // stage 1.5
+        .mockResolvedValueOnce([]) // stage 1.8
         .mockResolvedValueOnce([]) // stage 2
-        .mockResolvedValueOnce([normalExpiredAppt]); // stage 4
+        .mockResolvedValueOnce([normalExpiredAppt]); // stage 2.5 (grace period)
 
       mockPrisma.salonUser.findUnique.mockResolvedValue({
         id: 'user-normal-1',
@@ -180,7 +184,7 @@ describe('RemindersService - Absence Immunity & Zero-Penalty Schedulers', () => 
         expect.objectContaining({
           where: { id: 'appt-normal-noshow' },
           data: expect.objectContaining({
-            status: AppointmentStatus.NO_SHOW,
+            status: AppointmentStatus.CANCELLED,
           }),
         }),
       );

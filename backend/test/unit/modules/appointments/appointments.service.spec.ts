@@ -6,6 +6,7 @@ import { AvailabilityEngineService } from '../../../../src/modules/salon-admin/a
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { AppointmentStatus, BookingSource } from '@prisma/client';
 import { WhatsAppService } from '../../../../src/modules/channels/whatsapp/whatsapp.service';
+import { DateTime } from 'luxon';
 
 describe('AppointmentsService (Unit Tests)', () => {
   let service: AppointmentsService;
@@ -84,16 +85,16 @@ describe('AppointmentsService (Unit Tests)', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('should reject invalid status transition: IN_SERVICE -> CANCELLED', async () => {
+    it('should reject invalid status transition: BOOKED -> COMPLETED', async () => {
       jest.spyOn(service, 'getAppointmentById').mockResolvedValue({
         id: mockApptId,
         salonId: mockSalonId,
-        status: AppointmentStatus.IN_SERVICE,
+        status: AppointmentStatus.BOOKED,
       } as any);
 
       await expect(
         service.updateStatus(mockSalonId, mockApptId, {
-          status: AppointmentStatus.CANCELLED,
+          status: AppointmentStatus.COMPLETED,
         }),
       ).rejects.toThrow(BadRequestException);
     });
@@ -138,11 +139,11 @@ describe('AppointmentsService (Unit Tests)', () => {
       expect(result.status).toBe(AppointmentStatus.CANCELLED);
     });
 
-    it('should allow valid status transition: IN_SERVICE -> COMPLETED', async () => {
+    it('should allow valid status transition: SEATED_IN_CHAIR -> COMPLETED', async () => {
       jest.spyOn(service, 'getAppointmentById').mockResolvedValue({
         id: mockApptId,
         salonId: mockSalonId,
-        status: AppointmentStatus.IN_SERVICE,
+        status: AppointmentStatus.SEATED_IN_CHAIR,
       } as any);
 
       jest.spyOn(prisma.appointment, 'update').mockResolvedValue({
@@ -217,8 +218,9 @@ describe('AppointmentsService (Unit Tests)', () => {
         timezone: 'Asia/Kolkata',
       } as any);
 
+      const futureDate = DateTime.now().setZone('Asia/Kolkata').plus({ days: 1 }).toISODate()!;
       jest.spyOn(availabilityService, 'getAvailableSlots').mockResolvedValue({
-        date: '2026-09-08',
+        date: futureDate,
         salonTimezone: 'Asia/Kolkata',
         serviceDurationMinutes: 30,
         status: 'AVAILABLE',
@@ -226,8 +228,8 @@ describe('AppointmentsService (Unit Tests)', () => {
           {
             startTime: '14:00',
             endTime: '14:30',
-            isoStartTime: '2026-09-08T08:30:00.000Z',
-            isoEndTime: '2026-09-08T09:00:00.000Z',
+            isoStartTime: `${futureDate}T08:30:00.000Z`,
+            isoEndTime: `${futureDate}T09:00:00.000Z`,
             availableStaffCount: 1,
             eligibleStaffIds: ['sty-1'],
           },
@@ -237,24 +239,25 @@ describe('AppointmentsService (Unit Tests)', () => {
       jest.spyOn(prisma.appointment, 'findFirst').mockResolvedValue(null); // No overlap
       jest.spyOn(prisma.appointment, 'update').mockResolvedValue({
         id: mockApptId,
-        status: AppointmentStatus.CONFIRMED,
-        startAt: new Date('2026-09-08T08:30:00.000Z'),
-        endAt: new Date('2026-09-08T09:00:00.000Z'),
-        appointmentDate: new Date('2026-09-08'),
+        status: AppointmentStatus.PENDING_RESCHEDULE,
+        startAt: soon,
+        proposedStartAt: new Date(`${futureDate}T14:00:00.000Z`),
+        proposedEndAt: new Date(`${futureDate}T14:30:00.000Z`),
+        appointmentDate: new Date(futureDate),
       } as any);
 
       const result = await service.rescheduleAppointment(
         mockSalonId,
         mockApptId,
         {
-          newDate: '2026-09-08',
+          newDate: futureDate,
           newStartTime: '14:00',
         },
         'admin-override-user',
       );
 
       expect(result).toBeDefined();
-      expect(result.status).toBe(AppointmentStatus.CONFIRMED);
+      expect(result.status).toBe(AppointmentStatus.PENDING_RESCHEDULE);
     });
   });
 

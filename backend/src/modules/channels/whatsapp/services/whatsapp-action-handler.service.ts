@@ -9,7 +9,7 @@ import { WhatsAppSenderService, WhatsAppButtonId, InteractiveButton, Interactive
 import { WhatsAppTemplateService } from './whatsapp-template.service';
 import { WhatsAppSessionService } from './whatsapp-session.service';
 import { WhatsAppService } from '../whatsapp.service';
-import { ConversationState, AppointmentStatus, ClientEtaStatus, ServiceGender, BookingSource } from '@prisma/client';
+import { ConversationState, AppointmentStatus, ClientEtaStatus, ServiceGender, BookingSource, CancelledBy } from '@prisma/client';
 import { DateTime } from 'luxon';
 import { TimeUtility } from '../../../../common/utils/time.utility';
 
@@ -132,19 +132,29 @@ export class WhatsAppActionHandlerService {
         where: { id: conversation.activeAppointmentId },
         include: { service: true, stylist: true },
       });
-      if (!activeAppointment || ['CANCELLED', 'COMPLETED', 'NO_SHOW'].includes(activeAppointment.status)) {
+      if (!activeAppointment || [AppointmentStatus.CANCELLED, AppointmentStatus.COMPLETED, AppointmentStatus.REJECTED].includes(activeAppointment.status)) {
         activeAppointment = null;
         await this.session.updateConversationState(conversation.id, conversation.state, null);
       }
     }
 
-    // Fallback: check if customer has any active confirmed/checked_in appointment if not stored on session
+    // Fallback: check if customer has any active non-terminal appointment if not stored on session
     if (!activeAppointment) {
       activeAppointment = await this.prisma.appointment.findFirst({
         where: {
           salonId,
           salonUser: { userId: user.id },
-          status: { in: ['CONFIRMED', 'CHECKED_IN'] },
+          status: {
+            in: [
+              AppointmentStatus.BOOKED,
+              AppointmentStatus.CONFIRMED,
+              AppointmentStatus.ON_THE_WAY,
+              AppointmentStatus.CHECKED_IN,
+              AppointmentStatus.SEATED_IN_CHAIR,
+              AppointmentStatus.PENDING_ACCEPTANCE,
+              AppointmentStatus.PENDING_RESCHEDULE,
+            ],
+          },
         },
         include: { service: true, stylist: true },
         orderBy: { startAt: 'desc' },
@@ -242,6 +252,9 @@ export class WhatsAppActionHandlerService {
     if (input === WhatsAppButtonId.REMIND_CONFIRM) {
       const apptId = conversation.activeAppointmentId || activeAppointment?.id;
       if (apptId) {
+        await this.appointmentsService.updateStatus(salonId, apptId, {
+          status: AppointmentStatus.CONFIRMED,
+        });
         await this.appointmentsService.updateEtaStatus(salonId, apptId, ClientEtaStatus.ON_TIME);
       }
       const reply = `✅ *Thank you for confirming!*\n\nWe've noted your confirmation and your stylist will be ready for you at your scheduled time. See you soon!`;
@@ -261,6 +274,9 @@ export class WhatsAppActionHandlerService {
     if (input === WhatsAppButtonId.ETA_ON_THE_WAY || input === 'btn_eta_on_the_way') {
       const apptId = conversation.activeAppointmentId || activeAppointment?.id;
       if (apptId) {
+        await this.appointmentsService.updateStatus(salonId, apptId, {
+          status: AppointmentStatus.ON_THE_WAY,
+        });
         await this.appointmentsService.updateEtaStatus(salonId, apptId, ClientEtaStatus.ON_THE_WAY);
       }
       const reply = `🚗 *Safe travels!*\n\nWe've notified your stylist that you are on your way. Your chair will be ready for you!`;
@@ -336,21 +352,14 @@ export class WhatsAppActionHandlerService {
       );
 
       if (!eligibility.allowed) {
-        const reply = `⚠️ *Reschedule Notice*\n\nYour appointment is in less than ${eligibility.cancelWindowHours} hours. Online rescheduling is closed to protect stylist schedules.\n\n• Tap *'🚗 Running 15m Late'* if you are on your way.\n• Call our desk at *${salon.phone || 'our desk'}* for urgent adjustments.`;
+        const payload = this.templates.buildRescheduleCutoffPassedPrompt(salon.phone || undefined);
         await this.sendMessage(
           cleanNumber,
-          {
-            bodyText: reply,
-            interactiveType: 'button',
-            buttons: [
-              { id: WhatsAppButtonId.ETA_LATE_15, title: '🚗 Running 15m Late' },
-              { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
-            ],
-          },
+          payload,
           phoneNumberId,
           salonId,
         );
-        return { replyMessage: reply, state: conversation.state };
+        return { replyMessage: payload.bodyText, state: conversation.state };
       }
 
       const openDates = await this.availabilityService.findAvailableDates(
@@ -492,76 +501,95 @@ export class WhatsAppActionHandlerService {
         include: { service: true, stylist: true },
       });
 
-      if (appt && appt.proposedStartAt && appt.proposedEndAt) {
-        const newStart = appt.proposedStartAt;
-        const newEnd = appt.proposedEndAt;
-
-        await this.prisma.appointment.update({
-          where: { id: apptId },
-          data: {
-            startAt: newStart,
-            endAt: newEnd,
-            appointmentDate: DateTime.fromJSDate(newStart, { zone: tz }).startOf('day').toJSDate(),
-            status: AppointmentStatus.CONFIRMED,
-            proposedStartAt: null,
-            proposedEndAt: null,
-            proposedByAdminId: null,
-            notes: `${appt.notes || ''} [Rescheduled by salon admin and accepted by customer.]`.trim(),
-          },
-        });
-
-        const newTimeStr = DateTime.fromJSDate(newStart, { zone: tz }).toFormat('hh:mm a');
-        const reply = `🎉 *RESCHEDULE CONFIRMED!*\n\nThank you for accepting! Your appointment with *${appt.stylist?.name || 'Stylist'}* at *${salon.name}* is now set for *${newTimeStr}*.`;
-
-        await this.sendMessage(
-          cleanNumber,
-          {
-            bodyText: reply,
-            interactiveType: 'button',
-            buttons: [{ id: WhatsAppButtonId.START, title: '🏠 Main Menu' }],
-          },
-          phoneNumberId,
-          salonId,
-        );
-
-        this.appointmentsService?.emitSalonEvent(salonId, 'STATUS_UPDATED', appt);
-        return { replyMessage: reply, state: ConversationState.START };
+      if (!appt || appt.status !== AppointmentStatus.PENDING_RESCHEDULE || !appt.proposedStartAt || !appt.proposedEndAt) {
+        const staleReply = this.templates.buildRescheduleStaleExpiredReply();
+        await this.sendMessage(cleanNumber, staleReply, phoneNumberId, salonId);
+        return { replyMessage: staleReply.bodyText, state: ConversationState.START };
       }
+
+      const newStart = appt.proposedStartAt;
+      const newEnd = appt.proposedEndAt;
+
+      await this.prisma.appointment.update({
+        where: { id: apptId },
+        data: {
+          startAt: newStart,
+          endAt: newEnd,
+          appointmentDate: DateTime.fromJSDate(newStart, { zone: tz }).startOf('day').toJSDate(),
+          status: AppointmentStatus.CONFIRMED,
+          proposedStartAt: null,
+          proposedEndAt: null,
+          proposedByAdminId: null,
+          notes: `${appt.notes || ''} [Rescheduled by salon admin and accepted by customer.]`.trim(),
+        },
+      });
+
+      const newTimeStr = DateTime.fromJSDate(newStart, { zone: tz }).toFormat('hh:mm a');
+      const replyPayload = this.templates.buildRescheduleAcceptedReply({
+        salonName: salon.name,
+        stylistName: appt.stylist?.name || 'Stylist',
+        newTimeStr,
+      });
+
+      await this.sendMessage(
+        cleanNumber,
+        replyPayload,
+        phoneNumberId,
+        salonId,
+      );
+
+      this.appointmentsService?.emitSalonEvent(salonId, 'STATUS_UPDATED', appt);
+      this.appointmentsService?.emitSalonEvent(salonId, 'APPOINTMENT_UPDATED', appt);
+      return { replyMessage: replyPayload.bodyText, state: ConversationState.START };
     }
 
     if (input.startsWith(WhatsAppButtonId.PROPOSE_DECLINE_PREFIX)) {
       const apptId = input.replace(WhatsAppButtonId.PROPOSE_DECLINE_PREFIX, '');
-      const appt = await this.prisma.appointment.findUnique({ where: { id: apptId } });
+      const appt = await this.prisma.appointment.findUnique({
+        where: { id: apptId },
+        include: { service: true, stylist: true, salonUser: { include: { user: true } } },
+      });
 
-      if (appt) {
-        const isPast = new Date(appt.startAt).getTime() < Date.now();
-        await this.prisma.appointment.update({
-          where: { id: apptId },
-          data: {
-            status: isPast ? AppointmentStatus.CANCELLED : AppointmentStatus.CONFIRMED,
-            proposedStartAt: null,
-            proposedEndAt: null,
-            proposedByAdminId: null,
-            notes: `${appt.notes || ''} [Proposed reschedule declined by customer.]`.trim(),
-          },
-        });
-
-        const reply = `👍 *No problem!* We have kept your original appointment details. Contact the salon if you need further adjustments!`;
-        await this.sendMessage(
-          cleanNumber,
-          {
-            bodyText: reply,
-            interactiveType: 'button',
-            buttons: [{ id: WhatsAppButtonId.START, title: '🏠 Main Menu' }],
-          },
-          phoneNumberId,
-          salonId,
-        );
-
-        this.appointmentsService?.emitSalonEvent(salonId, 'STATUS_UPDATED', appt);
-        return { replyMessage: reply, state: ConversationState.START };
+      if (!appt || appt.status !== AppointmentStatus.PENDING_RESCHEDULE) {
+        const staleReply = this.templates.buildRescheduleStaleExpiredReply();
+        await this.sendMessage(cleanNumber, staleReply, phoneNumberId, salonId);
+        return { replyMessage: staleReply.bodyText, state: ConversationState.START };
       }
-    }
+
+      const updated = await this.prisma.appointment.update({
+        where: { id: apptId },
+        data: {
+          status: AppointmentStatus.CANCELLED,
+          cancellationReason: 'DECLINED_SALON_RESCHEDULE',
+          cancelledAt: new Date(),
+          cancelledBy: CancelledBy.USER,
+          penaltyApplied: false,
+          proposedStartAt: null,
+          proposedEndAt: null,
+          proposedByAdminId: null,
+          notes: `${appt.notes || ''} [Salon reschedule declined by customer. Cancelled without penalty.]`.trim(),
+        },
+        include: { service: true, stylist: true, salonUser: { include: { user: true } } },
+      });
+
+      const replyPayload = this.templates.buildRescheduleDeclinedReply();
+      await this.sendMessage(
+        cleanNumber,
+        replyPayload,
+        phoneNumberId,
+        salonId,
+      );
+
+        this.appointmentsService?.emitSalonEvent(salonId, 'STATUS_UPDATED', updated);
+        this.appointmentsService?.emitSalonEvent(salonId, 'APPOINTMENT_UPDATED', updated);
+        this.appointmentsService?.emitSalonEvent(salonId, 'BOOKING_CANCELLED', updated);
+
+        if (this.cancellationService && typeof (this.cancellationService as any).triggerSmartMoveUpBroadcast === 'function') {
+          await (this.cancellationService as any).triggerSmartMoveUpBroadcast(updated).catch(() => {});
+        }
+
+        return { replyMessage: replyPayload.bodyText, state: ConversationState.START };
+      }
 
     // ----------------------------------------------------
     // CATEGORY 4: ADD-ON SERVICE ACTION

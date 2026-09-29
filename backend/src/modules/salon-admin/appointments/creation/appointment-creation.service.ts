@@ -15,6 +15,7 @@ import { CreateAppointmentDto } from '../dto/create-appointment.dto';
 import {
   AppointmentStatus,
   BookingSource,
+  BookingType,
   DayOfWeek,
   StylistStatus,
   ServiceStatus,
@@ -320,7 +321,7 @@ export class AppointmentCreationService {
             where: {
               salonId,
               salonUserId: salonUser.id,
-              status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN, AppointmentStatus.IN_SERVICE] },
+              status: { in: [AppointmentStatus.BOOKED, AppointmentStatus.CONFIRMED, AppointmentStatus.ON_THE_WAY, AppointmentStatus.CHECKED_IN, AppointmentStatus.SEATED_IN_CHAIR] },
               AND: [
                 { startAt: { lt: endDt.toJSDate() } },
                 { endAt: { gt: startDt.toJSDate() } },
@@ -347,7 +348,7 @@ export class AppointmentCreationService {
               where: {
                 salonId,
                 stylistId: requestedStylistId,
-                status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN, AppointmentStatus.IN_SERVICE] },
+                status: { in: [AppointmentStatus.BOOKED, AppointmentStatus.CONFIRMED, AppointmentStatus.ON_THE_WAY, AppointmentStatus.CHECKED_IN, AppointmentStatus.SEATED_IN_CHAIR] },
                 AND: [
                   { startAt: { lt: endDt.toJSDate() } },
                   { endAt: { gt: startDt.toJSDate() } },
@@ -405,7 +406,7 @@ export class AppointmentCreationService {
                   where: {
                     salonId,
                     stylistId: candidateId,
-                    status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN, AppointmentStatus.IN_SERVICE] },
+                    status: { in: [AppointmentStatus.BOOKED, AppointmentStatus.CONFIRMED, AppointmentStatus.ON_THE_WAY, AppointmentStatus.CHECKED_IN, AppointmentStatus.SEATED_IN_CHAIR] },
                     AND: [
                       { startAt: { lt: endDt.toJSDate() } },
                       { endAt: { gt: startDt.toJSDate() } },
@@ -558,6 +559,28 @@ export class AppointmentCreationService {
           // Generate Human-friendly sequential appointment number
           const appointmentNumber = `SAL-${Math.floor(100000 + Math.random() * 900000)}`;
 
+          // Dynamic Lead-Time Classification
+          const leadTimeMinutes = (startDt.toMillis() - DateTime.now().setZone(timezone).toMillis()) / (1000 * 60);
+
+          let bookingType: BookingType = BookingType.NORMAL;
+          let initialStatus: AppointmentStatus;
+
+          if (options?.initialStatus) {
+            initialStatus = options.initialStatus;
+            bookingType = (initialStatus === AppointmentStatus.PENDING_ACCEPTANCE || dto.source === BookingSource.QUICK_BOOK)
+              ? BookingType.QUICK
+              : BookingType.NORMAL;
+          } else if (dto.source === BookingSource.QUICK_BOOK || leadTimeMinutes < 15) {
+            bookingType = BookingType.QUICK;
+            initialStatus = AppointmentStatus.PENDING_ACCEPTANCE;
+          } else if (leadTimeMinutes > 120) {
+            bookingType = BookingType.NORMAL;
+            initialStatus = AppointmentStatus.BOOKED;
+          } else {
+            bookingType = BookingType.NORMAL;
+            initialStatus = AppointmentStatus.CONFIRMED;
+          }
+
           // Create parent Appointment record with snapshots
           const appointment = await tx.appointment.create({
             data: {
@@ -572,7 +595,8 @@ export class AppointmentCreationService {
               appointmentDate: new Date(dto.date),
               startAt: startDt.toJSDate(),
               endAt: endDt.toJSDate(),
-              status: options?.initialStatus || AppointmentStatus.CONFIRMED,
+              bookingType,
+              status: initialStatus,
               source: dto.source || BookingSource.WEB,
               notes: dto.notes,
               createdByAdminId: createdByAdminId || null,

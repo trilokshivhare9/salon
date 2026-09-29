@@ -113,6 +113,7 @@ export class AppointmentsController {
   ) {
     return this.appointmentsService.cancelBooking(salonId, appointmentId, {
       ...context,
+      source: context?.source || 'ADMIN_DASHBOARD',
       adminId: user?.id,
     });
   }

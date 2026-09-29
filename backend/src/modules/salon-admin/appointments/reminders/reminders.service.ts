@@ -4,7 +4,7 @@ import { WhatsAppService } from '../../../channels/whatsapp/whatsapp.service';
 import { WhatsAppTemplateService } from '../../../channels/whatsapp/services/whatsapp-template.service';
 import { AppointmentsService } from '../appointments.service';
 import { DateTime } from 'luxon';
-import { AppointmentStatus, ClientEtaStatus, ReassignmentOutcome, AbsenceStatus } from '@prisma/client';
+import { AppointmentStatus, ClientEtaStatus, ReassignmentOutcome, AbsenceStatus, CancelledBy } from '@prisma/client';
 import { TimeUtility } from '../../../../common/utils/time.utility';
 
 @Injectable()
@@ -46,10 +46,18 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
     this.logger.log('⏰ Multi-Stage WhatsApp Reminder & Auto No-Show Worker started (60s tick).');
   }
 
-  async processReminders(): Promise<{ stage1: number; stage2: number; stage4: number; stage5: number }> {
+  async processReminders(): Promise<{
+    stage1: number;
+    stage1Cutoff: number;
+    stage2: number;
+    stage2Cutoff: number;
+    stage4: number;
+    stage5: number;
+    stage3Elapsed: number;
+  }> {
     if (this.isProcessing) {
       this.logger.debug('[Reminders Worker] Skipping tick - previous processReminders() execution still in progress.');
-      return { stage1: 0, stage2: 0, stage4: 0, stage5: 0 };
+      return { stage1: 0, stage1Cutoff: 0, stage2: 0, stage2Cutoff: 0, stage4: 0, stage5: 0, stage3Elapsed: 0 };
     }
 
     this.isProcessing = true;
@@ -60,26 +68,29 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
       });
 
       let stage1Count = 0;
+      let stage1CutoffCount = 0;
       let stage2Count = 0;
-      let stage4Count = 0;
-      let stage5Count = 0;
+      let stage2CutoffCount = 0;
+      let stage3ElapsedCount = 0;
 
       for (const salon of salons) {
         try {
           const tz = salon.timezone || 'Asia/Kolkata';
           const now = DateTime.now().setZone(tz);
           const phoneNumberId = salon.whatsappAccount?.phoneNumberId;
+          const todayStart = now.startOf('day').toJSDate();
 
           // -----------------------------------------------------------------------
-          // STAGE 1: Advance 2-Hour Reminder
+          // STAGE 1: Advance 2-Hour Confirmation Reminder
+          // Lead time > 120m starts as BOOKED. Send reminder prompt.
           // -----------------------------------------------------------------------
-          const stage1Min = now.plus({ minutes: 45 }).toJSDate();
+          const stage1Min = now.plus({ minutes: 60 }).toJSDate();
           const stage1Max = now.plus({ hours: 2, minutes: 15 }).toJSDate();
 
-          const stage1Appointments = await this.prisma.appointment.findMany({
+          const stage1Appointments = (await this.prisma.appointment.findMany({
             where: {
               salonId: salon.id,
-              status: AppointmentStatus.CONFIRMED,
+              status: AppointmentStatus.BOOKED,
               reminder2hSentAt: null,
               startAt: {
                 gte: stage1Min,
@@ -101,7 +112,7 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
               stylist: true,
               service: true,
             },
-          });
+          })) || [];
 
           for (const appt of stage1Appointments) {
             const user = appt.salonUser?.user;
@@ -137,11 +148,88 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
           }
 
           // -----------------------------------------------------------------------
+          // STAGE 1.5: T - 60 Minutes Ghost Cutoff Auto-Cancellation
+          // If status is still BOOKED and startAt <= now + 60 mins:
+          // Customer never confirmed -> Auto-cancel with +1 penalty strike (lead time <= 60m < 90m)
+          // -----------------------------------------------------------------------
+          const cutoff60m = now.plus({ minutes: 60 }).toJSDate();
+          const unconfirmedGhostAppointments = (await this.prisma.appointment.findMany({
+            where: {
+              salonId: salon.id,
+              status: AppointmentStatus.BOOKED,
+              startAt: {
+                gte: todayStart,
+                lte: cutoff60m,
+              },
+            },
+            include: {
+              salonUser: { include: { user: true } },
+              stylist: true,
+              service: true,
+            },
+          })) || [];
+
+          for (const appt of unconfirmedGhostAppointments) {
+            try {
+              await this.appointmentsService.cancelBooking(salon.id, appt.id, {
+                source: 'SYSTEM_AUTO_CUTOFF',
+                fault: 'CLIENT',
+                reasonCategory: 'CLIENT_UNRESPONSIVE',
+                reason: 'GHOSTED_2H_REMINDER',
+              });
+              stage1CutoffCount++;
+            } catch (err: any) {
+              this.logger.error(
+                `[Reminders Worker] Failed to auto-cancel unconfirmed 60m appt #${appt.appointmentNumber}: ${err.message}`,
+              );
+            }
+          }
+
+          // -----------------------------------------------------------------------
+          // STAGE 1.8: T - 60 Minutes Unresponsive Reschedule Proposal Cutoff
+          // If status is PENDING_RESCHEDULE and proposedStartAt <= now + 60 mins:
+          // Customer never responded to salon proposal -> Auto-cancel with 0 penalty (salon fault)
+          // -----------------------------------------------------------------------
+          const rescheduleCutoff60m = now.plus({ minutes: 60 }).toJSDate();
+          const expiredRescheduleAppointments = (await this.prisma.appointment.findMany({
+            where: {
+              salonId: salon.id,
+              status: AppointmentStatus.PENDING_RESCHEDULE,
+              proposedStartAt: {
+                lte: rescheduleCutoff60m,
+              },
+            },
+            include: {
+              salonUser: { include: { user: true } },
+              stylist: true,
+              service: true,
+            },
+          })) || [];
+
+          for (const appt of expiredRescheduleAppointments) {
+            try {
+              await this.appointmentsService.cancelBooking(salon.id, appt.id, {
+                source: 'SYSTEM_AUTO_CUTOFF',
+                fault: 'SALON',
+                noPenalty: true,
+                reason: 'UNRESPONSIVE_RESCHEDULE_PROPOSAL_EXPIRED_60M',
+                cancelledBy: CancelledBy.SYSTEM,
+              });
+              stage1CutoffCount++;
+            } catch (err: any) {
+              this.logger.error(
+                `[Reminders Worker] Failed to auto-cancel expired proposal appt #${appt.appointmentNumber}: ${err.message}`,
+              );
+            }
+          }
+
+          // -----------------------------------------------------------------------
           // STAGE 2: Imminent 15-Minute Arrival Alert & Warning
+          // Only for CONFIRMED appointments. Send [🚗 On My Way] and [❌ Cancel Visit].
           // -----------------------------------------------------------------------
           const stage2Max = now.plus({ minutes: 20 }).toJSDate();
 
-          const stage2Appointments = await this.prisma.appointment.findMany({
+          const stage2Appointments = (await this.prisma.appointment.findMany({
             where: {
               salonId: salon.id,
               status: AppointmentStatus.CONFIRMED,
@@ -166,7 +254,7 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
               stylist: true,
               service: true,
             },
-          });
+          })) || [];
 
           for (const appt of stage2Appointments) {
             const user = appt.salonUser?.user;
@@ -197,32 +285,21 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
           }
 
           // -----------------------------------------------------------------------
-          // STAGE 4: Auto-Cancellation & Penalty Strike Worker (+5m Grace Period)
+          // STAGE 2.5: T - 5 Minutes Grace Period Auto-Cancellation
+          // Customer was sent 15m alert and did NOT tap [🚗 On My Way] (status still CONFIRMED).
+          // Start time has 5m or less remaining -> Auto-cancel with +1 penalty strike!
+          // (Note: If customer clicked [🚗 On My Way], status transitioned to ON_THE_WAY,
+          // so they are NOT in status CONFIRMED and never auto-cancelled!).
           // -----------------------------------------------------------------------
-          const todayStart = now.startOf('day').toJSDate();
-          const gracePeriodCutoff = now.minus({ minutes: 5 }).toJSDate();
-
-          const expiredAppointments = await this.prisma.appointment.findMany({
+          const cutoff5m = now.plus({ minutes: 5 }).toJSDate();
+          const ghost15mAppointments = (await this.prisma.appointment.findMany({
             where: {
               salonId: salon.id,
               status: AppointmentStatus.CONFIRMED,
               startAt: {
                 gte: todayStart,
-                lte: gracePeriodCutoff,
+                lte: cutoff5m,
               },
-              OR: [
-                { clientEtaStatus: null },
-                {
-                  clientEtaStatus: {
-                    notIn: [
-                      ClientEtaStatus.ON_THE_WAY,
-                      ClientEtaStatus.ARRIVED,
-                      ClientEtaStatus.RUNNING_LATE_10M,
-                      ClientEtaStatus.RUNNING_LATE_20M,
-                    ],
-                  },
-                },
-              ],
             },
             include: {
               salonUser: {
@@ -239,10 +316,9 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
                 },
               },
             },
-          });
+          })) || [];
 
-          for (const appt of expiredAppointments) {
-            // Check if appointment is unresolvable due to active stylist absence
+          for (const appt of ghost15mAppointments) {
             const hasUnresolvedAbsence = (appt.reassignments && appt.reassignments.length > 0);
 
             try {
@@ -252,23 +328,22 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
                 reasonCategory: hasUnresolvedAbsence ? 'SALON_EMERGENCY' : 'CLIENT_UNRESPONSIVE',
                 reason: hasUnresolvedAbsence
                   ? 'Auto-cancelled: specialist absent and no replacement available'
-                  : 'Auto-canceled by system due to no-response after 5-minute grace period.',
+                  : 'GHOSTED_15M_ALERT',
               });
+              stage2CutoffCount++;
             } catch (cancelErr: any) {
               this.logger.error(
                 `[Reminders Worker] Failed to cancel expired appt #${appt.appointmentNumber}: ${cancelErr.message}`,
               );
             }
-
-            stage4Count++;
           }
 
           // -----------------------------------------------------------------------
-          // STAGE 5: Auto-Complete Elapsed Appointments (When service time has ended)
+          // STAGE 3: Auto-Complete Elapsed Appointments (When service time has ended)
           // -----------------------------------------------------------------------
           try {
             const completedCount = await this.appointmentsService.autoCompleteElapsedAppointments(salon.id);
-            stage5Count += completedCount;
+            stage3ElapsedCount += completedCount;
           } catch (autoCompleteErr: any) {
             this.logger.error(
               `[Reminders Worker] Failed to auto-complete elapsed appointments for salon "${salon.name}": ${autoCompleteErr.message}`,
@@ -283,7 +358,15 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
         }
       }
 
-      return { stage1: stage1Count, stage2: stage2Count, stage4: stage4Count, stage5: stage5Count };
+      return {
+        stage1: stage1Count,
+        stage1Cutoff: stage1CutoffCount,
+        stage2: stage2Count,
+        stage2Cutoff: stage2CutoffCount,
+        stage4: stage2CutoffCount,
+        stage5: stage3ElapsedCount,
+        stage3Elapsed: stage3ElapsedCount,
+      };
     } finally {
       this.isProcessing = false;
     }

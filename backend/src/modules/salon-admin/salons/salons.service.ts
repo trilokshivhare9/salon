@@ -471,7 +471,7 @@ Here are your salon owner login credentials:
     const activeBookings = await this.prisma.appointment.findMany({
       where: {
         salonId,
-        status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN, AppointmentStatus.IN_SERVICE] },
+        status: { in: [AppointmentStatus.BOOKED, AppointmentStatus.CONFIRMED, AppointmentStatus.ON_THE_WAY, AppointmentStatus.CHECKED_IN, AppointmentStatus.SEATED_IN_CHAIR] },
         appointmentDate: { gte: startOfToday },
       },
       include: {
@@ -482,7 +482,7 @@ Here are your salon owner login credentials:
       orderBy: { appointmentDate: 'asc' },
     });
 
-    const inServiceCount = activeBookings.filter((b) => b.status === AppointmentStatus.IN_SERVICE).length;
+    const inServiceCount = activeBookings.filter((b) => b.status === AppointmentStatus.SEATED_IN_CHAIR).length;
 
     return {
       salonId,
@@ -509,7 +509,7 @@ Here are your salon owner login credentials:
       const activeBookings = await this.prisma.appointment.findMany({
         where: {
           salonId,
-          status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN, AppointmentStatus.IN_SERVICE] },
+          status: { in: [AppointmentStatus.BOOKED, AppointmentStatus.CONFIRMED, AppointmentStatus.ON_THE_WAY, AppointmentStatus.CHECKED_IN, AppointmentStatus.SEATED_IN_CHAIR] },
           appointmentDate: { gte: startOfToday },
         },
         include: {
@@ -741,7 +741,7 @@ Here are your salon owner login credentials:
           where: {
             salonId,
             startAt: { gt: now },
-            status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN, AppointmentStatus.IN_SERVICE] },
+            status: { in: [AppointmentStatus.BOOKED, AppointmentStatus.CONFIRMED, AppointmentStatus.ON_THE_WAY, AppointmentStatus.CHECKED_IN, AppointmentStatus.SEATED_IN_CHAIR] },
             stylist: { followsSalonSchedule: true },
           },
           include: { stylist: true },
@@ -880,7 +880,7 @@ Here are your salon owner login credentials:
 
     // 3. Separate into past checked-in (endAt <= nowJS) vs future active (endAt > nowJS)
     const pastCheckedInAppts = targetAppts.filter(
-      (a) => (a.status === AppointmentStatus.CHECKED_IN || a.status === AppointmentStatus.IN_SERVICE) && a.endAt <= nowJS,
+      (a) => (a.status === AppointmentStatus.CHECKED_IN || a.status === AppointmentStatus.SEATED_IN_CHAIR) && a.endAt <= nowJS,
     );
 
     const futureApptsToCancel = targetAppts.filter(

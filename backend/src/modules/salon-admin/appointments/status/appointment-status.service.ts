@@ -11,6 +11,7 @@ import { PrismaService } from '../../../../database/prisma.service';
 import { AppointmentEventsService } from '../events/appointment-events.service';
 import { CancellationService } from '../cancellation/cancellation.service';
 import { WhatsAppService } from '../../../channels/whatsapp/whatsapp.service';
+import { WhatsAppTemplateService } from '../../../channels/whatsapp/services/whatsapp-template.service';
 import { UpdateAppointmentStatusDto } from '../dto/create-appointment.dto';
 import { AppointmentStatus, BookingSource, ClientEtaStatus } from '@prisma/client';
 import { TimeUtility } from '../../../../common/utils/time.utility';
@@ -31,7 +32,13 @@ export class AppointmentStatusService {
     @Optional() private cancellationService?: CancellationService,
     @Inject(forwardRef(() => WhatsAppService))
     @Optional() private whatsappService?: WhatsAppService,
-  ) {}
+    @Inject(forwardRef(() => WhatsAppTemplateService))
+    @Optional() private templates?: WhatsAppTemplateService,
+  ) {
+    if (!this.templates) {
+      this.templates = new WhatsAppTemplateService();
+    }
+  }
 
   /**
    * Helper: fetches appointment by salon and ID with complete relations
@@ -66,10 +73,10 @@ export class AppointmentStatusService {
       ? await appointmentsService.getAppointmentById(salonId, appointmentId)
       : await this.getAppointment(salonId, appointmentId);
 
-    // Idempotency: If already in target status or both current and target are CANCELLED/NO_SHOW
-    const isTargetCancelledNoShow = ([AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW] as string[]).includes(dto.status);
-    const isCurrentCancelledNoShow = ([AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW] as string[]).includes(appointment.status);
-    if (appointment.status === dto.status || (isCurrentCancelledNoShow && isTargetCancelledNoShow)) {
+    // Idempotency: If already in target status or both current and target are CANCELLED/REJECTED
+    const isTargetCancelled = ([AppointmentStatus.CANCELLED, AppointmentStatus.REJECTED] as string[]).includes(dto.status);
+    const isCurrentCancelled = ([AppointmentStatus.CANCELLED, AppointmentStatus.REJECTED] as string[]).includes(appointment.status);
+    if (appointment.status === dto.status || (isCurrentCancelled && isTargetCancelled)) {
       return formatAppointment(appointment);
     }
 
@@ -82,9 +89,9 @@ export class AppointmentStatusService {
 
     const nowMs = Date.now();
     const apptStartMs = new Date(appointment.startAt).getTime();
-    const hoursRemaining = (apptStartMs - nowMs) / (1000 * 60 * 60);
+    const minutesRemaining = (apptStartMs - nowMs) / (1000 * 60);
 
-    // Process Penalty Strike Calculation (< 2 hours remaining & client fault / unresponsive)
+    // Process Penalty Strike Calculation (< 90 minutes remaining & client fault / unresponsive)
     let isPenaltyApplied = false;
     let remainingPenalties = 2;
     let newCount = 0;
@@ -95,11 +102,11 @@ export class AppointmentStatusService {
       !adminId;
 
     if (
-      isTargetCancelledNoShow &&
+      isTargetCancelled &&
       isClientFault &&
       dto.reasonCategory !== 'SALON_EMERGENCY' &&
       appointment.source !== BookingSource.QUICK_BOOK &&
-      hoursRemaining < 2 &&
+      minutesRemaining < 90 &&
       appointment.salonUserId
     ) {
       const salonUser = await this.prisma.salonUser.findUnique({
@@ -149,19 +156,58 @@ export class AppointmentStatusService {
 
       if (appointment.status === AppointmentStatus.PENDING_ACCEPTANCE) {
         if (dto.status === AppointmentStatus.CHECKED_IN || dto.status === AppointmentStatus.CONFIRMED) {
-          const acceptMsg = `🎉 *QUICK BOOKING ACCEPTED!*\n\nHi *${userName}*, your quick booking check-in at *${salon.name}* has been accepted!\n\n• *Booking #:* *${updated.appointmentNumber}*\n• *Service:* *${updated.serviceNameSnapshot}*\n• *Time:* *${timeStr}*\n• *Specialist:* *${updated.stylist?.name || 'Your Specialist'}*\n• *Status:* *Checked In*\n\nPlease take a seat! *${updated.stylist?.name || 'Your Specialist'}* will call you to the chair shortly.`;
+          const acceptMsg = `🎉 *QUICK BOOKING ACCEPTED!*\n\nHi *${userName}*, your quick booking at *${salon.name}* has been accepted!\n\n• *Booking #:* *${updated.appointmentNumber}*\n• *Service:* *${updated.serviceNameSnapshot}*\n• *Time:* *${timeStr}*\n• *Specialist:* *${updated.stylist?.name || 'Your Specialist'}*\n• *Status:* *Confirmed*\n\nPlease tap below when you are on the way:`;
           await this.whatsappService.sendMetaMessage(
             userPhone,
             {
               bodyText: acceptMsg,
               interactiveType: 'button',
-              buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
+              buttons: [
+                { id: 'btn_eta_on_the_way', title: '🚗 On My Way' },
+                { id: 'btn_eta_arrived', title: '📍 I Have Arrived' },
+              ],
             },
             phoneNumberId,
             salonId,
           ).catch(() => { });
-        } else if (dto.status === AppointmentStatus.CANCELLED) {
-          const declineMsg = `❌ *QUICK BOOKING DECLINED*\n\nHi *${userName}*, *${salon.name}* is currently unable to accept quick bookings at this moment. Please speak to salon reception or book a regular appointment.`;
+
+          // Auto-reject competing quick bookings for the same stylist and overlapping time window!
+          const competing = await this.prisma.appointment.findMany({
+            where: {
+              salonId,
+              id: { not: appointment.id },
+              stylistId: appointment.stylistId,
+              status: AppointmentStatus.PENDING_ACCEPTANCE,
+              startAt: { lt: updated.endAt },
+              endAt: { gt: updated.startAt },
+            },
+            include: { salonUser: { include: { user: true } } },
+          });
+
+          for (const comp of competing) {
+            await this.prisma.appointment.update({
+              where: { id: comp.id },
+              data: {
+                status: AppointmentStatus.REJECTED,
+                cancellationReason: 'COMPETING_BOOKING_ACCEPTED',
+              },
+            });
+            if (comp.salonUser?.user?.phone) {
+              const compMsg = `❌ *SLOT NO LONGER AVAILABLE*\n\nHi *${comp.salonUser.user.name || 'Customer'}*, another booking was just confirmed for this slot. Please choose another time or browse our service catalog.`;
+              await this.whatsappService.sendMetaMessage(
+                comp.salonUser.user.phone,
+                {
+                  bodyText: compMsg,
+                  interactiveType: 'button',
+                  buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
+                },
+                phoneNumberId,
+                salonId,
+              ).catch(() => { });
+            }
+          }
+        } else if (dto.status === AppointmentStatus.REJECTED || dto.status === AppointmentStatus.CANCELLED) {
+          const declineMsg = `❌ *QUICK BOOKING DECLINED*\n\nHi *${userName}*, *${salon.name}* is currently unable to accept this quick booking request. Please speak to salon reception or book another slot.`;
           await this.whatsappService.sendMetaMessage(
             userPhone,
             {
@@ -173,7 +219,7 @@ export class AppointmentStatusService {
             salonId,
           ).catch(() => { });
         }
-      } else if (isTargetCancelledNoShow) {
+      } else if (isTargetCancelled) {
         if (dto.reasonCategory === 'SALON_EMERGENCY') {
           // Salon Emergency Apology (NO Penalty)
           const apologyMsg = `🙏 *SALON NOTICE: APPOINTMENT CANCELED*\n\nHi *${userName}*, we sincerely apologize! Your appointment for *${timeStr}* at *${salon.name}* was canceled due to a salon emergency.\n\n✨ *No penalty has been applied* to your account. We welcome you to rebook at your convenience!`;
@@ -237,7 +283,7 @@ export class AppointmentStatusService {
     }
 
     // Trigger Smart Move-Up Broadcast (ONLY if appointment startAt is in the FUTURE: apptStartMs > Date.now())
-    if (isTargetCancelledNoShow && apptStartMs > Date.now()) {
+    if (isTargetCancelled && apptStartMs > Date.now()) {
       await this.cancellationService.triggerSmartMoveUpBroadcast(formatted).catch((err) => {
         this.logger.warn(`Move-up broadcast trigger warning: ${err.message}`);
       });
@@ -300,26 +346,18 @@ export class AppointmentStatusService {
     const userPhone = appointment.salonUser?.user?.phone;
 
     if (userPhone && salon.whatsappAccount?.phoneNumberId && this.whatsappService) {
-      const message = `📅 *RESCHEDULE REQUEST FROM SALON*
-
-Hi *${appointment.salonUser?.user?.name || 'Customer'}*, *${salon.name}* requested to move your appointment to:
-
-• *Date:* *${dateStr}*
-• *Time:* *${timeStr}*
-• *Stylist:* *${appointment.stylist?.name || 'Stylist'}*
-
-Does this new time work for you?`;
+      const proposalPayload = this.templates!.buildRescheduleProposalPrompt({
+        salonName: salon.name,
+        customerName: appointment.salonUser?.user?.name || 'Customer',
+        dateFriendly: dateStr,
+        timeFriendly: timeStr,
+        stylistName: appointment.stylist?.name || 'Stylist',
+        appointmentId: appointment.id,
+      });
 
       await this.whatsappService.sendMetaMessage(
         userPhone,
-        {
-          bodyText: message,
-          interactiveType: 'button',
-          buttons: [
-            { id: `propose_accept_${appointment.id}`, title: '✅ Accept New Time' },
-            { id: `propose_decline_${appointment.id}`, title: '❌ Decline & Keep' },
-          ],
-        },
+        proposalPayload,
         salon.whatsappAccount.phoneNumberId,
         salonId,
       ).catch(() => { });
@@ -366,7 +404,7 @@ Does this new time work for you?`;
   async autoCompleteElapsedAppointments(salonId?: string): Promise<number> {
     const nowJS = new Date();
     const whereCondition: any = {
-      status: { in: [AppointmentStatus.CHECKED_IN, AppointmentStatus.IN_SERVICE] },
+      status: { in: [AppointmentStatus.CHECKED_IN, AppointmentStatus.SEATED_IN_CHAIR, AppointmentStatus.ON_THE_WAY] },
       endAt: { lte: nowJS },
     };
     if (salonId) {

@@ -32,7 +32,12 @@ export class AppointmentAddonService {
       throw new NotFoundException('Appointment not found.');
     }
 
-    const allowedStatuses: AppointmentStatus[] = [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN, AppointmentStatus.IN_SERVICE];
+    const allowedStatuses: AppointmentStatus[] = [
+      AppointmentStatus.CONFIRMED,
+      AppointmentStatus.ON_THE_WAY,
+      AppointmentStatus.CHECKED_IN,
+      AppointmentStatus.SEATED_IN_CHAIR,
+    ];
     if (!allowedStatuses.includes(appointment.status)) {
       throw new BadRequestException('No active confirmed appointment found for add-on modification.');
     }
@@ -107,7 +112,7 @@ export class AppointmentAddonService {
         stylistId: appointment.stylistId,
         appointmentDate: appointment.appointmentDate,
         id: { not: appointmentId },
-        status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN, AppointmentStatus.IN_SERVICE] },
+        status: { in: [AppointmentStatus.BOOKED, AppointmentStatus.CONFIRMED, AppointmentStatus.ON_THE_WAY, AppointmentStatus.CHECKED_IN, AppointmentStatus.SEATED_IN_CHAIR] },
         startAt: { lt: newEndAt },
         endAt: { gt: appointment.endAt },
       },

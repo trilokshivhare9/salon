@@ -140,9 +140,11 @@ export class LeaveReassignmentEngine {
           stylistId: candidate.id,
           status: {
             in: [
+              AppointmentStatus.BOOKED,
               AppointmentStatus.CONFIRMED,
+              AppointmentStatus.ON_THE_WAY,
               AppointmentStatus.CHECKED_IN,
-              AppointmentStatus.IN_SERVICE,
+              AppointmentStatus.SEATED_IN_CHAIR,
             ],
           },
           startAt: { lt: endAt },

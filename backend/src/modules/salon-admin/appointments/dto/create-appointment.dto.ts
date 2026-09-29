@@ -5,7 +5,7 @@ import {
   IsOptional,
   IsString,
 } from 'class-validator';
-import { AppointmentStatus, BookingSource } from '@prisma/client';
+import { AppointmentStatus, BookingSource, CancelledBy } from '@prisma/client';
 
 export class CreateAppointmentDto {
   @IsString()
@@ -98,10 +98,12 @@ export type CancellationSource =
   | 'CUSTOMER_ABSENCE'           // Customer cancels after stylist absence notification
   | 'CUSTOMER_REMINDER'          // Customer cancels from 10-min reminder
   | 'SYSTEM_AUTO_NOSHOW'         // Auto-cancel after 5-min grace period (no arrival)
+  | 'SYSTEM_AUTO_CUTOFF'         // Auto-cancel at T-60m for unconfirmed BOOKED appointments
   | 'SYSTEM_AUTO_EXPIRED'        // Quick booking expired (start time passed)
   | 'SYSTEM_SALON_DEACTIVATION'  // Super Admin deactivated salon
   | 'SYSTEM_STORE_CLOSURE'       // Emergency salon closure
-  | 'SYSTEM_MOVE_UP';            // Express Move-Up replaced old slot
+  | 'SYSTEM_MOVE_UP'             // Express Move-Up replaced old slot
+  | 'SALON_REJECTED';            // Salon rejected quick booking request
 
 /**
  * Determines penalty responsibility.
@@ -122,10 +124,13 @@ export interface CancelBookingContext {
   source: CancellationSource;
   fault: CancellationFault;
   reason?: string;              // Human-readable reason note
-  reasonCategory?: string;      // 'CLIENT_UNRESPONSIVE' → NO_SHOW, 'SALON_EMERGENCY' → CANCELLED
+  reasonCategory?: string;      // e.g. 'CLIENT_UNRESPONSIVE', 'SALON_EMERGENCY'
   adminId?: string;             // If admin-initiated
   skipWhatsAppNotify?: boolean; // For callers that send their own custom reply (e.g., WhatsApp bot)
   skipMoveUp?: boolean;         // Skip Smart Move-Up broadcast (e.g., bulk cancels)
+  applyPenalty?: boolean;       // Optional explicit penalty override from salon admin (true = mark penalty, false = without penalty)
+  noPenalty?: boolean;          // Explicit flag: when true, skip penalty logic and NEVER mark any penalty strike
+  cancelledBy?: CancelledBy;    // Actor who cancelled (USER, SALON, SYSTEM)
 }
 
 /**
@@ -138,5 +143,5 @@ export interface CancelBookingResult {
   penaltyCount: number;         // Total strikes after this cancel
   remainingStrikes: number;     // Strikes remaining before block
   isBlocked: boolean;           // Whether account is now locked
-  status: string;               // Final status (CANCELLED or NO_SHOW)
+  status: string;               // Final status (CANCELLED)
 }

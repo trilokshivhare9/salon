@@ -5,9 +5,11 @@ import {
   BadRequestException,
   Inject,
   forwardRef,
+  Optional,
 } from '@nestjs/common';
 import { PrismaService } from '../../../../database/prisma.service';
 import { WhatsAppService } from '../../../channels/whatsapp/whatsapp.service';
+import { WhatsAppTemplateService } from '../../../channels/whatsapp/services/whatsapp-template.service';
 import { AppointmentEventsService } from '../events/appointment-events.service';
 import {
   CancelBookingContext,
@@ -16,6 +18,7 @@ import {
 import {
   AppointmentStatus,
   BookingSource,
+  CancelledBy,
 } from '@prisma/client';
 import { DateTime } from 'luxon';
 import { TimeUtility } from '../../../../common/utils/time.utility';
@@ -34,7 +37,13 @@ export class CancellationService {
     private eventsService: AppointmentEventsService,
     @Inject(forwardRef(() => WhatsAppService))
     private whatsappService: WhatsAppService,
-  ) {}
+    @Inject(forwardRef(() => WhatsAppTemplateService))
+    @Optional() private templates?: WhatsAppTemplateService,
+  ) {
+    if (!this.templates) {
+      this.templates = new WhatsAppTemplateService();
+    }
+  }
 
   /**
    * Dedicated Domain Method: Checks if cancelling an appointment right now will trigger a late cancellation penalty strike.
@@ -60,17 +69,17 @@ export class CancellationService {
       throw new NotFoundException(`Appointment ${appointmentId} not found.`);
     }
 
-    const cancelWindowHours = appointment.salon?.cancelWindowHours ?? 2;
     const nowMs = Date.now();
     const apptStartMs = new Date(appointment.startAt).getTime();
-    const hoursUntil = (apptStartMs - nowMs) / (1000 * 60 * 60);
+    const minutesUntil = (apptStartMs - nowMs) / (1000 * 60);
 
-    const willIncurPenalty = hoursUntil < cancelWindowHours && hoursUntil > -1 && !!appointment.salonUserId;
+    // Global 90-minute rule
+    const willIncurPenalty = minutesUntil < 90 && !!appointment.salonUserId;
 
     return {
       willIncurPenalty,
-      hoursUntil,
-      cancelWindowHours,
+      hoursUntil: minutesUntil / 60,
+      cancelWindowHours: 1.5,
       appointment: formatAppointment(appointment),
     };
   }
@@ -81,7 +90,7 @@ export class CancellationService {
    * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
    *
    * Handles:
-   * 1. Status determination (CANCELLED vs NO_SHOW) based on context
+   * 1. Status determination (CANCELLED vs REJECTED) based on context
    * 2. Idempotency check
    * 3. State machine validation
    * 4. Penalty strike calculation (client fault + <2h window)
@@ -103,18 +112,22 @@ export class CancellationService {
     // 1. Determine target status based on source and fault
     const targetStatus = this.determineCancelStatus(context);
 
-    // 2. Idempotency: if already cancelled/no-show, return existing
-    const terminalStatuses = [AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW] as string[];
+    // 2. Idempotency: if already in terminal status, return existing
+    const terminalStatuses = [AppointmentStatus.CANCELLED, AppointmentStatus.REJECTED] as string[];
     if (terminalStatuses.includes(appointment.status)) {
       this.logger.warn(
         `[cancelBooking] Appointment ${appointmentId} already in terminal status ${appointment.status}. Idempotent return.`,
       );
+      const salonUser = appointment.salonUserId
+        ? await this.prisma.salonUser.findUnique({ where: { id: appointment.salonUserId } })
+        : null;
+      const count = salonUser?.yearlyNoShowCount || 0;
       return {
         appointment: formatAppointment(appointment),
-        penaltyApplied: false,
-        penaltyCount: 0,
-        remainingStrikes: 3,
-        isBlocked: false,
+        penaltyApplied: appointment.penaltyApplied || false,
+        penaltyCount: count,
+        remainingStrikes: Math.max(0, 3 - count),
+        isBlocked: count >= 3,
         status: appointment.status,
       };
     }
@@ -130,13 +143,28 @@ export class CancellationService {
     // 4. Penalty calculation
     const penaltyResult = await this.calculateCancelPenalty(appointment, context);
 
-    // 5. Update appointment in DB
+    // 5. Update appointment in DB with explicit cancelledBy tracking
+    const cancelledBy = context.cancelledBy || (
+      context.source === 'ADMIN_DASHBOARD' || Boolean(context.adminId) || context.source === 'SALON_REJECTED'
+        ? CancelledBy.SALON
+        : context.source.startsWith('SYSTEM_')
+        ? CancelledBy.SYSTEM
+        : CancelledBy.USER
+    );
+
     const reasonNote = this.buildCancelNote(appointment, context);
     const updated = await this.prisma.appointment.update({
       where: { id: appointmentId },
       data: {
         status: targetStatus,
         notes: reasonNote,
+        cancellationReason: context.reason || context.reasonCategory || 'CLIENT_CANCELLED',
+        cancelledAt: new Date(),
+        cancelledBy,
+        penaltyApplied: penaltyResult.penaltyApplied,
+        proposedStartAt: null,
+        proposedEndAt: null,
+        proposedByAdminId: null,
       },
       include: appointmentInclude,
     });
@@ -180,13 +208,9 @@ export class CancellationService {
 
   /**
    * Determines the final appointment status based on cancellation context.
-   * - SYSTEM_AUTO_NOSHOW or CLIENT_UNRESPONSIVE → NO_SHOW
-   * - Everything else → CANCELLED
+   * All cancellations transition to CANCELLED.
    */
-  private determineCancelStatus(context: CancelBookingContext): AppointmentStatus {
-    if (context.source === 'SYSTEM_AUTO_NOSHOW' || context.reasonCategory === 'CLIENT_UNRESPONSIVE') {
-      return AppointmentStatus.NO_SHOW;
-    }
+  private determineCancelStatus(_context: CancelBookingContext): AppointmentStatus {
     return AppointmentStatus.CANCELLED;
   }
 
@@ -194,7 +218,7 @@ export class CancellationService {
    * Calculates whether a penalty strike should be applied.
    * Penalty rules:
    * - Only for CLIENT fault
-   * - Only if cancel is within 2 hours of start time (or appointment already started for SYSTEM_AUTO_NOSHOW)
+   * - Only if cancel is within 90 minutes of start time
    * - Not for QUICK_BOOK source
    * - Only if salonUserId is linked
    */
@@ -202,23 +226,8 @@ export class CancellationService {
     appointment: any,
     context: CancelBookingContext,
   ): Promise<{ penaltyApplied: boolean; penaltyCount: number; remainingStrikes: number; isBlocked: boolean }> {
-    if (context.fault !== 'CLIENT') {
-      return { penaltyApplied: false, penaltyCount: 0, remainingStrikes: 3, isBlocked: false };
-    }
-
+    // Fallback: If no linked salonUser, no penalty strikes can be recorded
     if (!appointment.salonUserId) {
-      return { penaltyApplied: false, penaltyCount: 0, remainingStrikes: 3, isBlocked: false };
-    }
-
-    if (appointment.source === BookingSource.QUICK_BOOK) {
-      return { penaltyApplied: false, penaltyCount: 0, remainingStrikes: 3, isBlocked: false };
-    }
-
-    const nowMs = Date.now();
-    const apptStartMs = new Date(appointment.startAt).getTime();
-    const hoursRemaining = (apptStartMs - nowMs) / (1000 * 60 * 60);
-
-    if (context.source !== 'SYSTEM_AUTO_NOSHOW' && hoursRemaining >= 2) {
       return { penaltyApplied: false, penaltyCount: 0, remainingStrikes: 3, isBlocked: false };
     }
 
@@ -226,6 +235,61 @@ export class CancellationService {
       where: { id: appointment.salonUserId },
     });
     const currentCount = salonUser?.yearlyNoShowCount || 0;
+    const currentRemainingStrikes = Math.max(0, 3 - currentCount);
+    const currentlyBlocked = currentCount >= 3;
+
+    // 1. Explicit NO PENALTY Flag:
+    // If noPenalty === true OR applyPenalty === false OR fault === 'SALON',
+    // the system NEVER marks penalty regardless of source or remaining time.
+    const isExplicitNoPenalty =
+      context.noPenalty === true ||
+      context.applyPenalty === false ||
+      context.fault === 'SALON';
+
+    if (isExplicitNoPenalty) {
+      return {
+        penaltyApplied: false,
+        penaltyCount: currentCount,
+        remainingStrikes: currentRemainingStrikes,
+        isBlocked: currentlyBlocked,
+      };
+    }
+
+    // 2. Explicit WITH PENALTY Flag from Salon Admin:
+    // If salon admin explicitly marks applyPenalty === true, apply penalty directly (bypassing remaining time check).
+    const isExplicitAdminPenalty =
+      (context.source === 'ADMIN_DASHBOARD' || Boolean(context.adminId)) &&
+      context.applyPenalty === true;
+
+    if (!isExplicitAdminPenalty) {
+      // 3. Quick Booking Check: Quick book requests never incur cancellation penalty strikes
+      if (appointment.source === BookingSource.QUICK_BOOK) {
+        return {
+          penaltyApplied: false,
+          penaltyCount: currentCount,
+          remainingStrikes: currentRemainingStrikes,
+          isBlocked: currentlyBlocked,
+        };
+      }
+
+      // 4. Universal 90-Minute Rule:
+      // Any booking cancel where remaining time is < 90 min -> mark penalty.
+      // If remaining time >= 90 min -> no penalty.
+      const nowMs = Date.now();
+      const apptStartMs = new Date(appointment.startAt).getTime();
+      const minutesRemaining = (apptStartMs - nowMs) / (1000 * 60);
+
+      if (minutesRemaining >= 90) {
+        return {
+          penaltyApplied: false,
+          penaltyCount: currentCount,
+          remainingStrikes: currentRemainingStrikes,
+          isBlocked: currentlyBlocked,
+        };
+      }
+    }
+
+    // Apply Penalty Strike
     const newCount = currentCount + 1;
     const remainingStrikes = Math.max(0, 3 - newCount);
     const isBlocked = newCount >= 3;
@@ -278,54 +342,87 @@ export class CancellationService {
     const timeStr = TimeUtility.formatTime12h(appointment.startAt, tz);
     const dateStr = TimeUtility.formatDateFriendly(appointment.startAt, tz);
 
-    let message = '';
-    let buttons: { id: string; title: string }[] = [{ id: 'btn_start', title: '🏠 Main Menu' }];
+    let payload: any = null;
 
     switch (context.source) {
       case 'SYSTEM_AUTO_NOSHOW':
-        if (penalty.isBlocked) {
-          message = `⚠️ *ACCOUNT BOOKING LOCKED*\n\nHi *${userName}*, you have accumulated *3 penalty strikes* this year for missed appointments. Automatic slot booking is now locked for your account.\n\n📞 *Please contact the Salon Owner* directly to request access unblock.`;
+        payload = this.templates!.buildSystemAutoNoShowNotice({
+          userName,
+          timeStr,
+          remainingStrikes: penalty.remainingStrikes,
+          isBlocked: penalty.isBlocked,
+        });
+        break;
+
+      case 'SYSTEM_AUTO_CUTOFF':
+        if (
+          context.reason === 'UNRESPONSIVE_RESCHEDULE_PROPOSAL_EXPIRED_60M' ||
+          context.reason === 'UNRESPONSIVE_RESCHEDULE_PROPOSAL_EXPIRED_30M' ||
+          context.reason === 'UNRESPONSIVE_RESCHEDULE_PROPOSAL_EXPIRED'
+        ) {
+          const proposedTime = appointment.proposedStartAt
+            ? TimeUtility.formatTime12h(appointment.proposedStartAt, tz)
+            : timeStr;
+          payload = this.templates!.buildRescheduleExpiredNotice({
+            salonName: salon.name,
+            proposedTimeStr: proposedTime,
+          });
         } else {
-          message = `⚠️ *APPOINTMENT AUTO-CANCELED*\n\nHi *${userName}*, your appointment for *${timeStr}* was auto-canceled because we did not receive an arrival confirmation.\n\n⚠️ *Penalty Strike Recorded:* You have *${penalty.remainingStrikes} strike(s) remaining* this year before automatic slot booking is locked.`;
+          payload = this.templates!.buildSystemAutoCutoffNotice({
+            userName,
+            timeStr,
+            remainingStrikes: penalty.remainingStrikes,
+            isBlocked: penalty.isBlocked,
+          });
         }
         break;
 
       case 'SYSTEM_AUTO_EXPIRED':
-        message = `⏳ *QUICK BOOKING EXPIRED*\n\nYour quick booking request for *${timeStr}* at *${salon.name}* was not checked in before the start time and has automatically expired.\n\nPlease speak to the front desk for walk-in availability. 🙏`;
+        payload = this.templates!.buildQuickBookingExpiredNotice({
+          salonName: salon.name,
+          timeStr,
+        });
         break;
 
       case 'SYSTEM_SALON_DEACTIVATION':
-        message = `⚠️ *APPOINTMENT CANCELLED*\n\nHi *${userName}*, your appointment for *${dateStr} at ${timeStr}* at *${salon.name}* has been cancelled because the salon account was temporarily deactivated for platform maintenance.\n\nWe apologize for any inconvenience. Please contact the salon directly or visit another location for bookings.`;
+        payload = this.templates!.buildSalonDeactivationNotice({
+          userName,
+          salonName: salon.name,
+          dateStr,
+          timeStr,
+        });
         break;
 
       case 'SYSTEM_STORE_CLOSURE':
       case 'CUSTOMER_ABSENCE':
-        message = `🙏 *SALON NOTICE: APPOINTMENT CANCELED*\n\nHi *${userName}*, your appointment for *${timeStr}* at *${salon.name}* was canceled due to a salon emergency.\n\n✨ *No penalty has been applied* to your account. We welcome you to rebook at your convenience!`;
-        buttons = [{ id: 'btn_book', title: '📅 Book New Visit' }];
+        payload = this.templates!.buildSalonClosureNotice({
+          userName,
+          salonName: salon.name,
+          timeStr,
+        });
         break;
 
       case 'ADMIN_DASHBOARD':
-        if (context.fault === 'SALON') {
-          message = `🙏 *SALON NOTICE: APPOINTMENT CANCELED*\n\nHi *${userName}*, we sincerely apologize! Your appointment for *${timeStr}* at *${salon.name}* was canceled due to a salon emergency.\n\n✨ *No penalty has been applied* to your account. We welcome you to rebook at your convenience!`;
-          buttons = [{ id: 'btn_book', title: '📅 Book New Visit' }];
-        } else if (penalty.penaltyApplied) {
-          if (penalty.isBlocked) {
-            message = `⚠️ *ACCOUNT BOOKING LOCKED*\n\nHi *${userName}*, you have accumulated *3 penalty strikes* this year for missed or late-canceled appointments. Automatic slot booking is now locked for your account.\n\n📞 *Please contact the Salon Owner* directly to request access unblock.`;
-          } else {
-            message = `⚠️ *LATE CANCELLATION / NO-SHOW PENALTY RECORDED*\n\nHi *${userName}*, your appointment for *${timeStr}* at *${salon.name}* was canceled with less than 2 hours remaining.\n\n⚠️ *Penalty Strike Recorded:* You have *1 penalty strike* recorded. You have *${penalty.remainingStrikes} penalty strike(s) remaining* this year before automatic slot booking is locked.`;
-          }
-        }
+        payload = this.templates!.buildAdminCancelledNotice({
+          userName,
+          dateStr,
+          timeStr,
+          salonName: salon.name,
+          penaltyApplied: penalty.penaltyApplied,
+          remainingStrikes: penalty.remainingStrikes,
+          isBlocked: penalty.isBlocked,
+        });
         break;
 
       default:
         return;
     }
 
-    if (!message) return;
+    if (!payload) return;
 
     await this.whatsappService.sendMetaMessage(
       userPhone,
-      { bodyText: message, interactiveType: 'button', buttons },
+      payload,
       phoneNumberId,
       salonId,
     ).catch(() => {});
