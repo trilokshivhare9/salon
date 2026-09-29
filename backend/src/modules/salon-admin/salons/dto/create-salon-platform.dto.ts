@@ -95,4 +95,7 @@ export class CreateSalonPlatformDto {
   @IsOptional()
   @IsBoolean()
   seedStarterServices?: boolean;
+
+  @IsOptional()
+  schedule?: any[];
 }

@@ -57,23 +57,8 @@ export class SalonsService {
       orderBy: { createdAt: 'desc' },
     });
 
-    // Enforce business rule: A salon is ONLY ACTIVE when it has minimum 1 stylist AND 1 service!
-    // Auto-sync existing database records if they are improperly marked ACTIVE without minimum catalog.
-    for (const s of salons) {
-      const hasMinCatalog = s._count.stylists >= 1 && s._count.services >= 1;
-      if (!hasMinCatalog && s.status === SalonStatus.ACTIVE) {
-        await this.prisma.salon.update({
-          where: { id: s.id },
-          data: { status: SalonStatus.INACTIVE },
-        });
-        s.status = SalonStatus.INACTIVE;
-      }
-    }
-
     const totalSalons = salons.length;
-    const activeSalons = salons.filter(
-      (s) => s.status === 'ACTIVE' && s._count.stylists >= 1 && s._count.services >= 1,
-    ).length;
+    const activeSalons = salons.filter((s) => s.status === SalonStatus.ACTIVE).length;
     const totalAppointments = salons.reduce((sum, s) => sum + s._count.appointments, 0);
 
     return {
@@ -311,27 +296,54 @@ export class SalonsService {
         },
       });
 
-      // 3. Automatically Seed 7-Day Operating Hours
-      const days: DayOfWeek[] = [
-        DayOfWeek.SUNDAY,
-        DayOfWeek.MONDAY,
-        DayOfWeek.TUESDAY,
-        DayOfWeek.WEDNESDAY,
-        DayOfWeek.THURSDAY,
-        DayOfWeek.FRIDAY,
-        DayOfWeek.SATURDAY,
-      ];
+      // 3. Seed 7-Day Operating Hours (using dto.schedule if provided, otherwise default hours)
+      if (Array.isArray(dto.schedule) && dto.schedule.length > 0) {
+        for (const item of dto.schedule) {
+          const isClosed = item.isClosed !== undefined ? item.isClosed : item.dayOfWeek === DayOfWeek.TUESDAY;
+          const sTime = item.startTime || openTime;
+          const eTime = item.endTime || closeTime;
+          const breaksToSave = (Array.isArray(item.breaks) && !isClosed)
+            ? item.breaks.map((b: any) => ({
+                id: b.id || crypto.randomUUID(),
+                startTime: b.startTime,
+                endTime: b.endTime,
+                title: b.title || 'Lunch Break',
+              }))
+            : [];
 
-      for (const day of days) {
-        await tx.salonWorkingHours.create({
-          data: {
-            salonId: salon.id,
-            dayOfWeek: day,
-            isClosed: day === DayOfWeek.TUESDAY,
-            startTime: openTime,
-            endTime: closeTime,
-          },
-        });
+          await tx.salonWorkingHours.create({
+            data: {
+              salonId: salon.id,
+              dayOfWeek: item.dayOfWeek,
+              isClosed,
+              startTime: sTime,
+              endTime: eTime,
+              breaks: breaksToSave,
+            },
+          });
+        }
+      } else {
+        const days: DayOfWeek[] = [
+          DayOfWeek.SUNDAY,
+          DayOfWeek.MONDAY,
+          DayOfWeek.TUESDAY,
+          DayOfWeek.WEDNESDAY,
+          DayOfWeek.THURSDAY,
+          DayOfWeek.FRIDAY,
+          DayOfWeek.SATURDAY,
+        ];
+
+        for (const day of days) {
+          await tx.salonWorkingHours.create({
+            data: {
+              salonId: salon.id,
+              dayOfWeek: day,
+              isClosed: day === DayOfWeek.TUESDAY,
+              startTime: openTime,
+              endTime: closeTime,
+            },
+          });
+        }
       }
 
       // 4. Configure WhatsApp Meta Account if waId is present
@@ -380,7 +392,7 @@ export class SalonsService {
         servicesCount: 0,
         whatsappPhoneNumberId: waId,
       };
-    });
+    }, { maxWait: 15000, timeout: 35000 });
 
     // 5. Automatically dispatch Welcome WhatsApp Notification with Owner Credentials
     try {
@@ -567,7 +579,9 @@ Here are your salon owner login credentials:
     await this.prisma.$transaction(async (tx) => {
       // 1. Delete notifications for this salon
       await tx.notification.deleteMany({ where: { salonId } });
-      // 2. Delete appointments for this salon
+      // 2. Delete booking reassignments, appointment services & appointments
+      await tx.bookingReassignment.deleteMany({ where: { salonId } });
+      await tx.appointmentService.deleteMany({ where: { salonId } });
       await tx.appointment.deleteMany({ where: { salonId } });
       // 3. Delete conversations
       await tx.conversation.deleteMany({ where: { salonId } });
@@ -576,21 +590,34 @@ Here are your salon owner login credentials:
       await tx.whatsAppAccount.deleteMany({ where: { salonId } });
       // 5. Delete salon users (customers linked to this salon)
       await tx.salonUser.deleteMany({ where: { salonId } });
-      // 6. Delete stylist services & working hours & stylists
+      // 6. Delete stylist working hours, services, absences & stylists
       await tx.stylistWorkingHours.deleteMany({ where: { stylist: { salonId } } });
       await tx.stylistService.deleteMany({ where: { stylist: { salonId } } });
+      await tx.stylistAbsence.deleteMany({ where: { salonId } });
       await tx.stylist.deleteMany({ where: { salonId } });
-      // 7. Delete services
+      // 7. Delete services & categories
       await tx.service.deleteMany({ where: { salonId } });
-      // 8. Delete salon working hours
+      await tx.serviceCategory.deleteMany({ where: { salonId } });
+      // 8. Delete salon closures, quick codes & working hours
+      await tx.salonClosure.deleteMany({ where: { salonId } });
+      await tx.salonQuickCode.deleteMany({ where: { salonId } });
       await tx.salonWorkingHours.deleteMany({ where: { salonId } });
-      // 9. Delete audit logs for this salon
+      // 9. Delete audit logs & error logs for this salon
       await tx.auditLog.deleteMany({ where: { salonId } });
-      // 10. Delete salon admins (SALON_OWNER for this salon)
+      await tx.errorLog.deleteMany({ where: { salonId } });
+      // 10. Delete salon admins & user sessions
+      const superAdmin = await tx.admin.findFirst({ where: { role: AdminRole.SUPER_ADMIN } });
+      if (superAdmin && salon.createdByAdminId !== superAdmin.id) {
+        await tx.salon.update({
+          where: { id: salonId },
+          data: { createdByAdminId: superAdmin.id },
+        });
+      }
+      await tx.userSession.deleteMany({ where: { admin: { salonId } } });
       await tx.admin.deleteMany({ where: { salonId, role: AdminRole.SALON_OWNER } });
       // 11. Finally, delete salon
       await tx.salon.delete({ where: { id: salonId } });
-    });
+    }, { maxWait: 15000, timeout: 35000 });
 
     return { success: true, message: `Salon "${salon.name}" and all associated data permanently deleted.` };
   }
@@ -812,7 +839,7 @@ Here are your salon owner login credentials:
         where: { salonId },
         orderBy: { dayOfWeek: 'asc' },
       });
-    });
+    }, { maxWait: 15000, timeout: 35000 });
   }
 
   // -------------------------------------------------------------

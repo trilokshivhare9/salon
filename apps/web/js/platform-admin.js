@@ -1507,11 +1507,7 @@ export class PlatformAdminPortal {
         closeTime: monState.isClosed ? '19:00' : monState.endTime,
       };
 
-      try {
-        // Step A: Create Salon in backend
-        const createdSalon = await ApiClient.createSalonPlatform(payload);
-
-        // Step B: Persist exact custom 7-day schedule to PostgreSQL salon_working_hours
+        // Step A: Prepare custom 7-day schedule to be saved atomically with salon creation
         const hoursPayload = provScheduleState.map((d) => ({
           dayOfWeek: d.dayOfWeek,
           isClosed: d.isClosed,
@@ -1525,7 +1521,10 @@ export class PlatformAdminPortal {
           })),
         }));
 
-        await ApiClient.updateSalonWorkingHoursForSalon(createdSalon.id, hoursPayload);
+        payload.schedule = hoursPayload;
+
+        // Step B: Atomically provision salon and custom operating schedule in 1 request
+        const createdSalon = await ApiClient.createSalonPlatform(payload);
 
         this.showProvisionSuccessModal(createdSalon, payload.password);
         this.data = await ApiClient.getAllSalonsPlatform();
@@ -1731,12 +1730,6 @@ export class PlatformAdminPortal {
       btn.addEventListener('click', async (e) => {
         const salonId = e.currentTarget.getAttribute('data-id');
         const salonName = e.currentTarget.getAttribute('data-name');
-        const isReady = e.currentTarget.getAttribute('data-ready') === 'true';
-
-        if (btn.textContent.trim().toLowerCase().includes('activate') && !isReady) {
-          this.showToast(`⚠️ Cannot activate "${salonName}": A salon requires at least 1 staff member and 1 service before it can become ACTIVE.`, 'warning');
-          return;
-        }
 
         const originalText = btn.textContent;
         btn.textContent = 'Updating...';
@@ -1746,7 +1739,7 @@ export class PlatformAdminPortal {
           await ApiClient.toggleSalonStatusPlatform(salonId, false);
           this.data = await ApiClient.getAllSalonsPlatform();
           this.render();
-          this.showToast('Salon status updated successfully.', 'success');
+          this.showToast(`Salon "${salonName}" status updated successfully.`, 'success');
         } catch (err) {
           btn.textContent = originalText;
           btn.removeAttribute('disabled');
@@ -1791,23 +1784,66 @@ export class PlatformAdminPortal {
     });
 
     this.container.querySelectorAll('.btn-delete-salon').forEach((btn) => {
-      btn.addEventListener('click', async (e) => {
+      btn.addEventListener('click', (e) => {
         const salonId = e.currentTarget.getAttribute('data-id');
         const salonName = e.currentTarget.getAttribute('data-name');
-        const confirmed = window.confirm(
-          `⚠️ Are you sure you want to PERMANENTLY DELETE "${salonName}"?\n\nThis will completely erase all salon data, stylists, services, appointments, and owner login from the live database.\n\nThis action CANNOT be undone.`
-        );
-        if (!confirmed) return;
-
-        try {
-          await ApiClient.deleteSalonPlatform(salonId);
-          this.data = await ApiClient.getAllSalonsPlatform();
-          this.render();
-          this.showToast(`Salon "${salonName}" deleted successfully.`, 'success');
-        } catch (err) {
-          this.showToast('Error deleting salon: ' + err.message, 'error');
-        }
+        this.showDeleteConfirmModal(salonId, salonName);
       });
+    });
+  }
+
+  showDeleteConfirmModal(salonId, salonName) {
+    const modalContainer = document.getElementById('superadmin-modal-container');
+    if (!modalContainer) return;
+    modalContainer.innerHTML = `
+      <div class="modal-backdrop show" style="position: fixed; inset: 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(8px); z-index: 99999; display: flex; align-items: center; justify-content: center; padding: 20px;">
+        <div class="glass-panel" style="max-width: 440px; width: 100%; text-align: center; padding: 32px 28px; border-color: rgba(244,63,94,0.3); box-shadow: 0 25px 50px -12px rgba(0,0,0,0.7); animation: fadeIn 0.2s ease-out;">
+          <div style="width: 56px; height: 56px; border-radius: 16px; background: rgba(244,63,94,0.15); border: 1px solid rgba(244,63,94,0.3); display: inline-flex; align-items: center; justify-content: center; font-size: 1.8rem; margin-bottom: 16px;">
+            🗑️
+          </div>
+          <h3 style="color: #fff; margin-bottom: 8px; font-size: 1.25rem; font-weight: 800;">Delete Salon?</h3>
+          <p style="color: var(--text-secondary); font-size: 0.88rem; margin-bottom: 20px; line-height: 1.5;">
+            Are you sure you want to permanently delete <strong style="color: #fff;">"${salonName}"</strong>?<br/>
+            All stylists, services, working hours, and owner logins will be completely removed.
+          </p>
+          <div id="delete-modal-error" style="color: #f87171; font-size: 0.82rem; margin-bottom: 14px; display: none; background: rgba(244,63,94,0.1); padding: 8px 12px; border-radius: 6px; border: 1px solid rgba(244,63,94,0.25);"></div>
+          <div style="display: flex; gap: 10px; justify-content: center;">
+            <button type="button" class="btn btn-secondary" id="btn-cancel-delete" style="flex: 1; padding: 10px;">Cancel</button>
+            <button type="button" class="btn btn-primary" id="btn-confirm-delete" style="flex: 1; padding: 10px; background: linear-gradient(135deg, #f43f5e 0%, #be123c 100%); border-color: rgba(244,63,94,0.4); font-weight: 700;">
+              Yes, Delete Permanently
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('btn-cancel-delete')?.addEventListener('click', () => {
+      modalContainer.innerHTML = '';
+    });
+
+    document.getElementById('btn-confirm-delete')?.addEventListener('click', async () => {
+      const confirmBtn = document.getElementById('btn-confirm-delete');
+      const errEl = document.getElementById('delete-modal-error');
+      if (confirmBtn) {
+        confirmBtn.textContent = 'Deleting...';
+        confirmBtn.setAttribute('disabled', 'true');
+      }
+      try {
+        await ApiClient.deleteSalonPlatform(salonId);
+        modalContainer.innerHTML = '';
+        this.data = await ApiClient.getAllSalonsPlatform();
+        this.render();
+        this.showToast(`Salon "${salonName}" deleted successfully.`, 'success');
+      } catch (err) {
+        if (confirmBtn) {
+          confirmBtn.textContent = 'Yes, Delete Permanently';
+          confirmBtn.removeAttribute('disabled');
+        }
+        if (errEl) {
+          errEl.textContent = err.message || 'Failed to delete salon.';
+          errEl.style.display = 'block';
+        }
+      }
     });
   }
 
@@ -1964,6 +2000,11 @@ export class PlatformAdminPortal {
       toastContainer.id = 'platform-toast-container';
       toastContainer.style.cssText = 'position: fixed; top: calc(env(safe-area-inset-top, 0px) + 16px); right: 16px; left: 16px; max-width: 440px; margin: 0 auto; z-index: 99999; display: flex; flex-direction: column; gap: 10px; pointer-events: none;';
       document.body.appendChild(toastContainer);
+    }
+
+    // Dismiss existing toasts to avoid stacking multiple warning/error banners
+    while (toastContainer.firstChild) {
+      toastContainer.removeChild(toastContainer.firstChild);
     }
 
     const toast = document.createElement('div');
