@@ -7,7 +7,10 @@ import { Icons } from './icons.js';
 
 class App {
   constructor() {
-    this.currentUser = null;
+    const isSuperAdminRoute = typeof window !== 'undefined' && window.location.hash?.includes('super-admin');
+    this.currentUser = isSuperAdminRoute
+      ? (ApiClient.getSuperAdminUser() || ApiClient.getUser())
+      : (ApiClient.getUser() || ApiClient.getSuperAdminUser());
     this.init();
   }
 
@@ -60,8 +63,19 @@ class App {
   }
 
   async initSession() {
-    const token = ApiClient.getAccessToken();
+    const isSuperAdminRoute = typeof window !== 'undefined' && window.location.hash?.includes('super-admin');
+    const token = isSuperAdminRoute
+      ? (ApiClient.getSuperAdminToken() || ApiClient.getAccessToken())
+      : (ApiClient.getAccessToken() || ApiClient.getSuperAdminToken());
     const rawRefreshToken = RefreshTransport.getRefreshToken();
+    const cachedUser = isSuperAdminRoute
+      ? (ApiClient.getSuperAdminUser() || ApiClient.getUser())
+      : (ApiClient.getUser() || ApiClient.getSuperAdminUser());
+
+    // Optimistically restore session immediately so refresh never logs you out
+    if (cachedUser) {
+      this.currentUser = cachedUser;
+    }
 
     // 1. If valid unexpired access token exists, hydrate session directly via getMe()
     if (token && !ApiClient.isTokenExpired(token)) {
@@ -70,17 +84,34 @@ class App {
         if (user) {
           this.currentUser = user;
           ApiClient.setUser(user);
+          if (user.role === 'SUPER_ADMIN' || user.role === 'PLATFORM_ADMIN') {
+            ApiClient.setSuperAdminUser(user);
+            ApiClient.setSuperAdminToken(token);
+          }
           return;
         }
       } catch (err) {
-        console.warn('[App] getMe failed with active access token:', err.message);
+        console.warn('[App] getMe verification failed:', err.message);
+        // Only wipe session if server explicitly returned 401/403
+        if (err.status === 401 || err.status === 403 || err.message?.includes('unauthorized') || err.message?.includes('revoked') || err.message?.includes('not found')) {
+          this.currentUser = null;
+          ApiClient.clearSession(false);
+          return;
+        }
+        // If network error / server starting up, keep optimistic session intact!
+        if (cachedUser) {
+          this.currentUser = cachedUser;
+          return;
+        }
       }
     }
 
     // 2. If access token is missing or expired, attempt refresh ONCE
     if (!rawRefreshToken) {
-      this.currentUser = null;
-      ApiClient.clearSession(false);
+      if (!this.currentUser) {
+        this.currentUser = null;
+        ApiClient.clearSession(false);
+      }
       return;
     }
 
@@ -89,6 +120,10 @@ class App {
       if (refreshRes?.user) {
         this.currentUser = refreshRes.user;
         ApiClient.setUser(refreshRes.user);
+        if (refreshRes.user.role === 'SUPER_ADMIN' || refreshRes.user.role === 'PLATFORM_ADMIN') {
+          ApiClient.setSuperAdminUser(refreshRes.user);
+          if (refreshRes.accessToken) ApiClient.setSuperAdminToken(refreshRes.accessToken);
+        }
       } else {
         throw new Error('Invalid refresh response');
       }
@@ -205,7 +240,9 @@ class App {
 
     // 2. SUPER ADMIN PLATFORM ROUTE: /#super-admin
     if (hash === 'super-admin' || hash === 'superadmin-login') {
-      if (this.currentUser && (this.currentUser.role === 'SUPER_ADMIN' || this.currentUser.role === 'PLATFORM_ADMIN')) {
+      const superUser = ApiClient.getSuperAdminUser() || (this.currentUser && (this.currentUser.role === 'SUPER_ADMIN' || this.currentUser.role === 'PLATFORM_ADMIN') ? this.currentUser : null);
+      if (superUser && (superUser.role === 'SUPER_ADMIN' || superUser.role === 'PLATFORM_ADMIN')) {
+        this.currentUser = superUser;
         const portal = new PlatformAdminPortal('app-root', this.currentUser);
         portal.init();
       } else {

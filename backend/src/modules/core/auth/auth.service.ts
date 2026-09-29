@@ -261,7 +261,7 @@ export class AuthService {
           data: {
             salonId: salon.id,
             dayOfWeek: day,
-            isClosed: false,
+            isClosed: day === DayOfWeek.TUESDAY,
             startTime: '09:00',
             endTime: '21:00',
           },

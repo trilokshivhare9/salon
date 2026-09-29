@@ -17,7 +17,11 @@ const memoryCache = new Map();
  */
 export class RefreshTransport {
   static getRefreshToken() {
-    return localStorage.getItem('salon_refresh_token');
+    const isSuperAdminRoute = typeof window !== 'undefined' && window.location.hash?.includes('super-admin');
+    if (isSuperAdminRoute) {
+      return localStorage.getItem('super_admin_refresh_token') || localStorage.getItem('salon_refresh_token');
+    }
+    return localStorage.getItem('salon_refresh_token') || localStorage.getItem('super_admin_refresh_token');
   }
 
   static setRefreshToken(token) {
@@ -26,6 +30,7 @@ export class RefreshTransport {
 
   static clearRefreshToken() {
     localStorage.removeItem('salon_refresh_token');
+    localStorage.removeItem('super_admin_refresh_token');
   }
 }
 
@@ -72,7 +77,11 @@ export class ApiClient {
   }
 
   static getAccessToken() {
-    return inMemoryAccessToken || localStorage.getItem('salon_access_token');
+    const isSuperAdminRoute = typeof window !== 'undefined' && window.location.hash?.includes('super-admin');
+    if (isSuperAdminRoute) {
+      return localStorage.getItem('super_admin_token') || inMemoryAccessToken || localStorage.getItem('salon_access_token');
+    }
+    return inMemoryAccessToken || localStorage.getItem('salon_access_token') || localStorage.getItem('super_admin_token');
   }
 
   static setAccessToken(token) {
@@ -92,7 +101,7 @@ export class ApiClient {
   }
 
   static getSuperAdminToken() {
-    return inMemoryAccessToken || localStorage.getItem('super_admin_token');
+    return localStorage.getItem('super_admin_token') || inMemoryAccessToken;
   }
 
   static setSuperAdminToken(token) {
@@ -103,6 +112,7 @@ export class ApiClient {
   static removeSuperAdminToken() {
     localStorage.removeItem('super_admin_token');
     localStorage.removeItem('super_admin_user');
+    localStorage.removeItem('super_admin_refresh_token');
   }
 
   static getSuperAdminUser() {
@@ -133,7 +143,12 @@ export class ApiClient {
 
   static getUser() {
     try {
-      const raw = localStorage.getItem('salon_user_data');
+      const isSuperAdminRoute = typeof window !== 'undefined' && window.location.hash?.includes('super-admin');
+      if (isSuperAdminRoute) {
+        const superRaw = localStorage.getItem('super_admin_user');
+        if (superRaw) return JSON.parse(superRaw);
+      }
+      const raw = localStorage.getItem('salon_user_data') || localStorage.getItem('super_admin_user');
       return raw ? JSON.parse(raw) : null;
     } catch {
       return null;
@@ -205,6 +220,11 @@ export class ApiClient {
     }
     if (result.user) {
       this.setUser(result.user);
+      if (result.user.role === 'SUPER_ADMIN' || result.user.role === 'PLATFORM_ADMIN') {
+        this.setSuperAdminUser(result.user);
+        if (result.accessToken) this.setSuperAdminToken(result.accessToken);
+        if (result.refreshToken) localStorage.setItem('super_admin_refresh_token', result.refreshToken);
+      }
     }
 
     return result;
@@ -382,6 +402,11 @@ export class ApiClient {
     }
     if (data.user) {
       this.setUser(data.user);
+      if (data.user.role === 'SUPER_ADMIN' || data.user.role === 'PLATFORM_ADMIN') {
+        this.setSuperAdminToken(accessToken);
+        this.setSuperAdminUser(data.user);
+        if (refreshToken) localStorage.setItem('super_admin_refresh_token', refreshToken);
+      }
     }
 
     this.invalidateCache();

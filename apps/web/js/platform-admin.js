@@ -877,13 +877,77 @@ export class PlatformAdminPortal {
 
               <!-- STEP 2: Weekly Operating Schedule (7 Days) -->
               <div id="prov-step-2" class="prov-wizard-step" style="display: none;">
-                <div style="background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.25); border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 16px; font-size: 0.82rem; color: var(--text-secondary);">
+                <div style="background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.25); border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 14px; font-size: 0.82rem; color: var(--text-secondary);">
                   <strong style="color: #fff;">🗓️ Step 2 of 3: Weekly Operating Schedule</strong>
-                  <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px;">Set the recurring weekly schedule. This defines the default operating boundary for all stylists.</div>
+                  <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px;">Set the recurring weekly schedule. Configure default operating hours and lunch break once at the top, or adjust individual days below.</div>
+                </div>
+
+                <!-- ⚡ Quick Fill Master Template Control -->
+                <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(16,185,129,0.3); border-radius: var(--radius-sm); padding: 14px 16px; margin-bottom: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <span style="font-size: 1.05rem;">⚡</span>
+                      <strong style="color: #fff; font-size: 0.88rem; font-family: var(--font-heading);">Quick Setup: Default Hours for All Days</strong>
+                    </div>
+                    <span id="tmpl-lunch-mode-badge" class="badge" style="background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3); font-size: 0.68rem; font-weight: 700;">
+                      LUNCH ENABLED
+                    </span>
+                  </div>
+
+                  <!-- Default Operating Times -->
+                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 12px;">
+                    <div>
+                      <label style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 4px;">Default Open Time</label>
+                      <input type="time" class="form-control" id="tmpl-open-time" value="09:00" style="padding: 6px 10px; font-size: 0.85rem;" />
+                    </div>
+                    <div>
+                      <label style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 4px;">Default Close Time</label>
+                      <input type="time" class="form-control" id="tmpl-close-time" value="19:00" style="padding: 6px 10px; font-size: 0.85rem;" />
+                    </div>
+                  </div>
+
+                  <!-- Lunch Break Toggle & Options -->
+                  <div style="border-top: 1px dashed rgba(255,255,255,0.08); padding-top: 10px; margin-bottom: 12px;">
+                    <div style="margin-bottom: 8px;">
+                      <label style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; font-weight: 700; color: #fff; cursor: pointer; margin: 0;">
+                        <input type="checkbox" id="tmpl-has-lunch" checked style="accent-color: #3b82f6; width: 15px; height: 15px; cursor: pointer;" />
+                        <span>Include Midday Lunch Break</span>
+                      </label>
+                    </div>
+
+                    <!-- Lunch Start/End Fields (shown when checked) -->
+                    <div id="tmpl-lunch-fields" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+                      <div>
+                        <label style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 4px;">Break Title</label>
+                        <input type="text" class="form-control" id="tmpl-lunch-title" value="Lunch Break" placeholder="Lunch Break" style="padding: 6px 10px; font-size: 0.85rem;" />
+                      </div>
+                      <div>
+                        <label style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 4px;">Lunch Start Time</label>
+                        <input type="time" class="form-control" id="tmpl-lunch-start" value="13:00" style="padding: 6px 10px; font-size: 0.85rem;" />
+                      </div>
+                      <div>
+                        <label style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 4px;">Lunch End Time</label>
+                        <input type="time" class="form-control" id="tmpl-lunch-end" value="14:00" style="padding: 6px 10px; font-size: 0.85rem;" />
+                      </div>
+                    </div>
+
+                    <!-- Continuous Mode Notice (shown when unchecked) -->
+                    <div id="tmpl-continuous-notice" style="display: none; font-size: 0.75rem; color: #34d399; background: rgba(16,185,129,0.08); border: 1px dashed rgba(16,185,129,0.3); border-radius: 6px; padding: 8px 12px; line-height: 1.4;">
+                      ⚡ <strong>Continuous Operations Mode:</strong> No midday breaks will be scheduled. Stylists will be bookable continuously without downtime.
+                    </div>
+                  </div>
+
+                  <!-- 1-Click Apply Button -->
+                  <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 10px;">
+                    <span style="font-size: 0.73rem; color: var(--text-muted);">Clicking apply updates all 7 days below. You can still customize each day individually afterwards.</span>
+                    <button type="button" class="btn btn-primary btn-sm" id="btn-apply-schedule-template" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); border-color: rgba(16,185,129,0.4); color: #fff; font-weight: 700; font-size: 0.82rem; padding: 6px 16px; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;">
+                      <span>⚡ Apply Template to All Days</span>
+                    </button>
+                  </div>
                 </div>
 
                 <!-- 7-Day Schedule Editor Grid -->
-                <div id="prov-schedule-days-container" style="display: flex; flex-direction: column; gap: 12px; max-height: 52vh; overflow-y: auto; padding-right: 4px;">
+                <div id="prov-schedule-days-container" style="display: flex; flex-direction: column; gap: 12px; max-height: 48vh; overflow-y: auto; padding-right: 4px;">
                   <!-- Dynamically populated 7 days -->
                 </div>
 
@@ -927,15 +991,15 @@ export class PlatformAdminPortal {
     document.getElementById('btn-close-super-modal')?.addEventListener('click', () => { modalContainer.innerHTML = ''; });
     document.getElementById('btn-cancel-super-modal')?.addEventListener('click', () => { modalContainer.innerHTML = ''; });
 
-    // Initial 7-Day Schedule Data Model (Defaults: Mon-Sat 09:00-19:00 with 13:00-14:00 Lunch Break; Sun CLOSED)
+    // Initial 7-Day Schedule Data Model (Defaults: Mon, Wed-Sun 09:00-19:00 with 13:00-14:00 Lunch Break; Tue CLOSED)
     const dayNames = [
       { key: 'MONDAY', label: 'Monday', defaultOpen: true },
-      { key: 'TUESDAY', label: 'Tuesday', defaultOpen: true },
+      { key: 'TUESDAY', label: 'Tuesday', defaultOpen: false },
       { key: 'WEDNESDAY', label: 'Wednesday', defaultOpen: true },
       { key: 'THURSDAY', label: 'Thursday', defaultOpen: true },
       { key: 'FRIDAY', label: 'Friday', defaultOpen: true },
       { key: 'SATURDAY', label: 'Saturday', defaultOpen: true },
-      { key: 'SUNDAY', label: 'Sunday', defaultOpen: false },
+      { key: 'SUNDAY', label: 'Sunday', defaultOpen: true },
     ];
 
     let provScheduleState = dayNames.map((d) => ({
@@ -988,7 +1052,10 @@ export class PlatformAdminPortal {
               </div>
 
               ${day.breaks.length === 0 ? `
-                <div style="font-size: 0.72rem; color: var(--text-muted); font-style: italic;">No breaks configured for ${day.label}.</div>
+                <div style="font-size: 0.74rem; color: #34d399; font-weight: 600; display: flex; align-items: center; gap: 6px; padding: 4px 0;">
+                  <span>⚡ Continuous Operations</span>
+                  <span style="color: var(--text-muted); font-weight: normal; font-size: 0.7rem;">(No lunch/midday breaks scheduled)</span>
+                </div>
               ` : day.breaks.map((b, bIdx) => `
                 <div style="display: flex; gap: 6px; align-items: center; margin-bottom: 6px;">
                   <input type="text" class="form-control prov-break-title" data-idx="${idx}" data-bidx="${bIdx}" value="${b.title || 'Break'}" placeholder="Title" style="flex: 1; padding: 4px 8px; font-size: 0.78rem;" />
@@ -1118,14 +1185,115 @@ export class PlatformAdminPortal {
               </div>
               ${!d.isClosed && d.breaks.length > 0 ? `
                 <div style="color: var(--text-muted); font-size: 0.72rem; margin-top: 2px;">
-                  Breaks: ${d.breaks.map((b) => `${b.startTime}-${b.endTime}`).join(', ')}
+                  Breaks: ${d.breaks.map((b) => `${b.title ? b.title + ' ' : ''}${b.startTime}-${b.endTime}`).join(', ')}
                 </div>
-              ` : ''}
+              ` : (!d.isClosed ? `
+                <div style="color: #34d399; font-size: 0.72rem; margin-top: 2px; font-weight: 600;">
+                  ⚡ Continuous Operations (No Breaks)
+                </div>
+              ` : '')}
             </div>
           `).join('')}
         </div>
       `;
     };
+
+    // Quick Template Toggle & Auto-Sync Handlers
+    const tmplHasLunch = document.getElementById('tmpl-has-lunch');
+    const tmplLunchFields = document.getElementById('tmpl-lunch-fields');
+    const tmplContinuousNotice = document.getElementById('tmpl-continuous-notice');
+    const tmplBadge = document.getElementById('tmpl-lunch-mode-badge');
+
+    const syncTemplateToDays = (silent = false) => {
+      const tmplOpen = document.getElementById('tmpl-open-time')?.value || '09:00';
+      const tmplClose = document.getElementById('tmpl-close-time')?.value || '19:00';
+      const hasLunch = document.getElementById('tmpl-has-lunch')?.checked ?? true;
+      const lunchTitle = document.getElementById('tmpl-lunch-title')?.value?.trim() || 'Lunch Break';
+      const lunchStart = document.getElementById('tmpl-lunch-start')?.value || '13:00';
+      const lunchEnd = document.getElementById('tmpl-lunch-end')?.value || '14:00';
+
+      if (tmplOpen >= tmplClose) {
+        if (!silent) alert('Default Opening Time must be earlier than Default Closing Time.');
+        return;
+      }
+
+      if (hasLunch) {
+        if (lunchStart >= lunchEnd) {
+          if (!silent) alert('Lunch Start Time must be earlier than Lunch End Time.');
+          return;
+        }
+        if (lunchStart < tmplOpen || lunchEnd > tmplClose) {
+          if (!silent) alert(`Lunch Break (${lunchStart}-${lunchEnd}) must fall strictly inside operating hours (${tmplOpen}-${tmplClose}).`);
+          return;
+        }
+      }
+
+      provScheduleState.forEach((day) => {
+        day.startTime = tmplOpen;
+        day.endTime = tmplClose;
+        if (day.isClosed) {
+          day.breaks = [];
+        } else {
+          day.breaks = hasLunch
+            ? [{
+                id: `brk-${day.dayOfWeek}-${Date.now()}`,
+                startTime: lunchStart,
+                endTime: lunchEnd,
+                title: lunchTitle,
+              }]
+            : [];
+        }
+      });
+
+      renderProvScheduleDays();
+    };
+
+    tmplHasLunch?.addEventListener('change', (e) => {
+      const isChecked = e.target.checked;
+      if (isChecked) {
+        if (tmplLunchFields) tmplLunchFields.style.display = 'grid';
+        if (tmplContinuousNotice) tmplContinuousNotice.style.display = 'none';
+        if (tmplBadge) {
+          tmplBadge.textContent = 'LUNCH ENABLED';
+          tmplBadge.style.background = 'rgba(59,130,246,0.15)';
+          tmplBadge.style.color = '#60a5fa';
+          tmplBadge.style.borderColor = 'rgba(59,130,246,0.3)';
+        }
+      } else {
+        if (tmplLunchFields) tmplLunchFields.style.display = 'none';
+        if (tmplContinuousNotice) tmplContinuousNotice.style.display = 'block';
+        if (tmplBadge) {
+          tmplBadge.textContent = 'CONTINUOUS (NO LUNCH)';
+          tmplBadge.style.background = 'rgba(16,185,129,0.15)';
+          tmplBadge.style.color = '#34d399';
+          tmplBadge.style.borderColor = 'rgba(16,185,129,0.3)';
+        }
+      }
+      syncTemplateToDays(true);
+    });
+
+    // Real-time auto-sync when top inputs change
+    document.getElementById('tmpl-open-time')?.addEventListener('change', () => syncTemplateToDays(true));
+    document.getElementById('tmpl-close-time')?.addEventListener('change', () => syncTemplateToDays(true));
+    document.getElementById('tmpl-lunch-start')?.addEventListener('change', () => syncTemplateToDays(true));
+    document.getElementById('tmpl-lunch-end')?.addEventListener('change', () => syncTemplateToDays(true));
+    document.getElementById('tmpl-lunch-title')?.addEventListener('change', () => syncTemplateToDays(true));
+
+    document.getElementById('btn-apply-schedule-template')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      syncTemplateToDays(false);
+
+      const btn = document.getElementById('btn-apply-schedule-template');
+      if (btn) {
+        const origText = btn.innerHTML;
+        btn.innerHTML = `<span>✓ Applied to All Days!</span>`;
+        btn.style.background = 'linear-gradient(135deg, #059669 0%, #047857 100%)';
+        setTimeout(() => {
+          btn.innerHTML = origText;
+          btn.style.background = 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
+        }, 1500);
+      }
+    });
 
     document.getElementById('btn-next-step-2')?.addEventListener('click', () => {
       // Validate Step 1 basic fields
@@ -1151,7 +1319,8 @@ export class PlatformAdminPortal {
             alert(`Opening time must be earlier than closing time for ${d.label}.`);
             return;
           }
-          for (const b of d.breaks) {
+          for (let i = 0; i < d.breaks.length; i++) {
+            const b = d.breaks[i];
             if (b.startTime >= b.endTime) {
               alert(`Break start time (${b.startTime}) must be earlier than break end time (${b.endTime}) on ${d.label}.`);
               return;
@@ -1159,6 +1328,13 @@ export class PlatformAdminPortal {
             if (b.startTime < d.startTime || b.endTime > d.endTime) {
               alert(`Break ${b.startTime}-${b.endTime} must fall inside operating hours (${d.startTime}-${d.endTime}) on ${d.label}.`);
               return;
+            }
+            for (let j = i + 1; j < d.breaks.length; j++) {
+              const b2 = d.breaks[j];
+              if (b.startTime < b2.endTime && b2.startTime < b.endTime) {
+                alert(`Multiple breaks on ${d.label} overlap: ${b.startTime}-${b.endTime} and ${b2.startTime}-${b2.endTime}.`);
+                return;
+              }
             }
           }
         }

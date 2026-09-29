@@ -327,7 +327,7 @@ export class SalonsService {
           data: {
             salonId: salon.id,
             dayOfWeek: day,
-            isClosed: false,
+            isClosed: day === DayOfWeek.TUESDAY,
             startTime: openTime,
             endTime: closeTime,
           },
