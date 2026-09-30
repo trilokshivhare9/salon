@@ -157,43 +157,139 @@ export class WhatsAppActionHandlerService {
       }
     }
 
-    // 4. Resolve Active Appointment
+    // ----------------------------------------------------
+    // PRE-FLIGHT ACTION CLASSIFICATION
+    // ----------------------------------------------------
+    const isAppointmentAction =
+      input.startsWith('remind_') ||
+      input.startsWith('eta_') ||
+      input.startsWith('btn_eta_') ||
+      input.startsWith('appt_') ||
+      input.startsWith('late_') ||
+      input.startsWith('propose_') ||
+      input === 'btn_running_late' ||
+      input === WhatsAppButtonId.CANCEL_APPT ||
+      input === WhatsAppButtonId.RESCHEDULE ||
+      input === WhatsAppButtonId.REMIND_CONFIRM ||
+      input === WhatsAppButtonId.REMIND_RESCHEDULE ||
+      input === WhatsAppButtonId.REMIND_CANCEL;
+
+    // 4. Resolve Active & Target Appointment
     let activeAppointment: any = null;
+    let targetAppointment: any = null;
+
     if (conversation.activeAppointmentId) {
-      activeAppointment = await this.prisma.appointment.findUnique({
+      targetAppointment = await this.prisma.appointment.findUnique({
         where: { id: conversation.activeAppointmentId },
         include: { service: true, stylist: true },
       });
-      if (!activeAppointment || [AppointmentStatus.CANCELLED, AppointmentStatus.COMPLETED, AppointmentStatus.REJECTED].includes(activeAppointment.status)) {
-        activeAppointment = null;
-        await this.session.updateConversationState(conversation.id, conversation.state, null);
-      }
     }
 
-    // Fallback: ONLY check appointment table on initial START or ACTIVE_HUB states to avoid 600ms scan during active booking funnel
-    if (!activeAppointment && (!conversation.state || conversation.state === ConversationState.START || conversation.state === ConversationState.ACTIVE_HUB)) {
-      activeAppointment = await this.prisma.appointment.findFirst({
+    // Fallback: If targetAppointment not found via activeAppointmentId, fetch most recent appointment for this user
+    if (!targetAppointment && (isAppointmentAction || !conversation.state || conversation.state === ConversationState.START || conversation.state === ConversationState.ACTIVE_HUB)) {
+      targetAppointment = await this.prisma.appointment.findFirst({
         where: {
           salonId,
           salonUser: { userId: user.id },
-          status: {
-            in: [
-              AppointmentStatus.BOOKED,
-              AppointmentStatus.CONFIRMED,
-              AppointmentStatus.ON_THE_WAY,
-              AppointmentStatus.CHECKED_IN,
-              AppointmentStatus.SEATED_IN_CHAIR,
-              AppointmentStatus.PENDING_ACCEPTANCE,
-              AppointmentStatus.PENDING_RESCHEDULE,
-            ],
-          },
         },
         include: { service: true, stylist: true },
-        orderBy: { startAt: 'desc' },
+        orderBy: { createdAt: 'desc' },
       });
-      if (activeAppointment) {
-        await this.session.updateConversationState(conversation.id, conversation.state, activeAppointment.id);
+    }
+
+    if (targetAppointment) {
+      const activeStatuses = [
+        AppointmentStatus.BOOKED,
+        AppointmentStatus.CONFIRMED,
+        AppointmentStatus.ON_THE_WAY,
+        AppointmentStatus.CHECKED_IN,
+        AppointmentStatus.SEATED_IN_CHAIR,
+        AppointmentStatus.PENDING_ACCEPTANCE,
+        AppointmentStatus.PENDING_RESCHEDULE,
+      ];
+      if (activeStatuses.includes(targetAppointment.status)) {
+        activeAppointment = targetAppointment;
+        if (conversation.activeAppointmentId !== targetAppointment.id) {
+          await this.session.updateConversationState(conversation.id, conversation.state, targetAppointment.id);
+        }
       }
+    }
+
+    // ----------------------------------------------------
+    // PRE-FLIGHT APPOINTMENT ACTION GUARD:
+    // If user tapped an appointment action (remind_confirm, cancel, eta, etc.)
+    // Check real status of targetAppointment:
+    // ----------------------------------------------------
+    if (isAppointmentAction) {
+      if (!targetAppointment) {
+        const expireReply = this.templates.buildExpiredActionReply(true);
+        await this.sendMessage(cleanNumber, expireReply, phoneNumberId, salonId);
+        return { replyMessage: expireReply.bodyText, state: ConversationState.START };
+      }
+
+      // Case A: Appointment is CANCELLED (auto-canceled or manually canceled)
+      if (targetAppointment.status === AppointmentStatus.CANCELLED) {
+        const timeStr = targetAppointment.startAt ? TimeUtility.formatTime12h(targetAppointment.startAt, tz) : undefined;
+        const dateStr = targetAppointment.startAt ? TimeUtility.formatDateFriendly(targetAppointment.startAt, tz, 'dd LLL, EEEE') : undefined;
+        const isAutoCanceled =
+          targetAppointment.cancellationReason?.includes('GHOST') ||
+          targetAppointment.cancellationReason?.includes('auto') ||
+          targetAppointment.cancelReason?.includes('GHOST') ||
+          targetAppointment.cancelReason?.includes('auto') ||
+          targetAppointment.cancelledBy === 'SYSTEM' ||
+          targetAppointment.cancelReasonCategory === 'CLIENT_UNRESPONSIVE';
+
+        await this.session.updateConversationState(conversation.id, ConversationState.START, null, {
+          selectedCategoryId: null,
+          selectedServiceId: null,
+          selectedStaffId: null,
+          selectedDate: null,
+          selectedStartTime: null,
+          quickCodeVerifiedAt: null,
+        });
+
+        const cancelNotice = this.templates.buildAppointmentAlreadyCanceledReply({
+          timeStr,
+          dateStr,
+          isAutoCanceled,
+        });
+        await this.sendMessage(cleanNumber, cancelNotice, phoneNumberId, salonId);
+        return { replyMessage: cancelNotice.bodyText, state: ConversationState.START };
+      }
+
+      // Case B: Appointment is COMPLETED
+      if (targetAppointment.status === AppointmentStatus.COMPLETED) {
+        const dateStr = targetAppointment.startAt ? TimeUtility.formatDateFriendly(targetAppointment.startAt, tz, 'dd LLL, EEEE') : undefined;
+        await this.session.updateConversationState(conversation.id, ConversationState.START, null, {
+          selectedCategoryId: null,
+          selectedServiceId: null,
+          selectedStaffId: null,
+          selectedDate: null,
+          selectedStartTime: null,
+          quickCodeVerifiedAt: null,
+        });
+
+        const completedNotice = this.templates.buildAppointmentAlreadyCompletedReply({
+          serviceName: targetAppointment.service?.name,
+          dateStr,
+        });
+        await this.sendMessage(cleanNumber, completedNotice, phoneNumberId, salonId);
+        return { replyMessage: completedNotice.bodyText, state: ConversationState.START };
+      }
+
+      // Case C: Appointment is ALREADY CONFIRMED and user taps REMIND_CONFIRM again (Idempotency)
+      if (targetAppointment.status === AppointmentStatus.CONFIRMED && input === WhatsAppButtonId.REMIND_CONFIRM) {
+        const timeStr = targetAppointment.startAt ? TimeUtility.formatTime12h(targetAppointment.startAt, tz) : undefined;
+        const alreadyConfirmed = this.templates.buildAppointmentAlreadyConfirmedReply({
+          timeStr,
+          stylistName: targetAppointment.stylist?.name,
+        });
+        await this.sendMessage(cleanNumber, alreadyConfirmed, phoneNumberId, salonId);
+        return { replyMessage: alreadyConfirmed.bodyText, state: conversation.state };
+      }
+
+      // Case D: Active appointment -> assign activeAppointment so downstream handlers execute it
+      activeAppointment = targetAppointment;
     }
 
     // ----------------------------------------------------
@@ -205,7 +301,14 @@ export class WhatsAppActionHandlerService {
       ['hi', 'hello', 'hey', 'start', 'menu'].some((kw) => normalized === kw || normalized.startsWith('hi ') || normalized.startsWith('hello '));
 
     if (isGreetingOrReset) {
-      await this.session.updateConversationState(conversation.id, ConversationState.START);
+      await this.session.updateConversationState(conversation.id, ConversationState.START, null, {
+        selectedCategoryId: null,
+        selectedServiceId: null,
+        selectedStaffId: null,
+        selectedDate: null,
+        selectedStartTime: null,
+        quickCodeVerifiedAt: null,
+      });
       const welcome = this.templates.buildWelcomeMessage(salon, activeAppointment);
       await this.sendMessage(cleanNumber, welcome, phoneNumberId, salonId);
       return { replyMessage: welcome.bodyText, state: ConversationState.START };
@@ -237,6 +340,47 @@ export class WhatsAppActionHandlerService {
 
     if (input === WhatsAppButtonId.RESUME_BOOKING || input === 'btn_resume_booking') {
       return this.resumeIncompleteBooking(conversation, salon, cleanNumber, phoneNumberId, salonId);
+    }
+
+    // ----------------------------------------------------
+    // FUNNEL ACTION STALE CHECK:
+    // If user tapped a funnel button (cat_, svc_, staff_, date_, slot_)
+    // but the session was inactive for > 30 minutes, reset cleanly
+    // ----------------------------------------------------
+    const isFunnelAction =
+      input.startsWith('cat_') ||
+      input.startsWith('gender_select_') ||
+      input === 'btn_switch_gender' ||
+      input.startsWith('svc_') ||
+      input.startsWith('staff_') ||
+      input.startsWith('date_') ||
+      input.startsWith('slot_') ||
+      input.startsWith('addon_') ||
+      input.startsWith('btn_confirm');
+
+    if (isFunnelAction) {
+      const updatedAt = conversation.updatedAt ? new Date(conversation.updatedAt).getTime() : 0;
+      const isDraftStale = updatedAt > 0 && Date.now() - updatedAt > 30 * 60 * 1000;
+      if (isDraftStale) {
+        await this.session.updateConversationState(conversation.id, ConversationState.START, null, {
+          selectedCategoryId: null,
+          selectedServiceId: null,
+          selectedStaffId: null,
+          selectedDate: null,
+          selectedStartTime: null,
+          quickCodeVerifiedAt: null,
+        });
+        const staleNotice = {
+          bodyText: '⚠️ *SESSION EXPIRED*\n\nYour previous booking session was inactive for more than 30 minutes. Let\'s start fresh!',
+          interactiveType: 'button' as const,
+          buttons: [
+            { id: WhatsAppButtonId.BOOK_NOW, title: '📅 Book Appointment' },
+            { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
+          ],
+        };
+        await this.sendMessage(cleanNumber, staleNotice, phoneNumberId, salonId);
+        return { replyMessage: staleNotice.bodyText, state: ConversationState.START };
+      }
     }
 
     // ----------------------------------------------------
@@ -293,7 +437,14 @@ export class WhatsAppActionHandlerService {
             skipWhatsAppNotify: true,
           });
         }
-        await this.session.updateConversationState(conversation.id, ConversationState.START, null);
+        await this.session.updateConversationState(conversation.id, ConversationState.START, null, {
+          selectedCategoryId: null,
+          selectedServiceId: null,
+          selectedStaffId: null,
+          selectedDate: null,
+          selectedStartTime: null,
+          quickCodeVerifiedAt: null,
+        });
         const reply = this.templates.buildCancelSuccessReply();
         await this.sendMessage(cleanNumber, reply, phoneNumberId, salonId);
         return { replyMessage: reply.bodyText, state: ConversationState.START };
@@ -760,7 +911,14 @@ export class WhatsAppActionHandlerService {
         { initialStatus: AppointmentStatus.PENDING_ACCEPTANCE } as any,
       );
 
-      await this.session.updateConversationState(conversation.id, ConversationState.COMPLETED, newAppt?.id);
+      await this.session.updateConversationState(conversation.id, ConversationState.COMPLETED, newAppt?.id, {
+        selectedCategoryId: null,
+        selectedServiceId: null,
+        selectedStaffId: null,
+        selectedDate: null,
+        selectedStartTime: null,
+        quickCodeVerifiedAt: null,
+      });
       const pendingReply = this.templates.buildQuickBookPendingReply(newAppt);
       await this.sendMessage(cleanNumber, pendingReply, phoneNumberId, salonId);
       return { replyMessage: pendingReply.bodyText, state: ConversationState.COMPLETED };
@@ -1167,7 +1325,14 @@ export class WhatsAppActionHandlerService {
         source: BookingSource.WHATSAPP,
       });
 
-      await this.session.updateConversationState(conversation.id, ConversationState.START, newAppt.id);
+      await this.session.updateConversationState(conversation.id, ConversationState.START, newAppt.id, {
+        selectedCategoryId: null,
+        selectedServiceId: null,
+        selectedStaffId: null,
+        selectedDate: null,
+        selectedStartTime: null,
+        quickCodeVerifiedAt: null,
+      });
       const successReply = this.templates.buildBookingSuccessReply(newAppt);
       await this.sendMessage(cleanNumber, successReply, phoneNumberId, salonId);
       return { replyMessage: successReply.bodyText, state: ConversationState.START };
@@ -1190,6 +1355,35 @@ export class WhatsAppActionHandlerService {
     salonId?: string,
   ): Promise<{ replyMessage: string; state: ConversationState }> {
     const tz = salon.timezone || 'Asia/Kolkata';
+
+    // Validate that the draft is fresh (updated within 30 mins) and has a selected service
+    const updatedAt = conversation.updatedAt ? new Date(conversation.updatedAt).getTime() : 0;
+    const isDraftStale = updatedAt === 0 || Date.now() - updatedAt > 30 * 60 * 1000;
+
+    // Check if selectedDate is in the past
+    let isDatePast = false;
+    if (conversation.selectedDate) {
+      const todayIso = TimeUtility.formatDateToISO(new Date(), tz);
+      const draftDateIso = TimeUtility.formatDateToISO(conversation.selectedDate, tz);
+      if (draftDateIso < todayIso) {
+        isDatePast = true;
+      }
+    }
+
+    if (isDraftStale || isDatePast || !conversation.selectedServiceId) {
+      // Clean up dead draft columns
+      await this.session.updateConversationState(conversation.id, ConversationState.START, null, {
+        selectedCategoryId: null,
+        selectedServiceId: null,
+        selectedStaffId: null,
+        selectedDate: null,
+        selectedStartTime: null,
+        quickCodeVerifiedAt: null,
+      });
+      const welcome = this.templates.buildWelcomeMessage(salon, null);
+      await this.sendMessage(cleanNumber, welcome, phoneNumberId, salonId);
+      return { replyMessage: welcome.bodyText, state: ConversationState.START };
+    }
 
     // 1. If at Confirmation step and date/time/service present
     if (

@@ -381,12 +381,61 @@ export class WhatsAppTemplateService {
     salonAddress: string,
   ) {
     return {
-      bodyText: `⏰ *APPOINTMENT REMINDER*\n\nHello *${userName || 'Customer'}*, your upcoming visit at *${salonName}* is in ~2 hours:\n\n• *Service:* *${serviceName}* (₹${price})\n• *Stylist:* *${stylistName}*\n• *Date:* *${dateStr}*\n• *Time:* *${timeStr}*\n\n📍 *${salonName}*\n${salonAddress || ''}\n\nPlease confirm your arrival so we keep your chair ready!`,
+      bodyText: `⏰ *APPOINTMENT REMINDER*\n\nHello *${userName || 'Customer'}*, your upcoming visit at *${salonName}* is in ~2 hours:\n\n• *Service:* *${serviceName}* (₹${price})\n• *Stylist:* *${stylistName}*\n• *Date:* *${dateStr}*\n• *Time:* *${timeStr}*\n\n📍 *${salonName}*\n${salonAddress || ''}\n\n⚠️ *Action Required within 1 Hour:*\nPlease tap *Confirm Booking* below. If not confirmed at least 1 hour before your slot, the appointment will be *automatically canceled with a penalty strike* to release the slot for other waiting clients.`,
       interactiveType: 'button' as const,
       buttons: [
-        { id: WhatsAppButtonId.REMIND_CONFIRM, title: "✅ I'll Be There" },
+        { id: WhatsAppButtonId.REMIND_CONFIRM, title: '✅ Confirm Booking' },
         { id: WhatsAppButtonId.REMIND_RESCHEDULE, title: '🔄 Reschedule' },
         { id: WhatsAppButtonId.REMIND_CANCEL, title: '❌ Cancel' },
+      ],
+    };
+  }
+
+  buildAppointmentAlreadyCanceledReply(params: {
+    timeStr?: string;
+    dateStr?: string;
+    isAutoCanceled?: boolean;
+  }) {
+    const timeDetail = params.timeStr ? ` for *${params.timeStr}*` : '';
+    const dateDetail = params.dateStr ? ` on *${params.dateStr}*` : '';
+    const reasonText = params.isAutoCanceled
+      ? `This appointment was *automatically canceled* because confirmation was not received 1 hour prior to your slot, and the slot was released.`
+      : `This appointment has already been *canceled*.`;
+
+    return {
+      bodyText: `⚠️ *APPOINTMENT ALREADY CANCELED*\n\nYour appointment${timeDetail}${dateDetail} can no longer be modified or confirmed.\n\n${reasonText}\n\nWould you like to book a fresh appointment?`,
+      interactiveType: 'button' as const,
+      buttons: [
+        { id: WhatsAppButtonId.BOOK_NOW, title: '📅 Book New Slot' },
+        { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
+      ],
+    };
+  }
+
+  buildAppointmentAlreadyCompletedReply(params: {
+    serviceName?: string;
+    dateStr?: string;
+  }) {
+    const svcText = params.serviceName ? ` for *${params.serviceName}*` : '';
+    return {
+      bodyText: `✨ *VISIT COMPLETED*\n\nYour appointment${svcText} has already been completed. Thank you for visiting us! 🙏\n\nReady for your next styling session?`,
+      interactiveType: 'button' as const,
+      buttons: [
+        { id: WhatsAppButtonId.BOOK_NOW, title: '📅 Book Again' },
+        { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
+      ],
+    };
+  }
+
+  buildAppointmentAlreadyConfirmedReply(params: {
+    timeStr?: string;
+    stylistName?: string;
+  }) {
+    return {
+      bodyText: `✅ *APPOINTMENT ALREADY CONFIRMED*\n\nYour visit${params.timeStr ? ` at *${params.timeStr}*` : ''}${params.stylistName ? ` with *${params.stylistName}*` : ''} is confirmed! We look forward to seeing you. 💇`,
+      interactiveType: 'button' as const,
+      buttons: [
+        { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
       ],
     };
   }
