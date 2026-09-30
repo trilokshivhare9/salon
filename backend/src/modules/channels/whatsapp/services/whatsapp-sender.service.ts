@@ -68,10 +68,39 @@ export class WhatsAppSenderService {
   public whatsAppService?: any;
   private _isDispatching = false;
 
+  // In-memory cache for salon WhatsApp account credentials (5 min TTL)
+  private readonly accountCache = new Map<string, { account: any; cachedAt: number }>();
+  private readonly ACCOUNT_CACHE_TTL_MS = 5 * 60 * 1000;
+  private readonly MAX_ACCOUNT_CACHE_SIZE = 500;
+
   constructor(
     private prisma: PrismaService,
     private configService: ConfigService,
   ) {}
+
+  public invalidateAccountCache(salonId: string): void {
+    this.accountCache.delete(salonId);
+  }
+
+  private async getCachedAccount(salonId: string): Promise<any> {
+    const now = Date.now();
+    const entry = this.accountCache.get(salonId);
+    if (entry && now - entry.cachedAt < this.ACCOUNT_CACHE_TTL_MS) {
+      return entry.account ? { ...entry.account } : null;
+    }
+
+    const acc = await this.prisma.whatsAppAccount.findFirst({
+      where: { salonId, isActive: true },
+    });
+
+    if (this.accountCache.size >= this.MAX_ACCOUNT_CACHE_SIZE) {
+      const oldestKey = this.accountCache.keys().next().value;
+      if (oldestKey) this.accountCache.delete(oldestKey);
+    }
+
+    this.accountCache.set(salonId, { account: acc, cachedAt: now });
+    return acc ? { ...acc } : null;
+  }
 
   cleanPhone(phone: string): string {
     return phone.replace(/[^\d+]/g, '');
@@ -92,19 +121,6 @@ export class WhatsAppSenderService {
     phoneNumberId?: string,
     salonId?: string,
   ): Promise<boolean> {
-    if (
-      this.whatsAppService &&
-      typeof this.whatsAppService.sendMetaMessage === 'function' &&
-      !this._isDispatching
-    ) {
-      this._isDispatching = true;
-      try {
-        return await this.whatsAppService.sendMetaMessage(toPhone, payload, phoneNumberId, salonId);
-      } finally {
-        this._isDispatching = false;
-      }
-    }
-
     let accessToken =
       this.configService.get<string>('whatsapp.accessToken') ||
       process.env.WHATSAPP_ACCESS_TOKEN;
@@ -113,9 +129,7 @@ export class WhatsAppSenderService {
       this.configService.get<string>('whatsapp.phoneNumberId');
 
     if (salonId) {
-      const acc = await this.prisma.whatsAppAccount.findFirst({
-        where: { salonId, isActive: true },
-      });
+      const acc = await this.getCachedAccount(salonId);
       if (acc) {
         if (acc.phoneNumberId) phoneId = acc.phoneNumberId;
         if (acc.accessTokenEncrypted && acc.accessTokenEncrypted !== 'system_managed') {
@@ -130,7 +144,7 @@ export class WhatsAppSenderService {
       this.logger.warn(
         `[WhatsAppSenderService] Cannot send WhatsApp message to ${toPhone}: No Phone ID for salon (${salonId || 'unspecified'}).`,
       );
-      await this.prisma.whatsAppLog
+      this.prisma.whatsAppLog
         .create({
           data: {
             salonId: salonId || null,
@@ -226,6 +240,7 @@ export class WhatsAppSenderService {
         headers: {
           Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
+          Connection: 'keep-alive',
         },
         body: JSON.stringify(bodyData),
         signal: AbortSignal.timeout(5000),
@@ -237,7 +252,7 @@ export class WhatsAppSenderService {
         this.logger.error(
           `Meta WhatsApp API error (${response.status}): ${JSON.stringify(resJson)}`,
         );
-        await this.prisma.whatsAppLog
+        this.prisma.whatsAppLog
           .create({
             data: {
               salonId: salonId || null,
@@ -255,7 +270,8 @@ export class WhatsAppSenderService {
 
       const metaMsgId = resJson?.messages?.[0]?.id || null;
 
-      await this.prisma.whatsAppLog
+      // Non-blocking async log write so outbound dispatch returns instantly
+      this.prisma.whatsAppLog
         .create({
           data: {
             salonId: salonId || null,
@@ -265,9 +281,12 @@ export class WhatsAppSenderService {
             interactiveId: payload.interactiveType || null,
             status: 'SENT',
             rawPayload: resJson,
+            metaMessageId: metaMsgId,
           },
         })
-        .catch(() => {});
+        .catch((err) => {
+          this.logger.warn(`Failed to write outbound audit log: ${err.message}`);
+        });
 
       return true;
     } catch (err: any) {

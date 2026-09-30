@@ -2,7 +2,7 @@ import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 
 export interface WebhookJob {
   id: string;
-  salonId: string;
+  partitionKey: string;
   payload: any;
   receivedAt: Date;
   processor: () => Promise<any>;
@@ -11,74 +11,105 @@ export interface WebhookJob {
 @Injectable()
 export class WhatsAppWebhookQueue implements OnModuleDestroy {
   private readonly logger = new Logger(WhatsAppWebhookQueue.name);
-  private queue: WebhookJob[] = [];
-  private isProcessing = false;
   private isShuttingDown = false;
+  private pendingJobsCount = 0;
+  private activePipelines = new Map<string, Promise<void>>();
+
+  // Global Concurrency Semaphore: max active database worker tasks across all partitions simultaneously
+  private readonly MAX_GLOBAL_CONCURRENT_WORKERS = 10;
+  private currentActiveWorkers = 0;
+  private semaphoreWaitQueue: (() => void)[] = [];
+
+  private async acquireSlot(): Promise<void> {
+    if (this.currentActiveWorkers < this.MAX_GLOBAL_CONCURRENT_WORKERS) {
+      this.currentActiveWorkers++;
+      return;
+    }
+    return new Promise<void>((resolve) => {
+      this.semaphoreWaitQueue.push(resolve);
+    });
+  }
+
+  private releaseSlot(): void {
+    if (this.semaphoreWaitQueue.length > 0) {
+      const nextTask = this.semaphoreWaitQueue.shift();
+      if (nextTask) nextTask();
+    } else {
+      this.currentActiveWorkers = Math.max(0, this.currentActiveWorkers - 1);
+    }
+  }
 
   onModuleDestroy() {
     this.isShuttingDown = true;
-    this.queue = [];
+    this.activePipelines.clear();
+    while (this.semaphoreWaitQueue.length > 0) {
+      const waitResolve = this.semaphoreWaitQueue.shift();
+      if (waitResolve) waitResolve();
+    }
     this.logger.log('🛑 WhatsApp Webhook Queue shut down cleanly.');
   }
 
   /**
    * Enqueues an incoming Meta Webhook payload for asynchronous processing.
-   * Returns immediately so HTTP handler can reply 200 OK to Meta Cloud API in < 10ms.
+   * Uses Keyed Actor Partitioning + Global Counting Semaphore:
+   * - Messages for the SAME partitionKey (customer phone) are strictly sequential (FIFO).
+   * - Messages for DIFFERENT partitionKeys execute concurrently in parallel up to 10 workers.
+   * - Protects PostgreSQL and Prisma pool against exhaustion under massive traffic bursts.
+   * Returns immediately (<1ms) so HTTP webhook responds 200 OK to Meta Cloud API instantly.
    */
-  enqueue(salonId: string, payload: any, processor: () => Promise<any>): void {
+  enqueue(partitionKey: string, payload: any, processor: () => Promise<any>): void {
     if (this.isShuttingDown) return;
 
-    const job: WebhookJob = {
-      id: `wh_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
-      salonId,
-      payload,
-      receivedAt: new Date(),
-      processor,
-    };
+    const jobId = `wh_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const receivedAt = new Date();
+    this.pendingJobsCount++;
 
-    this.queue.push(job);
-    this.logger.log(`📥 [Webhook Queue] Enqueued job ${job.id} for salon ${salonId} (Buffer size: ${this.queue.length})`);
+    const key = (partitionKey || 'default').trim();
+    this.logger.log(
+      `📥 [Webhook Queue] Enqueued job ${jobId} for partition [${key}] (Active queues: ${this.activePipelines.size + 1}, Pending: ${this.pendingJobsCount})`,
+    );
 
-    // Trigger processing loop asynchronously
-    setImmediate(() => {
-      this.processQueue().catch((err) => {
-        this.logger.error('Error in WhatsApp webhook queue processing loop:', err);
+    const currentPipeline = this.activePipelines.get(key) || Promise.resolve();
+
+    const nextPipeline = currentPipeline
+      .then(async () => {
+        // Yield macrotask turn so synchronous burst enqueues finish before execution begins
+        await new Promise((resolve) => setImmediate(resolve));
+        if (this.isShuttingDown) return;
+
+        // Acquire slot from the Global Semaphore (caps parallel DB load to 10)
+        await this.acquireSlot();
+        try {
+          if (this.isShuttingDown) return;
+          const queueDelayMs = Date.now() - receivedAt.getTime();
+          this.logger.log(`⚙️ [Webhook Queue] Executing job ${jobId} for [${key}] (Queue delay: ${queueDelayMs}ms, Active workers: ${this.currentActiveWorkers})`);
+          await processor();
+          this.logger.log(`✅ [Webhook Queue] Completed job ${jobId} for [${key}]`);
+        } catch (err: any) {
+          this.logger.error(`❌ [Webhook Queue] Failed processing job ${jobId} for [${key}]:`, err?.stack || err);
+        } finally {
+          this.releaseSlot();
+          this.pendingJobsCount = Math.max(0, this.pendingJobsCount - 1);
+        }
+      })
+      .catch((err) => {
+        this.logger.error(`Unhandled error in pipeline for [${key}]:`, err);
+        this.pendingJobsCount = Math.max(0, this.pendingJobsCount - 1);
+      })
+      .finally(() => {
+        // Clean up map entry when this pipeline is completely idle
+        if (this.activePipelines.get(key) === nextPipeline) {
+          this.activePipelines.delete(key);
+        }
       });
-    });
+
+    this.activePipelines.set(key, nextPipeline);
   }
 
   /**
-   * Worker loop that processes queued webhook jobs in FIFO order.
-   */
-  private async processQueue(): Promise<void> {
-    if (this.isProcessing || this.queue.length === 0 || this.isShuttingDown) {
-      return;
-    }
-
-    this.isProcessing = true;
-
-    while (this.queue.length > 0 && !this.isShuttingDown) {
-      const job = this.queue.shift();
-      if (!job) break;
-
-      const queueDelayMs = Date.now() - job.receivedAt.getTime();
-      this.logger.log(`⚙️ [Webhook Queue] Processing job ${job.id} (Queue delay: ${queueDelayMs}ms)`);
-
-      try {
-        await job.processor();
-        this.logger.log(`✅ [Webhook Queue] Completed job ${job.id}`);
-      } catch (err: any) {
-        this.logger.error(`❌ [Webhook Queue] Failed processing job ${job.id} for salon ${job.salonId}:`, err?.stack || err);
-      }
-    }
-
-    this.isProcessing = false;
-  }
-
-  /**
-   * Returns current buffer size for metrics/monitoring.
+   * Returns current pending jobs count for metrics/monitoring.
    */
   getQueueLength(): number {
-    return this.queue.length;
+    return this.pendingJobsCount;
   }
 }

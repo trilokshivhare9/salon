@@ -34,6 +34,52 @@ export class WhatsAppActionHandlerService {
     @Optional() public whatsAppService?: WhatsAppService,
   ) { }
 
+  // Multi-tenant in-memory catalog cache with 3-minute TTL to eliminate repetitive heavy joins
+  private readonly catalogCache = new Map<string, { salon: any; cachedAt: number }>();
+  private readonly CATALOG_CACHE_TTL_MS = 3 * 60 * 1000;
+  private readonly MAX_CATALOG_CACHE_SIZE = 500;
+
+  public invalidateSalonCatalog(salonId: string): void {
+    this.catalogCache.delete(salonId);
+  }
+
+  private async getCachedSalon(salonId: string): Promise<any> {
+    const now = Date.now();
+    const entry = this.catalogCache.get(salonId);
+    if (entry && now - entry.cachedAt < this.CATALOG_CACHE_TTL_MS) {
+      // Defensive shallow copy to prevent downstream mutation of shared cached reference
+      return { ...entry.salon, staff: entry.salon.stylists || entry.salon.staff };
+    }
+
+    const salon: any = await this.prisma.salon.findUnique({
+      where: { id: salonId },
+      include: {
+        serviceCategories: { orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] },
+        services: {
+          where: {
+            status: 'ACTIVE',
+          },
+          include: { serviceCategory: true, stylists: { include: { stylist: true } } },
+          orderBy: { name: 'asc' },
+        },
+        stylists: { where: { status: 'ACTIVE' }, include: { services: true } },
+      },
+    });
+
+    if (salon) {
+      if (salon.stylists) salon.staff = salon.stylists;
+      // Bounded capacity: evict oldest if cache exceeds 500 salons to prevent memory leaks
+      if (this.catalogCache.size >= this.MAX_CATALOG_CACHE_SIZE) {
+        const oldestKey = this.catalogCache.keys().next().value;
+        if (oldestKey) this.catalogCache.delete(oldestKey);
+      }
+      this.catalogCache.set(salonId, { salon, cachedAt: now });
+      return { ...salon };
+    }
+
+    return null;
+  }
+
   public setWhatsAppService(service: any) {
     this.whatsAppService = service;
   }
@@ -72,21 +118,8 @@ export class WhatsAppActionHandlerService {
     const input = (interactiveId || messageText || '').trim();
     const normalized = input.toLowerCase();
 
-    // 1. Fetch Salon Details & Active Services/Staff
-    const salon: any = await this.prisma.salon.findUnique({
-      where: { id: salonId },
-      include: {
-        serviceCategories: { orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] },
-        services: {
-          where: {
-            status: 'ACTIVE',
-          },
-          include: { serviceCategory: true, stylists: { include: { stylist: true } } },
-          orderBy: { name: 'asc' },
-        },
-        stylists: { where: { status: 'ACTIVE' }, include: { services: true } },
-      },
-    });
+    // 1. Fetch Salon Details & Active Services/Staff (Optimized In-Memory Cache)
+    const salon: any = await this.getCachedSalon(salonId);
 
     if (!salon || salon.status !== 'ACTIVE') {
       const reply = 'Sorry, this salon booking service is currently inactive.';
@@ -94,7 +127,7 @@ export class WhatsAppActionHandlerService {
       return { replyMessage: reply, state: ConversationState.START };
     }
 
-    if (salon) salon.staff = salon.stylists;
+    if (salon && !salon.staff) salon.staff = salon.stylists;
     const tz = salon.timezone || 'Asia/Kolkata';
 
     // 2. Resolve Customer User & Session State

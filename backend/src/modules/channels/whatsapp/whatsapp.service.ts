@@ -369,6 +369,13 @@ export class WhatsAppService {
       });
     }
 
+    if (this.whatsAppSenderService) {
+      this.whatsAppSenderService.invalidateAccountCache(salonId);
+    }
+    if (this.whatsAppActionHandlerService) {
+      this.whatsAppActionHandlerService.invalidateSalonCatalog(salonId);
+    }
+
     return this.getSalonWhatsAppStatus(salonId);
   }
 
@@ -377,6 +384,14 @@ export class WhatsAppService {
     if (!salon) throw new NotFoundException('Salon not found.');
 
     await this.prisma.whatsAppAccount.deleteMany({ where: { salonId } });
+
+    if (this.whatsAppSenderService) {
+      this.whatsAppSenderService.invalidateAccountCache(salonId);
+    }
+    if (this.whatsAppActionHandlerService) {
+      this.whatsAppActionHandlerService.invalidateSalonCatalog(salonId);
+    }
+
     return this.getSalonWhatsAppStatus(salonId);
   }
 

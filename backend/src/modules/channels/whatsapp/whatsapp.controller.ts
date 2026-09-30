@@ -21,6 +21,32 @@ import { WhatsAppMessageDirection } from '@prisma/client';
 export class WhatsAppController {
   private readonly logger = new Logger(WhatsAppController.name);
 
+  // In-memory instant deduplication ring buffer (Drops Meta retries in < 0.001ms, closing async DB commit race window)
+  private static readonly seenMessageIds = new Map<string, number>();
+  private static readonly DEDUP_TTL_MS = 10 * 60 * 1000; // 10 minutes
+  private static readonly MAX_DEDUP_SIZE = 5000;
+
+  private isDuplicateWebhook(messageId: string): boolean {
+    if (!messageId) return false;
+    const now = Date.now();
+
+    // 1. Fast in-memory check (< 0.001ms)
+    const seenAt = WhatsAppController.seenMessageIds.get(messageId);
+    if (seenAt && now - seenAt < WhatsAppController.DEDUP_TTL_MS) {
+      return true;
+    }
+
+    // 2. Prevent memory leak: Evict oldest if buffer reaches capacity
+    if (WhatsAppController.seenMessageIds.size >= WhatsAppController.MAX_DEDUP_SIZE) {
+      const oldestKey = WhatsAppController.seenMessageIds.keys().next().value;
+      if (oldestKey) WhatsAppController.seenMessageIds.delete(oldestKey);
+    }
+
+    // 3. Mark as seen immediately in RAM before any async execution
+    WhatsAppController.seenMessageIds.set(messageId, now);
+    return false;
+  }
+
   constructor(
     private readonly whatsappService: WhatsAppService,
     private readonly configService: ConfigService,
@@ -74,7 +100,10 @@ export class WhatsAppController {
         } else {
           this.logger.log(`[Meta Webhook] ℹ️ WhatsApp Delivery Status for ${recipient}: ${status}`);
         }
-        await this.whatsappService.recordStatusLog(statuses);
+        // Non-blocking async status logging so webhook returns 200 OK immediately (<5ms)
+        this.whatsappService.recordStatusLog(statuses).catch((err) => {
+          this.logger.error(`Error recording delivery status: ${err.message}`);
+        });
       }
 
       // 2. Process Incoming Messages
@@ -83,14 +112,21 @@ export class WhatsAppController {
         const messageId = message.id; // Meta Message ID
         const phoneNumberId = changes.metadata?.phone_number_id;
 
-        // Deduplication (Section 38): Check if meta_message_id was already received
+        // Deduplication: 1. Fast in-memory RAM filter (<0.001ms) -> 2. PostgreSQL fallback check
         if (messageId) {
+          if (this.isDuplicateWebhook(messageId)) {
+            this.logger.warn(
+              `[Meta Webhook] 🔁 Fast-path duplicate dropped in RAM for MsgId "${messageId}" from ${fromPhone}.`,
+            );
+            return res.status(HttpStatus.OK).send('EVENT_RECEIVED');
+          }
+
           const existingLog = await this.prisma.whatsAppLog.findUnique({
             where: { metaMessageId: messageId },
           });
           if (existingLog) {
             this.logger.warn(
-              `[Meta Webhook] 🔁 Duplicate meta_message_id "${messageId}" received from ${fromPhone}. Skipping processing.`,
+              `[Meta Webhook] 🔁 DB duplicate found for MsgId "${messageId}" from ${fromPhone}. Skipping processing.`,
             );
             return res.status(HttpStatus.OK).send('EVENT_RECEIVED');
           }
@@ -220,19 +256,22 @@ export class WhatsAppController {
           }
         }
 
-        // Enqueue asynchronously to queue worker so Meta Webhook receives immediate 200 OK (<10ms)
+        // Enqueue to Keyed Actor Queue partitioned by customer's phone number
         this.webhookQueue.enqueue(
-          salon?.id || 'unmapped',
+          fromPhone || salon?.id || 'unmapped',
           payload,
           async () => {
-            await this.whatsappService.recordInboundLog(
+            // Asynchronous inbound log write without blocking core booking pipeline
+            this.whatsappService.recordInboundLog(
               salon?.id || null,
               fromPhone,
               text,
               interactiveId,
               payload,
               messageId,
-            );
+            ).catch((err) => {
+              this.logger.error(`Error recording inbound audit log: ${err.message}`);
+            });
 
             if (salon) {
               this.logger.log(`[Meta Webhook] 🏢 Routed message to salon: "${salon.name}" (${salon.id})`);
