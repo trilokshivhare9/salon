@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { WhatsAppButtonId, InteractiveButton, InteractiveListRow } from './whatsapp-sender.service';
+import { WhatsAppButtonId, InteractiveButton, InteractiveListRow, InteractiveListSection } from './whatsapp-sender.service';
 import { TimeUtility } from '../../../../common/utils/time.utility';
 
 @Injectable()
@@ -115,6 +115,150 @@ export class WhatsAppTemplateService {
     };
   }
 
+  // 5.1 Streamlined Multi-Section Service Menu (1-Tap Service Selection)
+  buildSectionedServiceMenu(salon: any, genderLabel?: string) {
+    const categories: any[] = salon.serviceCategories || [];
+    const allServices: any[] = salon.services || [];
+    const genderSuffix = genderLabel && genderLabel !== 'UNISEX' ? ` (${genderLabel})` : '';
+
+    const sections: InteractiveListSection[] = [];
+    let rowCount = 0;
+    const MAX_ROWS = 9; // Leave room for "All Categories" if catalog is large
+
+    for (const cat of categories) {
+      if (rowCount >= MAX_ROWS) break;
+
+      const catServices = allServices.filter((s: any) => {
+        const inCat = (s.categoryId || s.serviceCategoryId) === cat.id;
+        if (!inCat) return false;
+        if (!genderLabel || genderLabel === 'UNISEX') return true;
+        const g = s.targetGender || s.gender;
+        return g === genderLabel || g === 'UNISEX' || !g;
+      });
+
+      if (catServices.length === 0) continue;
+
+      const rows: InteractiveListRow[] = [];
+      for (const svc of catServices) {
+        if (rowCount >= MAX_ROWS) break;
+        rows.push({
+          id: `qsvc_${svc.id}`,
+          title: svc.name.slice(0, 24),
+          description: `⏱️ ${svc.durationMinutes || 30}m | ₹${svc.price || 0}`.slice(0, 72),
+        });
+        rowCount++;
+      }
+
+      if (rows.length > 0) {
+        sections.push({
+          title: cat.name.slice(0, 24),
+          rows,
+        });
+      }
+    }
+
+    // Uncategorized services fallback
+    if (rowCount < MAX_ROWS) {
+      const uncategorized = allServices.filter(
+        (s: any) => !s.categoryId && !s.serviceCategoryId,
+      );
+      if (uncategorized.length > 0) {
+        const uncatRows: InteractiveListRow[] = [];
+        for (const svc of uncategorized) {
+          if (rowCount >= MAX_ROWS) break;
+          uncatRows.push({
+            id: `qsvc_${svc.id}`,
+            title: svc.name.slice(0, 24),
+            description: `⏱️ ${svc.durationMinutes || 30}m | ₹${svc.price || 0}`.slice(0, 72),
+          });
+          rowCount++;
+        }
+        if (uncatRows.length > 0) {
+          sections.push({
+            title: 'Other Services',
+            rows: uncatRows,
+          });
+        }
+      }
+    }
+
+    // If salon has many services (> 9), append "All Categories" row
+    if (allServices.length > MAX_ROWS && sections.length > 0) {
+      sections[sections.length - 1].rows.push({
+        id: 'btn_all_categories',
+        title: '📂 All Categories',
+        description: 'Explore full categorized menu',
+      });
+    }
+
+    // If no sections were built (e.g. empty categories), fallback to flat list
+    if (sections.length === 0) {
+      const flatRows: InteractiveListRow[] = allServices.slice(0, 10).map((s: any) => ({
+        id: `qsvc_${s.id}`,
+        title: s.name.slice(0, 24),
+        description: `⏱️ ${s.durationMinutes || 30}m | ₹${s.price || 0}`.slice(0, 72),
+      }));
+      return {
+        headerText: `✂️ ${salon.name || 'Salon'}${genderSuffix}`.slice(0, 60),
+        bodyText: `Please choose a service to book your appointment:`,
+        buttonText: 'Select Service',
+        interactiveType: 'list' as const,
+        listRows: flatRows,
+      };
+    }
+
+    return {
+      headerText: `✂️ ${salon.name || 'Salon'}${genderSuffix}`.slice(0, 60),
+      bodyText: `Please choose a service to book your appointment:`,
+      buttonText: 'Select Service',
+      interactiveType: 'list' as const,
+      listSections: sections,
+    };
+  }
+
+  // 5.2 Direct Quick Slot Menu (1-Tap Slot Selection)
+  buildDirectQuickSlotMenu(params: {
+    serviceName: string;
+    price: number;
+    durationMinutes: number;
+    serviceId: string;
+    slots: {
+      dateStr: string;
+      displayDate: string;
+      startTime: string;
+      displayTime: string;
+      staffId?: string;
+      staffName?: string;
+    }[];
+  }) {
+    const rows: InteractiveListRow[] = params.slots.slice(0, 8).map((s) => ({
+      id: `qslot_${s.dateStr}_${s.startTime}_${s.staffId || 'any'}`,
+      title: `${s.displayDate}, ${s.displayTime}`.slice(0, 24),
+      description: `⏱️ ${params.durationMinutes}m • ${s.staffName || 'Any Specialist'}`.slice(0, 72),
+    }));
+
+    // Customization rows: pick specialist or pick other date
+    rows.push({
+      id: `btn_pick_stylist_${params.serviceId}`,
+      title: '💇 Pick Specialist',
+      description: 'Choose a specific stylist instead',
+    });
+
+    rows.push({
+      id: `btn_pick_custom_date_${params.serviceId}`,
+      title: '📅 Pick Other Date',
+      description: 'View upcoming calendar dates',
+    });
+
+    return {
+      headerText: `📅 Instant Slots`.slice(0, 60),
+      bodyText: `Selected: *${params.serviceName}* (₹${params.price})\n\nChoose your preferred time slot below:`,
+      buttonText: 'Choose Time',
+      interactiveType: 'list' as const,
+      listRows: rows,
+    };
+  }
+
   // 6. Staff Selection Menu Template
   buildStaffSelectionMenu(staffList: any[]) {
     const rows: InteractiveListRow[] = [
@@ -200,9 +344,11 @@ export class WhatsAppTemplateService {
     const startTimeVal = appointment?.startTime || appointment?.startAt;
     const date = startTimeVal ? TimeUtility.formatDateFriendly(startTimeVal, tz, 'dd LLL, EEE') : '';
     const time = startTimeVal ? TimeUtility.formatTime12h(startTimeVal, tz) : '';
+    const svcName = appointment?.service?.name ? `\n✂️ *Service:* ${appointment.service.name}` : '';
+    const apptNum = appointment?.appointmentNumber ? `\n🔖 *Ref:* ${appointment.appointmentNumber}` : '';
 
     return {
-      bodyText: `🎉 *Booking Confirmed!*\n\nYour appointment has been successfully scheduled.\n\n📅 *Date:* ${date}\n🕒 *Time:* ${time}\n\nWe look forward to serving you!`,
+      bodyText: `🎉 *Booking Confirmed!*\n\nYour appointment has been successfully scheduled.${svcName}\n📅 *Date:* ${date}\n🕒 *Time:* ${time}${apptNum}\n\nWe look forward to serving you!`,
       interactiveType: 'button' as const,
       buttons: [
         { id: WhatsAppButtonId.BOOK, title: '📋 Active Booking' },

@@ -77,15 +77,15 @@ export class WhatsAppSessionService {
         case ConversationState.QUICK_BOOK_CODE:
           return true;
         case ConversationState.SELECT_CATEGORY:
-          return input.startsWith('cat_') || input.startsWith('gender_select_') || input === 'btn_switch_gender';
+          return input.startsWith('cat_') || input.startsWith('gender_select_') || input === 'btn_switch_gender' || input.startsWith('svc_') || input.startsWith('qsvc_');
         case ConversationState.SELECT_SERVICE:
-          return input.startsWith('svc_') || input === 'cat_back' || input.startsWith('gender_select_') || input === 'btn_switch_gender';
+          return input.startsWith('svc_') || input.startsWith('qsvc_') || input === 'cat_back' || input.startsWith('gender_select_') || input === 'btn_switch_gender' || input === 'btn_all_categories';
         case ConversationState.SELECT_STAFF:
           return input.startsWith('staff_');
         case ConversationState.SELECT_DATE:
           return input.startsWith('date_');
         case ConversationState.SELECT_TIME:
-          return input.startsWith('slot_');
+          return input.startsWith('slot_') || input.startsWith('qslot_') || input.startsWith('btn_pick_stylist_') || input.startsWith('btn_pick_custom_date_');
         case ConversationState.SELECT_ADDON:
           return input.startsWith('addon_');
         default:
@@ -116,8 +116,10 @@ export class WhatsAppSessionService {
         input.startsWith('date_') ||
         input.startsWith('rdate_') ||
         input.startsWith('slot_') ||
+        input.startsWith('qslot_') ||
         input.startsWith('rslot_') ||
         input.startsWith('svc_') ||
+        input.startsWith('qsvc_') ||
         input.startsWith('staff_') ||
         ['btn_confirm_yes', 'btn_confirm', 'btn_cancel_yes', 'btn_eta_arrived', 'btn_eta_late_15'].includes(input);
       if (isStaleInteractive) return false;

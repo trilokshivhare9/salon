@@ -62,6 +62,11 @@ export interface InteractiveListRow {
   description?: string;
 }
 
+export interface InteractiveListSection {
+  title: string;
+  rows: InteractiveListRow[];
+}
+
 @Injectable()
 export class WhatsAppSenderService {
   private readonly logger = new Logger(WhatsAppSenderService.name);
@@ -117,6 +122,7 @@ export class WhatsAppSenderService {
       buttonText?: string;
       buttons?: InteractiveButton[];
       listRows?: InteractiveListRow[];
+      listSections?: InteractiveListSection[];
     },
     phoneNumberId?: string,
     salonId?: string,
@@ -203,9 +209,32 @@ export class WhatsAppSenderService {
         };
       } else if (
         payload.interactiveType === 'list' &&
-        payload.listRows &&
-        payload.listRows.length > 0
+        ((payload.listSections && payload.listSections.length > 0) ||
+          (payload.listRows && payload.listRows.length > 0))
       ) {
+        let sections: any[] = [];
+        if (payload.listSections && payload.listSections.length > 0) {
+          sections = payload.listSections.slice(0, 10).map((sec) => ({
+            title: sec.title.slice(0, 24),
+            rows: sec.rows.slice(0, 10).map((r) => ({
+              id: r.id,
+              title: r.title.slice(0, 24),
+              description: r.description ? r.description.slice(0, 72) : undefined,
+            })),
+          }));
+        } else if (payload.listRows && payload.listRows.length > 0) {
+          sections = [
+            {
+              title: 'Available Options',
+              rows: payload.listRows.slice(0, 10).map((r) => ({
+                id: r.id,
+                title: r.title.slice(0, 24),
+                description: r.description ? r.description.slice(0, 72) : undefined,
+              })),
+            },
+          ];
+        }
+
         bodyData.type = 'interactive';
         bodyData.interactive = {
           type: 'list',
@@ -216,16 +245,7 @@ export class WhatsAppSenderService {
           footer: payload.footerText ? { text: payload.footerText } : undefined,
           action: {
             button: (payload.buttonText || 'View Options').slice(0, 20),
-            sections: [
-              {
-                title: 'Available Options',
-                rows: payload.listRows.slice(0, 10).map((r) => ({
-                  id: r.id,
-                  title: r.title.slice(0, 24),
-                  description: r.description ? r.description.slice(0, 72) : undefined,
-                })),
-              },
-            ],
+            sections,
           },
         };
       } else {
