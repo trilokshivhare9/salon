@@ -15,12 +15,12 @@ import { AppointmentsService } from '../../salon-admin/appointments/appointments
 import { CancellationService } from '../../salon-admin/appointments/cancellation/cancellation.service';
 import { RescheduleService } from '../../salon-admin/appointments/reschedule/reschedule.service';
 import { QuickCodeService } from '../../salon-admin/quick-booking/quick-code.service';
-import { WhatsAppSenderService, InteractiveButton, InteractiveListRow } from './services/whatsapp-sender.service';
+import { WhatsAppSenderService, InteractiveButton, InteractiveListRow, WhatsAppInteractivePayload } from './services/whatsapp-sender.service';
 import { WhatsAppTemplateService } from './services/whatsapp-template.service';
 import { WhatsAppSessionService, BookingLifecycleStage } from './services/whatsapp-session.service';
 import { WhatsAppActionHandlerService } from './services/whatsapp-action-handler.service';
 
-export { BookingLifecycleStage, InteractiveButton, InteractiveListRow };
+export { BookingLifecycleStage, InteractiveButton, InteractiveListRow, WhatsAppInteractivePayload };
 
 @Injectable()
 export class WhatsAppService {
@@ -86,16 +86,7 @@ export class WhatsAppService {
   // 2. Outbound Dispatch to Meta Cloud API (Delegates 100% to WhatsAppSenderService)
   async sendMetaMessage(
     toPhone: string,
-    payload: {
-      textBody?: string;
-      interactiveType?: 'button' | 'list';
-      headerText?: string;
-      bodyText?: string;
-      footerText?: string;
-      buttonText?: string;
-      buttons?: InteractiveButton[];
-      listRows?: InteractiveListRow[];
-    },
+    payload: WhatsAppInteractivePayload,
     phoneNumberId?: string,
     salonId?: string,
   ): Promise<boolean> {

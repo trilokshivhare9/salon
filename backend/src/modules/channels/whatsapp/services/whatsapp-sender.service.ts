@@ -67,6 +67,23 @@ export interface InteractiveListSection {
   rows: InteractiveListRow[];
 }
 
+export interface WhatsAppInteractivePayload {
+  textBody?: string;
+  interactiveType?: 'button' | 'list' | 'flow';
+  headerText?: string;
+  bodyText?: string;
+  footerText?: string;
+  buttonText?: string;
+  buttons?: InteractiveButton[];
+  listRows?: InteractiveListRow[];
+  listSections?: InteractiveListSection[];
+  flowId?: string;
+  flowCta?: string;
+  flowToken?: string;
+  flowMode?: 'draft' | 'published';
+  flowActionPayload?: any;
+}
+
 @Injectable()
 export class WhatsAppSenderService {
   private readonly logger = new Logger(WhatsAppSenderService.name);
@@ -113,17 +130,7 @@ export class WhatsAppSenderService {
 
   async sendMetaMessage(
     toPhone: string,
-    payload: {
-      textBody?: string;
-      interactiveType?: 'button' | 'list';
-      headerText?: string;
-      bodyText?: string;
-      footerText?: string;
-      buttonText?: string;
-      buttons?: InteractiveButton[];
-      listRows?: InteractiveListRow[];
-      listSections?: InteractiveListSection[];
-    },
+    payload: WhatsAppInteractivePayload,
     phoneNumberId?: string,
     salonId?: string,
   ): Promise<boolean> {
@@ -194,7 +201,31 @@ export class WhatsAppSenderService {
         to: toPhone.replace('+', ''),
       };
 
-      if (payload.interactiveType === 'button' && payload.buttons && payload.buttons.length > 0) {
+      if (payload.interactiveType === 'flow' && payload.flowId) {
+        bodyData.type = 'interactive';
+        bodyData.interactive = {
+          type: 'flow',
+          header: payload.headerText
+            ? { type: 'text', text: payload.headerText.slice(0, 60) }
+            : undefined,
+          body: { text: payload.bodyText || 'Please select your booking details:' },
+          footer: payload.footerText ? { text: payload.footerText } : undefined,
+          action: {
+            name: 'flow',
+            parameters: {
+              flow_message_version: '3',
+              flow_token: payload.flowToken || `flow_${Date.now()}`,
+              flow_id: payload.flowId,
+              flow_cta: (payload.flowCta || payload.buttonText || '📅 Book Slot').slice(0, 20),
+              mode: payload.flowMode || 'draft',
+              flow_action: 'navigate',
+              flow_action_payload: payload.flowActionPayload || {
+                screen: 'BOOKING_SCREEN',
+              },
+            },
+          },
+        };
+      } else if (payload.interactiveType === 'button' && payload.buttons && payload.buttons.length > 0) {
         bodyData.type = 'interactive';
         bodyData.interactive = {
           type: 'button',

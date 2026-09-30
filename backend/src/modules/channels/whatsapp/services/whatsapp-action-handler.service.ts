@@ -141,6 +141,7 @@ export class WhatsAppActionHandlerService {
         input.startsWith('qsvc_') ||
         input.startsWith('slot_') ||
         input.startsWith('qslot_') ||
+        input.startsWith('flow_response:') ||
         input.startsWith('date_');
 
       if (isBookingAttempt) {
@@ -168,7 +169,6 @@ export class WhatsAppActionHandlerService {
       input.startsWith('btn_eta_') ||
       input.startsWith('appt_') ||
       input.startsWith('late_') ||
-      input.startsWith('propose_') ||
       input === 'btn_running_late' ||
       input === WhatsAppButtonId.CANCEL_APPT ||
       input === WhatsAppButtonId.RESCHEDULE ||
@@ -931,8 +931,28 @@ export class WhatsAppActionHandlerService {
     }
 
     // Step A: Start Booking / Services / Quick Book
-    if (['btn_book', 'btn_services', 'btn_book_now', 'btn_quick_book'].includes(input)) {
+    if (
+      ['btn_book', 'btn_services', 'btn_book_now', 'btn_quick_book'].includes(input) ||
+      ['book', 'book now', 'booking', 'appointment'].includes(normalized)
+    ) {
       const isQuick = input === 'btn_quick_book';
+      const flowId = process.env.WHATSAPP_BOOKING_FLOW_ID;
+      const flowMode = (process.env.WHATSAPP_BOOKING_FLOW_MODE || 'draft') as 'draft' | 'published';
+
+      // 0. Native WhatsApp Flow Form (if Flow ID is configured & not quick book)
+      if (flowId && !isQuick) {
+        const flowToken = `${salonId}:${cleanNumber}:${Date.now()}`;
+        const flowMsg = this.templates.buildBookingFlowMessage({
+          salon,
+          flowId,
+          flowToken,
+          mode: flowMode,
+        });
+        await this.session.updateConversationState(conversation.id, ConversationState.SELECT_SERVICE);
+        await this.sendMessage(cleanNumber, flowMsg, phoneNumberId, salonId);
+        return { replyMessage: flowMsg.bodyText, state: ConversationState.SELECT_SERVICE };
+      }
+
       await this.session.updateConversationState(conversation.id, ConversationState.SELECT_CATEGORY, undefined, {
         quickCodeVerifiedAt: isQuick ? new Date() : null,
       });
@@ -1415,6 +1435,90 @@ export class WhatsAppActionHandlerService {
       const successReply = this.templates.buildBookingSuccessReply(newAppt);
       await this.sendMessage(cleanNumber, successReply, phoneNumberId, salonId);
       return { replyMessage: successReply.bodyText, state: ConversationState.START };
+    }
+
+    // ----------------------------------------------------
+    // STEP: Native WhatsApp In-App Flow Submission Handler
+    // Triggered when client submits the Flow booking form
+    // ----------------------------------------------------
+    if (input.startsWith('flow_response:')) {
+      let flowData: Record<string, any> = {};
+      try {
+        const rawJson = input.slice('flow_response:'.length).trim();
+        flowData = rawJson ? JSON.parse(rawJson) : {};
+      } catch (err) {
+        this.logger.error(`[WhatsApp Flow] Failed to parse flow response_json: ${input}`, err);
+      }
+
+      const serviceId =
+        flowData.service_id ||
+        flowData.service ||
+        flowData.selected_service ||
+        flowData.services;
+
+      const stylistRaw =
+        flowData.stylist_id ||
+        flowData.stylist ||
+        flowData.staff_id ||
+        flowData.staff ||
+        flowData.specialist;
+
+      const stylistId = !stylistRaw || stylistRaw === 'any' ? undefined : stylistRaw;
+
+      const dateStr =
+        flowData.date ||
+        flowData.selected_date ||
+        flowData.dates ||
+        TimeUtility.now(tz).toISODate()!;
+
+      const timeStr =
+        flowData.time_slot ||
+        flowData.time ||
+        flowData.slot ||
+        flowData.slots ||
+        '10:00';
+
+      // Fallback service resolution
+      let effectiveService = salon.services?.find((s: any) => s.id === serviceId);
+      if (!effectiveService && salon.services?.length > 0) {
+        effectiveService = salon.services[0];
+      }
+      const finalServiceId = effectiveService?.id || serviceId;
+
+      if (!finalServiceId) {
+        const fallbackMsg = { bodyText: '❌ Could not complete booking: No active services found for this salon.' };
+        await this.sendMessage(cleanNumber, fallbackMsg, phoneNumberId, salonId);
+        return { replyMessage: fallbackMsg.bodyText, state: ConversationState.START };
+      }
+
+      const newAppt = await this.appointmentsService.createAppointment(salonId, {
+        customerPhone: cleanNumber,
+        customerName: user.name || 'WhatsApp Customer',
+        serviceIds: [finalServiceId],
+        stylistId,
+        date: dateStr,
+        startTime: timeStr,
+        source: BookingSource.WHATSAPP,
+      });
+
+      await this.session.updateConversationState(conversation.id, ConversationState.START, newAppt.id, {
+        selectedCategoryId: null,
+        selectedServiceId: null,
+        selectedStaffId: null,
+        selectedDate: null,
+        selectedStartTime: null,
+        quickCodeVerifiedAt: null,
+      });
+
+      const successReply = this.templates.buildBookingSuccessReply(newAppt, tz);
+      await this.sendMessage(cleanNumber, successReply, phoneNumberId, salonId);
+      return { replyMessage: successReply.bodyText, state: ConversationState.START };
+    }
+
+    if (input === 'flow_submit') {
+      const msg = { bodyText: '✅ Thank you! Your booking form was received.' };
+      await this.sendMessage(cleanNumber, msg, phoneNumberId, salonId);
+      return { replyMessage: msg.bodyText, state: ConversationState.START };
     }
 
     if (input.startsWith('btn_pick_stylist_')) {

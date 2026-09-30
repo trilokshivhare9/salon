@@ -162,13 +162,18 @@ export class WhatsAppController {
           }
         }
 
+        const isNfmReply = message.interactive?.type === 'nfm_reply' || !!message.interactive?.nfm_reply;
         const text =
           message.text?.body ||
+          (isNfmReply ? 'Form Submitted' : '') ||
           message.interactive?.button_reply?.title ||
           message.interactive?.list_reply?.title ||
           '';
-        const interactiveId =
-          message.interactive?.button_reply?.id || message.interactive?.list_reply?.id;
+        const interactiveId = isNfmReply
+          ? (message.interactive?.nfm_reply?.response_json
+              ? 'flow_response:' + message.interactive.nfm_reply.response_json
+              : 'flow_submit')
+          : (message.interactive?.button_reply?.id || message.interactive?.list_reply?.id);
         const normalizedText = text.trim().toLowerCase();
 
         this.logger.log(

@@ -471,7 +471,7 @@ describe('Salon Admin - Cancellation & Reschedule Workflows', () => {
         mockSalonId,
         mockApptId,
         {
-          newDate: '2026-09-30',
+          newDate: DateTime.now().setZone('Asia/Kolkata').plus({ days: 1 }).toISODate()!,
           newStartTime: '15:00',
         },
         mockAdminId,

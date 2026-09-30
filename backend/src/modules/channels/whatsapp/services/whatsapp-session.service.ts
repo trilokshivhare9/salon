@@ -71,6 +71,7 @@ export class WhatsAppSessionService {
     if (['btn_confirm_yes', 'btn_confirm_no', 'btn_confirm'].includes(input) && conversationState === ConversationState.CONFIRMATION) return true;
     if (['btn_confirm_quick', 'confirm'].includes(input) && conversationState === ConversationState.QUICK_BOOK_CONFIRM) return true;
     if (['btn_reschedule', 'btn_change_stylist', 'btn_keep_appt'].includes(input) && conversationState === ConversationState.ADDON_CONFLICT) return true;
+    if (input.startsWith('flow_response:') || input === 'flow_submit') return true;
 
     if (stage === BookingLifecycleStage.PRE_BOOKING) {
       switch (conversationState) {

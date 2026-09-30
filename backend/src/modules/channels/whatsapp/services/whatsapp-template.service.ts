@@ -259,6 +259,72 @@ export class WhatsAppTemplateService {
     };
   }
 
+  // 5.3 Native WhatsApp Booking Flow Message (1-Screen Flow Form)
+  buildBookingFlowMessage(params: {
+    salon: any;
+    flowId: string;
+    flowToken: string;
+    mode?: 'draft' | 'published';
+  }) {
+    const { salon, flowId, flowToken, mode = 'draft' } = params;
+    const services = (salon.services || []).filter((s: any) => s.status === 'ACTIVE').slice(0, 10).map((s: any) => ({
+      id: s.id,
+      title: s.name.slice(0, 24),
+      description: `${s.durationMinutes || 30} mins • ₹${s.price || 0}`.slice(0, 72),
+    }));
+
+    const stylists = [
+      { id: 'any', title: '✨ Any Specialist' },
+      ...(salon.stylists || []).filter((st: any) => st.status === 'ACTIVE').slice(0, 9).map((st: any) => ({
+        id: st.id,
+        title: st.name.slice(0, 24),
+      })),
+    ];
+
+    const tz = salon.timezone || TimeUtility.DEFAULT_TIMEZONE;
+    const now = TimeUtility.now(tz);
+    const dates = [
+      { id: now.toISODate()!, title: `Today (${now.toFormat('dd LLL')})` },
+      { id: now.plus({ days: 1 }).toISODate()!, title: `Tomorrow (${now.plus({ days: 1 }).toFormat('dd LLL')})` },
+      { id: now.plus({ days: 2 }).toISODate()!, title: now.plus({ days: 2 }).toFormat('EEE, dd LLL') },
+      { id: now.plus({ days: 3 }).toISODate()!, title: now.plus({ days: 3 }).toFormat('EEE, dd LLL') },
+    ];
+
+    const slots = [
+      { id: '10:00', title: '10:00 AM' },
+      { id: '10:30', title: '10:30 AM' },
+      { id: '11:00', title: '11:00 AM' },
+      { id: '11:30', title: '11:30 AM' },
+      { id: '12:00', title: '12:00 PM' },
+      { id: '14:00', title: '02:00 PM' },
+      { id: '15:00', title: '03:00 PM' },
+      { id: '16:00', title: '04:00 PM' },
+      { id: '17:00', title: '05:00 PM' },
+      { id: '18:00', title: '06:00 PM' },
+    ];
+
+    return {
+      interactiveType: 'flow' as const,
+      headerText: `✂️ ${salon.name || 'Salon'}`.slice(0, 60),
+      bodyText: `Welcome to *${salon.name || 'our Salon'}*!\n\nTap below to open our native appointment booking form:`,
+      footerText: 'Powered by Salon SaaS',
+      buttonText: '📅 Book Slot',
+      flowId,
+      flowCta: '📅 Book Slot',
+      flowToken,
+      flowMode: mode,
+      flowActionPayload: {
+        screen: 'BOOKING_SCREEN',
+        data: {
+          services: services.length > 0 ? services : [{ id: 'general', title: 'General Service', description: '30m' }],
+          stylists,
+          dates,
+          slots,
+        },
+      },
+    };
+  }
+
   // 6. Staff Selection Menu Template
   buildStaffSelectionMenu(staffList: any[]) {
     const rows: InteractiveListRow[] = [
