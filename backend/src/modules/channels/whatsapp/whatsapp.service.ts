@@ -158,20 +158,22 @@ export class WhatsAppService {
     metaMessageId?: string,
   ) {
     const cleanPhone = this.whatsAppSenderService.cleanPhone(phone);
-    return this.prisma.whatsAppLog
-      .create({
-        data: {
-          salonId: salonId || null,
-          phone: cleanPhone,
-          direction: WhatsAppMessageDirection.INBOUND,
-          messageText,
-          interactiveId: interactiveId || null,
-          status: 'RECEIVED',
-          metaMessageId: metaMessageId || null,
-          rawPayload: rawPayload || null,
-        },
-      })
-      .catch((e) => this.logger.error('Failed to persist inbound WhatsApp log:', e));
+    setImmediate(() => {
+      this.prisma.whatsAppLog
+        .create({
+          data: {
+            salonId: salonId || null,
+            phone: cleanPhone,
+            direction: WhatsAppMessageDirection.INBOUND,
+            messageText,
+            interactiveId: interactiveId || null,
+            status: 'RECEIVED',
+            metaMessageId: metaMessageId || null,
+            rawPayload: rawPayload || null,
+          },
+        })
+        .catch((e) => this.logger.error('Failed to persist inbound WhatsApp log:', e));
+    });
   }
 
   async recordStatusLog(statusObj: any) {
@@ -375,8 +377,26 @@ export class WhatsAppService {
     if (this.whatsAppActionHandlerService) {
       this.whatsAppActionHandlerService.invalidateSalonCatalog(salonId);
     }
+    if (this.availabilityService) {
+      this.availabilityService.invalidateSalonScheduleCache(salonId);
+    }
 
     return this.getSalonWhatsAppStatus(salonId);
+  }
+
+  public invalidateAccountCache(salonId: string): void {
+    if (this.whatsAppSenderService) {
+      this.whatsAppSenderService.invalidateAccountCache(salonId);
+    }
+  }
+
+  public invalidateSalonCatalog(salonId: string): void {
+    if (this.whatsAppActionHandlerService) {
+      this.whatsAppActionHandlerService.invalidateSalonCatalog(salonId);
+    }
+    if (this.availabilityService) {
+      this.availabilityService.invalidateSalonScheduleCache(salonId);
+    }
   }
 
   async disconnectSalonWhatsApp(salonId: string) {
@@ -390,6 +410,9 @@ export class WhatsAppService {
     }
     if (this.whatsAppActionHandlerService) {
       this.whatsAppActionHandlerService.invalidateSalonCatalog(salonId);
+    }
+    if (this.availabilityService) {
+      this.availabilityService.invalidateSalonScheduleCache(salonId);
     }
 
     return this.getSalonWhatsAppStatus(salonId);

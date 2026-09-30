@@ -143,22 +143,66 @@ export class WhatsAppSessionService {
     return payload.bodyText;
   }
 
+  // Multi-tenant in-memory customer user cache (15-min sliding TTL)
+  // Eliminates 2 sequential DB round trips (user, salonUser) on active WhatsApp chats
+  private readonly userCache = new Map<string, {
+    user: any;
+    salonUser: any;
+    cachedAt: number;
+  }>();
+  private readonly USER_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+  private readonly MAX_USER_CACHE_SIZE = 5000;
+
+  public getUserKey(salonId: string, cleanNumber: string): string {
+    return `${salonId}:${cleanNumber}`;
+  }
+
+  public invalidateUserCache(salonId?: string, cleanNumber?: string): void {
+    if (salonId && cleanNumber) {
+      this.userCache.delete(this.getUserKey(salonId, cleanNumber));
+    } else {
+      this.userCache.clear();
+    }
+  }
+
   async getOrCreateSession(salonId: string, cleanNumber: string) {
-    let user = await this.prisma.user.findUnique({
-      where: { phone: cleanNumber },
-    });
-    if (!user) {
-      user = await this.prisma.user.create({
-        data: { phone: cleanNumber, name: null },
+    const key = this.getUserKey(salonId, cleanNumber);
+    const now = Date.now();
+
+    let user: any;
+    let salonUser: any;
+
+    // 1. Fast in-memory RAM lookup for User & SalonUser (< 0.001ms)
+    const cached = this.userCache.get(key);
+    if (cached && now - cached.cachedAt < this.USER_CACHE_TTL_MS) {
+      cached.cachedAt = now; // Slide TTL
+      user = cached.user;
+      salonUser = cached.salonUser;
+    } else {
+      user = await this.prisma.user.findUnique({
+        where: { phone: cleanNumber },
       });
+      if (!user) {
+        user = await this.prisma.user.create({
+          data: { phone: cleanNumber, name: null },
+        });
+      }
+
+      salonUser = await this.prisma.salonUser.upsert({
+        where: { salonId_userId: { salonId, userId: user.id } },
+        update: {},
+        create: { salonId, userId: user.id },
+      });
+
+      if (this.userCache.size >= this.MAX_USER_CACHE_SIZE) {
+        const oldestKey = this.userCache.keys().next().value;
+        if (oldestKey) this.userCache.delete(oldestKey);
+      }
+
+      this.userCache.set(key, { user, salonUser, cachedAt: now });
     }
 
-    const salonUser = await this.prisma.salonUser.upsert({
-      where: { salonId_userId: { salonId, userId: user.id } },
-      update: {},
-      create: { salonId, userId: user.id },
-    });
-
+    // 2. Fetch Conversation by unique index (Always 100% authoritative and in-sync)
     let conversation = await this.prisma.conversation.findUnique({
       where: { salonId_customerPhone: { salonId, customerPhone: cleanNumber } },
     });
@@ -174,7 +218,11 @@ export class WhatsAppSessionService {
       });
     }
 
-    return { user, salonUser, conversation };
+    return {
+      user: { ...user },
+      salonUser: { ...salonUser },
+      conversation,
+    };
   }
 
   async updateConversationState(

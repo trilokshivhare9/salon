@@ -26,6 +26,46 @@ export class WhatsAppController {
   private static readonly DEDUP_TTL_MS = 10 * 60 * 1000; // 10 minutes
   private static readonly MAX_DEDUP_SIZE = 5000;
 
+  // In-memory phone-to-salon routing cache (10 min TTL)
+  // Eliminates 500ms remote DB query on every incoming WhatsApp webhook
+  private static readonly phoneToSalonCache = new Map<string, { salon: any; cachedAt: number }>();
+  private static readonly ROUTING_CACHE_TTL_MS = 10 * 60 * 1000;
+  private static readonly MAX_ROUTING_CACHE_SIZE = 500;
+
+  public static invalidateRouting(phoneNumberId?: string): void {
+    if (phoneNumberId) {
+      WhatsAppController.phoneToSalonCache.delete(phoneNumberId);
+    } else {
+      WhatsAppController.phoneToSalonCache.clear();
+    }
+  }
+
+  private async getLinkedSalonByPhoneId(phoneNumberId: string): Promise<any> {
+    const now = Date.now();
+    const cached = WhatsAppController.phoneToSalonCache.get(phoneNumberId);
+    if (cached && now - cached.cachedAt < WhatsAppController.ROUTING_CACHE_TTL_MS) {
+      return cached.salon ? { ...cached.salon } : null;
+    }
+
+    const linkedSalon = await this.prisma.salon.findFirst({
+      where: {
+        whatsappAccount: { phoneNumberId },
+      },
+    });
+
+    if (WhatsAppController.phoneToSalonCache.size >= WhatsAppController.MAX_ROUTING_CACHE_SIZE) {
+      const oldestKey = WhatsAppController.phoneToSalonCache.keys().next().value;
+      if (oldestKey) WhatsAppController.phoneToSalonCache.delete(oldestKey);
+    }
+
+    WhatsAppController.phoneToSalonCache.set(phoneNumberId, {
+      salon: linkedSalon,
+      cachedAt: now,
+    });
+
+    return linkedSalon ? { ...linkedSalon } : null;
+  }
+
   private isDuplicateWebhook(messageId: string): boolean {
     if (!messageId) return false;
     const now = Date.now();
@@ -112,21 +152,11 @@ export class WhatsAppController {
         const messageId = message.id; // Meta Message ID
         const phoneNumberId = changes.metadata?.phone_number_id;
 
-        // Deduplication: 1. Fast in-memory RAM filter (<0.001ms) -> 2. PostgreSQL fallback check
+        // Deduplication: Fast in-memory RAM filter (<0.001ms)
         if (messageId) {
           if (this.isDuplicateWebhook(messageId)) {
             this.logger.warn(
               `[Meta Webhook] 🔁 Fast-path duplicate dropped in RAM for MsgId "${messageId}" from ${fromPhone}.`,
-            );
-            return res.status(HttpStatus.OK).send('EVENT_RECEIVED');
-          }
-
-          const existingLog = await this.prisma.whatsAppLog.findUnique({
-            where: { metaMessageId: messageId },
-          });
-          if (existingLog) {
-            this.logger.warn(
-              `[Meta Webhook] 🔁 DB duplicate found for MsgId "${messageId}" from ${fromPhone}. Skipping processing.`,
             );
             return res.status(HttpStatus.OK).send('EVENT_RECEIVED');
           }
@@ -147,13 +177,9 @@ export class WhatsAppController {
 
         let salon: any = null;
 
-        // 1. Direct Phone ID Routing: Resolve target salon by the WhatsApp Phone ID the customer messaged
+        // 1. Direct Phone ID Routing: Resolve target salon by WhatsApp Phone ID (<0.001ms In-Memory Cache)
         if (phoneNumberId) {
-          const linkedSalon = await this.prisma.salon.findFirst({
-            where: {
-              whatsappAccount: { phoneNumberId },
-            },
-          });
+          const linkedSalon = await this.getLinkedSalonByPhoneId(phoneNumberId);
 
           if (!linkedSalon) {
             this.logger.warn(
@@ -366,11 +392,15 @@ export class WhatsAppController {
       code?: string;
     },
   ) {
+    WhatsAppController.invalidateRouting(body.phoneNumberId);
+    this.whatsappService.invalidateAccountCache(body.salonId);
     return this.whatsappService.connectSalonWhatsApp(body.salonId, body);
   }
 
   @Post('disconnect')
   async disconnect(@Body() body: { salonId: string }) {
+    WhatsAppController.invalidateRouting();
+    this.whatsappService.invalidateAccountCache(body.salonId);
     return this.whatsappService.disconnectSalonWhatsApp(body.salonId);
   }
 

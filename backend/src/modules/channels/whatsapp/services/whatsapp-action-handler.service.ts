@@ -170,8 +170,8 @@ export class WhatsAppActionHandlerService {
       }
     }
 
-    // Fallback: check if customer has any active non-terminal appointment if not stored on session
-    if (!activeAppointment) {
+    // Fallback: ONLY check appointment table on initial START or ACTIVE_HUB states to avoid 600ms scan during active booking funnel
+    if (!activeAppointment && (!conversation.state || conversation.state === ConversationState.START || conversation.state === ConversationState.ACTIVE_HUB)) {
       activeAppointment = await this.prisma.appointment.findFirst({
         where: {
           salonId,

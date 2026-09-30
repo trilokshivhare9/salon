@@ -243,7 +243,8 @@ export class WhatsAppSenderService {
           Connection: 'keep-alive',
         },
         body: JSON.stringify(bodyData),
-        signal: AbortSignal.timeout(5000),
+        keepalive: true,
+        signal: AbortSignal.timeout(6000),
       });
 
       const resJson: any = await response.json();
@@ -252,6 +253,28 @@ export class WhatsAppSenderService {
         this.logger.error(
           `Meta WhatsApp API error (${response.status}): ${JSON.stringify(resJson)}`,
         );
+        setImmediate(() => {
+          this.prisma.whatsAppLog
+            .create({
+              data: {
+                salonId: salonId || null,
+                phone: cleanTo,
+                direction: WhatsAppMessageDirection.OUTBOUND,
+                messageText: payload.bodyText || payload.textBody || '',
+                interactiveId: payload.interactiveType || null,
+                status: 'FAILED',
+                errorMessage: JSON.stringify(resJson),
+              },
+            })
+            .catch(() => {});
+        });
+        return false;
+      }
+
+      const metaMsgId = resJson?.messages?.[0]?.id || null;
+
+      // Fully detached async log write so outbound dispatch returns instantly to user
+      setImmediate(() => {
         this.prisma.whatsAppLog
           .create({
             data: {
@@ -260,33 +283,15 @@ export class WhatsAppSenderService {
               direction: WhatsAppMessageDirection.OUTBOUND,
               messageText: payload.bodyText || payload.textBody || '',
               interactiveId: payload.interactiveType || null,
-              status: 'FAILED',
-              errorMessage: JSON.stringify(resJson),
+              status: 'SENT',
+              rawPayload: resJson,
+              metaMessageId: metaMsgId,
             },
           })
-          .catch(() => {});
-        return false;
-      }
-
-      const metaMsgId = resJson?.messages?.[0]?.id || null;
-
-      // Non-blocking async log write so outbound dispatch returns instantly
-      this.prisma.whatsAppLog
-        .create({
-          data: {
-            salonId: salonId || null,
-            phone: cleanTo,
-            direction: WhatsAppMessageDirection.OUTBOUND,
-            messageText: payload.bodyText || payload.textBody || '',
-            interactiveId: payload.interactiveType || null,
-            status: 'SENT',
-            rawPayload: resJson,
-            metaMessageId: metaMsgId,
-          },
-        })
-        .catch((err) => {
-          this.logger.warn(`Failed to write outbound audit log: ${err.message}`);
-        });
+          .catch((err) => {
+            this.logger.warn(`Failed to write outbound audit log: ${err.message}`);
+          });
+      });
 
       return true;
     } catch (err: any) {
