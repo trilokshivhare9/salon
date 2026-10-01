@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { DateTime } from 'luxon';
+import { TimeUtility } from '../../../common/utils/time.utility';
 import { PrismaService } from '../../../database/prisma.service';
 import { AppointmentsService } from '../appointments/appointments.service';
 import { WhatsAppService } from '../../channels/whatsapp/whatsapp.service';
@@ -150,7 +151,7 @@ export class AbsenceService {
 
         for (const dateDt of incrementalDates) {
           const dateStr = dateDt.toISODate()!;
-          const dateObj = new Date(`${dateStr}T00:00:00.000Z`);
+          const dateObj = TimeUtility.toDbDate(dateStr);
           const dayOfWeek = this.getDayOfWeekEnum(dateDt);
 
           const key1 = this.hashToSignedInt32(`salon:${salonId}`);
@@ -383,7 +384,7 @@ export class AbsenceService {
 
     for (const dateDt of datesList) {
       const dateStr = dateDt.toISODate()!;
-      const dateObj = new Date(`${dateStr}T00:00:00.000Z`);
+      const dateObj = TimeUtility.toDbDate(dateStr);
       const dayOfWeek = this.getDayOfWeekEnum(dateDt);
 
       const schedule = await this.processingService.resolveDaySchedule(

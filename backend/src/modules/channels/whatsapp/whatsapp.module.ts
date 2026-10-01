@@ -9,6 +9,12 @@ import { WhatsAppSenderService } from './services/whatsapp-sender.service';
 import { WhatsAppTemplateService } from './services/whatsapp-template.service';
 import { WhatsAppSessionService } from './services/whatsapp-session.service';
 import { WhatsAppActionHandlerService } from './services/whatsapp-action-handler.service';
+import { CatalogCacheService } from './actions/shared/catalog-cache.service';
+import { CheckinAction } from './actions/checkin.action';
+import { AppointmentAction } from './actions/appointment.action';
+import { DraftRecoveryAction } from './actions/draft-recovery.action';
+import { QuickBookingAction } from './actions/quick-booking.action';
+import { BookingAction } from './actions/booking.action';
 
 @Module({
   imports: [AvailabilityModule, forwardRef(() => AppointmentsModule), QuickBookingModule],
@@ -19,6 +25,12 @@ import { WhatsAppActionHandlerService } from './services/whatsapp-action-handler
     WhatsAppSenderService,
     WhatsAppTemplateService,
     WhatsAppSessionService,
+    CatalogCacheService,
+    CheckinAction,
+    AppointmentAction,
+    DraftRecoveryAction,
+    QuickBookingAction,
+    BookingAction,
     WhatsAppActionHandlerService,
   ],
   exports: [
@@ -27,8 +39,13 @@ import { WhatsAppActionHandlerService } from './services/whatsapp-action-handler
     WhatsAppSenderService,
     WhatsAppTemplateService,
     WhatsAppSessionService,
+    CatalogCacheService,
+    CheckinAction,
+    AppointmentAction,
+    DraftRecoveryAction,
+    QuickBookingAction,
+    BookingAction,
     WhatsAppActionHandlerService,
   ],
 })
 export class WhatsAppModule {}
-

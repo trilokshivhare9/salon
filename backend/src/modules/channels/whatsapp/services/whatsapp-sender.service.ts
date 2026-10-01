@@ -30,6 +30,7 @@ export enum WhatsAppButtonId {
   CANCEL_YES = 'btn_cancel_yes',
   CANCEL_NO = 'btn_cancel_no',
   ETA_CANCEL = 'btn_eta_cancel',
+  CANCEL_PENDING_QUICK = 'btn_cancel_pending_quick',
 
   // Reschedule & Proposed Reschedule
   RESCHEDULE = 'btn_reschedule',
@@ -48,6 +49,7 @@ export enum WhatsAppButtonId {
 
   // Incomplete Booking & Stale Action Recovery
   RESUME_BOOKING = 'btn_resume_booking',
+  CHECK_LAST_BOOKING = 'btn_last_booking',
   NEW_BOOKING = 'btn_new_booking',
 }
 
@@ -76,7 +78,7 @@ export class WhatsAppSenderService {
   constructor(
     private prisma: PrismaService,
     private configService: ConfigService,
-  ) {}
+  ) { }
 
   public invalidateAccountCache(salonId: string): void {
     this.accountCache.delete(salonId);
@@ -156,7 +158,7 @@ export class WhatsAppSenderService {
             errorMessage: 'No WhatsApp Phone ID registered for this salon in DB.',
           },
         })
-        .catch(() => {});
+        .catch(() => { });
       return false;
     }
 
@@ -176,7 +178,7 @@ export class WhatsAppSenderService {
             errorMessage: 'WHATSAPP_ACCESS_TOKEN is missing.',
           },
         })
-        .catch(() => {});
+        .catch(() => { });
       return false;
     }
 
@@ -266,7 +268,7 @@ export class WhatsAppSenderService {
                 errorMessage: JSON.stringify(resJson),
               },
             })
-            .catch(() => {});
+            .catch(() => { });
         });
         return false;
       }

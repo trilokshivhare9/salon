@@ -228,4 +228,116 @@ export class TimeUtility {
     }
     return dt.toFormat('cccc').toUpperCase() as DayOfWeek;
   }
+
+  /**
+   * Converts any date input ("YYYY-MM-DD", Date, or DateTime) into a pure UTC midnight Date object.
+   * Format: YYYY-MM-DDT00:00:00.000Z.
+   * This is mathematically immune to timezone shifts when stored into PostgreSQL @db.Date columns.
+   */
+  public static toDbDate(dateInput: string | Date | DateTime | null | undefined): Date {
+    if (!dateInput) {
+      const todayIso = this.getTodayDate();
+      return new Date(`${todayIso}T00:00:00.000Z`);
+    }
+    const isoStr = this.toDateString(dateInput);
+    return new Date(`${isoStr}T00:00:00.000Z`);
+  }
+
+  /**
+   * Extracts clean "YYYY-MM-DD" calendar date string without timezone drift.
+   */
+  public static toDateString(
+    dateInput: string | Date | DateTime | null | undefined,
+    timezone?: string,
+  ): string {
+    if (!dateInput) return '';
+    if (typeof dateInput === 'string') {
+      const clean = dateInput.trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) return clean;
+      if (clean.includes('T')) return clean.split('T')[0];
+      const parsed = DateTime.fromISO(clean, { zone: timezone || this.DEFAULT_TIMEZONE });
+      if (parsed.isValid) return parsed.toISODate()!;
+      return clean.slice(0, 10);
+    }
+    if (dateInput instanceof Date) {
+      // If date was created as UTC midnight (e.g. from @db.Date), toISOString() yields the pure calendar date
+      return dateInput.toISOString().split('T')[0];
+    }
+    if (dateInput instanceof DateTime) {
+      return dateInput.toISODate()!;
+    }
+    return '';
+  }
+
+  /**
+   * Returns today's calendar date string ("YYYY-MM-DD") evaluated in the specified timezone (defaults to Asia/Kolkata).
+   */
+  public static getTodayDate(timezone?: string): string {
+    return DateTime.now().setZone(timezone || this.DEFAULT_TIMEZONE).toISODate()!;
+  }
+
+  /**
+   * Combines date ("YYYY-MM-DD") and 24h time ("HH:mm") into a full JavaScript Date (TIMESTAMPTZ) in the given timezone.
+   */
+  public static toTimestamp(
+    dateStr: string | Date,
+    timeStr: string,
+    timezone?: string,
+  ): Date {
+    const zone = timezone || this.DEFAULT_TIMEZONE;
+    const baseDateStr = this.toDateString(dateStr, zone);
+    const cleanTime = timeStr || '00:00';
+    const [h, m] = cleanTime.split(':').map((v) => parseInt(v, 10));
+
+    return DateTime.fromISO(baseDateStr, { zone })
+      .set({ hour: h || 0, minute: m || 0, second: 0, millisecond: 0 })
+      .toJSDate();
+  }
+
+  /**
+   * Formats any Date or timestamp into a customized pattern in the specified timezone.
+   */
+  public static formatDateTimeInTz(
+    dateInput: Date | DateTime | string,
+    formatStr: string,
+    timezone?: string,
+  ): string {
+    const zone = timezone || this.DEFAULT_TIMEZONE;
+    let dt: DateTime;
+    if (dateInput instanceof Date) {
+      dt = DateTime.fromJSDate(dateInput, { zone });
+    } else if (dateInput instanceof DateTime) {
+      dt = dateInput.setZone(zone);
+    } else {
+      dt = DateTime.fromISO(String(dateInput), { zone });
+    }
+    return dt.isValid ? dt.toFormat(formatStr) : '';
+  }
+
+  /**
+   * Checks whether a given date is today in the salon's timezone.
+   */
+  public static isToday(dateStr: string | Date | DateTime, timezone?: string): boolean {
+    const zone = timezone || this.DEFAULT_TIMEZONE;
+    return this.toDateString(dateStr, zone) === this.getTodayDate(zone);
+  }
+
+  /**
+   * Checks whether a date is strictly before today in the salon's timezone.
+   */
+  public static isPastDate(dateStr: string | Date | DateTime, timezone?: string): boolean {
+    const zone = timezone || this.DEFAULT_TIMEZONE;
+    return this.toDateString(dateStr, zone) < this.getTodayDate(zone);
+  }
+
+  /**
+   * Checks whether a 24h time string has already passed by clock today in the salon's timezone.
+   */
+  public static isPastTimeToday(timeStr: string, timezone?: string): boolean {
+    const zone = timezone || this.DEFAULT_TIMEZONE;
+    const now = DateTime.now().setZone(zone);
+    const nowMinutes = now.hour * 60 + now.minute;
+    const [h, m] = timeStr.split(':').map((v) => parseInt(v, 10));
+    return (h * 60 + m) <= nowMinutes;
+  }
 }

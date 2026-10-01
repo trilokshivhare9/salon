@@ -151,12 +151,37 @@ export class WhatsAppController {
         const fromPhone = message.from;
         const messageId = message.id; // Meta Message ID
         const phoneNumberId = changes.metadata?.phone_number_id;
+        const senderName = changes?.contacts?.[0]?.profile?.name || null;
 
-        // Deduplication: Fast in-memory RAM filter (<0.001ms)
+        // 1. Drop stale delayed webhook retries from Meta (e.g. from earlier downtime)
+        const messageTimestamp = message.timestamp ? parseInt(message.timestamp, 10) : null;
+        if (messageTimestamp) {
+          const ageSec = Math.floor(Date.now() / 1000) - messageTimestamp;
+          if (ageSec > 180) {
+            this.logger.warn(
+              `[Meta Webhook] ⏱️ Dropped delayed Meta webhook retry for MsgId "${messageId}" (${ageSec}s old). Preventing phantom execution.`,
+            );
+            return res.status(HttpStatus.OK).send('EVENT_RECEIVED');
+          }
+        }
+
+        // 2. In-memory fast RAM deduplication (<0.001ms)
         if (messageId) {
           if (this.isDuplicateWebhook(messageId)) {
             this.logger.warn(
               `[Meta Webhook] 🔁 Fast-path duplicate dropped in RAM for MsgId "${messageId}" from ${fromPhone}.`,
+            );
+            return res.status(HttpStatus.OK).send('EVENT_RECEIVED');
+          }
+
+          // 3. Persistent DB deduplication check across restarts
+          const alreadyLogged = await this.prisma.whatsAppLog.findFirst({
+            where: { metaMessageId: messageId },
+            select: { id: true },
+          });
+          if (alreadyLogged) {
+            this.logger.warn(
+              `[Meta Webhook] 🔁 Duplicate dropped (already recorded in DB) for MsgId "${messageId}".`,
             );
             return res.status(HttpStatus.OK).send('EVENT_RECEIVED');
           }
@@ -307,6 +332,7 @@ export class WhatsAppController {
                 text,
                 interactiveId,
                 phoneNumberId,
+                senderName,
               );
             } else {
               this.logger.warn(`[Meta Webhook] ⚠️ No active salon found to process incoming message from ${fromPhone}`);

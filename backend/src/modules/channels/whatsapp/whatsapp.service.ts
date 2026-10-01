@@ -19,6 +19,12 @@ import { WhatsAppSenderService, InteractiveButton, InteractiveListRow } from './
 import { WhatsAppTemplateService } from './services/whatsapp-template.service';
 import { WhatsAppSessionService, BookingLifecycleStage } from './services/whatsapp-session.service';
 import { WhatsAppActionHandlerService } from './services/whatsapp-action-handler.service';
+import { CatalogCacheService } from './actions/shared/catalog-cache.service';
+import { CheckinAction } from './actions/checkin.action';
+import { AppointmentAction } from './actions/appointment.action';
+import { DraftRecoveryAction } from './actions/draft-recovery.action';
+import { QuickBookingAction } from './actions/quick-booking.action';
+import { BookingAction } from './actions/booking.action';
 
 export { BookingLifecycleStage, InteractiveButton, InteractiveListRow };
 
@@ -53,16 +59,63 @@ export class WhatsAppService {
       this.whatsAppSessionService = new WhatsAppSessionService(this.prisma, this.whatsAppSenderService, this.whatsAppTemplateService);
     }
     if (!this.whatsAppActionHandlerService) {
-      this.whatsAppActionHandlerService = new WhatsAppActionHandlerService(
+      const catalogCache = new CatalogCacheService(this.prisma);
+      const checkinAction = new CheckinAction(
+        this.whatsAppSenderService,
+        this.whatsAppTemplateService,
+        this.appointmentsService as any,
+        this,
+      );
+      const appointmentAction = new AppointmentAction(
         this.prisma,
         this.whatsAppSenderService,
         this.whatsAppTemplateService,
         this.whatsAppSessionService,
         this.availabilityService as any,
-        this.quickCodeService as any,
         this.appointmentsService as any,
         this.cancellationService || (this.appointmentsService as any)?.cancellationService,
         this.rescheduleService || (this.appointmentsService as any)?.rescheduleService,
+        this,
+      );
+      const draftRecoveryAction = new DraftRecoveryAction(
+        this.prisma,
+        this.whatsAppSenderService,
+        this.whatsAppTemplateService,
+        this.whatsAppSessionService,
+        this.availabilityService as any,
+        this,
+      );
+      const quickBookingAction = new QuickBookingAction(
+        this.prisma,
+        this.whatsAppSenderService,
+        this.whatsAppTemplateService,
+        this.whatsAppSessionService,
+        this.availabilityService as any,
+        this.appointmentsService as any,
+        this,
+      );
+      const bookingAction = new BookingAction(
+        this.prisma,
+        this.whatsAppSenderService,
+        this.whatsAppTemplateService,
+        this.whatsAppSessionService,
+        this.availabilityService as any,
+        quickBookingAction,
+        this.appointmentsService as any,
+        this,
+      );
+
+      this.whatsAppActionHandlerService = new WhatsAppActionHandlerService(
+        this.prisma,
+        this.whatsAppSenderService,
+        this.whatsAppTemplateService,
+        this.whatsAppSessionService,
+        catalogCache,
+        checkinAction,
+        appointmentAction,
+        draftRecoveryAction,
+        quickBookingAction,
+        bookingAction,
         this,
       );
     }
@@ -112,6 +165,7 @@ export class WhatsAppService {
     messageText: string,
     interactiveId?: string,
     phoneNumberId?: string,
+    senderName?: string,
   ): Promise<{ replyMessage: string; state: ConversationState; metadata?: any }> {
     if (this.whatsAppActionHandlerService) {
       this.whatsAppActionHandlerService.setWhatsAppService(this);
@@ -121,6 +175,7 @@ export class WhatsAppService {
         messageText,
         interactiveId,
         phoneNumberId,
+        senderName,
       );
     }
     const cleanNumber = this.whatsAppSenderService.cleanPhone(customerPhone);
