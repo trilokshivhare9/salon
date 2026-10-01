@@ -120,9 +120,14 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
             const timeStr = TimeUtility.formatTime12h(appt.startAt, tz);
             const dateStr = TimeUtility.formatDateFriendly(appt.startAt, tz);
 
+            const displayName =
+              user.name && user.name !== 'WhatsApp Customer' && user.name !== 'Customer' && user.name !== 'Valued Client'
+                ? user.name
+                : 'there';
+
             const payload = this.whatsAppTemplateService.build2HourReminderPrompt(
               salon.name,
-              user.name || 'Customer',
+              displayName,
               appt.serviceNameSnapshot || appt.service?.name || 'Service',
               Number(appt.price) || 0,
               appt.stylist?.name || 'Stylist',
@@ -224,10 +229,13 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
           }
 
           // -----------------------------------------------------------------------
-          // STAGE 2: Imminent 15-Minute Arrival Alert & Warning
-          // Only for CONFIRMED appointments. Send [🚗 On My Way] and [❌ Cancel Visit].
+          // STAGE 2: 15-Minute Arrival Reminder
+          // Sends a friendly reminder ~15 minutes before appointment.
+          // Only for CONFIRMED appointments that haven't been reminded yet.
+          // Tight 14-16 min window ensures it fires once per 60s tick.
           // -----------------------------------------------------------------------
-          const stage2Max = now.plus({ minutes: 20 }).toJSDate();
+          const stage2Min = now.plus({ minutes: 14 }).toJSDate();
+          const stage2Max = now.plus({ minutes: 16 }).toJSDate();
 
           const stage2Appointments = (await this.prisma.appointment.findMany({
             where: {
@@ -235,7 +243,7 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
               status: AppointmentStatus.CONFIRMED,
               reminder10mSentAt: null,
               startAt: {
-                gte: now.toJSDate(),
+                gte: stage2Min,
                 lte: stage2Max,
               },
               reassignments: {
@@ -260,10 +268,14 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
             const user = appt.salonUser?.user;
             if (!user?.phone) continue;
             const timeStr = TimeUtility.formatTime12h(appt.startAt, tz);
+            const displayName =
+              user.name && user.name !== 'WhatsApp Customer' && user.name !== 'Customer' && user.name !== 'Valued Client'
+                ? user.name
+                : 'there';
 
             const payload = this.whatsAppTemplateService.build15MinArrivalPrompt(
               salon.name,
-              user.name || 'Customer',
+              displayName,
               appt.stylist?.name || 'Stylist',
               timeStr,
             );
@@ -285,17 +297,18 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
           }
 
           // -----------------------------------------------------------------------
-          // STAGE 2.5: T - 5 Minutes Grace Period Auto-Cancellation
-          // Customer was sent 15m alert and did NOT tap [🚗 On My Way] (status still CONFIRMED).
-          // Start time has 5m or less remaining -> Auto-cancel with +1 penalty strike!
-          // (Note: If customer clicked [🚗 On My Way], status transitioned to ON_THE_WAY,
-          // so they are NOT in status CONFIRMED and never auto-cancelled!).
+          // STAGE 2.5: Auto-Cancel After 10-Minute Response Window
+          // If the 15-min reminder was sent (reminder10mSentAt is set) and the
+          // customer has NOT responded (status still CONFIRMED, not ON_THE_WAY
+          // or CHECKED_IN), and we are within 5 minutes of start time → auto-cancel.
+          // This gives exactly 10 minutes to respond (reminder at T-15, cancel at T-5).
           // -----------------------------------------------------------------------
           const cutoff5m = now.plus({ minutes: 5 }).toJSDate();
           const ghost15mAppointments = (await this.prisma.appointment.findMany({
             where: {
               salonId: salon.id,
               status: AppointmentStatus.CONFIRMED,
+              reminder10mSentAt: { not: null },
               startAt: {
                 gte: todayStart,
                 lte: cutoff5m,

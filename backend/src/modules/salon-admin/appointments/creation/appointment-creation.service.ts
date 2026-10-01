@@ -23,6 +23,7 @@ import {
   LeavePortion,
 } from '@prisma/client';
 import { DateTime } from 'luxon';
+import { TimeUtility } from '../../../../common/utils/time.utility';
 import {
   appointmentInclude,
   formatAppointment,
@@ -255,10 +256,30 @@ export class AppointmentCreationService {
       second: 0,
       millisecond: 0,
     });
-    const endDt = startDt.plus({ minutes: totalDuration });
+
+    // Check if slot was squeezed and bounded to interval end
+    let effectiveDuration = totalDuration;
+    if (matchingSlot.endTime) {
+      const [endH, endM] = matchingSlot.endTime.split(':').map((v) => parseInt(v, 10));
+      let slotEndDt = DateTime.fromISO(dto.date, { zone: timezone }).set({
+        hour: endH,
+        minute: endM,
+        second: 0,
+        millisecond: 0,
+      });
+      if (slotEndDt < startDt) {
+        slotEndDt = slotEndDt.plus({ days: 1 });
+      }
+      const diffMins = Math.round(slotEndDt.diff(startDt, 'minutes').minutes);
+      if (diffMins > 0 && diffMins <= totalDuration) {
+        effectiveDuration = diffMins;
+      }
+    }
+    const endDt = startDt.plus({ minutes: effectiveDuration });
+
     const dayOfWeek = startDt.toFormat('cccc').toUpperCase() as DayOfWeek;
     const nowInSalonZone = DateTime.now().setZone(timezone);
-    if (startDt < nowInSalonZone.minus({ minutes: 2 })) {
+    if (startDt < nowInSalonZone.minus({ minutes: 5 })) {
       throw new ConflictException('The selected appointment time has already passed. Please select a fresh slot.');
     }
 
@@ -590,9 +611,9 @@ export class AppointmentCreationService {
               stylistId: assignedStylistId,
               serviceId: primaryService.id,
               serviceNameSnapshot,
-              durationMinutes: totalDuration,
+              durationMinutes: effectiveDuration,
               price: totalPrice,
-              appointmentDate: new Date(dto.date),
+              appointmentDate: TimeUtility.toDbDate(dto.date),
               startAt: startDt.toJSDate(),
               endAt: endDt.toJSDate(),
               bookingType,

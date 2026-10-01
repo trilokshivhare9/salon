@@ -421,7 +421,7 @@ export class RescheduleService {
           return tx.appointment.update({
             where: { id: appointmentId },
             data: {
-              appointmentDate: new Date(dto.newDate),
+              appointmentDate: TimeUtility.toDbDate(dto.newDate),
               startAt: startDt.toJSDate(),
               endAt: endDt.toJSDate(),
               stylistId: targetStylistId,

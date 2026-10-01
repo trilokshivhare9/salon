@@ -1,20 +1,65 @@
 import { Injectable } from '@nestjs/common';
 import { WhatsAppButtonId, InteractiveButton, InteractiveListRow } from './whatsapp-sender.service';
 import { TimeUtility } from '../../../../common/utils/time.utility';
+import { AppointmentStatus } from '@prisma/client';
 
 @Injectable()
 export class WhatsAppTemplateService {
   // 1. Welcome & Active Hub Templates
+  buildPendingRequestWelcomeMessage(salon: any, pendingAppointment: any) {
+    const salonName = salon?.name || 'our Salon';
+    const isLocalDev = process.env.NODE_ENV === 'development';
+    const localTag = isLocalDev ? '💻 [LOCAL DEV SERVER]\n\n' : '';
+    const tz = salon?.timezone || TimeUtility.DEFAULT_TIMEZONE;
+    const startTimeVal = pendingAppointment.startTime || pendingAppointment.startAt;
+    const date = startTimeVal ? TimeUtility.formatDateFriendly(startTimeVal, tz, 'dd LLL, EEE') : 'Today';
+    const time = startTimeVal ? TimeUtility.formatTime12h(startTimeVal, tz) : '';
+    const serviceName = pendingAppointment.service?.name || pendingAppointment.serviceNameSnapshot || 'Hair & Grooming';
+    const stylistText = pendingAppointment.stylist?.name ? `\n✂️ Stylist: *${pendingAppointment.stylist.name}*` : '';
+
+    return {
+      bodyText: `${localTag}👋 Welcome back to *${salonName}*!\n\n⏳ *Pending Quick Booking Request:*\n📅 ${date} at ${time}\n💈 Service: *${serviceName}*${stylistText}\n📊 Status: *Awaiting Salon Confirmation* ⏳\n\nThe salon desk is currently reviewing your request. We'll notify you here the moment it's confirmed!`,
+      interactiveType: 'button' as const,
+      buttons: [
+        { id: WhatsAppButtonId.CANCEL_PENDING_QUICK, title: '❌ Cancel Request' },
+        { id: WhatsAppButtonId.INFO, title: '📍 Salon Info' },
+      ],
+    };
+  }
+
+  buildPendingModificationBlockedReply() {
+    return {
+      bodyText: `⚠️ *Request Awaiting Salon Approval*\n\nYour quick booking request has been sent to the salon desk and is awaiting review.\n\nYou cannot add extra services or reschedule until the salon desk accepts your booking.\n\nWould you like to cancel this request instead?`,
+      interactiveType: 'button' as const,
+      buttons: [
+        { id: WhatsAppButtonId.CANCEL_PENDING_QUICK, title: '❌ Cancel Request' },
+        { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
+      ],
+    };
+  }
+
   buildWelcomeMessage(salon: any, activeAppointment?: any) {
     const salonName = salon?.name || 'our Salon';
+    const isLocalDev = process.env.NODE_ENV === 'development';
+    const localTag = isLocalDev ? '💻 [LOCAL DEV SERVER]\n\n' : '';
 
-    if (activeAppointment) {
+    if (activeAppointment && activeAppointment.status !== AppointmentStatus.PENDING_ACCEPTANCE) {
       const tz = salon?.timezone || TimeUtility.DEFAULT_TIMEZONE;
       const startTimeVal = activeAppointment.startTime || activeAppointment.startAt;
       const date = startTimeVal ? TimeUtility.formatDateFriendly(startTimeVal, tz, 'dd LLL, EEE') : '';
       const time = startTimeVal ? TimeUtility.formatTime12h(startTimeVal, tz) : '';
+      const statusMap: Record<string, string> = {
+        BOOKED: 'Confirmed',
+        CONFIRMED: 'Confirmed',
+        ON_THE_WAY: 'On The Way',
+        CHECKED_IN: 'Checked In',
+        SEATED_IN_CHAIR: 'In Service',
+        PENDING_RESCHEDULE: 'Reschedule Requested',
+      };
+      const friendlyStatus = statusMap[activeAppointment.status] || activeAppointment.status;
+
       return {
-        bodyText: `👋 Welcome back to *${salonName}*!\n\n📋 *Active Reservation:*\n📅 ${date} at ${time}\n💈 Status: *${activeAppointment.status}*\n\nHow can we assist you today?`,
+        bodyText: `${localTag}👋 Welcome back to *${salonName}*!\n\n📋 *Active Reservation:*\n📅 ${date} at ${time}\n💈 Status: *${friendlyStatus}*\n\nHow can we assist you today?`,
         interactiveType: 'button' as const,
         buttons: [
           { id: WhatsAppButtonId.ADD_SERVICE, title: '➕ Add Service' },
@@ -25,7 +70,7 @@ export class WhatsAppTemplateService {
     }
 
     return {
-      bodyText: `👋 Welcome to *${salonName}*!\n\nBook your appointment in a few quick taps or choose Quick Book for express walk-in check-in.`,
+      bodyText: `${localTag}👋 Welcome to *${salonName}*!\n\nBook your appointment in a few quick taps or choose Quick Book for express walk-in check-in.`,
       interactiveType: 'button' as const,
       buttons: [
         { id: WhatsAppButtonId.BOOK, title: '📅 Book Slot' },
@@ -176,6 +221,13 @@ export class WhatsAppTemplateService {
     };
   }
 
+  // 8B. Collect Customer Name Prompt
+  buildCollectNamePrompt(details: { serviceName: string; dateStr: string; timeStr: string }) {
+    return {
+      bodyText: `👤 *What is your name?*\n\nTo complete your booking for *${details.serviceName}* on *${details.dateStr} at ${details.timeStr}*, please reply with your *full name*:`,
+    };
+  }
+
   // 9. Booking Confirmation Prompt Template
   buildBookingConfirmationPrompt(summary: {
     serviceName: string;
@@ -183,9 +235,15 @@ export class WhatsAppTemplateService {
     dateStr: string;
     timeStr: string;
     price: number;
+    customerName?: string | null;
+    isUrgentWithin15Min?: boolean;
   }) {
+    const nameLine = summary.customerName ? `👤 *Name:* ${summary.customerName}\n` : '';
+    const urgentNotice = summary.isUrgentWithin15Min
+      ? `\n⚡ *Urgent Slot (< 15 mins):* Because this slot starts very soon, confirming will send an instant *Quick Booking request* directly to the salon desk to accept immediately.\n`
+      : '';
     return {
-      bodyText: `📋 *Booking Confirmation*\n\n✂️ *Service:* ${summary.serviceName}\n💇‍♂️ *Stylist:* ${summary.staffName}\n📅 *Date:* ${summary.dateStr}\n🕒 *Time:* ${summary.timeStr}\n💵 *Price:* ₹${summary.price}\n\nWould you like to confirm this reservation?`,
+      bodyText: `📋 *Booking Confirmation*\n\n${nameLine}✂️ *Service:* ${summary.serviceName}\n💇‍♂️ *Stylist:* ${summary.staffName}\n📅 *Date:* ${summary.dateStr}\n🕒 *Time:* ${summary.timeStr}\n💵 *Price:* ₹${summary.price}\n${urgentNotice}\nWould you like to confirm this reservation?`,
       interactiveType: 'button' as const,
       buttons: [
         { id: WhatsAppButtonId.CONFIRM_YES, title: '✅ Confirm Booking' },
@@ -205,7 +263,6 @@ export class WhatsAppTemplateService {
       bodyText: `🎉 *Booking Confirmed!*\n\nYour appointment has been successfully scheduled.\n\n📅 *Date:* ${date}\n🕒 *Time:* ${time}\n\nWe look forward to serving you!`,
       interactiveType: 'button' as const,
       buttons: [
-        { id: WhatsAppButtonId.BOOK, title: '📋 Active Booking' },
         { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
       ],
     };
@@ -335,12 +392,89 @@ export class WhatsAppTemplateService {
     };
   }
 
-  buildQuickBookPendingReply(appointment: any) {
+  buildQuickBookPendingReply(appointment: any, isUrgentWithin15Min = false) {
+    if (isUrgentWithin15Min) {
+      return {
+        bodyText: `⚡ *Request Sent to Salon!*\n\nSince your appointment is in *less than 15 minutes*, this slot is treated as a *Quick Booking* directly sent to the salon desk.\n\n🔔 The salon owner will review and confirm your slot right away. We'll notify you here the moment it's confirmed!`,
+        interactiveType: 'button' as const,
+        buttons: [
+          { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
+        ],
+      };
+    }
+
     return {
-      bodyText: `⏳ *REQUEST SENT TO SALON!*\n\nYour quick booking request for *${appointment?.serviceNameSnapshot || 'Service'}* is *Pending Approval* by the salon desk. We will notify you once confirmed!`,
+      bodyText: `⏳ *Request Sent to Salon!*\n\nYour quick booking request for *${appointment?.serviceNameSnapshot || 'Service'}* is *Pending Approval* by the salon. We'll notify you once confirmed!`,
       interactiveType: 'button' as const,
       buttons: [
-        { id: WhatsAppButtonId.BOOK, title: '📋 Check Status' },
+        { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
+      ],
+    };
+  }
+
+  buildPendingRequestConflictPrompt(details: { serviceName: string; timeStr: string; stylistName?: string }) {
+    const stylistLine = details.stylistName ? `\n✂️ Stylist: *${details.stylistName}*` : '';
+    return {
+      bodyText:
+        `⚠️ *Quick Booking Already In Progress*\n\n` +
+        `You already have an active Quick Booking request awaiting salon confirmation:\n\n` +
+        `📅 Time: *${details.timeStr}*\n` +
+        `💈 Service: *${details.serviceName}*` +
+        `${stylistLine}\n` +
+        `📊 Status: *Awaiting Salon Confirmation* ⏳\n\n` +
+        `Please wait for the salon owner to confirm, or cancel your current request to choose another slot:`,
+      interactiveType: 'button' as const,
+      buttons: [
+        { id: WhatsAppButtonId.CANCEL_PENDING_QUICK, title: '❌ Cancel Request' },
+        { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
+      ],
+    };
+  }
+
+  buildPendingRequestCancelledReply() {
+    return {
+      bodyText:
+        `✅ *Pending Request Cancelled*\n\n` +
+        `Your previous booking request has been cancelled with *no penalty*. You are free to book a new appointment!`,
+      interactiveType: 'button' as const,
+      buttons: [
+        { id: WhatsAppButtonId.BOOK, title: '📅 Book Appointment' },
+        { id: WhatsAppButtonId.QUICK_BOOK, title: '⚡ Quick Book' },
+        { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
+      ],
+    };
+  }
+
+  buildSlotAutoRefreshedReply(details: {
+    oldTimeStr: string;
+    newTimeStr: string;
+    serviceName: string;
+    stylistName?: string;
+    minutesUntilNewSlot?: number;
+  }) {
+    const countdown =
+      details.minutesUntilNewSlot !== undefined && details.minutesUntilNewSlot > 0
+        ? ` (in ${Math.round(details.minutesUntilNewSlot)} mins)`
+        : '';
+    const stylistLine = details.stylistName ? `\n• *Specialist:* *${details.stylistName}*` : '';
+
+    const introText =
+      details.oldTimeStr && details.newTimeStr && details.oldTimeStr !== details.newTimeStr
+        ? `Your previous *${details.oldTimeStr}* slot has just passed by clock.\n\nWe've held the next earliest slot for you:`
+        : `We've refreshed and held the earliest available slot for you:`;
+
+    return {
+      headerText: '⚡ Slot Time Updated',
+      bodyText:
+        `⚡ *SLOT TIME UPDATED*\n\n` +
+        `${introText}\n` +
+        `• *Earliest Slot:* *Today at ${details.newTimeStr}*${countdown}\n` +
+        `• *Service:* *${details.serviceName}*` +
+        stylistLine +
+        `\n\nTap *⚡ Confirm Quick Book* below to confirm right away!`,
+      interactiveType: 'button' as const,
+      buttons: [
+        { id: WhatsAppButtonId.CONFIRM_QUICK, title: '⚡ Confirm Quick Book' },
         { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
       ],
     };
@@ -353,7 +487,7 @@ export class WhatsAppTemplateService {
         bodyText: `⚠️ This option has expired. You can check your last booking or start a new one.`,
         interactiveType: 'button' as const,
         buttons: [
-          { id: WhatsAppButtonId.RESUME_BOOKING, title: '📋 Check Last Booking' },
+          { id: WhatsAppButtonId.CHECK_LAST_BOOKING, title: '📋 Check Booking' },
           { id: WhatsAppButtonId.NEW_BOOKING, title: '📅 New Booking' },
         ],
       };
@@ -365,6 +499,71 @@ export class WhatsAppTemplateService {
       buttons: [
         { id: WhatsAppButtonId.RESUME_BOOKING, title: '▶️ Continue Booking' },
         { id: WhatsAppButtonId.NEW_BOOKING, title: '📅 New Booking' },
+      ],
+    };
+  }
+
+  // 15B. Booking Details & Status Template
+  buildBookingDetailsPrompt(appointment: any, salon: any) {
+    const tz = salon?.timezone || TimeUtility.DEFAULT_TIMEZONE;
+    const startTimeVal = appointment?.startTime || appointment?.startAt;
+    const date = startTimeVal ? TimeUtility.formatDateFriendly(startTimeVal, tz, 'dd LLL, EEEE') : 'N/A';
+    const time = startTimeVal ? TimeUtility.formatTime12h(startTimeVal, tz) : 'N/A';
+    const serviceName = appointment?.service?.name || appointment?.serviceNameSnapshot || 'Service';
+    const stylistName = appointment?.stylist?.name || 'Any Specialist';
+    const price = appointment?.price || appointment?.totalPrice || appointment?.priceSnapshot || '0';
+
+    const activeStatuses: AppointmentStatus[] = [
+      AppointmentStatus.BOOKED,
+      AppointmentStatus.CONFIRMED,
+      AppointmentStatus.ON_THE_WAY,
+      AppointmentStatus.CHECKED_IN,
+      AppointmentStatus.SEATED_IN_CHAIR,
+      AppointmentStatus.PENDING_RESCHEDULE,
+    ];
+
+    if (activeStatuses.includes(appointment?.status)) {
+      return {
+        bodyText: `📋 *Your Active Booking Details:*\n\n✂️ *Service:* ${serviceName}\n💇‍♂️ *Stylist:* ${stylistName}\n📅 *Date:* ${date}\n🕒 *Time:* ${time}\n💈 *Status:* *${appointment.status}*\n💵 *Price:* ₹${price}\n\nHow would you like to proceed?`,
+        interactiveType: 'button' as const,
+        buttons: [
+          { id: WhatsAppButtonId.RESCHEDULE, title: '🔄 Reschedule' },
+          { id: WhatsAppButtonId.CANCEL_APPT, title: '✕ Cancel Booking' },
+          { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
+        ],
+      };
+    }
+
+    if (appointment?.status === AppointmentStatus.PENDING_ACCEPTANCE) {
+      return {
+        bodyText: `⏳ *Booking Request Pending Approval:*\n\n✂️ *Service:* ${serviceName}\n📅 *Date:* ${date} at ${time}\n💈 *Status:* *Pending Salon Acceptance*\n\nYour request has been received. The salon will notify you once confirmed!`,
+        interactiveType: 'button' as const,
+        buttons: [
+          { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
+        ],
+      };
+    }
+
+    return {
+      bodyText: `📋 *Your Last Booking:*\n\n✂️ *Service:* ${serviceName}\n📅 *Date:* ${date} at ${time}\n💈 *Status:* *${appointment?.status || 'N/A'}*\n\nWould you like to book a new appointment?`,
+      interactiveType: 'button' as const,
+      buttons: [
+        { id: WhatsAppButtonId.BOOK, title: '📅 Book Slot' },
+        { id: WhatsAppButtonId.QUICK_BOOK, title: '⚡ Quick Book' },
+        { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
+      ],
+    };
+  }
+
+  buildNoBookingsReply(salon: any) {
+    const salonName = salon?.name || 'our Salon';
+    return {
+      bodyText: `ℹ️ You don't have any bookings with *${salonName}* yet.\n\nWould you like to book your first appointment?`,
+      interactiveType: 'button' as const,
+      buttons: [
+        { id: WhatsAppButtonId.BOOK, title: '📅 Book Slot' },
+        { id: WhatsAppButtonId.QUICK_BOOK, title: '⚡ Quick Book' },
+        { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
       ],
     };
   }
@@ -447,10 +646,10 @@ export class WhatsAppTemplateService {
     timeStr: string,
   ) {
     return {
-      bodyText: `🚨 *URGENT: ARRIVAL CHECK-IN REQUIRED*\n\nHi *${userName || 'Customer'}*, your appointment at *${salonName}* with *${stylistName}* starts in ~15 mins (*${timeStr}*).\n\n⚠️ *Arrival Notice:* We hold your chair strictly for 5 minutes after start time before automatic slot cancellation.\n\nPlease update your status below:`,
+      bodyText: `👋 Hi *${userName || 'there'}*, just a reminder!\n\nYour appointment with *${stylistName}* at *${salonName}* is coming up at *${timeStr}*.\n\nPlease tap below to let us know your status:\n\n_If we don't hear back in 10 minutes, your slot will be automatically released._`,
       interactiveType: 'button' as const,
       buttons: [
-        { id: WhatsAppButtonId.ETA_ARRIVED, title: "📍 I'm Arrived" },
+        { id: WhatsAppButtonId.ETA_ARRIVED, title: "📍 I've Arrived" },
         { id: WhatsAppButtonId.ETA_ON_THE_WAY, title: '🚗 On My Way' },
         { id: WhatsAppButtonId.ETA_CANCEL, title: '❌ Cancel Visit' },
       ],

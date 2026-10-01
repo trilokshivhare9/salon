@@ -6,6 +6,7 @@ import { WhatsAppTemplateService } from './whatsapp-template.service';
 
 export enum BookingLifecycleStage {
   PRE_BOOKING = 'PRE_BOOKING',
+  PENDING_REQUEST = 'PENDING_REQUEST',
   POST_BOOKING = 'POST_BOOKING',
   IDLE = 'IDLE',
 }
@@ -18,7 +19,7 @@ export class WhatsAppSessionService {
     private prisma: PrismaService,
     private sender: WhatsAppSenderService,
     private templates: WhatsAppTemplateService,
-  ) {}
+  ) { }
 
   getBookingType(conversation: { quickCodeVerifiedAt?: Date | null }): 'NORMAL' | 'QUICK' {
     if (!conversation?.quickCodeVerifiedAt) {
@@ -31,7 +32,11 @@ export class WhatsAppSessionService {
   determineLifecycleStage(
     conversation: any,
     activeAppointment: any,
+    pendingAppointment?: any,
   ): BookingLifecycleStage {
+    if (pendingAppointment) {
+      return BookingLifecycleStage.PENDING_REQUEST;
+    }
     if (activeAppointment) {
       return BookingLifecycleStage.POST_BOOKING;
     }
@@ -61,7 +66,7 @@ export class WhatsAppSessionService {
     // Navigation buttons & greetings are always valid globally
     const normalizedInput = (input || '').trim().toLowerCase();
     if (
-      ['btn_menu', 'btn_start', 'btn_services', 'btn_quick_book', 'btn_book', 'btn_info', 'btn_resume_booking', 'btn_new_booking'].includes(input) ||
+      ['btn_menu', 'btn_start', 'btn_services', 'btn_quick_book', 'btn_book', 'btn_info', 'btn_resume_booking', 'btn_last_booking', 'btn_new_booking'].includes(input) ||
       ['hi', 'hello', 'start', 'menu', 'restart', 'reset'].includes(normalizedInput)
     ) {
       return true;
@@ -69,12 +74,25 @@ export class WhatsAppSessionService {
 
     if (['btn_cancel_yes', 'btn_cancel_no'].includes(input) && conversationState === ConversationState.CONFIRM_CANCEL) return true;
     if (['btn_confirm_yes', 'btn_confirm_no', 'btn_confirm'].includes(input) && conversationState === ConversationState.CONFIRMATION) return true;
-    if (['btn_confirm_quick', 'confirm'].includes(input) && conversationState === ConversationState.QUICK_BOOK_CONFIRM) return true;
+    if (['btn_confirm_quick', 'quick_book_confirm', 'confirm'].includes(input) && conversationState === ConversationState.QUICK_BOOK_CONFIRM) return true;
     if (['btn_reschedule', 'btn_change_stylist', 'btn_keep_appt'].includes(input) && conversationState === ConversationState.ADDON_CONFLICT) return true;
+
+    if (stage === BookingLifecycleStage.PENDING_REQUEST) {
+      // Pending quick booking queue: user can only cancel request or view info
+      if (['btn_cancel_pending_quick', 'btn_cancel_appt', 'btn_info'].includes(input)) {
+        return true;
+      }
+      // Explicitly disallow modifying an unconfirmed request
+      if (['btn_add_service', 'btn_add_addon', 'btn_reschedule', 'btn_running_late', 'btn_eta_late_15', 'btn_eta_arrived'].includes(input)) {
+        return false;
+      }
+      return true;
+    }
 
     if (stage === BookingLifecycleStage.PRE_BOOKING) {
       switch (conversationState) {
         case ConversationState.QUICK_BOOK_CODE:
+        case ConversationState.COLLECT_NAME:
           return true;
         case ConversationState.SELECT_CATEGORY:
           return input.startsWith('cat_') || input.startsWith('gender_select_') || input === 'btn_switch_gender';
@@ -88,11 +106,15 @@ export class WhatsAppSessionService {
           return input.startsWith('slot_');
         case ConversationState.SELECT_ADDON:
           return input.startsWith('addon_');
+        case ConversationState.CONFIRMATION:
+          return ['btn_confirm_yes', 'btn_confirm_no', 'btn_confirm', 'btn_confirm_quick', 'quick_book_confirm'].includes(input) || input.startsWith('slot_');
+        case ConversationState.QUICK_BOOK_CONFIRM:
+          return ['btn_confirm_quick', 'quick_book_confirm', 'confirm'].includes(input) || input === 'btn_services' || input === 'btn_start';
         default:
           return false;
       }
     } else if (stage === BookingLifecycleStage.POST_BOOKING) {
-      if (['btn_add_service', 'btn_add_addon', 'btn_reschedule', 'btn_cancel_appt', 'btn_running_late', 'btn_eta_late_15', 'btn_eta_arrived', 'btn_eta_on_the_way', 'btn_eta_cancel', 'remind_confirm', 'remind_reschedule', 'remind_cancel', 'btn_book', 'btn_cancel_no', 'btn_cancel_yes'].includes(input)) {
+      if (['btn_add_service', 'btn_add_addon', 'btn_reschedule', 'btn_cancel_appt', 'btn_running_late', 'btn_eta_late_15', 'btn_eta_arrived', 'btn_eta_on_the_way', 'btn_eta_cancel', 'remind_confirm', 'remind_reschedule', 'remind_cancel', 'btn_book', 'btn_cancel_no', 'btn_cancel_yes', 'btn_last_booking', 'btn_resume_booking', 'btn_new_booking'].includes(input)) {
         return true;
       }
       if (input.startsWith('svc_') || input.startsWith('remind_') || input.startsWith('appt_') || input.startsWith('propose_') || input.startsWith('late_') || input.startsWith('move_up_')) {
@@ -165,7 +187,7 @@ export class WhatsAppSessionService {
     }
   }
 
-  async getOrCreateSession(salonId: string, cleanNumber: string) {
+  async getOrCreateSession(salonId: string, cleanNumber: string, senderName?: string) {
     const key = this.getUserKey(salonId, cleanNumber);
     const now = Date.now();
 
@@ -179,12 +201,18 @@ export class WhatsAppSessionService {
       user = cached.user;
       salonUser = cached.salonUser;
     } else {
-      user = await this.prisma.user.findUnique({
-        where: { phone: cleanNumber },
+      const plusNumber = cleanNumber.startsWith('+') ? cleanNumber : `+${cleanNumber}`;
+      const noPlusNumber = cleanNumber.replace(/^\+/, '');
+
+      user = await this.prisma.user.findFirst({
+        where: {
+          phone: { in: [cleanNumber, plusNumber, noPlusNumber] },
+        },
+        orderBy: { createdAt: 'asc' },
       });
       if (!user) {
         user = await this.prisma.user.create({
-          data: { phone: cleanNumber, name: null },
+          data: { phone: plusNumber, name: senderName || null },
         });
       }
 
@@ -200,6 +228,16 @@ export class WhatsAppSessionService {
       }
 
       this.userCache.set(key, { user, salonUser, cachedAt: now });
+    }
+
+    // Auto-populate user name from WhatsApp profile if not yet set or placeholder
+    if (senderName && (!user.name || user.name === 'WhatsApp Customer' || user.name === 'Customer')) {
+      user = await this.prisma.user.update({
+        where: { id: user.id },
+        data: { name: senderName },
+      });
+      const entry = this.userCache.get(key);
+      if (entry) entry.user = user;
     }
 
     // 2. Fetch Conversation by unique index (Always 100% authoritative and in-sync)

@@ -8,6 +8,7 @@ import { DateTime } from 'luxon';
 import { DayOfWeek, AppointmentStatus } from '@prisma/client';
 import { AvailabilityEngineService, MinuteInterval } from './availability-engine.service';
 import { TimeUtility } from '../../../common/utils/time.utility';
+import { SlotSqueezePolicy } from './policies/slot-squeeze.policy';
 
 export type AvailabilityStatus =
   | 'AVAILABLE'
@@ -25,6 +26,8 @@ export interface AvailableSlotResponse {
   isoEndTime: string;      // UTC ISO timestamp
   availableStaffCount: number;
   eligibleStaffIds: string[];
+  isSqueezed?: boolean;
+  squeezedMinutes?: number;
 }
 
 export interface AvailabilityResult {
@@ -86,7 +89,8 @@ export class AvailabilityService {
   constructor(
     private prisma: PrismaService,
     private engine: AvailabilityEngineService,
-  ) {}
+    private squeezePolicy: SlotSqueezePolicy,
+  ) { }
 
   private parseTimeStringToMinutes(timeStr: string): number {
     return this.engine.parseTimeStringToMinutes(timeStr);
@@ -203,7 +207,7 @@ export class AvailabilityService {
         ? candidateStepMinutes
         : (totalServiceDuration > 0 ? totalServiceDuration : 15);
 
-    const targetDateObj = new Date(`${dateStr}T00:00:00.000Z`);
+    const targetDateObj = TimeUtility.toDbDate(dateStr);
 
     // Check if the store is closed via a SalonClosure record on target date
     const activeClosure = await this.prisma.salonClosure.findFirst({
@@ -294,7 +298,7 @@ export class AvailabilityService {
     // 4. Fetch existing active blocking appointments for eligible stylists on this date
     const apptWhere: any = {
       salonId,
-      appointmentDate: new Date(dateStr),
+      appointmentDate: TimeUtility.toDbDate(dateStr),
       status: { in: ['BOOKED', 'CONFIRMED', 'ON_THE_WAY', 'CHECKED_IN', 'SEATED_IN_CHAIR'] },
     };
     let excludedStartMin: number | null = null;
@@ -363,15 +367,18 @@ export class AvailabilityService {
     // 5. Continuous Free-Interval Calculation per Stylist via AvailabilityEngineService
     const slotsMap = new Map<string, { startTime: string; endTime: string; eligibleStylistIds: Set<string> }>();
 
-    // Advance notice check if booking for today: zero artificial buffer, only upcoming slots
+    // Advance notice check if booking for today: zero artificial buffer, with 15-minute checkout grace period
     let earliestAllowedMinutes = 0;
+    let nowMinuteOfDay = 0;
     if (requestedDate.hasSame(todayInSalonZone, 'day')) {
-      const nowMinuteOfDay = nowInSalonZone.hour * 60 + nowInSalonZone.minute;
+      nowMinuteOfDay = nowInSalonZone.hour * 60 + nowInSalonZone.minute;
+      // 15-minute checkout grace window so in-flight slots don't expire mid-tap
+      const graceMinuteOfDay = Math.max(0, nowMinuteOfDay - 15);
       if (candidateStepMinutes !== undefined && candidateStepMinutes > 0) {
-        const rem = nowMinuteOfDay % stepMinutes;
-        earliestAllowedMinutes = rem === 0 ? nowMinuteOfDay : nowMinuteOfDay + (stepMinutes - rem);
+        const rem = graceMinuteOfDay % stepMinutes;
+        earliestAllowedMinutes = rem === 0 ? graceMinuteOfDay : graceMinuteOfDay + (stepMinutes - rem);
       } else {
-        earliestAllowedMinutes = nowMinuteOfDay;
+        earliestAllowedMinutes = graceMinuteOfDay;
       }
     }
 
@@ -424,36 +431,50 @@ export class AvailabilityService {
         busyIntervals,
       );
 
-      // Filter intervals that can accommodate the continuous total service duration
+      // Filter intervals that can accommodate the continuous total service duration (with human squeeze tolerance)
       const validFreeIntervals = freeIntervals.filter(
-        (intv) => intv.end - intv.start >= totalServiceDuration,
+        (intv) => this.squeezePolicy.canFit(intv.end - intv.start, totalServiceDuration).fits,
       );
 
       // Generate candidate start times within continuous free intervals using the service-duration interval
       for (const interval of validFreeIntervals) {
         let candidateStart = interval.start;
-        // If an explicit custom step was requested, align candidate start to that step
-        if (candidateStepMinutes !== undefined && candidateStepMinutes > 0) {
+
+        // If checking for TODAY and this interval started before or at current time:
+        // Snap candidateStart to the nearest upcoming 5-minute mark from now (with a 1-minute lead buffer)
+        if (requestedDate.hasSame(todayInSalonZone, 'day') && candidateStart <= nowMinuteOfDay) {
+          const targetMinute = nowMinuteOfDay + 1;
+          const next5MinMark = Math.ceil(targetMinute / 5) * 5;
+          candidateStart = Math.max(interval.start, next5MinMark);
+        } else if (candidateStepMinutes !== undefined && candidateStepMinutes > 0) {
           const remainder = candidateStart % stepMinutes;
           if (remainder !== 0) {
             candidateStart += stepMinutes - remainder;
           }
         }
 
-        while (candidateStart + totalServiceDuration <= interval.end) {
+        while (candidateStart < interval.end) {
+          const remainingMinutes = interval.end - candidateStart;
+          const fit = this.squeezePolicy.canFit(remainingMinutes, totalServiceDuration);
+          if (!fit.fits) {
+            break;
+          }
+
           if (
             !requestedDate.hasSame(todayInSalonZone, 'day') ||
             candidateStart >= earliestAllowedMinutes
           ) {
             const timeKey = this.formatMinutesToTime(candidateStart);
-            const endTimeKey = this.formatMinutesToTime(candidateStart + totalServiceDuration);
+            const endTimeKey = this.formatMinutesToTime(candidateStart + fit.effectiveDuration);
 
             if (!slotsMap.has(timeKey)) {
               slotsMap.set(timeKey, {
                 startTime: timeKey,
                 endTime: endTimeKey,
                 eligibleStylistIds: new Set<string>(),
-              });
+                isSqueezed: fit.isSqueezed,
+                squeezedMinutes: fit.squeezedMinutes,
+              } as any);
             }
             slotsMap.get(timeKey)!.eligibleStylistIds.add(stylist.id);
           }
@@ -474,15 +495,15 @@ export class AvailabilityService {
 
     // 6. Format and sort final slots
     const availableSlots: AvailableSlotResponse[] = Array.from(slotsMap.values())
-      .map((slot) => {
-        const [h, m] = slot.startTime.split(':').map((v) => parseInt(v, 10));
-        const [eh, em] = slot.endTime.split(':').map((v) => parseInt(v, 10));
+      .map((slot: any) => {
+        const [h, m] = slot.startTime.split(':').map((v: string) => parseInt(v, 10));
+        const [eh, em] = slot.endTime.split(':').map((v: string) => parseInt(v, 10));
 
         const isoStart = requestedDate.set({ hour: h, minute: m, second: 0, millisecond: 0 }).toUTC().toISO()!;
         const isoEnd = requestedDate.set({ hour: eh, minute: em, second: 0, millisecond: 0 }).toUTC().toISO()!;
 
         // Sort eligible stylists deterministically matching eligibleStylists order
-        const sortedStaffIds = Array.from(slot.eligibleStylistIds).sort(
+        const sortedStaffIds = Array.from(slot.eligibleStylistIds as Set<string>).sort(
           (a, b) => (stylistIdOrderMap.get(a) ?? 0) - (stylistIdOrderMap.get(b) ?? 0),
         );
 
@@ -493,6 +514,8 @@ export class AvailabilityService {
           isoEndTime: isoEnd,
           availableStaffCount: sortedStaffIds.length,
           eligibleStaffIds: sortedStaffIds,
+          isSqueezed: slot.isSqueezed || false,
+          squeezedMinutes: slot.squeezedMinutes || 0,
         };
       })
       .sort((a, b) => a.startTime.localeCompare(b.startTime));
@@ -631,7 +654,7 @@ export class AvailabilityService {
       select: { timezone: true },
     });
     const tz = salon?.timezone || TimeUtility.DEFAULT_TIMEZONE;
-    const todayStr = TimeUtility.now(tz).toISODate()!;
+    const todayStr = TimeUtility.getTodayDate(tz);
 
     try {
       const avail = await this.getAvailableSlots(

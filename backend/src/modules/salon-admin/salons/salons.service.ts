@@ -16,6 +16,7 @@ import { CreateClosureDto } from './dto/create-closure.dto';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { DateTime } from 'luxon';
+import { TimeUtility } from '../../../common/utils/time.utility';
 import { AdminRole, SalonStatus, DayOfWeek, AppointmentStatus } from '@prisma/client';
 import { WhatsAppService } from '../../channels/whatsapp/whatsapp.service';
 import { AppointmentsService } from '../appointments/appointments.service';
@@ -931,8 +932,8 @@ Here are your salon owner login credentials:
       data: {
         salonId,
         closureType: dto.closureType,
-        startDate: new Date(`${dto.startDate}T00:00:00Z`),
-        endDate: new Date(`${dto.endDate}T00:00:00Z`),
+        startDate: TimeUtility.toDbDate(dto.startDate),
+        endDate: TimeUtility.toDbDate(dto.endDate),
         isPartialDay: dto.isPartialDay || false,
         startTime: dto.startTime || null,
         endTime: dto.endTime || null,

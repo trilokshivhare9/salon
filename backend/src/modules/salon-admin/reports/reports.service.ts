@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../../../database/prisma.service';
 import { DateTime } from 'luxon';
+import { TimeUtility } from '../../../common/utils/time.utility';
 import { AppointmentStatus } from '@prisma/client';
 
 interface CachedQuota {
@@ -165,7 +166,7 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
     const targetDateIso = targetDate.toISODate()!;
     const dayStart = targetDate.startOf('day').toJSDate();
     const dayEnd = targetDate.endOf('day').toJSDate();
-    const dateUtcMidnight = new Date(`${targetDateIso}T00:00:00.000Z`);
+    const dateUtcMidnight = TimeUtility.toDbDate(targetDateIso);
 
     const [todayAppointments, salonMetrics, whatsappQuota, salonInfo] = await Promise.all([
       // 1. Appointments for the day (including active appointments or appointments proposed for this day)
