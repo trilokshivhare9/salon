@@ -1,4 +1,5 @@
-import { ApiClient } from './api.js';
+import { ApiClient, PlatformAuth } from './api.js';
+import { LocationPicker } from './location-picker.js';
 
 export class PlatformAdminPortal {
   constructor(containerId, currentUser = null) {
@@ -27,8 +28,8 @@ export class PlatformAdminPortal {
         </div>
       `;
       document.getElementById('btn-admin-login')?.addEventListener('click', async () => {
-        await ApiClient.logout();
-        window.location.hash = '#super-admin';
+        await PlatformAuth.logout();
+        window.location.hash = '#superadmin-login';
         window.location.reload();
       });
     }
@@ -557,8 +558,8 @@ export class PlatformAdminPortal {
 
     // Logout
     document.getElementById('btn-super-logout')?.addEventListener('click', async () => {
-      await ApiClient.logout();
-      window.location.hash = '#login';
+      await PlatformAuth.logout();
+      window.location.hash = '#superadmin-login';
       window.location.reload();
     });
   }
@@ -581,8 +582,8 @@ export class PlatformAdminPortal {
         </div>
       `;
       document.getElementById('btn-admin-login')?.addEventListener('click', async () => {
-        await ApiClient.logout();
-        window.location.hash = '#super-admin';
+        await PlatformAuth.logout();
+        window.location.hash = '#superadmin-login';
         window.location.reload();
       });
     }
@@ -858,14 +859,8 @@ export class PlatformAdminPortal {
                   </div>
                 </div>
 
-                <!-- Shop Address / Landmark -->
-                <div class="form-group" style="margin-bottom: 16px;">
-                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                    <label style="margin-bottom: 0;">Shop Address / Landmark</label>
-                    <span style="font-size: 0.72rem; color: var(--text-muted);">(Optional)</span>
-                  </div>
-                  <input type="text" class="form-control" id="prov-address" placeholder="e.g. Shop 12, Main Market, Near Rajwada" />
-                </div>
+                <!-- 4-in-1 Zero-Cost Location & GPS Directions Component -->
+                <div id="prov-location-picker-container"></div>
 
                 <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px;">
                   <button type="button" class="btn btn-secondary" id="btn-cancel-super-modal">Cancel</button>
@@ -991,6 +986,24 @@ export class PlatformAdminPortal {
     document.getElementById('btn-close-super-modal')?.addEventListener('click', () => { modalContainer.innerHTML = ''; });
     document.getElementById('btn-cancel-super-modal')?.addEventListener('click', () => { modalContainer.innerHTML = ''; });
 
+    // Mount Zero-Cost 4-in-1 Location & GPS Direction Engine
+    const locationPicker = new LocationPicker('prov-location-picker-container', {
+      getCity: () => document.getElementById('prov-city')?.value?.trim() || '',
+      onChange: (locData) => {
+        if (locData.city) {
+          const cityEl = document.getElementById('prov-city');
+          if (cityEl && !cityEl.value) cityEl.value = locData.city;
+        }
+      },
+    });
+
+    // Auto-update location picker scope when city input changes
+    document.getElementById('prov-city')?.addEventListener('input', () => {
+      if (locationPicker.activeMode === 'search') {
+        locationPicker.render();
+      }
+    });
+
     // Initial 7-Day Schedule Data Model (Defaults: Mon, Wed-Sun 09:00-19:00 with 13:00-14:00 Lunch Break; Tue CLOSED)
     const dayNames = [
       { key: 'MONDAY', label: 'Monday', defaultOpen: true },
@@ -1018,54 +1031,66 @@ export class PlatformAdminPortal {
       if (!container) return;
 
       container.innerHTML = provScheduleState.map((day, idx) => `
-        <div style="background: rgba(255,255,255,0.025); border: 1px solid ${day.isClosed ? 'rgba(239,68,68,0.2)' : 'var(--border-subtle)'}; border-radius: var(--radius-sm); padding: 12px 14px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: ${day.isClosed ? '0' : '10px'};">
-            <div style="display: flex; align-items: center; gap: 10px;">
-              <strong style="color: #fff; font-size: 0.95rem; font-family: var(--font-heading); min-width: 90px;">${day.label}</strong>
-              <span class="badge" style="background: ${day.isClosed ? 'rgba(239,68,68,0.15)' : 'rgba(16,185,129,0.15)'}; color: ${day.isClosed ? '#f87171' : '#34d399'}; border: 1px solid ${day.isClosed ? 'rgba(239,68,68,0.3)' : 'rgba(16,185,129,0.3)'}; font-size: 0.68rem; font-weight: 800;">
-                ${day.isClosed ? 'CLOSED' : 'OPEN'}
-              </span>
+        <div class="day-sched-card ${day.isClosed ? 'is-closed' : ''}">
+          <div class="day-sched-header">
+            <div class="day-sched-title-wrap">
+              <strong class="day-sched-name">${day.label}</strong>
+              ${day.isClosed ? '<span class="day-sched-closed-tag">Closed</span>' : ''}
             </div>
-            <button type="button" class="btn btn-secondary btn-sm btn-prov-toggle-day" data-idx="${idx}" style="font-size: 0.75rem; padding: 4px 10px; background: ${day.isClosed ? 'rgba(16,185,129,0.18)' : 'rgba(239,68,68,0.18)'}; color: ${day.isClosed ? '#34d399' : '#f87171'}; border: 1px solid ${day.isClosed ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'};">
-              ${day.isClosed ? 'Set to OPEN' : 'Set to CLOSED'}
+            <button type="button" class="btn-prov-toggle-day day-sched-toggle-btn ${day.isClosed ? 'is-closed' : 'is-open'}" data-idx="${idx}" title="${day.isClosed ? 'Click to open this day' : 'Click to close this day'}">
+              <span class="day-sched-toggle-dot"></span>
+              <span>${day.isClosed ? 'Closed' : 'Open'}</span>
             </button>
           </div>
 
           ${!day.isClosed ? `
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
-              <div>
-                <label style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 2px;">Opening Time</label>
-                <input type="time" class="form-control prov-day-start" data-idx="${idx}" value="${day.startTime}" style="padding: 6px 10px; font-size: 0.85rem;" />
+            <div class="day-sched-times-grid">
+              <div class="day-sched-time-col">
+                <label class="day-sched-lbl">Opens</label>
+                <input type="time" class="day-sched-time-inp prov-day-start" data-idx="${idx}" value="${day.startTime}" aria-label="${day.label} Open Time" />
               </div>
-              <div>
-                <label style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 2px;">Closing Time</label>
-                <input type="time" class="form-control prov-day-end" data-idx="${idx}" value="${day.endTime}" style="padding: 6px 10px; font-size: 0.85rem;" />
+              <div class="day-sched-time-col">
+                <label class="day-sched-lbl">Closes</label>
+                <input type="time" class="day-sched-time-inp prov-day-end" data-idx="${idx}" value="${day.endTime}" aria-label="${day.label} Close Time" />
               </div>
             </div>
 
-            <div style="border-top: 1px dashed var(--border-subtle); padding-top: 8px;">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                <span style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600;">Breaks (${day.breaks.length})</span>
-                <button type="button" class="btn btn-secondary btn-sm btn-prov-add-break" data-idx="${idx}" style="font-size: 0.7rem; padding: 2px 8px;">
-                  + Add Break
+            <div class="day-sched-breaks-bar">
+              <div class="day-sched-breaks-title-wrap">
+                <span class="day-sched-breaks-title">Breaks</span>
+                ${day.breaks.length > 0 ? `<span class="day-sched-badge-count">${day.breaks.length}</span>` : ''}
+              </div>
+              <div class="day-sched-break-btns">
+                <button type="button" class="day-sched-sm-btn btn-prov-add-break" data-idx="${idx}" title="Add custom break">
+                  + Break
                 </button>
               </div>
-
-              ${day.breaks.length === 0 ? `
-                <div style="font-size: 0.74rem; color: #34d399; font-weight: 600; display: flex; align-items: center; gap: 6px; padding: 4px 0;">
-                  <span>⚡ Continuous Operations</span>
-                  <span style="color: var(--text-muted); font-weight: normal; font-size: 0.7rem;">(No lunch/midday breaks scheduled)</span>
-                </div>
-              ` : day.breaks.map((b, bIdx) => `
-                <div style="display: flex; gap: 6px; align-items: center; margin-bottom: 6px;">
-                  <input type="text" class="form-control prov-break-title" data-idx="${idx}" data-bidx="${bIdx}" value="${b.title || 'Break'}" placeholder="Title" style="flex: 1; padding: 4px 8px; font-size: 0.78rem;" />
-                  <input type="time" class="form-control prov-break-start" data-idx="${idx}" data-bidx="${bIdx}" value="${b.startTime}" style="width: 100px; padding: 4px 6px; font-size: 0.78rem;" />
-                  <span style="color: var(--text-muted); font-size: 0.75rem;">-</span>
-                  <input type="time" class="form-control prov-break-end" data-idx="${idx}" data-bidx="${bIdx}" value="${b.endTime}" style="width: 100px; padding: 4px 6px; font-size: 0.78rem;" />
-                  <button type="button" class="btn btn-secondary btn-sm btn-prov-del-break" data-idx="${idx}" data-bidx="${bIdx}" style="padding: 2px 6px; color: #f87171; font-size: 0.75rem;">✕</button>
-                </div>
-              `).join('')}
             </div>
+
+            ${day.breaks.length === 0 ? `
+              <div class="day-sched-continuous-banner">
+                <span class="day-sched-green-dot"></span>
+                <span>Continuous operations (no breaks)</span>
+              </div>
+            ` : `
+              <div class="day-sched-breaks-container">
+                ${day.breaks.map((b, bIdx) => `
+                  <div class="day-sched-break-box">
+                    <div class="day-sched-break-row1">
+                      <input type="text" class="day-sched-break-name-inp prov-break-title" data-idx="${idx}" data-bidx="${bIdx}" value="${b.title || 'Break'}" placeholder="Break Title" />
+                      <button type="button" class="day-sched-break-trash btn-prov-del-break" data-idx="${idx}" data-bidx="${bIdx}" title="Remove Break" aria-label="Remove Break">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                      </button>
+                    </div>
+                    <div class="day-sched-break-row2">
+                      <input type="time" class="day-sched-time-inp prov-break-start" data-idx="${idx}" data-bidx="${bIdx}" value="${b.startTime}" aria-label="Break Start Time" />
+                      <span class="day-sched-to-sep">to</span>
+                      <input type="time" class="day-sched-time-inp prov-break-end" data-idx="${idx}" data-bidx="${bIdx}" value="${b.endTime}" aria-label="Break End Time" />
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            `}
           ` : ''}
         </div>
       `).join('');
@@ -1157,17 +1182,19 @@ export class PlatformAdminPortal {
       const summaryDiv = document.getElementById('prov-review-summary-container');
       if (!summaryDiv) return;
 
-      const name = document.getElementById('prov-name').value.trim();
-      const ownerName = document.getElementById('prov-owner-name').value.trim();
-      const email = document.getElementById('prov-email').value.trim();
-      const phone = document.getElementById('prov-phone').value.trim();
-      const city = document.getElementById('prov-city').value.trim();
+      const locData = locationPicker ? locationPicker.getValue() : {};
 
       summaryDiv.innerHTML = `
         <div style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.6; margin-bottom: 14px;">
-          <div>🏢 Salon Name: <strong style="color: #fff;">${name}</strong> (${city})</div>
+          <div>🏢 Salon Name: <strong style="color: #fff;">${name}</strong> (${city || locData.city || 'City'})</div>
           <div>👤 Owner: <strong style="color: #fff;">${ownerName}</strong> (${email})</div>
           <div>📞 WhatsApp Phone: <code>${phone}</code></div>
+          <div>📍 Address: <strong style="color: #fff;">${locData.address || 'Standard Address'}</strong></div>
+          ${locData.directionsUrl ? `
+            <div style="margin-top: 4px;">
+              🚗 Navigation Route: <a href="${locData.directionsUrl}" target="_blank" rel="noopener noreferrer" style="color: #a5b4fc; text-decoration: underline;">Test Google Directions ↗</a>
+            </div>
+          ` : ''}
         </div>
 
         <div style="font-size: 0.8rem; font-weight: 700; color: #fff; margin-bottom: 6px; text-transform: uppercase;">
@@ -1493,14 +1520,20 @@ export class PlatformAdminPortal {
       // Pick general open/close times from Monday or default 09:00 - 19:00
       const monState = provScheduleState.find((d) => d.dayOfWeek === 'MONDAY') || provScheduleState[0];
 
+      const locData = locationPicker ? locationPicker.getValue() : {};
+
       const payload = {
         name: document.getElementById('prov-name').value.trim(),
         ownerName: document.getElementById('prov-owner-name').value.trim(),
         email: document.getElementById('prov-email').value.trim(),
         password: document.getElementById('prov-password').value,
         phone: rawPhone,
-        city: document.getElementById('prov-city').value.trim(),
-        address: document.getElementById('prov-address')?.value?.trim() || undefined,
+        city: (locData.city || document.getElementById('prov-city').value || '').trim(),
+        address: (locData.address || document.getElementById('prov-address')?.value || '').trim() || undefined,
+        latitude: locData.latitude,
+        longitude: locData.longitude,
+        googleMapsUrl: locData.googleMapsUrl,
+        locationType: locData.locationType,
         whatsappPhoneNumberId: rawWaId,
         timezone: 'Asia/Kolkata',
         openTime: monState.isClosed ? '09:00' : monState.startTime,
@@ -1708,8 +1741,8 @@ export class PlatformAdminPortal {
 
   attachEventListeners() {
     document.getElementById('btn-super-logout')?.addEventListener('click', async () => {
-      await ApiClient.logout();
-      window.location.hash = '#super-admin';
+      await PlatformAuth.logout();
+      window.location.hash = '#superadmin-login';
       window.location.reload();
     });
 
@@ -1841,7 +1874,21 @@ export class PlatformAdminPortal {
           confirmBtn.removeAttribute('disabled');
         }
         if (errEl) {
-          errEl.textContent = err.message || 'Failed to delete salon.';
+          const isAuthErr = err.message?.toLowerCase().includes('unauthorized') || err.message?.toLowerCase().includes('forbidden');
+          if (isAuthErr) {
+            errEl.innerHTML = `
+              <div><strong>Session Expired / Unauthorized</strong></div>
+              <div style="margin-top: 4px; font-size: 0.78rem;">Please log in with Super Admin credentials.</div>
+              <button type="button" class="btn btn-sm btn-secondary" id="btn-modal-relogin" style="margin-top: 8px; font-size: 0.75rem; padding: 4px 10px;">Go to Super Admin Login →</button>
+            `;
+            document.getElementById('btn-modal-relogin')?.addEventListener('click', async () => {
+              await PlatformAuth.logout();
+              window.location.hash = '#superadmin-login';
+              window.location.reload();
+            });
+          } else {
+            errEl.textContent = err.message || 'Failed to delete salon.';
+          }
           errEl.style.display = 'block';
         }
       }

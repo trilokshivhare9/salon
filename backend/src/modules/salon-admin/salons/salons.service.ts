@@ -276,8 +276,12 @@ export class SalonsService {
           slug,
           phone,
           email,
-          address: dto.address?.trim(),
+          address: dto.address?.trim() || null,
           city: dto.city.trim(),
+          latitude: dto.latitude !== undefined && dto.latitude !== null ? Number(dto.latitude) : null,
+          longitude: dto.longitude !== undefined && dto.longitude !== null ? Number(dto.longitude) : null,
+          googleMapsUrl: dto.googleMapsUrl?.trim() || null,
+          locationType: dto.locationType || 'MANUAL',
           timezone: dto.timezone || 'Asia/Kolkata',
           status: SalonStatus.ACTIVE,
           defaultStartTime: openTime,
@@ -383,7 +387,12 @@ export class SalonsService {
         ownerName: dto.ownerName,
         email,
         phone,
+        address: salon.address,
         city: salon.city,
+        latitude: salon.latitude,
+        longitude: salon.longitude,
+        googleMapsUrl: salon.googleMapsUrl,
+        locationType: salon.locationType,
         timezone: salon.timezone,
         openTime,
         closeTime,
@@ -763,14 +772,13 @@ Here are your salon owner login credentials:
           });
         }
 
-        // Check active future appointments strictly for stylists who follow the salon schedule
+        // Check active future appointments across all stylists for salon-level facility collisions
         const now = new Date();
         const futureAppointments = await tx.appointment.findMany({
           where: {
             salonId,
             startAt: { gt: now },
             status: { in: [AppointmentStatus.BOOKED, AppointmentStatus.CONFIRMED, AppointmentStatus.ON_THE_WAY, AppointmentStatus.CHECKED_IN, AppointmentStatus.SEATED_IN_CHAIR] },
-            stylist: { followsSalonSchedule: true },
           },
           include: { stylist: true },
         });
@@ -800,9 +808,16 @@ Here are your salon owner login credentials:
 
             for (const b of breaksToSave) {
               if (apptStart < b.endTime && apptEnd > b.startTime) {
-                throw new ConflictException(
-                  `Cannot set salon break on ${item.dayOfWeek} to ${b.startTime}-${b.endTime}: future appointment #${appt.appointmentNumber} (${apptStart}-${apptEnd}) conflicts with the break.`,
-                );
+                if (dto.autoReschedule) {
+                  await tx.appointment.update({
+                    where: { id: appt.id },
+                    data: { status: AppointmentStatus.PENDING_RESCHEDULE },
+                  });
+                } else {
+                  throw new ConflictException(
+                    `Cannot set salon break on ${item.dayOfWeek} to ${b.startTime}-${b.endTime}: future appointment #${appt.appointmentNumber} (${apptStart}-${apptEnd}) conflicts with the break. Enable auto-reschedule to automatically notify the client.`,
+                  );
+                }
               }
             }
           }

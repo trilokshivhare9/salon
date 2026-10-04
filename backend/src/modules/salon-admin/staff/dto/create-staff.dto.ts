@@ -124,6 +124,10 @@ export class UpdateStaffWorkingHoursDto {
   @ValidateNested({ each: true })
   @Type(() => StaffDayWorkingHourDto)
   hours: StaffDayWorkingHourDto[];
+
+  @IsBoolean()
+  @IsOptional()
+  followsSalonSchedule?: boolean;
 }
 
 export class CreateStaffBreakDto {
@@ -141,4 +145,8 @@ export class CreateStaffBreakDto {
   @IsString()
   @IsOptional()
   title?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  autoReschedule?: boolean;
 }

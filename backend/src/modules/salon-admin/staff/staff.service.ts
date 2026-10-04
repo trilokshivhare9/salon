@@ -87,17 +87,6 @@ export class StaffService {
   }
 
   async createStaff(salonId: string, dto: CreateStaffDto) {
-    // 1. Verify that active services exist in the salon
-    const totalServices = await this.prisma.service.count({
-      where: { salonId, status: ServiceStatus.ACTIVE },
-    });
-
-    if (totalServices === 0) {
-      throw new BadRequestException(
-        'Cannot create stylist: Salon must have at least one active service before stylists can be created.',
-      );
-    }
-
     let serviceIds: string[] = [];
 
     if (dto.serviceIds !== undefined) {
@@ -277,10 +266,10 @@ export class StaffService {
     const tz = salon.timezone || 'Asia/Kolkata';
 
     const res = await this.prisma.$transaction(async (tx) => {
-      // Stylist has custom hours now
+      const followsSchedule = dto.followsSalonSchedule !== undefined ? dto.followsSalonSchedule : false;
       await tx.stylist.update({
         where: { id: staffId },
-        data: { followsSalonSchedule: false },
+        data: { followsSalonSchedule: followsSchedule },
       });
 
       const now = new Date();
@@ -513,21 +502,79 @@ export class StaffService {
 
   async getStaffBreaks(salonId: string, staffId: string) {
     await this.getStaffById(salonId, staffId);
-    const records = await this.prisma.stylistWorkingHours.findMany({
-      where: {
-        stylistId: staffId,
-        breakStartTime: { not: null },
-        breakEndTime: { not: null },
-      },
+
+    // 1. Fetch Salon Facility Breaks (The Immutable Foundation)
+    const salonWorkingHours = await this.prisma.salonWorkingHours.findMany({
+      where: { salonId },
       orderBy: { dayOfWeek: 'asc' },
     });
-    return records.map((r) => ({
-      id: r.id,
-      dayOfWeek: r.dayOfWeek,
-      startTime: r.breakStartTime,
-      endTime: r.breakEndTime,
-      title: 'Shift Break',
-    }));
+
+    const salonBreaks: any[] = [];
+    for (const s of salonWorkingHours) {
+      if (!s.isClosed) {
+        if (Array.isArray(s.breaks) && s.breaks.length > 0) {
+          for (const b of (s.breaks as any[])) {
+            salonBreaks.push({
+              id: b.id || `salon-brk-${s.dayOfWeek}-${b.startTime}`,
+              dayOfWeek: s.dayOfWeek,
+              startTime: b.startTime,
+              endTime: b.endTime,
+              title: b.title || 'Salon Lunch',
+              origin: 'SALON',
+              isLocked: true,
+            });
+          }
+        } else if (s.breakStartTime && s.breakEndTime) {
+          salonBreaks.push({
+            id: `salon-brk-${s.dayOfWeek}-legacy`,
+            dayOfWeek: s.dayOfWeek,
+            startTime: s.breakStartTime,
+            endTime: s.breakEndTime,
+            title: 'Salon Lunch',
+            origin: 'SALON',
+            isLocked: true,
+          });
+        }
+      }
+    }
+
+    // 2. Fetch Stylist Personal Shift Breaks
+    const stylistHours = await this.prisma.stylistWorkingHours.findMany({
+      where: { stylistId: staffId },
+      orderBy: { dayOfWeek: 'asc' },
+    });
+
+    const stylistPersonalBreaks: any[] = [];
+    for (const st of stylistHours) {
+      if (st.isWorking && st.hasBreakOverride) {
+        if (Array.isArray(st.breaks) && st.breaks.length > 0) {
+          for (const b of (st.breaks as any[])) {
+            stylistPersonalBreaks.push({
+              id: b.id || `st-brk-${st.dayOfWeek}-${b.startTime}`,
+              dayOfWeek: st.dayOfWeek,
+              startTime: b.startTime,
+              endTime: b.endTime,
+              title: b.title || 'Personal Break',
+              origin: 'STYLIST',
+              isLocked: false,
+            });
+          }
+        } else if (st.breakStartTime && st.breakEndTime) {
+          stylistPersonalBreaks.push({
+            id: `st-brk-${st.dayOfWeek}-legacy`,
+            dayOfWeek: st.dayOfWeek,
+            startTime: st.breakStartTime,
+            endTime: st.breakEndTime,
+            title: 'Personal Break',
+            origin: 'STYLIST',
+            isLocked: false,
+          });
+        }
+      }
+    }
+
+    // Discrete Origin-Tagged Break Collection: Both coexist with zero destructive merge
+    return [...salonBreaks, ...stylistPersonalBreaks];
   }
 
   async createStaffBreak(salonId: string, staffId: string, dto: CreateStaffBreakDto) {
@@ -543,6 +590,24 @@ export class StaffService {
     const breakDuration = (bEndH * 60 + bEndM) - (bStartH * 60 + bStartM);
     if (breakDuration < 15 || breakDuration % 15 !== 0) {
       throw new BadRequestException('Break duration must be at least 15 minutes and divisible by 15.');
+    }
+
+    // Check if an identical break is already covered by Salon Facility Breaks
+    const salonHours = await this.prisma.salonWorkingHours.findUnique({
+      where: {
+        salonId_dayOfWeek: {
+          salonId,
+          dayOfWeek: dto.dayOfWeek,
+        },
+      },
+    });
+
+    if (salonHours && !salonHours.isClosed) {
+      const sBreaks = Array.isArray(salonHours.breaks) ? (salonHours.breaks as any[]) : [];
+      const exactMatch = sBreaks.find((b: any) => b.startTime === dto.startTime && b.endTime === dto.endTime);
+      if (exactMatch || (salonHours.breakStartTime === dto.startTime && salonHours.breakEndTime === dto.endTime)) {
+        throw new BadRequestException(`This break time (${dto.startTime}-${dto.endTime}) is already active as a Salon Facility Break. All stylists observe it automatically.`);
+      }
     }
 
     const salon = await this.prisma.salon.findUnique({ where: { id: salonId } });
@@ -564,32 +629,58 @@ export class StaffService {
       return dayName === dto.dayOfWeek;
     });
 
+    const conflictingAppts: any[] = [];
     for (const appt of dayAppointments) {
       const apptStart = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('HH:mm');
       const apptEnd = DateTime.fromJSDate(appt.endAt, { zone: tz }).toFormat('HH:mm');
 
       if (apptStart < dto.endTime && apptEnd > dto.startTime) {
+        conflictingAppts.push({ appt, apptStart, apptEnd });
+      }
+    }
+
+    if (conflictingAppts.length > 0) {
+      if (dto.autoReschedule) {
+        // Automatically flag conflicting appointments for rescheduling
+        for (const c of conflictingAppts) {
+          await this.prisma.appointment.update({
+            where: { id: c.appt.id },
+            data: { status: AppointmentStatus.PENDING_RESCHEDULE },
+          });
+        }
+      } else {
+        const c = conflictingAppts[0];
         throw new ConflictException(
-          `Cannot schedule break at ${dto.startTime}-${dto.endTime}: stylist has existing future appointment #${appt.appointmentNumber} (${apptStart}-${apptEnd}).`,
+          `Cannot schedule break at ${dto.startTime}-${dto.endTime}: stylist has existing future appointment #${c.appt.appointmentNumber} (${c.apptStart}-${c.apptEnd}). Enable auto-reschedule to notify the customer.`,
         );
       }
     }
 
-    const salonHours = await this.prisma.salonWorkingHours.findUnique({
-      where: {
-        salonId_dayOfWeek: {
-          salonId,
-          dayOfWeek: dto.dayOfWeek,
-        },
-      },
-    });
+    const newBreakId = crypto.randomUUID();
+    const newBreakItem = {
+      id: newBreakId,
+      origin: 'STYLIST',
+      startTime: dto.startTime,
+      endTime: dto.endTime,
+      title: dto.title || 'Personal Break',
+    };
 
     const res = await this.prisma.$transaction(async (tx) => {
-      // Mark stylist with custom schedule so break is respected
-      await tx.stylist.update({
-        where: { id: staffId },
-        data: { followsSalonSchedule: false },
+      const existingRecord = await tx.stylistWorkingHours.findUnique({
+        where: {
+          stylistId_dayOfWeek: {
+            stylistId: staffId,
+            dayOfWeek: dto.dayOfWeek,
+          },
+        },
       });
+
+      let existingBreaks: any[] = [];
+      if (existingRecord && Array.isArray(existingRecord.breaks)) {
+        existingBreaks = [...(existingRecord.breaks as any[])];
+      }
+
+      existingBreaks.push(newBreakItem);
 
       return tx.stylistWorkingHours.upsert({
         where: {
@@ -599,6 +690,8 @@ export class StaffService {
           },
         },
         update: {
+          hasBreakOverride: true,
+          breaks: existingBreaks,
           breakStartTime: dto.startTime,
           breakEndTime: dto.endTime,
         },
@@ -608,6 +701,8 @@ export class StaffService {
           isWorking: salonHours ? !salonHours.isClosed : true,
           startTime: salonHours?.startTime || '09:00',
           endTime: salonHours?.endTime || '21:00',
+          hasBreakOverride: true,
+          breaks: existingBreaks,
           breakStartTime: dto.startTime,
           breakEndTime: dto.endTime,
         },
@@ -620,28 +715,60 @@ export class StaffService {
     });
 
     return {
-      id: res.id,
+      id: newBreakId,
       dayOfWeek: res.dayOfWeek,
-      startTime: res.breakStartTime,
-      endTime: res.breakEndTime,
-      title: dto.title || 'Shift Break',
+      startTime: dto.startTime,
+      endTime: dto.endTime,
+      title: dto.title || 'Personal Break',
+      origin: 'STYLIST',
+      isLocked: false,
     };
   }
 
   async deleteStaffBreak(salonId: string, staffId: string, breakId: string) {
     await this.getStaffById(salonId, staffId);
 
-    const isDay = Object.values(DayOfWeek).includes(breakId.toUpperCase() as DayOfWeek);
-    if (isDay) {
-      await this.prisma.stylistWorkingHours.updateMany({
-        where: { stylistId: staffId, dayOfWeek: breakId.toUpperCase() as DayOfWeek },
-        data: { breakStartTime: null, breakEndTime: null },
-      });
-    } else {
-      await this.prisma.stylistWorkingHours.updateMany({
-        where: { id: breakId, stylistId: staffId },
-        data: { breakStartTime: null, breakEndTime: null },
-      });
+    // Guard: Salon Facility Breaks CANNOT be deleted at stylist level
+    const salonWorkingHours = await this.prisma.salonWorkingHours.findMany({
+      where: { salonId },
+    });
+
+    for (const s of salonWorkingHours) {
+      if (Array.isArray(s.breaks)) {
+        const foundSalonBreak = (s.breaks as any[]).find((b: any) => b.id === breakId);
+        if (foundSalonBreak || breakId.startsWith(`salon-brk-`)) {
+          throw new BadRequestException(
+            'Salon facility breaks cannot be deleted at the stylist level. Please modify or remove them in the Salon Operating Schedule.',
+          );
+        }
+      }
+    }
+
+    // Delete from stylist personal breaks
+    const stylistHours = await this.prisma.stylistWorkingHours.findMany({
+      where: { stylistId: staffId },
+    });
+
+    for (const st of stylistHours) {
+      if (Array.isArray(st.breaks)) {
+        const remaining = (st.breaks as any[]).filter((b: any) => b.id !== breakId);
+        if (remaining.length !== (st.breaks as any[]).length) {
+          await this.prisma.stylistWorkingHours.update({
+            where: { id: st.id },
+            data: {
+              breaks: remaining,
+              hasBreakOverride: remaining.length > 0,
+              breakStartTime: remaining.length > 0 ? remaining[0].startTime : null,
+              breakEndTime: remaining.length > 0 ? remaining[0].endTime : null,
+            },
+          });
+        }
+      } else if (st.id === breakId || breakId.toUpperCase() === st.dayOfWeek) {
+        await this.prisma.stylistWorkingHours.update({
+          where: { id: st.id },
+          data: { breakStartTime: null, breakEndTime: null, breaks: [], hasBreakOverride: false },
+        });
+      }
     }
 
     this.appointmentsService.emitSalonEvent(salonId, 'STAFF_UPDATED', {

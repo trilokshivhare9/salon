@@ -1,3 +1,4 @@
+import { Transform } from 'class-transformer';
 import {
   IsDateString,
   IsEnum,
@@ -52,7 +53,25 @@ export class CreateAppointmentDto {
   notes?: string;
 }
 
+/**
+ * Backward-compatible status alias dictionary.
+ * Protects against cached PWA clients, stale mobile app bundles, and legacy webhooks.
+ */
+export const STATUS_ALIAS_MAP: Record<string, AppointmentStatus> = {
+  IN_SERVICE: AppointmentStatus.SEATED_IN_CHAIR,
+  ARRIVED: AppointmentStatus.CHECKED_IN,
+  DONE: AppointmentStatus.COMPLETED,
+  REJECT: AppointmentStatus.REJECTED,
+};
+
 export class UpdateAppointmentStatusDto {
+  @Transform(({ value }) => {
+    if (typeof value === 'string') {
+      const sanitized = value.trim().toUpperCase();
+      return STATUS_ALIAS_MAP[sanitized] || sanitized;
+    }
+    return value;
+  })
   @IsEnum(AppointmentStatus)
   @IsNotEmpty()
   status: AppointmentStatus;

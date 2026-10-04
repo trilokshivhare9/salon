@@ -24,6 +24,7 @@ import {
 @Injectable()
 export class AppointmentStatusService {
   private readonly logger = new Logger(AppointmentStatusService.name);
+  private readonly templates: WhatsAppTemplateService;
 
   constructor(
     private prisma: PrismaService,
@@ -33,11 +34,9 @@ export class AppointmentStatusService {
     @Inject(forwardRef(() => WhatsAppService))
     @Optional() private whatsappService?: WhatsAppService,
     @Inject(forwardRef(() => WhatsAppTemplateService))
-    @Optional() private templates?: WhatsAppTemplateService,
+    @Optional() templates?: WhatsAppTemplateService,
   ) {
-    if (!this.templates) {
-      this.templates = new WhatsAppTemplateService();
-    }
+    this.templates = templates || new WhatsAppTemplateService();
   }
 
   /**
@@ -169,7 +168,9 @@ export class AppointmentStatusService {
             },
             phoneNumberId,
             salonId,
-          ).catch(() => { });
+          ).catch((err) => {
+            this.logger.error(`Failed to send WhatsApp quick booking accepted notification: ${err?.message || err}`);
+          });
 
           // Auto-reject competing quick bookings for the same stylist and overlapping time window!
           const competing = await this.prisma.appointment.findMany({
@@ -203,7 +204,9 @@ export class AppointmentStatusService {
                 },
                 phoneNumberId,
                 salonId,
-              ).catch(() => { });
+              ).catch((err) => {
+                this.logger.error(`Failed to send WhatsApp slot taken notification: ${err?.message || err}`);
+              });
             }
           }
         } else if (dto.status === AppointmentStatus.REJECTED || dto.status === AppointmentStatus.CANCELLED) {
@@ -217,7 +220,9 @@ export class AppointmentStatusService {
             },
             phoneNumberId,
             salonId,
-          ).catch(() => { });
+          ).catch((err) => {
+            this.logger.error(`Failed to send WhatsApp quick booking declined notification: ${err?.message || err}`);
+          });
         }
       } else if (isTargetCancelled) {
         if (dto.reasonCategory === 'SALON_EMERGENCY') {
@@ -232,7 +237,9 @@ export class AppointmentStatusService {
             },
             phoneNumberId,
             salonId,
-          ).catch(() => { });
+          ).catch((err) => {
+            this.logger.error(`Failed to send WhatsApp salon emergency cancellation notification: ${err?.message || err}`);
+          });
         } else if (isPenaltyApplied) {
           // Penalty Strike Notice
           let message = '';
@@ -250,7 +257,9 @@ export class AppointmentStatusService {
             },
             phoneNumberId,
             salonId,
-          ).catch(() => { });
+          ).catch((err) => {
+            this.logger.error(`Failed to send WhatsApp penalty strike notification: ${err?.message || err}`);
+          });
         }
       } else if (dto.status === AppointmentStatus.CHECKED_IN) {
         const welcomeMsg = `👋 *WELCOME TO ${salon.name.toUpperCase()}!*\n\nHi *${userName}*, you are checked in! Your stylist *${updated.stylist?.name || 'Stylist'}* will call you to the chair shortly.`;
@@ -263,22 +272,39 @@ export class AppointmentStatusService {
           },
           phoneNumberId,
           salonId,
-        ).catch(() => { });
-      } else if (dto.status === AppointmentStatus.COMPLETED) {
-        const receiptMsg = `✨ *THANK YOU FOR VISITING ${salon.name.toUpperCase()}!*\n\nHi *${userName}*, thank you for visiting us today!\n\n• *Service:* *${updated.serviceNameSnapshot}*\n• *Stylist:* *${updated.stylist?.name || 'Stylist'}*\n• *Total Paid:* *₹${updated.price}*\n\n⭐ *How was your experience today?*`;
+        ).catch((err) => {
+          this.logger.error(`Failed to send WhatsApp CHECKED_IN notification: ${err?.message || err}`);
+        });
+      } else if (dto.status === AppointmentStatus.SEATED_IN_CHAIR) {
+        const seatedMsg = this.templates.buildSeatedInChairReply(
+          salon.name,
+          updated.stylist?.name || 'Stylist',
+          updated.serviceNameSnapshot || 'Hair & Grooming',
+        );
         await this.whatsappService.sendMetaMessage(
           userPhone,
-          {
-            bodyText: receiptMsg,
-            interactiveType: 'button',
-            buttons: [
-              { id: 'btn_start', title: '⭐ Great Service!' },
-              { id: 'btn_start', title: '📅 Book Next Visit' },
-            ],
-          },
+          seatedMsg,
           phoneNumberId,
           salonId,
-        ).catch(() => { });
+        ).catch((err) => {
+          this.logger.error(`Failed to send WhatsApp SEATED_IN_CHAIR notification: ${err?.message || err}`);
+        });
+      } else if (dto.status === AppointmentStatus.COMPLETED) {
+        const receiptMsg = this.templates.buildCompletedReceiptReply({
+          salonName: salon.name,
+          serviceName: updated.serviceNameSnapshot || 'Hair & Grooming',
+          stylistName: updated.stylist?.name || 'Stylist',
+          price: updated.price ? Number(updated.price) : 0,
+          customerName: userName,
+        });
+        await this.whatsappService.sendMetaMessage(
+          userPhone,
+          receiptMsg,
+          phoneNumberId,
+          salonId,
+        ).catch((err) => {
+          this.logger.error(`Failed to send WhatsApp COMPLETED receipt notification: ${err?.message || err}`);
+        });
       }
     }
 
@@ -305,7 +331,7 @@ export class AppointmentStatusService {
     });
 
     const formatted = formatAppointment(updated);
-    this.eventsService?.emitSalonEvent(salonId, 'APPOINTMENT_UPDATED', formatted);
+    this.eventsService?.emitSalonEvent(salonId, 'STATUS_UPDATED', formatted);
     return formatted;
   }
 

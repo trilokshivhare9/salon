@@ -43,9 +43,17 @@ export class CheckinAction {
     // 1. Remind Confirm (On Time)
     if (input === WhatsAppButtonId.REMIND_CONFIRM) {
       if (apptId) {
-        await this.appointmentsService.updateStatus(salonId, apptId, {
-          status: AppointmentStatus.CONFIRMED,
-        });
+        // Only transition to CONFIRMED if appointment is in a pre-confirmed state
+        try {
+          const appt = await this.appointmentsService.getAppointmentById(salonId, apptId);
+          if (appt && ([AppointmentStatus.BOOKED, AppointmentStatus.CONFIRMED] as AppointmentStatus[]).includes(appt.status as AppointmentStatus)) {
+            await this.appointmentsService.updateStatus(salonId, apptId, {
+              status: AppointmentStatus.CONFIRMED,
+            });
+          }
+        } catch (err) {
+          this.logger.warn(`[CheckinAction] Confirm status guard: ${err.message}`);
+        }
         await this.appointmentsService.updateEtaStatus(salonId, apptId, ClientEtaStatus.ON_TIME);
       }
       const reply = `✅ *Thank you for confirming!*\n\nWe've noted your confirmation and your stylist will be ready for you at your scheduled time. See you soon!`;
@@ -62,21 +70,22 @@ export class CheckinAction {
       return { replyMessage: reply, state: conversation.state };
     }
 
-    // 2. On The Way
+    // 2. On The Way — ONLY updates travel telemetry (clientEtaStatus), NOT appointment lifecycle status.
+    // This decoupling prevents the CHECKED_IN → ON_THE_WAY crash when admin already checked in the customer.
     if (input === WhatsAppButtonId.ETA_ON_THE_WAY || input === 'btn_eta_on_the_way') {
       if (apptId) {
-        await this.appointmentsService.updateStatus(salonId, apptId, {
-          status: AppointmentStatus.ON_THE_WAY,
-        });
         await this.appointmentsService.updateEtaStatus(salonId, apptId, ClientEtaStatus.ON_THE_WAY);
       }
-      const reply = `🚗 *Safe travels!*\n\nWe've notified your stylist that you are on your way. Your chair will be ready for you!`;
+      const reply = `🚗 *Safe travels!*\n\nWe've notified your stylist that you are on your way. Your chair will be ready for you!\n\nNeed directions or salon details? Tap *📍 Directions & Info* below.`;
       await this.sendMessage(
         cleanNumber,
         {
           bodyText: reply,
           interactiveType: 'button',
-          buttons: [{ id: WhatsAppButtonId.START, title: '🏠 Main Menu' }],
+          buttons: [
+            { id: WhatsAppButtonId.INFO, title: '📍 Directions & Info' },
+            { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
+          ],
         },
         phoneNumberId,
         salonId,
@@ -84,12 +93,20 @@ export class CheckinAction {
       return { replyMessage: reply, state: conversation.state };
     }
 
-    // 3. Arrived / Check-in
+    // 3. Arrived / Check-in — Updates ETA always, but only transitions status if pre-checkin
     if (input === WhatsAppButtonId.ETA_ARRIVED) {
       if (apptId) {
-        await this.appointmentsService.updateStatus(salonId, apptId, {
-          status: AppointmentStatus.CHECKED_IN,
-        });
+        // Only transition to CHECKED_IN if appointment is in a valid pre-checkin state
+        try {
+          const appt = await this.appointmentsService.getAppointmentById(salonId, apptId);
+          if (appt && ([AppointmentStatus.BOOKED, AppointmentStatus.CONFIRMED, AppointmentStatus.ON_THE_WAY] as AppointmentStatus[]).includes(appt.status as AppointmentStatus)) {
+            await this.appointmentsService.updateStatus(salonId, apptId, {
+              status: AppointmentStatus.CHECKED_IN,
+            });
+          }
+        } catch (err) {
+          this.logger.warn(`[CheckinAction] Arrived status guard: ${err.message}`);
+        }
         await this.appointmentsService.updateEtaStatus(salonId, apptId, ClientEtaStatus.ARRIVED);
       }
       const reply = this.templates.buildCheckinSuccessReply();

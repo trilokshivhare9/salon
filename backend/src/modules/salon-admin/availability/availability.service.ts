@@ -39,6 +39,16 @@ export interface AvailabilityResult {
   statusReason?: string;
 }
 
+export interface QuickBookingOperatingStatus {
+  isOpen: boolean;
+  reason?: 'SALON_CLOSED_TODAY' | 'PAST_OPERATING_HOURS' | 'INSUFFICIENT_TIME_REMAINING' | 'FULLY_BOOKED_TODAY';
+  closingTime?: string;
+  closingTimeFormatted?: string;
+  nextOpenDate?: string;
+  nextOpeningTimeFormatted?: string;
+  salonTimezone: string;
+}
+
 @Injectable()
 export class AvailabilityService {
   // In-memory cache for salon metadata & working hours (5-minute TTL)
@@ -679,6 +689,134 @@ export class AvailabilityService {
     }
 
     return null;
+  }
+
+  /**
+   * Evaluates if Quick Booking (same-day in-salon express walk-in) can be fulfilled right now.
+   * Performs high-speed $O(1)$ memory checks for closures, working hours, and capacity feasibility.
+   */
+  async getQuickBookingOperatingStatus(
+    salonId: string,
+    tzOverride?: string,
+  ): Promise<QuickBookingOperatingStatus> {
+    const salon = await this.getCachedSalon(salonId);
+    if (!salon || salon.status !== 'ACTIVE') {
+      return { isOpen: false, reason: 'SALON_CLOSED_TODAY', salonTimezone: tzOverride || 'Asia/Kolkata' };
+    }
+
+    const timezone = tzOverride || salon.timezone || TimeUtility.DEFAULT_TIMEZONE;
+    const nowInSalonZone = DateTime.now().setZone(timezone);
+    const todayStr = nowInSalonZone.toISODate();
+    const targetDateObj = TimeUtility.toDbDate(todayStr);
+
+    // Determine tomorrow's opening time for friendly customer redirection
+    const tomorrow = nowInSalonZone.plus({ days: 1 });
+    const tomorrowDay = this.getDayOfWeekEnum(tomorrow);
+    const tomorrowHours = await this.getCachedSalonWorkingHours(salonId, tomorrowDay);
+    const nextOpeningTimeFormatted =
+      tomorrowHours && !tomorrowHours.isClosed
+        ? TimeUtility.formatTime12h(tomorrowHours.startTime)
+        : '09:00 AM';
+
+    // 1. Check Full-Day Salon Closures
+    const activeClosure = await this.prisma.salonClosure.findFirst({
+      where: {
+        salonId,
+        startDate: { lte: targetDateObj },
+        endDate: { gte: targetDateObj },
+      },
+    });
+
+    if (activeClosure && !activeClosure.isPartialDay) {
+      return {
+        isOpen: false,
+        reason: 'SALON_CLOSED_TODAY',
+        nextOpenDate: tomorrow.toISODate() || undefined,
+        nextOpeningTimeFormatted,
+        salonTimezone: timezone,
+      };
+    }
+
+    // 2. Check Salon Working Hours for Today
+    const dayOfWeek = this.getDayOfWeekEnum(nowInSalonZone);
+    const workingHours = await this.getCachedSalonWorkingHours(salonId, dayOfWeek);
+
+    if (!workingHours || workingHours.isClosed) {
+      return {
+        isOpen: false,
+        reason: 'SALON_CLOSED_TODAY',
+        nextOpenDate: tomorrow.toISODate() || undefined,
+        nextOpeningTimeFormatted,
+        salonTimezone: timezone,
+      };
+    }
+
+    // 3. Check Current Time vs Salon Closing Time
+    const closeMinutes = this.parseTimeStringToMinutes(workingHours.endTime);
+    const currentMinutes = nowInSalonZone.hour * 60 + nowInSalonZone.minute;
+    const closingTimeFormatted = TimeUtility.formatTime12h(workingHours.endTime);
+
+    if (currentMinutes >= closeMinutes) {
+      return {
+        isOpen: false,
+        reason: 'PAST_OPERATING_HOURS',
+        closingTime: workingHours.endTime,
+        closingTimeFormatted,
+        nextOpenDate: tomorrow.toISODate() || undefined,
+        nextOpeningTimeFormatted,
+        salonTimezone: timezone,
+      };
+    }
+
+    // 4. Check Minimum Service Buffer (Fastest Active Service in Salon)
+    const shortestService = await this.prisma.service.findFirst({
+      where: { salonId, status: 'ACTIVE' },
+      orderBy: { durationMinutes: 'asc' },
+      select: { id: true, durationMinutes: true },
+    });
+
+    const minDuration = shortestService?.durationMinutes || 15;
+    if (currentMinutes + minDuration > closeMinutes) {
+      return {
+        isOpen: false,
+        reason: 'INSUFFICIENT_TIME_REMAINING',
+        closingTime: workingHours.endTime,
+        closingTimeFormatted,
+        nextOpenDate: tomorrow.toISODate() || undefined,
+        nextOpeningTimeFormatted,
+        salonTimezone: timezone,
+      };
+    }
+
+    // 5. Shortest-Service Slot Feasibility Guard (Capacity Exhaustion Check)
+    if (shortestService) {
+      const shortestSlot = await this.findEarliestAvailableSlotToday(salonId, shortestService.id);
+      if (!shortestSlot) {
+        return {
+          isOpen: false,
+          reason: 'FULLY_BOOKED_TODAY',
+          closingTime: workingHours.endTime,
+          closingTimeFormatted,
+          nextOpenDate: tomorrow.toISODate() || undefined,
+          nextOpeningTimeFormatted,
+          salonTimezone: timezone,
+        };
+      }
+    }
+
+    return {
+      isOpen: true,
+      closingTime: workingHours.endTime,
+      closingTimeFormatted,
+      nextOpenDate: tomorrow.toISODate() || undefined,
+      nextOpeningTimeFormatted,
+      salonTimezone: timezone,
+    };
+  }
+
+  async isQuickBookingOperationalToday(salonId: string, tzOverride?: string): Promise<boolean> {
+    const status = await this.getQuickBookingOperatingStatus(salonId, tzOverride);
+    return status.isOpen;
   }
 }
 

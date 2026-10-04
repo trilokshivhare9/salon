@@ -135,20 +135,17 @@ export class AvailabilityEngineService {
     );
 
     const followsSalon = stylist?.followsSalonSchedule ?? true;
+    let effectiveOpen: number;
+    let effectiveClose: number;
+    let isWorking: boolean;
 
+    // Stage 1: Shift Window Resolution (Working boundary)
     if (followsSalon) {
-      return {
-        isWorking: true,
-        salonOpenMinutes: salonOpen,
-        salonCloseMinutes: salonClose,
-        effectiveOpenMinutes: salonOpen,
-        effectiveCloseMinutes: salonClose,
-        effectiveBreaks: salonBreaks,
-      };
-    }
-
-    // Custom stylist schedule
-    if (!stylistWorkingHours || !stylistWorkingHours.isWorking) {
+      effectiveOpen = salonOpen;
+      effectiveClose = salonClose;
+      isWorking = true;
+    } else if (stylistWorkingHours && stylistWorkingHours.isWorking === false) {
+      // Explicitly marked as day-off in custom schedule
       return {
         isWorking: false,
         salonOpenMinutes: salonOpen,
@@ -156,46 +153,56 @@ export class AvailabilityEngineService {
         effectiveOpenMinutes: null,
         effectiveCloseMinutes: null,
         effectiveBreaks: [],
-        statusReason: 'Stylist is not scheduled to work on this day.',
+        statusReason: 'Stylist is scheduled off-duty on this day.',
       };
+    } else if (stylistWorkingHours && stylistWorkingHours.startTime && stylistWorkingHours.endTime) {
+      // Explicit custom stylist shift
+      const customOpen = this.parseTimeStringToMinutes(stylistWorkingHours.startTime);
+      const customClose = this.parseTimeStringToMinutes(stylistWorkingHours.endTime);
+
+      effectiveOpen = Math.max(customOpen, salonOpen);
+      effectiveClose = Math.min(customClose, salonClose);
+
+      if (effectiveOpen >= effectiveClose) {
+        return {
+          isWorking: false,
+          salonOpenMinutes: salonOpen,
+          salonCloseMinutes: salonClose,
+          effectiveOpenMinutes: null,
+          effectiveCloseMinutes: null,
+          effectiveBreaks: [],
+          statusReason: 'Stylist working hours fall completely outside salon operating window.',
+        };
+      }
+      isWorking = true;
+    } else {
+      // Graceful Resilience Fallback: Custom schedule active but this specific day row is unconfigured (sparse table)
+      // Fall back to salon operating hours so staff is never silently killed
+      effectiveOpen = salonOpen;
+      effectiveClose = salonClose;
+      isWorking = true;
     }
 
-    const customOpen = this.parseTimeStringToMinutes(stylistWorkingHours.startTime);
-    const customClose = this.parseTimeStringToMinutes(stylistWorkingHours.endTime);
+    // Stage 2: Discrete Break Projection
+    // 1. Salon-level facility breaks form the immutable outer foundation.
+    // 2. Stylist custom breaks (if present) are projected alongside facility breaks without mutating either record.
+    const unmergedBreaks: MinuteInterval[] = [...salonBreaks];
+    const hasPersonalBreaks =
+      stylistWorkingHours &&
+      (stylistWorkingHours.hasBreakOverride === true ||
+        (Array.isArray(stylistWorkingHours.breaks) && stylistWorkingHours.breaks.length > 0) ||
+        (stylistWorkingHours.breakStartTime && stylistWorkingHours.breakEndTime));
 
-    // Hard boundary clamping: Stylist shift MUST be contained within salon window
-    const effectiveOpen = Math.max(customOpen, salonOpen);
-    const effectiveClose = Math.min(customClose, salonClose);
-
-    if (effectiveOpen >= effectiveClose) {
-      return {
-        isWorking: false,
-        salonOpenMinutes: salonOpen,
-        salonCloseMinutes: salonClose,
-        effectiveOpenMinutes: null,
-        effectiveCloseMinutes: null,
-        effectiveBreaks: [],
-        statusReason: 'Stylist working hours fall completely outside salon operating window.',
-      };
-    }
-
-    // Break Inheritance & Override Rule:
-    // If hasBreakOverride === true, use stylist custom breaks.
-    // If hasBreakOverride === false, INHERIT SALON BREAKS.
-    let unmergedBreaks: MinuteInterval[] = [];
-    const hasOverride = stylistWorkingHours.hasBreakOverride === true;
-
-    if (hasOverride) {
-      unmergedBreaks = this.extractBreaks(
+    if (hasPersonalBreaks) {
+      const stylistPersonalBreaks = this.extractBreaks(
         stylistWorkingHours.breaks,
         stylistWorkingHours.breakStartTime,
         stylistWorkingHours.breakEndTime,
       );
-    } else {
-      unmergedBreaks = salonBreaks;
+      unmergedBreaks.push(...stylistPersonalBreaks);
     }
 
-    // Clamp breaks to effective shift window
+    // Stage 3: Clamp breaks to effective shift window and merge overlapping intervals
     const clampedBreaks: MinuteInterval[] = [];
     for (const b of unmergedBreaks) {
       const cStart = Math.max(effectiveOpen, b.start);

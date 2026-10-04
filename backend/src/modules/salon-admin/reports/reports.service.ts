@@ -264,13 +264,26 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
       },
       whatsappQuota,
       salon: salonInfo,
-      todayAppointments: todayAppointments.map((appt: any) => ({
-        ...appt,
-        customer: appt.salonUser?.user,
-        staff: appt.stylist,
-        startTime: appt.startAt,
-        endTime: appt.endAt,
-      })),
+      todayAppointments: todayAppointments
+        .map((appt: any) => ({
+          ...appt,
+          customer: appt.salonUser?.user,
+          staff: appt.stylist,
+          startTime: appt.startAt,
+          endTime: appt.endAt,
+        }))
+        .sort((a: any, b: any) => {
+          const terminalStatuses = ['COMPLETED', 'CANCELLED', 'REJECTED'];
+          const isTermA = terminalStatuses.includes(a.status);
+          const isTermB = terminalStatuses.includes(b.status);
+          if (isTermA !== isTermB) return isTermA ? 1 : -1;
+          const timeA = new Date(a.startAt || 0).getTime();
+          const timeB = new Date(b.startAt || 0).getTime();
+          if (!isTermA) return timeA - timeB;
+          const upA = new Date(a.updatedAt || a.startAt || 0).getTime();
+          const upB = new Date(b.updatedAt || b.startAt || 0).getTime();
+          return upB - upA;
+        }),
     };
   }
 }

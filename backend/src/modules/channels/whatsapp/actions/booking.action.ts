@@ -11,6 +11,7 @@ import { TimeUtility } from '../../../../common/utils/time.utility';
 import { ActionContext, ActionResult } from './shared/action-context';
 import { ActionUtils } from './shared/action-utils';
 import { QuickBookingAction } from './quick-booking.action';
+import { SlotWindowType } from '../services/time-slot-window.engine';
 
 @Injectable()
 export class BookingAction {
@@ -91,9 +92,23 @@ export class BookingAction {
       return this.handleDateSelected(ctx);
     }
 
+    // 9.0 Time Slot Window Navigation (Afternoon / Evening / Earliest)
+    if (input.startsWith('window_')) {
+      return this.handleSlotWindowSwitched(ctx);
+    }
+
     // 9. Time Slot Selected
     if (input.startsWith('slot_')) {
       return this.handleSlotSelected(ctx);
+    }
+
+    // 9.1 In-Funnel Time / Date Re-selection (Bypasses top-level Collision Guard)
+    if (input === WhatsAppButtonId.CHANGE_TIME || input === 'btn_change_time') {
+      return this.handleTimeReSelection(ctx);
+    }
+
+    if (input === WhatsAppButtonId.CHANGE_DATE || input === 'btn_change_date') {
+      return this.handleDateReSelection(ctx);
     }
 
     // 10. Customer Name Input
@@ -110,7 +125,13 @@ export class BookingAction {
     }
 
     // Default Fallback
-    const defaultWelcome = this.templates.buildWelcomeMessage(ctx.salon, ctx.activeAppointment);
+    let isQuickBookOpen = true;
+    try {
+      isQuickBookOpen = await this.availabilityService.isQuickBookingOperationalToday(ctx.salonId, ctx.tz);
+    } catch (err) {
+      isQuickBookOpen = true;
+    }
+    const defaultWelcome = this.templates.buildWelcomeMessage(ctx.salon, ctx.activeAppointment, { isQuickBookOpen });
     await this.sendMessage(cleanNumber, defaultWelcome, ctx.phoneNumberId, ctx.salonId);
     return { replyMessage: defaultWelcome.bodyText, state: ConversationState.START };
   }
@@ -359,7 +380,8 @@ export class BookingAction {
   }
 
   private async handleDateSelected(ctx: ActionContext): Promise<ActionResult> {
-    const { input, cleanNumber, phoneNumberId, salonId, conversation } = ctx;
+    const { input, cleanNumber, phoneNumberId, salonId, salon, conversation } = ctx;
+    const tz = salon.timezone || TimeUtility.DEFAULT_TIMEZONE;
     const dateStr = input.replace('date_', '');
 
     const availability = await this.availabilityService.getAvailableSlots(
@@ -419,7 +441,46 @@ export class BookingAction {
       displayTime: ActionUtils.formatTime12h(s.startTime),
     }));
 
-    const slotMenu = this.templates.buildTimeSlotMenu(slotRows);
+    const nowDt = TimeUtility.now(tz);
+    const isToday = dateStr === nowDt.toISODate();
+    const nowMinutes = nowDt.hour * 60 + nowDt.minute;
+
+    const slotMenu = this.templates.buildTimeSlotMenu(slotRows, false, SlotWindowType.EARLIEST, {
+      isToday,
+      nowMinutes,
+      salonName: salon.name,
+    });
+    await this.sendMessage(cleanNumber, slotMenu, phoneNumberId, salonId);
+    return { replyMessage: slotMenu.bodyText, state: ConversationState.SELECT_TIME };
+  }
+
+  private async handleSlotWindowSwitched(ctx: ActionContext): Promise<ActionResult> {
+    const { input, cleanNumber, phoneNumberId, salonId, conversation, tz } = ctx;
+    const targetWindow = input.replace('window_', '') as SlotWindowType;
+
+    const datePart = conversation.selectedDate || new Date();
+    const dateStr = TimeUtility.formatDateToISO(datePart, tz);
+
+    const availability = await this.availabilityService.getAvailableSlots(
+      salonId,
+      conversation.selectedServiceId!,
+      dateStr,
+      conversation.selectedStaffId || undefined,
+    );
+
+    const slotRows = (availability.availableSlots || []).map((s: any) => ({
+      timeStr: s.startTime,
+      displayTime: ActionUtils.formatTime12h(s.startTime),
+    }));
+
+    const nowDt = TimeUtility.now(tz);
+    const isToday = dateStr === nowDt.toISODate();
+    const nowMinutes = nowDt.hour * 60 + nowDt.minute;
+
+    const slotMenu = this.templates.buildTimeSlotMenu(slotRows, false, targetWindow, {
+      isToday,
+      nowMinutes,
+    });
     await this.sendMessage(cleanNumber, slotMenu, phoneNumberId, salonId);
     return { replyMessage: slotMenu.bodyText, state: ConversationState.SELECT_TIME };
   }
@@ -436,9 +497,55 @@ export class BookingAction {
     const formattedDate = ActionUtils.formatDateFriendly(datePart, tz, 'dd LLL, EEEE');
     const formattedTime = ActionUtils.formatTime12h(timeStr);
 
+    const minutesUntilSlot = (slotDateTime.getTime() - Date.now()) / (1000 * 60);
+
+    // Pillar 1: Pre-Commit Clock & Availability Freshness Guard
+    // If the slot has already passed the clock (e.g. user replied minutes late)
+    if (minutesUntilSlot <= 0) {
+      this.logger.warn(
+        `[BookingAction] Slot ${timeStr} on ${formattedDate} has already passed clock (${minutesUntilSlot.toFixed(1)}m ago). Auto-refreshing.`,
+      );
+
+      const dateStr = TimeUtility.formatDateToISO(datePart, tz);
+      const availability = await this.availabilityService.getAvailableSlots(
+        salonId,
+        conversation.selectedServiceId,
+        dateStr,
+        conversation.selectedStaffId || undefined,
+      );
+
+      if (availability.availableSlots && availability.availableSlots.length > 0) {
+        const slotRows = availability.availableSlots.map((s: any) => ({
+          timeStr: s.startTime,
+          displayTime: ActionUtils.formatTime12h(s.startTime),
+        }));
+        const nowDt = TimeUtility.now(tz);
+        const isToday = dateStr === nowDt.toISODate();
+        const nowMinutes = nowDt.hour * 60 + nowDt.minute;
+
+        const slotMenu = this.templates.buildTimeSlotMenu(slotRows, false, SlotWindowType.EARLIEST, {
+          isToday,
+          nowMinutes,
+        });
+        slotMenu.bodyText = `⚠️ *Slot Passed*\n\nThe slot at *${formattedTime}* has already passed. Please select from the latest available times today:`;
+        await this.sendMessage(cleanNumber, slotMenu, phoneNumberId, salonId);
+        return { replyMessage: slotMenu.bodyText, state: ConversationState.SELECT_TIME };
+      } else {
+        const noMoreMsg = {
+          bodyText: `⚠️ *Slot Passed & No More Slots Today*\n\nThe slot at *${formattedTime}* has passed, and all other appointments for today are fully booked.\n\nWould you like to pick an upcoming date?`,
+          interactiveType: 'button' as const,
+          buttons: [
+            { id: WhatsAppButtonId.CHANGE_DATE, title: '📅 Pick Another Date' },
+            { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
+          ],
+        };
+        await this.sendMessage(cleanNumber, noMoreMsg, phoneNumberId, salonId);
+        return { replyMessage: noMoreMsg.bodyText, state: ConversationState.SELECT_DATE };
+      }
+    }
+
     const hasReal = ActionUtils.hasRealName(user);
     const effectiveName = conversation.customerName || (hasReal ? user.name : null);
-    const minutesUntilSlot = (slotDateTime.getTime() - Date.now()) / (1000 * 60);
     const isUrgentWithin15Min = minutesUntilSlot >= 0 && minutesUntilSlot < 15;
 
     if (!effectiveName) {
@@ -530,7 +637,7 @@ export class BookingAction {
   }
 
   private async handleFinalConfirmation(ctx: ActionContext): Promise<ActionResult> {
-    const { cleanNumber, phoneNumberId, salonId, user, conversation, tz } = ctx;
+    const { cleanNumber, phoneNumberId, salonId, salon, user, conversation, tz } = ctx;
 
     const timeStr = conversation.selectedStartTime
       ? TimeUtility.formatTime24h(conversation.selectedStartTime, tz)
@@ -618,21 +725,58 @@ export class BookingAction {
         newAppt.id,
         ActionUtils.getClearDraftData(),
       );
-      const successReply = this.templates.buildBookingSuccessReply(newAppt);
+      const successReply = this.templates.buildBookingSuccessReply(newAppt, tz, salon);
       await this.sendMessage(cleanNumber, successReply, phoneNumberId, salonId);
       return { replyMessage: successReply.bodyText, state: ConversationState.START };
     } catch (err: any) {
       this.logger.warn(`[BookingAction] Failed creating appointment: ${err?.message}`);
-      const conflictMsg = {
-        bodyText: `⚠️ *Slot Unavailable*\n\nThe slot at *${timeStr}* was just booked or is no longer available. Please select another time slot!`,
-        interactiveType: 'button' as const,
-        buttons: [
-          { id: WhatsAppButtonId.BOOK, title: '📅 Pick Another Time' },
-          { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
-        ],
-      };
-      await this.sendMessage(cleanNumber, conflictMsg, phoneNumberId, salonId);
-      return { replyMessage: conflictMsg.bodyText, state: ConversationState.SELECT_TIME };
+
+      // Pillar 2: Toxic State Eviction & Direct Slot Recovery
+      // 1. Immediately wipe the dead slot in DB so draft is clean and never deadlocks
+      await this.session.updateConversationState(
+        conversation.id,
+        ConversationState.SELECT_TIME,
+        undefined,
+        { selectedStartTime: null },
+      );
+
+      // 2. Query fresh live slots for this date
+      const availability = await this.availabilityService.getAvailableSlots(
+        salonId,
+        conversation.selectedServiceId,
+        dateStr,
+        conversation.selectedStaffId || undefined,
+      );
+
+      const nowDt = TimeUtility.now(tz);
+      const isToday = dateStr === nowDt.toISODate();
+      const nowMinutes = nowDt.hour * 60 + nowDt.minute;
+
+      if (availability.availableSlots && availability.availableSlots.length > 0) {
+        const slotRows = availability.availableSlots.map((s: any) => ({
+          timeStr: s.startTime,
+          displayTime: ActionUtils.formatTime12h(s.startTime),
+        }));
+        const slotMenu = this.templates.buildTimeSlotMenu(slotRows, false, SlotWindowType.EARLIEST, {
+          isToday,
+          nowMinutes,
+          salonName: salon.name,
+        });
+        slotMenu.bodyText = `⚠️ *Slot Unavailable*\n\nThe slot at *${ActionUtils.formatTime12h(timeStr)}* was just booked or is no longer available. Please select another time slot from the list below:`;
+        await this.sendMessage(cleanNumber, slotMenu, phoneNumberId, salonId);
+        return { replyMessage: slotMenu.bodyText, state: ConversationState.SELECT_TIME };
+      } else {
+        const noMoreMsg = {
+          bodyText: `⚠️ *No More Slots Available Today*\n\nThe slot at *${ActionUtils.formatTime12h(timeStr)}* is no longer available, and all remaining slots for today are fully booked.\n\nWould you like to pick another date?`,
+          interactiveType: 'button' as const,
+          buttons: [
+            { id: WhatsAppButtonId.CHANGE_DATE, title: '📅 Pick Another Date' },
+            { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
+          ],
+        };
+        await this.sendMessage(cleanNumber, noMoreMsg, phoneNumberId, salonId);
+        return { replyMessage: noMoreMsg.bodyText, state: ConversationState.SELECT_DATE };
+      }
     }
   }
 
@@ -682,5 +826,79 @@ export class BookingAction {
     const staffMenu = this.templates.buildStaffSelectionMenu(qualifiedStylists);
     await this.sendMessage(cleanNumber, staffMenu, phoneNumberId, salon.id);
     return { replyMessage: staffMenu.bodyText, state: ConversationState.SELECT_STAFF };
+  }
+
+  /**
+   * In-Funnel Time Slot Re-Selection (Bypasses Entry Collision Guard)
+   */
+  async handleTimeReSelection(ctx: ActionContext): Promise<ActionResult> {
+    const { cleanNumber, phoneNumberId, salonId, salon, conversation } = ctx;
+    const tz = salon.timezone || TimeUtility.DEFAULT_TIMEZONE;
+    if (!conversation.selectedServiceId) {
+      return this.handleStartBooking(ctx);
+    }
+    const datePart = conversation.selectedDate || new Date();
+    const dateStr = TimeUtility.formatDateToISO(datePart, tz);
+    const nowDt = TimeUtility.now(tz);
+    const isToday = dateStr === nowDt.toISODate();
+    const nowMinutes = nowDt.hour * 60 + nowDt.minute;
+
+    await this.session.updateConversationState(
+      conversation.id,
+      ConversationState.SELECT_TIME,
+      undefined,
+      { selectedStartTime: null },
+    );
+
+    const availability = await this.availabilityService.getAvailableSlots(
+      salonId,
+      conversation.selectedServiceId,
+      dateStr,
+      conversation.selectedStaffId || undefined,
+    );
+
+    if (availability.availableSlots && availability.availableSlots.length > 0) {
+      const slotRows = availability.availableSlots.map((s: any) => ({
+        timeStr: s.startTime,
+        displayTime: ActionUtils.formatTime12h(s.startTime),
+      }));
+      const slotMenu = this.templates.buildTimeSlotMenu(slotRows, false, SlotWindowType.EARLIEST, {
+        isToday,
+        nowMinutes,
+        salonName: salon.name,
+      });
+      await this.sendMessage(cleanNumber, slotMenu, phoneNumberId, salonId);
+      return { replyMessage: slotMenu.bodyText, state: ConversationState.SELECT_TIME };
+    }
+
+    return this.handleDateReSelection(ctx);
+  }
+
+  /**
+   * In-Funnel Date Re-Selection (Bypasses Entry Collision Guard)
+   */
+  async handleDateReSelection(ctx: ActionContext): Promise<ActionResult> {
+    const { cleanNumber, phoneNumberId, salonId, conversation } = ctx;
+    if (!conversation.selectedServiceId) {
+      return this.handleStartBooking(ctx);
+    }
+
+    await this.session.updateConversationState(
+      conversation.id,
+      ConversationState.SELECT_DATE,
+      undefined,
+      { selectedStartTime: null, selectedDate: null },
+    );
+
+    const openDates = await this.availabilityService.findAvailableDates(
+      salonId,
+      conversation.selectedServiceId,
+      conversation.selectedStaffId || undefined,
+      7,
+    );
+
+    const dateMenu = this.templates.buildDateSelectionMenu(openDates);
+    await this.sendMessage(cleanNumber, dateMenu, phoneNumberId, salonId);
+    return { replyMessage: dateMenu.bodyText, state: ConversationState.SELECT_DATE };
   }
 }

@@ -278,5 +278,34 @@ export const Icons = {
     <line x1="12" y1="8" x2="12" y2="12"/>
     <line x1="12" y1="16" x2="12.01" y2="16"/>
   `, opts),
+
+  mail: (opts) => svg(`
+    <rect width="20" height="16" x="2" y="4" rx="2"/>
+    <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+  `, opts),
+
+  logOut: (opts) => svg(`
+    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+    <polyline points="16 17 21 12 16 7"/>
+    <line x1="21" y1="12" x2="9" y2="12"/>
+  `, opts),
+
+  history: (opts) => svg(`
+    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+    <path d="M3 3v5h5"/>
+    <polyline points="12 7 12 12 15 15"/>
+  `, opts),
+
+  sliders: (opts) => svg(`
+    <line x1="4" x2="4" y1="21" y2="14"/>
+    <line x1="4" x2="4" y1="10" y2="3"/>
+    <line x1="12" x2="12" y1="21" y2="12"/>
+    <line x1="12" x2="12" y1="8" y2="3"/>
+    <line x1="20" x2="20" y1="21" y2="16"/>
+    <line x1="20" x2="20" y1="12" y2="3"/>
+    <line x1="2" x2="6" y1="14" y2="14"/>
+    <line x1="10" x2="14" y1="8" y2="8"/>
+    <line x1="18" x2="22" y1="16" y2="16"/>
+  `, opts),
 };
 

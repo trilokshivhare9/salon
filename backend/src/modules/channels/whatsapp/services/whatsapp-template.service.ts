@@ -1,7 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { WhatsAppButtonId, InteractiveButton, InteractiveListRow } from './whatsapp-sender.service';
 import { TimeUtility } from '../../../../common/utils/time.utility';
 import { AppointmentStatus } from '@prisma/client';
+import { TimeSlotWindowEngine, SlotWindowType } from './time-slot-window.engine';
 
 @Injectable()
 export class WhatsAppTemplateService {
@@ -38,7 +39,11 @@ export class WhatsAppTemplateService {
     };
   }
 
-  buildWelcomeMessage(salon: any, activeAppointment?: any) {
+  buildWelcomeMessage(
+    salon: any,
+    activeAppointment?: any,
+    options?: { isQuickBookOpen?: boolean },
+  ) {
     const salonName = salon?.name || 'our Salon';
     const isLocalDev = process.env.NODE_ENV === 'development';
     const localTag = isLocalDev ? '💻 [LOCAL DEV SERVER]\n\n' : '';
@@ -69,13 +74,46 @@ export class WhatsAppTemplateService {
       };
     }
 
+    const showQuickBook = options?.isQuickBookOpen !== false;
+
+    const buttons = [
+      { id: WhatsAppButtonId.BOOK, title: '📅 Book Slot' },
+      ...(showQuickBook ? [{ id: WhatsAppButtonId.QUICK_BOOK, title: '⚡ Quick Book' }] : []),
+      { id: WhatsAppButtonId.INFO, title: '📍 Salon Info' },
+    ];
+
+    const bodyDescription = showQuickBook
+      ? 'Book your appointment in a few quick taps or choose Quick Book for express walk-in check-in.'
+      : 'Book your appointment in a few quick taps or view salon information.';
+
     return {
-      bodyText: `${localTag}👋 Welcome to *${salonName}*!\n\nBook your appointment in a few quick taps or choose Quick Book for express walk-in check-in.`,
+      bodyText: `${localTag}👋 Welcome to *${salonName}*!\n\n${bodyDescription}`,
+      interactiveType: 'button' as const,
+      buttons,
+    };
+  }
+
+  buildQuickBookClosedReply(
+    salonName: string,
+    options?: { nextOpeningTimeFormatted?: string; reason?: string },
+  ) {
+    const nextOpen = options?.nextOpeningTimeFormatted || '09:00 AM';
+    let detail = `We are currently closed for today (opens tomorrow at ${nextOpen}).`;
+
+    if (options?.reason === 'FULLY_BOOKED_TODAY') {
+      detail = `All appointments for today are fully booked or the salon has reached full walk-in capacity.`;
+    } else if (options?.reason === 'INSUFFICIENT_TIME_REMAINING') {
+      detail = `The salon is preparing to close soon and cannot accommodate new walk-ins for today.`;
+    }
+
+    const bodyText = `⚡ *Quick Booking (Express Walk-in)*\n\n${detail}\n\nWould you like to schedule an upcoming appointment with normal booking?`;
+
+    return {
+      bodyText,
       interactiveType: 'button' as const,
       buttons: [
-        { id: WhatsAppButtonId.BOOK, title: '📅 Book Slot' },
-        { id: WhatsAppButtonId.QUICK_BOOK, title: '⚡ Quick Book' },
-        { id: WhatsAppButtonId.INFO, title: '📍 Salon Info' },
+        { id: WhatsAppButtonId.BOOK, title: '📅 Book for Tomorrow' },
+        { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
       ],
     };
   }
@@ -83,12 +121,23 @@ export class WhatsAppTemplateService {
   // 2. Salon Info Template
   buildSalonInfoMessage(salon: any) {
     const name = salon?.name || 'Salon';
-    const address = salon?.address || 'Address available at desk';
+    const address = salon?.address
+      ? `${salon.address}${salon.city ? ', ' + salon.city : ''}`
+      : 'Address available at desk';
     const phone = salon?.phone || 'Contact desk directly';
     const hours = salon?.openingHours || '9:00 AM - 9:00 PM Daily';
 
+    let mapsLine = '';
+    if (salon?.googleMapsUrl) {
+      mapsLine = `\n🗺️ *Maps Link:* ${salon.googleMapsUrl}`;
+    } else if (salon?.latitude && salon?.longitude) {
+      mapsLine = `\n🗺️ *Directions:* https://maps.google.com/?q=${salon.latitude},${salon.longitude}`;
+    } else if (salon?.address) {
+      mapsLine = `\n🗺️ *Directions:* https://maps.google.com/?q=${encodeURIComponent(salon.address + (salon.city ? ' ' + salon.city : ''))}`;
+    }
+
     return {
-      bodyText: `📍 *${name} Info*\n\n🏠 *Address:* ${address}\n📞 *Phone:* ${phone}\n🕒 *Hours:* ${hours}\n\nWe look forward to styling you!`,
+      bodyText: `📍 *${name} Info*\n\n🏠 *Address:* ${address}\n📞 *Phone:* ${phone}\n🕒 *Hours:* ${hours}${mapsLine}\n\nWe look forward to styling you!`,
       interactiveType: 'button' as const,
       buttons: [
         { id: WhatsAppButtonId.BOOK, title: '📅 Book Slot' },
@@ -203,22 +252,24 @@ export class WhatsAppTemplateService {
     };
   }
 
-  // 8. Time Slot Menu Template
-  buildTimeSlotMenu(slots: { timeStr: string; displayTime: string }[], isReschedule = false) {
-    const prefix = isReschedule ? 'rslot_' : 'slot_';
-    const rows: InteractiveListRow[] = slots.slice(0, 10).map((s) => ({
-      id: `${prefix}${s.timeStr}`,
-      title: s.displayTime,
-      description: 'Available Slot',
-    }));
+  constructor(@Optional() private windowEngine?: TimeSlotWindowEngine) {
+    if (!this.windowEngine) {
+      this.windowEngine = new TimeSlotWindowEngine();
+    }
+  }
 
-    return {
-      headerText: '🕒 Select Time Slot',
-      bodyText: 'Please pick an available time slot:',
-      buttonText: 'View Time Slots',
-      interactiveType: 'list' as const,
-      listRows: rows,
-    };
+  // 8. Time Slot Menu Template
+  buildTimeSlotMenu(
+    slots: { timeStr: string; displayTime: string }[],
+    isReschedule = false,
+    activeWindow: SlotWindowType = SlotWindowType.EARLIEST,
+    options?: { isToday?: boolean; nowMinutes?: number; salonName?: string },
+  ) {
+    const prefix = isReschedule ? 'rslot_' : 'slot_';
+    return this.windowEngine.buildWindowedMenu(slots, prefix, activeWindow, {
+      ...options,
+      isReschedule,
+    });
   }
 
   // 8B. Collect Customer Name Prompt
@@ -240,10 +291,10 @@ export class WhatsAppTemplateService {
   }) {
     const nameLine = summary.customerName ? `👤 *Name:* ${summary.customerName}\n` : '';
     const urgentNotice = summary.isUrgentWithin15Min
-      ? `\n⚡ *Urgent Slot (< 15 mins):* Because this slot starts very soon, confirming will send an instant *Quick Booking request* directly to the salon desk to accept immediately.\n`
-      : '';
+      ? `\n⚡ *Express Quick Booking Notice:* Because this slot begins in *less than 15 minutes*, confirming will alert our salon desk with an express request to hold your chair immediately. Pay at the salon!\n`
+      : `\n✅ *Instant Auto-Confirmation:* Your chair will be locked in real-time upon confirmation. Pay at the salon after your service.\n⏱️ *Arrival:* Please arrive ~5 minutes prior to your time.\n`;
     return {
-      bodyText: `📋 *Booking Confirmation*\n\n${nameLine}✂️ *Service:* ${summary.serviceName}\n💇‍♂️ *Stylist:* ${summary.staffName}\n📅 *Date:* ${summary.dateStr}\n🕒 *Time:* ${summary.timeStr}\n💵 *Price:* ₹${summary.price}\n${urgentNotice}\nWould you like to confirm this reservation?`,
+      bodyText: `📋 *Booking Confirmation*\n\n${nameLine}✂️ *Service:* ${summary.serviceName}\n💇‍♂️ *Specialist:* ${summary.staffName}\n📅 *Date:* ${summary.dateStr}\n🕒 *Time:* ${summary.timeStr}\n💵 *Price:* ₹${summary.price}\n${urgentNotice}\nWould you like to confirm this reservation?`,
       interactiveType: 'button' as const,
       buttons: [
         { id: WhatsAppButtonId.CONFIRM_YES, title: '✅ Confirm Booking' },
@@ -253,16 +304,21 @@ export class WhatsAppTemplateService {
   }
 
   // 10. Booking Success Reply Template
-  buildBookingSuccessReply(appointment: any, timezone?: string) {
+  buildBookingSuccessReply(appointment: any, timezone?: string, salon?: any) {
     const tz = timezone || TimeUtility.DEFAULT_TIMEZONE;
     const startTimeVal = appointment?.startTime || appointment?.startAt;
     const date = startTimeVal ? TimeUtility.formatDateFriendly(startTimeVal, tz, 'dd LLL, EEE') : '';
     const time = startTimeVal ? TimeUtility.formatTime12h(startTimeVal, tz) : '';
+    const serviceName = appointment?.service?.name || appointment?.serviceNameSnapshot || 'Hair & Grooming';
+    const stylistName = appointment?.stylist?.name || 'Any Specialist';
+    const price = appointment?.price ? `₹${appointment.price}` : '';
+    const salonName = salon?.name || appointment?.salon?.name || 'Our Salon';
 
     return {
-      bodyText: `🎉 *Booking Confirmed!*\n\nYour appointment has been successfully scheduled.\n\n📅 *Date:* ${date}\n🕒 *Time:* ${time}\n\nWe look forward to serving you!`,
+      bodyText: `🎉 *Booking Confirmed!*\n\nYour reservation at *${salonName}* has been scheduled successfully.\n\n✂️ *Service:* ${serviceName}\n💇‍♂️ *Specialist:* ${stylistName}\n📅 *Date:* ${date}\n🕒 *Time:* ${time}${price ? `\n💵 *Total:* ${price}` : ''}\n\n⏱️ *Arrival:* Please arrive ~5 minutes before your time.\n\nWe look forward to serving you!`,
       interactiveType: 'button' as const,
       buttons: [
+        { id: WhatsAppButtonId.INFO, title: '📍 Directions & Info' },
         { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
       ],
     };
@@ -316,6 +372,48 @@ export class WhatsAppTemplateService {
       bodyText: `✅ *Checked In Successfully!*\n\nOur staff has been notified of your arrival. Please have a seat in the waiting section!`,
       interactiveType: 'button' as const,
       buttons: [{ id: WhatsAppButtonId.START, title: '🏠 Main Menu' }],
+    };
+  }
+
+  buildSeatedInChairReply(salonName: string, stylistName: string, serviceName: string) {
+    return {
+      bodyText: `💺 *YOU'RE IN THE CHAIR!*\n\nHi! You are now seated with *${stylistName}* for *${serviceName}* at *${salonName}*.\n\nSit back, relax, and enjoy your grooming experience! ✨`,
+      interactiveType: 'button' as const,
+      buttons: [{ id: WhatsAppButtonId.START, title: '🏠 Main Menu' }],
+    };
+  }
+
+  buildCompletedReceiptReply(details: {
+    salonName: string;
+    serviceName: string;
+    stylistName: string;
+    price: number | string | any;
+    customerName?: string;
+  }) {
+    const greeting = details.customerName ? `Hi *${details.customerName}*, thank` : 'Thank';
+    return {
+      bodyText: `✨ *THANK YOU FOR VISITING ${details.salonName.toUpperCase()}!*\n\n${greeting} you for visiting us today! We hope you loved your new look!\n\n• *Service:* *${details.serviceName}*\n• *Stylist:* *${details.stylistName}*\n• *Total Paid:* *₹${details.price}*\n\n⭐ *How was your experience today?*`,
+      interactiveType: 'button' as const,
+      buttons: [
+        { id: WhatsAppButtonId.FEEDBACK_GREAT, title: '⭐ Great Service!' },
+        { id: WhatsAppButtonId.BOOK, title: '📅 Book Next Visit' },
+        { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
+      ],
+    };
+  }
+
+  buildFeedbackThanksReply(salonName: string, reviewUrl?: string) {
+    let body = `💖 *THANK YOU FOR YOUR FEEDBACK!*\n\nWe are delighted to hear that you had a wonderful experience at *${salonName}*! Your kind words mean the world to our team.`;
+    if (reviewUrl) {
+      body += `\n\n🌟 If you have a moment, we would love a quick review:\n${reviewUrl}`;
+    }
+    return {
+      bodyText: body,
+      interactiveType: 'button' as const,
+      buttons: [
+        { id: WhatsAppButtonId.BOOK, title: '📅 Book Next Visit' },
+        { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
+      ],
     };
   }
 
@@ -395,18 +493,20 @@ export class WhatsAppTemplateService {
   buildQuickBookPendingReply(appointment: any, isUrgentWithin15Min = false) {
     if (isUrgentWithin15Min) {
       return {
-        bodyText: `⚡ *Request Sent to Salon!*\n\nSince your appointment is in *less than 15 minutes*, this slot is treated as a *Quick Booking* directly sent to the salon desk.\n\n🔔 The salon owner will review and confirm your slot right away. We'll notify you here the moment it's confirmed!`,
+        bodyText: `⚡ *Quick Booking Request Sent!*\n\nSince this appointment begins in *less than 15 minutes*, our salon desk has received your express request to prepare your chair immediately.\n\n🔔 *Status:* Awaiting Salon Confirmation\n⏱️ *Expected Response:* Under 2–3 minutes\n\nWe will notify you here the second your chair is confirmed!`,
         interactiveType: 'button' as const,
         buttons: [
+          { id: WhatsAppButtonId.CANCEL_PENDING_QUICK, title: '❌ Cancel Request' },
           { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
         ],
       };
     }
 
     return {
-      bodyText: `⏳ *Request Sent to Salon!*\n\nYour quick booking request for *${appointment?.serviceNameSnapshot || 'Service'}* is *Pending Approval* by the salon. We'll notify you once confirmed!`,
+      bodyText: `⏳ *Quick Booking Request Sent!*\n\nYour request for *${appointment?.serviceNameSnapshot || 'Service'}* is *Pending Approval* by our salon desk.\n\n⏱️ *Expected Response:* Under 2–3 minutes\nWe'll notify you here the moment it's confirmed!`,
       interactiveType: 'button' as const,
       buttons: [
+        { id: WhatsAppButtonId.CANCEL_PENDING_QUICK, title: '❌ Cancel Request' },
         { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
       ],
     };
@@ -578,9 +678,11 @@ export class WhatsAppTemplateService {
     dateStr: string,
     timeStr: string,
     salonAddress: string,
+    directionsUrl?: string,
   ) {
+    const directionsBlock = directionsUrl ? `\n🚗 *Get Directions:*\n${directionsUrl}` : '';
     return {
-      bodyText: `⏰ *APPOINTMENT REMINDER*\n\nHello *${userName || 'Customer'}*, your upcoming visit at *${salonName}* is in ~2 hours:\n\n• *Service:* *${serviceName}* (₹${price})\n• *Stylist:* *${stylistName}*\n• *Date:* *${dateStr}*\n• *Time:* *${timeStr}*\n\n📍 *${salonName}*\n${salonAddress || ''}\n\n⚠️ *Action Required within 1 Hour:*\nPlease tap *Confirm Booking* below. If not confirmed at least 1 hour before your slot, the appointment will be *automatically canceled with a penalty strike* to release the slot for other waiting clients.`,
+      bodyText: `⏰ *APPOINTMENT REMINDER*\n\nHello *${userName || 'Customer'}*, your upcoming visit at *${salonName}* is in ~2 hours:\n\n• *Service:* *${serviceName}* (₹${price})\n• *Stylist:* *${stylistName}*\n• *Date:* *${dateStr}*\n• *Time:* *${timeStr}*\n\n📍 *${salonName}*\n${salonAddress || ''}${directionsBlock}\n\n⚠️ *Action Required within 1 Hour:*\nPlease tap *Confirm Booking* below. If not confirmed at least 1 hour before your slot, the appointment will be *automatically canceled with a penalty strike* to release the slot for other waiting clients.`,
       interactiveType: 'button' as const,
       buttons: [
         { id: WhatsAppButtonId.REMIND_CONFIRM, title: '✅ Confirm Booking' },

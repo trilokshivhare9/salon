@@ -3,10 +3,12 @@ import { RealtimeNotifier } from './realtime.js';
 import { SoundManager } from './sound.js';
 import { Icons } from './icons.js';
 import { LeaveManagementUI } from './leave-management.js';
+import { LocationPicker } from './location-picker.js';
 import {
   SERVICE_DURATION_OPTIONS,
   renderServiceDurationOptions,
 } from './constants.js';
+import { AppointmentStatus, StatusPredicates } from './constants/appointment-status.js';
 
 export {
   SERVICE_DURATION_OPTIONS,
@@ -111,6 +113,7 @@ export class SalonDashboard {
     this.categoriesList = [];
     this.salonProfile = {};
     this.searchQuery = '';
+    this.activeProfileSubtab = 'account';
   }
 
   showToast(msg, type = 'info') {
@@ -393,6 +396,9 @@ export class SalonDashboard {
     if (this.activeTab && this.activeTab !== targetTab) {
       this.previousTab = this.activeTab;
     }
+    if (targetTab === 'profile') {
+      this.mobileSettingsDrilled = false;
+    }
     this.activeTab = targetTab;
 
     // Update active state on desktop tab buttons
@@ -591,7 +597,7 @@ export class SalonDashboard {
           <div class="header-actions-group" style="display: flex; gap: 8px; align-items: center;">
             <button class="btn btn-secondary btn-sm" id="btn-header-quick-requests" title="View Pending Quick Booking Requests" style="background: ${pendingQuickCount > 0 ? 'rgba(245,158,11,0.25)' : 'rgba(99,102,241,0.12)'}; border: 1px solid ${pendingQuickCount > 0 ? 'rgba(245,158,11,0.5)' : 'rgba(99,102,241,0.3)'}; color: ${pendingQuickCount > 0 ? '#fbbf24' : '#818cf8'}; font-weight: 700; gap: 6px; display: flex; align-items: center;">
               ${Icons.sparkles({ size: 14, color: pendingQuickCount > 0 ? '#fbbf24' : '#818cf8' })}
-              <span>Quick Requests <strong id="header-quick-requests-val" style="background: ${pendingQuickCount > 0 ? '#f59e0b' : 'rgba(255,255,255,0.15)'}; color: ${pendingQuickCount > 0 ? '#000' : '#fff'}; padding: 1px 7px; border-radius: 10px; font-weight: 800; margin-left: 4px; font-size: 0.8rem;">${pendingQuickCount}</strong></span>
+              <span><span class="desktop-only-inline">Quick Requests </span><strong id="header-quick-requests-val" style="background: ${pendingQuickCount > 0 ? '#f59e0b' : 'rgba(255,255,255,0.15)'}; color: ${pendingQuickCount > 0 ? '#000' : '#fff'}; padding: 1px 7px; border-radius: 10px; font-weight: 800; margin-left: 4px; font-size: 0.8rem;">${pendingQuickCount}</strong></span>
             </button>
             <button class="btn btn-secondary btn-sm" id="btn-toggle-sound" title="${SoundManager.isMuted() ? 'Unmute Floor Audio' : 'Mute Floor Audio'}">
               <span id="sound-icon">${SoundManager.isMuted() ? Icons.volumeX({ size: 16, color: '#94a3b8' }) : Icons.volume2({ size: 16, color: '#34d399' })}</span>
@@ -739,7 +745,10 @@ export class SalonDashboard {
   // =========================================================================
   renderDashboardTab() {
     const summary = this.summaryData || {};
-    const statusCounts = summary.statusCounts || { total: 0, confirmed: 0, checkedIn: 0, inService: 0, completed: 0, cancelled: 0, noShow: 0 };
+    const statusCounts = summary.statusCounts || { total: 0, booked: 0, confirmed: 0, checkedIn: 0, onTheWay: 0, inService: 0, seatedInChair: 0, completed: 0, cancelled: 0, noShow: 0, rejected: 0 };
+    const waitingDisplayCount = (statusCounts.checkedIn || 0) + (statusCounts.onTheWay || 0);
+    const inChairDisplayCount = (statusCounts.inService || 0) + (statusCounts.seatedInChair || 0);
+    const bookedConfirmedCount = (statusCounts.confirmed || 0) + (statusCounts.booked || 0);
     const todayRevenue = summary.todayRevenue || 0;
     const todayAppointments = summary.todayAppointments || [];
     const profile = this.salonProfile || {};
@@ -809,11 +818,11 @@ export class SalonDashboard {
               <span class="telemetry-chip-lbl">Bookings</span>
             </div>
             <div class="telemetry-chip">
-              <span class="telemetry-chip-val" style="color: #fbbf24;">${statusCounts.checkedIn}</span>
+              <span class="telemetry-chip-val" style="color: #fbbf24;">${waitingDisplayCount}</span>
               <span class="telemetry-chip-lbl">Waiting</span>
             </div>
             <div class="telemetry-chip">
-              <span class="telemetry-chip-val" style="color: #c084fc;">${statusCounts.inService}</span>
+              <span class="telemetry-chip-val" style="color: #c084fc;">${inChairDisplayCount}</span>
               <span class="telemetry-chip-lbl">In Chair</span>
             </div>
             <div class="telemetry-chip">
@@ -835,7 +844,7 @@ export class SalonDashboard {
             ${(this.staffList && this.staffList.length > 0)
         ? this.staffList.map((st, idx) => {
           const todayAppts = (todayAppointments || []).filter((a) => (a.staff?.id || a.staffId) === st.id);
-          const inService = todayAppts.find((a) => a.status === 'IN_SERVICE');
+          const inService = todayAppts.find((a) => a.status === 'SEATED_IN_CHAIR' || a.status === 'IN_SERVICE');
           const isOccupied = !!inService;
           const _stDateIso = (this.selectedDate || new Date().toISOString().split('T')[0]);
           const _stAbsent = (st.absences || []).some((ab) => {
@@ -845,7 +854,7 @@ export class SalonDashboard {
             return _stDateIso >= sDate && _stDateIso <= eDate;
           });
           const _stStatusColor = todayClosure ? '#f87171' : _stAbsent ? '#fb7185' : isOccupied ? '#c084fc' : '#34d399';
-          const _stStatusLabel = todayClosure ? '🚨 Store Closed Today' : _stAbsent ? '🚫 Absent Today' : isOccupied ? `In Chair: ${inService.customer?.name || 'Client'}` : '🟢 Ready for Walk-In';
+          const _stStatusLabel = todayClosure ? '🚨 Store Closed Today' : _stAbsent ? '🚫 Absent Today' : isOccupied ? `In Chair: ${inService.customer?.name || inService.customerName || inService.user?.name || 'Client'}` : '🟢 Ready for Walk-In';
           return `
                     <div class="station-card ${_stAbsent || todayClosure ? 'absent' : isOccupied ? 'occupied' : 'ready'}" style="${_stAbsent || todayClosure ? 'opacity: 0.7;' : ''}">
                       <div class="station-num-badge">#${idx + 1}</div>
@@ -897,9 +906,9 @@ export class SalonDashboard {
           </div>
           <div class="stat-value" style="color: #c7d2fe;">${statusCounts.total}</div>
           <div class="stat-sub">
-            <span>Confirmed: <strong style="color: #fff;">${statusCounts.confirmed}</strong></span>
+            <span>Confirmed: <strong style="color: #fff;">${bookedConfirmedCount}</strong></span>
             <span>•</span>
-            <span>Waiting: <strong style="color: #fbbf24;">${statusCounts.checkedIn}</strong></span>
+            <span>Waiting: <strong style="color: #fbbf24;">${waitingDisplayCount}</strong></span>
           </div>
         </div>
 
@@ -911,7 +920,7 @@ export class SalonDashboard {
               ${Icons.armchair({ size: 18, color: '#c084fc' })}
             </div>
           </div>
-          <div class="stat-value" style="color: #c084fc;">${statusCounts.inService}</div>
+          <div class="stat-value" style="color: #c084fc;">${inChairDisplayCount}</div>
           <div class="stat-sub">
             <span class="q-live-dot" style="width: 6px; height: 6px; display: inline-block;"></span>
             <span>Active stations currently occupied</span>
@@ -1074,65 +1083,110 @@ export class SalonDashboard {
       const summary = this.summaryData || {};
       const statusCounts = summary.statusCounts || {
         total: 0,
+        booked: 0,
         confirmed: 0,
         checkedIn: 0,
+        onTheWay: 0,
         inService: 0,
+        seatedInChair: 0,
         completed: 0,
         cancelled: 0,
         noShow: 0,
+        rejected: 0,
+        pendingAcceptance: 0,
+        pendingReschedule: 0,
       };
       const todayAppointments = Array.isArray(summary.todayAppointments)
         ? summary.todayAppointments
         : [];
 
-      // Smart Operator Queue Sorting:
-      // 1. IN_SERVICE (In Chair right now) -> TOP Priority
-      // 2. CHECKED_IN (Waiting in salon) -> 2nd
-      // 3. CONFIRMED (Upcoming today) -> Earliest startTime first
-      // 4. COMPLETED (Finished) -> Sinks to bottom, most recent first
-      // 5. CANCELLED / NO_SHOW -> Bottom
-      const getStatusPriority = (status) => {
-        switch (status) {
-          case 'PENDING_ACCEPTANCE': return 0;
-          case 'IN_SERVICE': return 1;
-          case 'CHECKED_IN': return 2;
-          case 'CONFIRMED': return 3;
-          case 'COMPLETED': return 4;
-          case 'CANCELLED': return 5;
-          case 'NO_SHOW': return 6;
-          default: return 7;
+      // Architecture-Level Tiered Queue Prioritization Engine:
+      // Tier 0: PENDING_ACCEPTANCE (Quick booking requests needing immediate operator action)
+      // Tier 1: IN_SERVICE / SEATED_IN_CHAIR (Occupying chair right now)
+      // Tier 2: CHECKED_IN / ARRIVED (Physically present in salon, awaiting chair)
+      // Tier 3: ON_THE_WAY / En-Route (Client traveling to salon)
+      // Tier 4: BOOKED / CONFIRMED (Upcoming today: chronological earliest slot first)
+      // Tier 5: BOOKED / CONFIRMED Overdue (startAt has passed > 15m without check-in)
+      // Tier 6: PENDING_RESCHEDULE (Awaiting customer action)
+      // Tier 7: COMPLETED (Finished visits, sunk to bottom)
+      // Tier 8: CANCELLED / NO_SHOW / REJECTED (Freed chair capacity, sunk to bottom)
+      const nowMs = Date.now();
+
+      const evaluateQueueItem = (appt) => {
+        const status = appt.status || 'BOOKED';
+        const startMs = new Date(appt.startTime || appt.startAt || 0).getTime() || 0;
+        const isEnRoute = appt.clientEtaStatus === 'ON_THE_WAY' || status === 'ON_THE_WAY';
+        const isLobby = status === 'CHECKED_IN' || appt.clientEtaStatus === 'ARRIVED';
+        const isInChair = status === 'IN_SERVICE' || status === 'SEATED_IN_CHAIR';
+
+        if (status === 'PENDING_ACCEPTANCE') return { tier: 0, isUpcoming: true, isOverdue: false };
+        if (isInChair) return { tier: 1, isUpcoming: false, isOverdue: false, isInChair: true };
+        if (isLobby) return { tier: 2, isUpcoming: false, isOverdue: false, isLobby: true };
+        if (isEnRoute) return { tier: 3, isUpcoming: true, isOverdue: false, isEnRoute: true };
+        if (status === 'CONFIRMED' || status === 'BOOKED') {
+          // If start time was more than 15 minutes ago, classify as Overdue/Late
+          const isOverdue = startMs > 0 && startMs < (nowMs - 15 * 60 * 1000);
+          if (isOverdue) {
+            return { tier: 5, isUpcoming: false, isOverdue: true };
+          }
+          return { tier: 4, isUpcoming: true, isOverdue: false };
         }
+        if (status === 'PENDING_RESCHEDULE') return { tier: 6, isUpcoming: true, isOverdue: false };
+        if (status === 'COMPLETED') return { tier: 7, isUpcoming: false, isOverdue: false };
+        if (status === 'CANCELLED' || status === 'NO_SHOW' || status === 'REJECTED') {
+          return { tier: 8, isUpcoming: false, isOverdue: false };
+        }
+        return { tier: 9, isUpcoming: false, isOverdue: false };
       };
 
       const sortedAppointments = [...todayAppointments].sort((a, b) => {
-        const pA = getStatusPriority(a.status);
-        const pB = getStatusPriority(b.status);
-        if (pA !== pB) return pA - pB;
-        const timeA = new Date(a.startTime || a.startAt || 0).getTime() || 0;
-        const timeB = new Date(b.startTime || b.startAt || 0).getTime() || 0;
-        if (pA <= 3) {
-          return timeA - timeB;
-        } else {
-          return timeB - timeA;
+        const itemA = evaluateQueueItem(a);
+        const itemB = evaluateQueueItem(b);
+
+        // Tier separation: Lower tier numbers ALWAYS precede higher tiers
+        if (itemA.tier !== itemB.tier) {
+          return itemA.tier - itemB.tier;
         }
+
+        // Secondary sorting within same tier:
+        // For active/upcoming tiers (0-6): Earliest scheduled start time first
+        if (itemA.tier <= 6) {
+          const timeA = new Date(a.startTime || a.startAt || 0).getTime() || 0;
+          const timeB = new Date(b.startTime || b.startAt || 0).getTime() || 0;
+          return timeA - timeB;
+        }
+
+        // For terminal tiers (7-8: Completed, Cancelled, No-Show):
+        // Reverse-chronological: Most recently updated/concluded first
+        const timeA = new Date(a.updatedAt || a.startTime || a.startAt || 0).getTime() || 0;
+        const timeB = new Date(b.updatedAt || b.startTime || b.startAt || 0).getTime() || 0;
+        return timeB - timeA;
       });
 
       // Filter appointments based on operator selection
       let filteredAppointments = sortedAppointments;
       if (this.queueFilter === 'WAITING') {
-        filteredAppointments = sortedAppointments.filter((a) => ['CONFIRMED', 'CHECKED_IN', 'PENDING_ACCEPTANCE'].includes(a.status));
+        filteredAppointments = sortedAppointments.filter((a) =>
+          ['BOOKED', 'CONFIRMED', 'CHECKED_IN', 'ON_THE_WAY', 'PENDING_ACCEPTANCE', 'PENDING_RESCHEDULE'].includes(a.status)
+        );
       } else if (this.queueFilter === 'IN_CHAIR') {
-        filteredAppointments = sortedAppointments.filter((a) => a.status === 'IN_SERVICE');
+        filteredAppointments = sortedAppointments.filter((a) => a.status === 'IN_SERVICE' || a.status === 'SEATED_IN_CHAIR');
       } else if (this.queueFilter === 'COMPLETED') {
         filteredAppointments = sortedAppointments.filter((a) => a.status === 'COMPLETED');
       } else if (this.queueFilter === 'CANCELLED') {
-        filteredAppointments = sortedAppointments.filter((a) => ['CANCELLED', 'NO_SHOW'].includes(a.status));
+        filteredAppointments = sortedAppointments.filter((a) => ['CANCELLED', 'NO_SHOW', 'REJECTED'].includes(a.status));
       }
 
-      const waitingCount = (statusCounts.confirmed || 0) + (statusCounts.checkedIn || 0);
-      const inChairCount = statusCounts.inService || 0;
+      const waitingCount =
+        (statusCounts.booked || 0) +
+        (statusCounts.confirmed || 0) +
+        (statusCounts.checkedIn || 0) +
+        (statusCounts.onTheWay || 0) +
+        (statusCounts.pendingAcceptance || 0) +
+        (statusCounts.pendingReschedule || 0);
+      const inChairCount = (statusCounts.inService || 0) + (statusCounts.seatedInChair || 0);
       const completedCount = statusCounts.completed || 0;
-      const cancelledCount = (statusCounts.cancelled || 0) + (statusCounts.noShow || 0);
+      const cancelledCount = (statusCounts.cancelled || 0) + (statusCounts.noShow || 0) + (statusCounts.rejected || 0);
 
       const todayISO = this.getLocalDateString();
       const [sy, sm, sd] = (this.selectedDate || todayISO).split('-').map(Number);
@@ -1358,8 +1412,10 @@ export class SalonDashboard {
         const initials = getInitials(customerName);
         const avatarCls = getAvatarColor(customerName);
         const isDone = appt.status === 'COMPLETED';
-        const isCancelled = ['CANCELLED', 'NO_SHOW'].includes(appt.status);
+        const isCancelled = ['CANCELLED', 'NO_SHOW', 'REJECTED'].includes(appt.status);
         const statusKey = (appt.status || 'CONFIRMED').toLowerCase();
+        const queueItemEval = evaluateQueueItem(appt);
+        const isOverdue = queueItemEval.isOverdue;
 
         const rawStart = appt.startTime || appt.startAt;
         const startDt = rawStart ? new Date(rawStart) : new Date();
@@ -1448,10 +1504,16 @@ export class SalonDashboard {
                         `;
                       }).join('');
                     })()}
-                    ${appt.status === 'IN_SERVICE' ? `
+                    ${appt.status === 'IN_SERVICE' || appt.status === 'SEATED_IN_CHAIR' ? `
                       <span class="qc__tag qc__tag--inchair">
                         <span class="qc__pulse-dot"></span>
                         <span>In Chair · ~${remainingMins}m left</span>
+                      </span>
+                    ` : ''}
+
+                    ${isOverdue && !isDone && !isCancelled ? `
+                      <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); font-size: 0.72rem; padding: 4px 8px; border-radius: 6px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
+                        ⚠️ Scheduled Slot Passed
                       </span>
                     ` : ''}
 
@@ -1470,9 +1532,15 @@ export class SalonDashboard {
                       </span>
                     ` : ''}
 
-                    ${appt.customerActionStatus === 'ON_WAY' || appt.clientEtaStatus === 'ON_WAY_10M' || appt.clientEtaStatus === 'ON_WAY_15M' ? `
+                    ${appt.clientEtaStatus === 'ON_THE_WAY' ? `
                       <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); font-size: 0.72rem; padding: 4px 8px; border-radius: 6px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
                         🚗 Client On the Way
+                      </span>
+                    ` : ''}
+
+                    ${appt.clientEtaStatus === 'RUNNING_LATE_10M' || appt.clientEtaStatus === 'RUNNING_LATE_20M' ? `
+                      <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); font-size: 0.72rem; padding: 4px 8px; border-radius: 6px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
+                        ⏰ Client Running Late${appt.clientEtaStatus === 'RUNNING_LATE_20M' ? ' (20m)' : ' (10m)'}
                       </span>
                     ` : ''}
 
@@ -1549,7 +1617,7 @@ export class SalonDashboard {
 
                     ${appt.status === 'CHECKED_IN' ? `
                       <div class="qc__cta-wrap">
-                        <button class="qc__cta qc__cta--seat btn-status" data-id="${appt.id}" data-status="IN_SERVICE">
+                        <button class="qc__cta qc__cta--seat btn-status" data-id="${appt.id}" data-status="SEATED_IN_CHAIR">
                           ${Icons.armchair({ size: 16, color: '#fff' })}
                           <span>💺 Seat in Chair</span>
                         </button>
@@ -1564,7 +1632,7 @@ export class SalonDashboard {
                       </div>
                     ` : ''}
 
-                    ${appt.status === 'IN_SERVICE' ? `
+                    ${appt.status === 'IN_SERVICE' || appt.status === 'SEATED_IN_CHAIR' ? `
                       <div class="qc__cta-wrap">
                         <button class="qc__cta qc__cta--finish btn-status" data-id="${appt.id}" data-status="COMPLETED">
                           ${Icons.check({ size: 16, color: '#fff' })}
@@ -1614,11 +1682,16 @@ export class SalonDashboard {
   getStatusColor(status) {
     switch (status) {
       case 'PENDING_ACCEPTANCE': return '#f59e0b';
+      case 'BOOKED': return '#3b82f6';
       case 'CONFIRMED': return '#0ea5e9';
+      case 'ON_THE_WAY': return '#10b981';
       case 'CHECKED_IN': return '#f59e0b';
       case 'IN_SERVICE': return '#a855f7';
+      case 'SEATED_IN_CHAIR': return '#a855f7';
+      case 'PENDING_RESCHEDULE': return '#f59e0b';
       case 'COMPLETED': return '#10b981';
       case 'CANCELLED': return '#f43f5e';
+      case 'REJECTED': return '#f43f5e';
       case 'NO_SHOW': return '#64748b';
       default: return '#6366f1';
     }
@@ -1666,8 +1739,8 @@ export class SalonDashboard {
       } else {
         const staffCardsHtml = staff.map((st) => {
           const todayAppts = appts.filter((a) => (a.staff?.id || a.staffId) === st.id);
-          const inService = todayAppts.find((a) => a.status === 'IN_SERVICE');
-          const confirmedCount = todayAppts.filter((a) => ['CONFIRMED', 'CHECKED_IN', 'IN_SERVICE'].includes(a.status)).length;
+          const inService = todayAppts.find((a) => a.status === 'SEATED_IN_CHAIR' || a.status === 'IN_SERVICE');
+          const confirmedCount = todayAppts.filter((a) => ['CONFIRMED', 'CHECKED_IN', 'SEATED_IN_CHAIR', 'IN_SERVICE'].includes(a.status)).length;
           const completedCount = todayAppts.filter((a) => a.status === 'COMPLETED').length;
   
           const todayIso = (this.selectedDate || new Date().toISOString().split('T')[0]);
@@ -1717,319 +1790,516 @@ export class SalonDashboard {
   
           let shiftStart = '09:00';
           let shiftEnd = '21:00';
-          let shiftBreaks = [];
           let isOffDay = false;
-  
-          if (st.workingHours && st.workingHours.length > 0) {
-            const stHours = st.workingHours.find(h => h.dayOfWeek === dayOfWeek);
-            if (stHours) {
-              isOffDay = stHours.isOff;
-              if (!isOffDay) {
-                shiftStart = stHours.startTime || shiftStart;
-                shiftEnd = stHours.endTime || shiftEnd;
-              }
-              if (Array.isArray(stHours.breaks) && stHours.breaks.length > 0) {
-                shiftBreaks = stHours.breaks;
-              } else if (stHours.breakStartTime && stHours.breakEndTime) {
-                shiftBreaks = [{ startTime: stHours.breakStartTime, endTime: stHours.breakEndTime, title: 'Lunch' }];
-              }
-            }
-          } else if (this.salonProfile && this.salonProfile.workingHours) {
+          let salonBreaks = [];
+          let stylistPersonalBreaks = [];
+
+          // 1. Salon-level facility breaks (The Immutable Foundation)
+          if (this.salonProfile && this.salonProfile.workingHours) {
             const salonHours = this.salonProfile.workingHours.find(h => h.dayOfWeek === dayOfWeek);
             if (salonHours) {
-              isOffDay = salonHours.isOff;
+              isOffDay = salonHours.isClosed || salonHours.isOff;
               if (!isOffDay) {
                 shiftStart = salonHours.startTime || shiftStart;
                 shiftEnd = salonHours.endTime || shiftEnd;
               }
               if (Array.isArray(salonHours.breaks) && salonHours.breaks.length > 0) {
-                shiftBreaks = salonHours.breaks;
+                salonBreaks = salonHours.breaks.map(b => ({
+                  id: b.id || `salon-brk-${dayOfWeek}-${b.startTime}`,
+                  startTime: b.startTime,
+                  endTime: b.endTime,
+                  title: b.title || 'Salon Lunch',
+                  origin: 'SALON',
+                  isLocked: true,
+                }));
               } else if (salonHours.breakStartTime && salonHours.breakEndTime) {
-                shiftBreaks = [{ startTime: salonHours.breakStartTime, endTime: salonHours.breakEndTime, title: 'Lunch' }];
+                salonBreaks = [{
+                  id: `salon-brk-${dayOfWeek}-legacy`,
+                  startTime: salonHours.breakStartTime,
+                  endTime: salonHours.breakEndTime,
+                  title: 'Salon Lunch',
+                  origin: 'SALON',
+                  isLocked: true,
+                }];
               }
             }
           }
-  
+
+          // 2. Stylist-level personal shift hours & personal breaks
+          if (st.workingHours && st.workingHours.length > 0) {
+            const stHours = st.workingHours.find(h => h.dayOfWeek === dayOfWeek);
+            if (stHours) {
+              isOffDay = stHours.isOff !== undefined ? stHours.isOff : !stHours.isWorking;
+              if (!isOffDay) {
+                shiftStart = stHours.startTime || shiftStart;
+                shiftEnd = stHours.endTime || shiftEnd;
+              }
+              if (stHours.hasBreakOverride) {
+                if (Array.isArray(stHours.breaks) && stHours.breaks.length > 0) {
+                  stylistPersonalBreaks = stHours.breaks.map(b => ({
+                    id: b.id || `st-brk-${dayOfWeek}-${b.startTime}`,
+                    startTime: b.startTime,
+                    endTime: b.endTime,
+                    title: b.title || 'Personal Break',
+                    origin: 'STYLIST',
+                    isLocked: false,
+                  }));
+                } else if (stHours.breakStartTime && stHours.breakEndTime) {
+                  stylistPersonalBreaks = [{
+                    id: `st-brk-${dayOfWeek}-legacy`,
+                    startTime: stHours.breakStartTime,
+                    endTime: stHours.breakEndTime,
+                    title: 'Personal Break',
+                    origin: 'STYLIST',
+                    isLocked: false,
+                  }];
+                }
+              }
+            }
+          }
+
+          // Combined discrete breaks: Both co-exist natively with origin tagging
+          let shiftBreaks = [...salonBreaks, ...stylistPersonalBreaks];
+
+          this.openStaffScheduleIds = this.openStaffScheduleIds || new Set();
+          this.staffScheduleViewMode = this.staffScheduleViewMode || {};
+          const isScheduleOpen = this.openStaffScheduleIds.has(st.id);
+          const scheduleViewMode = this.staffScheduleViewMode[st.id] || 'timeline';
+
           let startMins = parseTime(shiftStart);
           let endMins = parseTime(shiftEnd);
           if (endMins <= startMins) endMins = startMins + 720;
           let totalShiftMins = endMins - startMins;
-          if (totalShiftMins <= 0) totalShiftMins = 720; 
-  
-          // Premium Design Constants
-          const PIXELS_PER_MIN = 2.5;
-          const trackWidth = totalShiftMins * PIXELS_PER_MIN;
-  
-          // Axis Grid
-          let axisHtml = '';
-          for (let m = startMins; m <= endMins; m += 30) {
-              let leftPx = (m - startMins) * PIXELS_PER_MIN;
-              let isHour = (m % 60 === 0);
-              
-              if (isHour) {
-                 axisHtml += `<div style="position: absolute; left: ${leftPx}px; top: 20px; bottom: 0; width: 1px; background: rgba(255,255,255,0.15); z-index: 0;"></div>
-                              <div style="position: absolute; left: ${leftPx}px; top: 0px; transform: translateX(-50%); font-size: 0.7rem; color: #d4d4d8; font-weight: 600;">${formatTimeMins(m)}</div>`;
-              } else {
-                 axisHtml += `<div style="position: absolute; left: ${leftPx}px; top: 25px; height: 10px; width: 1px; background: rgba(255,255,255,0.1); z-index: 0;"></div>`;
-              }
-          }
-  
-          // Events
+          if (totalShiftMins <= 0) totalShiftMins = 720;
+
+          // Practical Proportional Scale: ~70px per hour (~1.15px per min)
+          const PIXELS_PER_MIN = 1.15;
+          const trackWidth = Math.max(760, Math.round(totalShiftMins * PIXELS_PER_MIN));
+
+          // Events aggregation
           let dailyEvents = [];
-          shiftBreaks.forEach(b => {
+          shiftBreaks.forEach((b) => {
             dailyEvents.push({
               type: 'break',
+              origin: b.origin || 'STYLIST',
+              isLocked: b.isLocked || false,
               startMins: parseTime(b.startTime),
               endMins: parseTime(b.endTime),
-              title: b.title || 'Break',
+              title: b.title || (b.origin === 'SALON' ? 'Salon Lunch' : 'Personal Break'),
             });
           });
-  
-          todayAppts.filter(a => ['CONFIRMED', 'CHECKED_IN', 'IN_SERVICE', 'COMPLETED'].includes(a.status)).forEach(a => {
-              const aDate = new Date(a.startAt || a.startTime);
-              const aStartMins = aDate.getHours() * 60 + aDate.getMinutes();
-              const duration = a.duration || a.service?.duration || 30;
-              dailyEvents.push({
-                type: 'service',
-                startMins: aStartMins,
-                endMins: aStartMins + duration,
-                title: a.service?.name || 'Service',
-                customer: a.user?.name || a.customerName || 'Walk-in',
-                status: a.status
-              });
+
+          todayAppts.filter((a) => ['CONFIRMED', 'CHECKED_IN', 'SEATED_IN_CHAIR', 'IN_SERVICE', 'COMPLETED'].includes(a.status)).forEach((a) => {
+            const aDate = new Date(a.startAt || a.startTime);
+            const aStartMins = aDate.getHours() * 60 + aDate.getMinutes();
+            const duration = a.duration || a.service?.duration || 30;
+            dailyEvents.push({
+              type: 'service',
+              startMins: aStartMins,
+              endMins: aStartMins + duration,
+              title: a.service?.name || 'Service',
+              customer: a.user?.name || a.customerName || 'Walk-in Client',
+              phone: a.user?.phone || a.customerPhone || '',
+              status: a.status,
+            });
           });
-  
-          // Sort events
+
+          // Sort chronologically
           dailyEvents.sort((a, b) => a.startMins - b.startMins);
-  
-          // Blocks and Gaps
-          let blocksHtml = '';
-          let gapsHtml = '';
-          let currentMins = startMins;
-          let serviceCounter = 1;
-  
-          let maxGap = 0;
-          let gapData = [];
-  
-          dailyEvents.forEach(ev => {
-             if (ev.startMins > currentMins) {
-                let gapDuration = ev.startMins - currentMins;
-                if (gapDuration >= 15) {
-                   gapData.push({ start: currentMins, end: ev.startMins, duration: gapDuration });
-                   if (gapDuration > maxGap) maxGap = gapDuration;
-                }
-             }
-             
-             if (ev.endMins > currentMins) {
-               const trueStart = Math.max(currentMins, ev.startMins);
-               let duration = ev.endMins - trueStart;
-               let leftPx = (trueStart - startMins) * PIXELS_PER_MIN;
-               let widthPx = duration * PIXELS_PER_MIN;
-               
-               if (leftPx < 0) { widthPx += leftPx; leftPx = 0; }
-               if (leftPx + widthPx > trackWidth) widthPx = trackWidth - leftPx;
-  
-               if (widthPx > 0) {
-                   if (ev.type === 'break') {
-                      blocksHtml += `<div style="position: absolute; top: 35px; left: ${leftPx}px; width: ${widthPx}px; height: 65px; background: #c4b5fd; border-radius: 10px; z-index: 2; padding: 6px 8px; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.3);">
-                         <div style="display: flex; justify-content: space-between; align-items: flex-start; width: 100%;">
-                           <span style="font-size: 0.55rem; font-weight: 800; color: #4c1d95; text-transform: uppercase; letter-spacing: 0.5px;">LUNCH BREAK</span>
-                           <span style="font-size: 0.55rem; font-weight: 700; color: #4c1d95; background: rgba(255,255,255,0.4); padding: 1px 4px; border-radius: 4px;">${duration}m</span>
-                         </div>
-                         <span style="font-size: 0.75rem; font-weight: 700; color: #4c1d95; margin-top: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">☕ ${ev.title}</span>
-                         <span style="font-size: 0.55rem; color: rgba(76,29,149,0.8); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Rest & Refuel</span>
-                      </div>`;
-                   } else {
-                      let bg = '#1e293b'; let text = '#f8fafc'; let subtext = '#94a3b8'; let pillBg = 'rgba(255,255,255,0.1)';
-                      if (ev.status === 'COMPLETED') { bg = '#6ee7b7'; text = '#064e3b'; subtext = '#065f46'; pillBg = 'rgba(255,255,255,0.4)'; }
-                      if (ev.status === 'IN_SERVICE') { bg = '#fcd34d'; text = '#78350f'; subtext = '#92400e'; pillBg = 'rgba(255,255,255,0.4)'; }
-                      
-                      blocksHtml += `<div style="position: absolute; top: 35px; left: ${leftPx}px; width: ${widthPx}px; height: 65px; background: ${bg}; border-radius: 10px; z-index: 3; padding: 6px 8px; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1);">
-                         <div style="display: flex; justify-content: space-between; align-items: flex-start; width: 100%;">
-                           <span style="font-size: 0.55rem; font-weight: 800; color: ${text}; text-transform: uppercase; letter-spacing: 0.5px;">SERVICE ${serviceCounter++}</span>
-                           <span style="font-size: 0.55rem; font-weight: 700; color: ${text}; background: ${pillBg}; padding: 1px 4px; border-radius: 4px;">${duration}m</span>
-                         </div>
-                         <span style="font-size: 0.75rem; font-weight: 700; color: ${text}; margin-top: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${ev.title}</span>
-                         <span style="font-size: 0.55rem; color: ${subtext}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">👤 ${ev.customer}</span>
-                      </div>`;
-                   }
-               }
-               currentMins = Math.max(currentMins, ev.endMins);
-             }
-          });
-  
-          if (currentMins < endMins) {
-              let gapDuration = endMins - currentMins;
-              if (gapDuration >= 15) {
-                  gapData.push({ start: currentMins, end: endMins, duration: gapDuration });
-                  if (gapDuration > maxGap) maxGap = gapDuration;
-              }
-          }
-  
-          gapData.forEach(g => {
-              let leftPx = (g.start - startMins) * PIXELS_PER_MIN;
-              let widthPx = g.duration * PIXELS_PER_MIN;
-              let isLargest = g.duration === maxGap && maxGap > 0;
-              
-              let color = isLargest ? '#fbbf24' : '#fb923c';
-              let title = isLargest ? '⚠️ LARGEST GAP' : 'WASTAGE TIME';
-              let subtitle = isLargest ? 'Opportunity Slot' : 'Chair Empty';
-              
-              gapsHtml += `
-              <div style="position: absolute; left: ${leftPx + 10}px; width: ${widthPx - 20}px; top: 105px; display: flex; flex-direction: column; align-items: center; z-index: 1;">
-                 <div style="width: 100%; height: 6px; border-left: 1.5px solid ${color}; border-right: 1.5px solid ${color}; border-top: 1.5px solid ${color}; border-radius: 3px 3px 0 0; opacity: 0.7;"></div>
-                 <div style="background: ${color}; width: 1.5px; height: 6px; opacity: 0.7;"></div>
-                 <span style="color: ${color}; font-size: 0.55rem; font-weight: 800; margin-top: 2px; letter-spacing: 0.5px; white-space: nowrap;">${title}</span>
-                 <span style="color: #e2e8f0; font-size: 0.65rem; font-weight: 600;">${g.duration >= 60 ? Math.floor(g.duration/60) + 'h ' + (g.duration%60) + 'm' : g.duration + ' min'}</span>
-                 <span style="color: #94a3b8; font-size: 0.5rem; font-weight: 500;">${subtitle}</span>
-              </div>
-              `;
-          });
-  
+          const dailyApptsCount = todayAppts.filter((a) => ['CONFIRMED', 'CHECKED_IN', 'SEATED_IN_CHAIR', 'IN_SERVICE', 'COMPLETED'].includes(a.status)).length;
+
+          // Current Time Needle
           const now = new Date();
           const nowMins = now.getHours() * 60 + now.getMinutes();
-          let currentTimeHtml = '';
-          if (nowMins >= startMins && nowMins <= endMins) {
-             let nowLeftPx = (nowMins - startMins) * PIXELS_PER_MIN;
-             currentTimeHtml = `
-               <div style="position: absolute; left: ${nowLeftPx}px; top: 20px; bottom: 0px; width: 1.5px; background: #fca5a5; z-index: 10; box-shadow: 0 0 8px rgba(252,165,165,0.8);">
-                  <div style="position: absolute; bottom: 0; left: -2.5px; width: 6px; height: 6px; border-radius: 50%; background: #fca5a5;"></div>
-               </div>
-               <div style="position: absolute; left: ${nowLeftPx}px; top: -10px; transform: translateX(-50%); background: #fca5a5; color: #7f1d1d; font-size: 0.55rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; z-index: 10; border: 1px solid #f87171;">NOW ${formatTimeMins(nowMins)}</div>
-             `;
-          }
-  
-          let trackAreaHtml = '';
-          if (isOffDay) {
-            trackAreaHtml = `
-              <div style="padding: 40px; text-align: center; font-size: 0.9rem; color: #fb7185; font-weight: 600;">
-                🚫 Not Scheduled / Day Off
-              </div>
-            `;
-          } else {
-            trackAreaHtml = `
-              <div style="width: 100%; overflow-x: auto; padding: 24px 20px 30px 20px; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.1) transparent; cursor: grab;">
-                 <div style="position: relative; width: ${trackWidth}px; height: 160px; background: #0f111a; border-radius: 8px; border: 1px solid rgba(255,255,255,0.03);">
-                    <div style="position: absolute; top: 20px; left: 0; right: 0; height: 1px; background: rgba(255,255,255,0.15);"></div>
-                    ${axisHtml}
-                    ${blocksHtml}
-                    ${gapsHtml}
-                    ${currentTimeHtml}
-                 </div>
-              </div>
-            `;
-          }
+          const isNowInsideShift = nowMins >= startMins && nowMins <= endMins;
+          const nowLeftPx = isNowInsideShift ? Math.round((nowMins - startMins) * PIXELS_PER_MIN) : 0;
+          const initialScroll = isNowInsideShift ? Math.max(0, nowLeftPx - 160) : 0;
 
-          const timelineHtml = `
-            <div style="margin-top: 24px; margin-bottom: 12px; background: #151821; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05); overflow: hidden;">
-              <div style="padding: 16px 20px 0 20px;">
-                  <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px;">
-                      <div>
-                          <div style="display: flex; align-items: center; gap: 8px;">
-                              <span style="display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: rgba(52, 211, 153, 0.1); color: #34d399; border-radius: 6px;"><i class="fas fa-project-diagram" style="font-size: 10px;"></i></span>
-                              <h3 style="margin: 0; color: #f8fafc; font-size: 1.05rem; font-weight: 700;">Continuous Atelier Timeline & Wastage Matrix</h3>
-                              <span style="background: rgba(255,255,255,0.1); color: #cbd5e1; font-size: 0.55rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px;">PRO DESIGN</span>
-                          </div>
-                          <p style="margin: 4px 0 0 32px; color: #94a3b8; font-size: 0.65rem; max-width: 500px; line-height: 1.4;">Continuous linear temporal axis spanning exactly ${formatTimeMins(startMins)} to ${formatTimeMins(endMins)} with explicit service intervals, duration annotations, and idle wastage bracket indicators.</p>
-                      </div>
-                      <div style="display: flex; gap: 12px; flex-wrap: wrap; font-size: 0.6rem; font-weight: 600; color: #cbd5e1;">
-                          <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 12px; height: 12px; background: #6ee7b7; border-radius: 2px;"></div> Completed Service</div>
-                          <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 12px; height: 12px; background: #fcd34d; border-radius: 2px;"></div> Active In-Progress</div>
-                          <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 12px; height: 12px; background: #c4b5fd; border-radius: 2px;"></div> Repose / Lunch</div>
-                          <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 12px; height: 12px; background: #1e293b; border-radius: 2px; border: 1px solid #334155;"></div> Future / Booked</div>
-                      </div>
+          // Render Schedule Widget (When Expanded)
+          let scheduleWidgetHtml = '';
+          if (isScheduleOpen) {
+            if (isOffDay) {
+              scheduleWidgetHtml = `
+                <div style="margin-top: 10px; padding: 20px; text-align: center; background: rgba(251, 113, 133, 0.05); border: 1px dashed rgba(251, 113, 133, 0.25); border-radius: 8px;">
+                  <div style="font-size: 1rem; color: #fb7185; font-weight: 700;">🚫 Not Scheduled Today</div>
+                  <p style="font-size: 0.76rem; color: #94a3b8; margin: 4px 0 0 0;">Stylist has a scheduled day off or is marked absent.</p>
+                </div>
+              `;
+            } else if (scheduleViewMode === 'agenda') {
+              // Agenda List View
+              scheduleWidgetHtml = `
+                <div class="staff-schedule-panel">
+                  <div class="staff-schedule-header">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <span style="font-size: 0.74rem; font-weight: 700; color: #f1f5f9;">
+                        Shift: ${formatTimeMins(startMins)} – ${formatTimeMins(endMins)}
+                      </span>
+                      <span style="font-size: 0.68rem; color: #94a3b8;">(${Math.round(totalShiftMins / 60)}h)</span>
+                    </div>
+
+                    <div style="display: flex; background: rgba(0,0,0,0.3); padding: 2px; border-radius: 5px; border: 1px solid rgba(255,255,255,0.06);">
+                      <button type="button" class="sched-control-btn btn-switch-sched-view" data-id="${st.id}" data-mode="timeline" title="Visual Timeline View">
+                        <span>📊 Timeline</span>
+                      </button>
+                      <button type="button" class="sched-control-btn btn-switch-sched-view active" data-id="${st.id}" data-mode="agenda" title="Chronological Agenda List">
+                        <span>📋 Agenda</span>
+                      </button>
+                    </div>
                   </div>
-              </div>
-              ${trackAreaHtml}
-            </div>
-          `;
-  
-          return `
-                    <div class="staff-card" style="display: flex; flex-direction: column; justify-content: space-between;">
-                      <div>
-                        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
-                          <div style="display: flex; align-items: center; gap: 12px;">
-                            <img src="${st.profileImageUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'}" style="width: 44px; height: 44px; border-radius: 50%; object-fit: cover; border: 2px solid rgba(255,255,255,0.12);" />
-                            <div>
-                              <div style="font-weight: 700; font-size: 1.05rem; color: #fff; line-height: 1.2;">${st.name || 'Specialist'}</div>
-                              <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">${st.phone || 'No phone'}</div>
+
+                  <div style="padding: 10px 12px; max-height: 220px; overflow-y: auto;">
+                    ${dailyEvents.length === 0 ? `
+                      <div style="padding: 24px; text-align: center;">
+                        <span style="font-size: 1.2rem; display: block; margin-bottom: 4px;">🟢</span>
+                        <span style="font-size: 0.82rem; font-weight: 600; color: #f1f5f9;">No bookings today</span>
+                        <div style="font-size: 0.74rem; color: #64748b; margin-top: 2px;">Stylist is available for walk-in clients.</div>
+                      </div>
+                    ` : dailyEvents.map((ev) => {
+                      const isBreak = ev.type === 'break';
+                      const isSalonBreak = isBreak && ev.origin === 'SALON';
+                      let badgeBg = 'rgba(59, 130, 246, 0.15)';
+                      let badgeColor = '#60a5fa';
+                      let badgeText = (ev.status || 'BOOKED').replace('_', ' ');
+
+                      if (isSalonBreak) {
+                        badgeBg = 'rgba(16, 185, 129, 0.18)';
+                        badgeColor = '#34d399';
+                        badgeText = '🔒 SALON BREAK';
+                      } else if (isBreak) {
+                        badgeBg = 'rgba(139, 92, 246, 0.18)';
+                        badgeColor = '#c4b5fd';
+                        badgeText = '☕ PERSONAL BREAK';
+                      } else if (ev.status === 'COMPLETED') {
+                        badgeBg = 'rgba(16, 185, 129, 0.15)';
+                        badgeColor = '#34d399';
+                        badgeText = 'DONE';
+                      } else if (ev.status === 'IN_SERVICE' || ev.status === 'SEATED_IN_CHAIR') {
+                        badgeBg = 'rgba(245, 158, 11, 0.15)';
+                        badgeColor = '#fbbf24';
+                        badgeText = 'IN CHAIR';
+                      }
+
+                      return `
+                        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 10px; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 6px; margin-bottom: 5px;">
+                          <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+                            <span style="font-size: 0.75rem; font-weight: 700; color: #e2e8f0; min-width: 105px;">
+                              ${formatTimeMins(ev.startMins)} – ${formatTimeMins(ev.endMins)}
+                            </span>
+                            <div style="min-width: 0;">
+                              <div style="font-size: 0.78rem; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 6px;">
+                                <span>${isSalonBreak ? '🏢 ' + ev.title : (isBreak ? '☕ ' + ev.title : '✂️ ' + ev.title)}</span>
+                                ${isSalonBreak ? '<span class="badge-salon-lock">Salon</span>' : ''}
+                              </div>
+                              ${!isBreak && ev.customer ? `<div style="font-size: 0.7rem; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">👤 ${ev.customer}</div>` : ''}
                             </div>
                           </div>
-                          <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
-                            <span class="badge ${st.status === 'ACTIVE' ? 'badge-completed' : 'badge-cancelled'}" style="font-size: 0.65rem;">
-                              ${st.status || 'ACTIVE'}
-                            </span>
-                            ${isAbsentToday ? `
-                              <span class="badge" style="background: rgba(251, 113, 133, 0.15); color: #fb7185; border: 1px solid rgba(251,113,133,0.3); font-size: 0.62rem; font-weight: 700;">
-                                🚫 ON LEAVE
-                              </span>
-                            ` : ''}
-                          </div>
-                        </div>
-  
-                        <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 12px;">
-                          <div style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; font-weight: 600;">
-                            <span class="status-dot ${statusDot}"></span>
-                            <span style="color: #fff;">${statusText}</span>
-                          </div>
-                          <div style="display: flex; justify-content: space-between; font-size: 0.74rem; color: var(--text-muted); margin-top: 6px;">
-                            <span>Today: <strong>${confirmedCount}</strong> Active • <strong>${completedCount}</strong> Done</span>
-                          </div>
-                          ${timelineHtml}
-                        </div>
-  
-                        <div style="margin-bottom: 12px;">
-                          <div class="meta-bullet-row">
-                            <span style="color: var(--text-muted); font-size: 0.75rem;">QUALIFIED SERVICES (${st.services?.length || 0}):</span>
-                            <span style="color: var(--text-secondary); font-size: 0.78rem; font-weight: 500;">
-                              ${(st.services && st.services.length > 0)
-                                ? st.services.map((svc) => svc.service?.name || 'Service').join(', ')
-                                : 'None assigned'}
+                          <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
+                            <span style="font-size: 0.68rem; color: #64748b;">${ev.endMins - ev.startMins}m</span>
+                            <span style="font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; background: ${badgeBg}; color: ${badgeColor};">
+                              ${badgeText}
                             </span>
                           </div>
                         </div>
+                      `;
+                    }).join('')}
+                  </div>
+                </div>
+              `;
+            } else {
+              // Visual Timeline Axis View (Horizontal Scrollable)
+              let axisHtml = '';
+              for (let m = startMins; m <= endMins; m += 30) {
+                let leftPx = Math.round((m - startMins) * PIXELS_PER_MIN);
+                let isHour = (m % 60 === 0);
+                if (isHour) {
+                  axisHtml += `
+                    <div style="position: absolute; left: ${leftPx}px; top: 18px; bottom: 0; width: 1px; background: rgba(255,255,255,0.1); z-index: 1;"></div>
+                    <div style="position: absolute; left: ${leftPx}px; top: 2px; transform: translateX(-50%); font-size: 0.66rem; color: #94a3b8; font-weight: 600; letter-spacing: 0.3px;">${formatTimeMins(m)}</div>
+                  `;
+                } else {
+                  axisHtml += `
+                    <div style="position: absolute; left: ${leftPx}px; top: 18px; height: 6px; width: 1px; background: rgba(255,255,255,0.06); z-index: 1;"></div>
+                  `;
+                }
+              }
+
+              let blocksHtml = '';
+              let currentMins = startMins;
+
+              dailyEvents.forEach((ev) => {
+                // Free interval before event
+                if (ev.startMins > currentMins) {
+                  let gapDuration = ev.startMins - currentMins;
+                  if (gapDuration >= 15) {
+                    let gapLeft = Math.round((currentMins - startMins) * PIXELS_PER_MIN);
+                    let gapWidth = Math.round(gapDuration * PIXELS_PER_MIN);
+                    blocksHtml += `
+                      <div style="position: absolute; top: 26px; left: ${gapLeft}px; width: ${gapWidth}px; height: 54px; background: rgba(255, 255, 255, 0.015); border: 1px dashed rgba(255, 255, 255, 0.08); border-radius: 6px; display: flex; align-items: center; justify-content: center; z-index: 1;" title="Free Slot (${gapDuration} mins)">
+                        <span style="font-size: 0.6rem; color: #64748b; font-weight: 600;">Free • ${gapDuration >= 60 ? Math.floor(gapDuration / 60) + 'h ' + (gapDuration % 60) + 'm' : gapDuration + 'm'}</span>
                       </div>
-  
-                      <div>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px;">
-                          <button class="btn btn-secondary btn-sm btn-edit-staff" data-id="${st.id}" data-name="${st.name || ''}" data-phone="${st.phone || ''}" data-email="${st.email || ''}" data-img="${st.profileImageUrl || ''}" style="font-size: 0.76rem; gap: 4px; justify-content: center;">
-                            ${Icons.edit({ size: 13 })}
-                            <span>Edit Info</span>
-                          </button>
-                          <button class="btn btn-secondary btn-sm btn-assign-services" data-id="${st.id}" data-name="${st.name || ''}" style="font-size: 0.76rem; gap: 4px; justify-content: center;">
-                            ${Icons.scissors({ size: 13 })}
-                            <span>Services</span>
-                          </button>
+                    `;
+                  }
+                }
+
+                if (ev.endMins > currentMins) {
+                  const trueStart = Math.max(currentMins, ev.startMins);
+                  const duration = ev.endMins - trueStart;
+                  let leftPx = Math.round((trueStart - startMins) * PIXELS_PER_MIN);
+                  let widthPx = Math.round(duration * PIXELS_PER_MIN);
+
+                  if (leftPx < 0) { widthPx += leftPx; leftPx = 0; }
+                  if (leftPx + widthPx > trackWidth) widthPx = trackWidth - leftPx;
+
+                  if (widthPx > 0) {
+                    if (ev.type === 'break') {
+                      const isSalon = ev.origin === 'SALON';
+                      const breakBg = isSalon
+                        ? 'linear-gradient(135deg, #059669, #047857)'
+                        : 'linear-gradient(135deg, #7c3aed, #6d28d9)';
+                      const breakBorder = isSalon
+                        ? '1px solid rgba(52, 211, 153, 0.5)'
+                        : '1px solid rgba(196, 181, 253, 0.4)';
+                      const breakBadgeBg = isSalon ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.2)';
+                      const breakLabel = isSalon ? '🔒 SALON' : '☕ PERSONAL';
+
+                      blocksHtml += `
+                        <div style="position: absolute; top: 26px; left: ${leftPx}px; width: ${widthPx}px; height: 54px; background: ${breakBg}; border: ${breakBorder}; border-radius: 7px; z-index: 3; padding: 4px 6px; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.3);" title="Break: ${ev.title} (${duration}m)">
+                          <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-size: 0.54rem; font-weight: 800; color: #fff; text-transform: uppercase;">${breakLabel}</span>
+                            <span style="font-size: 0.54rem; font-weight: 700; color: #fff; background: ${breakBadgeBg}; padding: 1px 4px; border-radius: 3px;">${duration}m</span>
+                          </div>
+                          <span style="font-size: 0.68rem; font-weight: 700; color: #fff; margin-top: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${ev.title}</span>
                         </div>
-  
-                        <div class="segmented-action-bar">
-                          <button class="segmented-action-btn btn-edit-hours" data-id="${st.id}" data-name="${st.name || ''}" title="Shift Working Hours">
-                            <span>Hours</span>
-                          </button>
-                          <button class="segmented-action-btn btn-add-break" data-id="${st.id}" data-name="${st.name || ''}" title="Shift Breaks">
-                            <span>Break</span>
-                          </button>
-                          <button class="segmented-action-btn btn-mark-absent" data-id="${st.id}" data-name="${st.name || ''}" style="color: #fb7185;" title="Record Leave">
-                            <span>Leave</span>
-                          </button>
-                          <button class="segmented-action-btn btn-leave-history" data-id="${st.id}" data-name="${st.name || ''}" style="color: #818cf8;" title="Leave History & Actions">
-                            <span>History</span>
-                          </button>
-                          <button class="segmented-action-btn danger-btn btn-delete-staff" data-id="${st.id}" data-name="${st.name || ''}" title="Delete Stylist">
-                            ${Icons.trash({ size: 12 })}
-                          </button>
+                      `;
+                    } else {
+                      let bgGradient = 'linear-gradient(135deg, #2563eb, #1d4ed8)';
+                      let borderClr = 'rgba(147, 197, 253, 0.4)';
+                      let titleClr = '#eff6ff';
+                      let badgeBg = 'rgba(0, 0, 0, 0.2)';
+                      let badgeTxt = '#dbeafe';
+                      let statusLabel = 'BOOKED';
+
+                      if (ev.status === 'COMPLETED') {
+                        bgGradient = 'linear-gradient(135deg, #059669, #047857)';
+                        borderClr = 'rgba(110, 231, 183, 0.5)';
+                        titleClr = '#ecfdf5';
+                        badgeBg = 'rgba(0, 0, 0, 0.2)';
+                        badgeTxt = '#d1fae5';
+                        statusLabel = 'DONE';
+                      } else if (ev.status === 'IN_SERVICE' || ev.status === 'SEATED_IN_CHAIR') {
+                        bgGradient = 'linear-gradient(135deg, #d97706, #b45309)';
+                        borderClr = 'rgba(252, 211, 77, 0.5)';
+                        titleClr = '#fffbeb';
+                        badgeBg = 'rgba(0, 0, 0, 0.2)';
+                        badgeTxt = '#fef3c7';
+                        statusLabel = 'IN CHAIR';
+                      }
+
+                      blocksHtml += `
+                        <div style="position: absolute; top: 26px; left: ${leftPx}px; width: ${widthPx}px; height: 54px; background: ${bgGradient}; border: 1px solid ${borderClr}; border-radius: 7px; z-index: 3; padding: 4px 6px; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.3);" title="${ev.title} • ${ev.customer} (${duration}m)">
+                          <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-size: 0.54rem; font-weight: 800; color: ${titleClr}; letter-spacing: 0.4px;">${statusLabel}</span>
+                            <span style="font-size: 0.54rem; font-weight: 700; color: ${badgeTxt}; background: ${badgeBg}; padding: 1px 4px; border-radius: 3px;">${duration}m</span>
+                          </div>
+                          <span style="font-size: 0.68rem; font-weight: 700; color: #fff; margin-top: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${ev.title}</span>
+                          <span style="font-size: 0.56rem; color: ${badgeTxt}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">👤 ${ev.customer}</span>
                         </div>
-                      </div>
+                      `;
+                    }
+                  }
+                  currentMins = Math.max(currentMins, ev.endMins);
+                }
+              });
+
+              // Trailing free time until shift end
+              if (currentMins < endMins) {
+                let gapDuration = endMins - currentMins;
+                if (gapDuration >= 15) {
+                  let gapLeft = Math.round((currentMins - startMins) * PIXELS_PER_MIN);
+                  let gapWidth = Math.round(gapDuration * PIXELS_PER_MIN);
+                  blocksHtml += `
+                    <div style="position: absolute; top: 26px; left: ${gapLeft}px; width: ${gapWidth}px; height: 54px; background: rgba(255, 255, 255, 0.015); border: 1px dashed rgba(255, 255, 255, 0.08); border-radius: 6px; display: flex; align-items: center; justify-content: center; z-index: 1;" title="Free Slot (${gapDuration} mins)">
+                      <span style="font-size: 0.6rem; color: #64748b; font-weight: 600;">Free • ${gapDuration >= 60 ? Math.floor(gapDuration / 60) + 'h ' + (gapDuration % 60) + 'm' : gapDuration + 'm'}</span>
                     </div>
                   `;
+                }
+              }
+
+              // Live Current Time Needle
+              let currentTimeHtml = '';
+              if (isNowInsideShift) {
+                currentTimeHtml = `
+                  <div style="position: absolute; left: ${nowLeftPx}px; top: 18px; bottom: 0; width: 2px; background: #f43f5e; z-index: 10; box-shadow: 0 0 8px rgba(244,63,94,0.8);">
+                    <div style="position: absolute; bottom: 0; left: -3px; width: 8px; height: 8px; border-radius: 50%; background: #f43f5e;"></div>
+                  </div>
+                  <div style="position: absolute; left: ${nowLeftPx}px; top: 2px; transform: translateX(-50%); background: #f43f5e; color: #fff; font-size: 0.56rem; font-weight: 800; padding: 1px 6px; border-radius: 4px; z-index: 11; box-shadow: 0 2px 6px rgba(0,0,0,0.4); white-space: nowrap;">
+                    NOW ${formatTimeMins(nowMins)}
+                  </div>
+                `;
+              }
+
+              scheduleWidgetHtml = `
+                <div class="staff-schedule-panel">
+                  <div class="staff-schedule-header">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <span style="font-size: 0.74rem; font-weight: 700; color: #f1f5f9;">
+                        Shift: ${formatTimeMins(startMins)} – ${formatTimeMins(endMins)}
+                      </span>
+                      <span style="font-size: 0.68rem; color: #94a3b8;">(${Math.round(totalShiftMins / 60)}h)</span>
+                    </div>
+
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                      <div style="display: flex; background: rgba(0,0,0,0.3); padding: 2px; border-radius: 5px; border: 1px solid rgba(255,255,255,0.06);">
+                        <button type="button" class="sched-control-btn btn-switch-sched-view active" data-id="${st.id}" data-mode="timeline" title="Visual Timeline View">
+                          <span>📊 Timeline</span>
+                        </button>
+                        <button type="button" class="sched-control-btn btn-switch-sched-view" data-id="${st.id}" data-mode="agenda" title="Chronological Agenda List">
+                          <span>📋 Agenda</span>
+                        </button>
+                      </div>
+
+                      <div style="display: flex; align-items: center; gap: 3px;">
+                        <button type="button" class="sched-control-btn btn-scroll-earlier" data-id="${st.id}" title="Scroll Earlier">◀</button>
+                        ${isNowInsideShift ? `
+                          <button type="button" class="sched-control-btn btn-jump-now" data-id="${st.id}" data-now-left="${nowLeftPx}" style="color: #fca5a5; border-color: rgba(252,165,165,0.3);" title="Jump to Current Time">
+                            <span class="pulse-dot-live" style="background: #f87171; box-shadow: 0 0 6px #f87171;"></span>
+                            <span>NOW</span>
+                          </button>
+                        ` : ''}
+                        <button type="button" class="sched-control-btn btn-scroll-later" data-id="${st.id}" title="Scroll Later">▶</button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style="padding: 10px 12px; width: 100%;">
+                    <div class="staff-timeline-scroll-track" id="timeline-track-${st.id}" data-initial-scroll="${initialScroll}">
+                      <div style="position: relative; width: ${trackWidth}px; height: 90px; padding-top: 2px;">
+                        <div style="position: absolute; top: 18px; left: 0; right: 0; height: 1px; background: rgba(255,255,255,0.1);"></div>
+                        ${axisHtml}
+                        ${blocksHtml}
+                        ${currentTimeHtml}
+                      </div>
+                    </div>
+
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap; font-size: 0.62rem; font-weight: 600; color: #94a3b8; margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.05); align-items: center; justify-content: flex-end;">
+                      <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 8px; height: 8px; background: #059669; border-radius: 2px;"></div> Done</div>
+                      <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 8px; height: 8px; background: #d97706; border-radius: 2px;"></div> In Chair</div>
+                      <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 8px; height: 8px; background: #7c3aed; border-radius: 2px;"></div> Break</div>
+                      <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 8px; height: 8px; background: #2563eb; border-radius: 2px;"></div> Booked</div>
+                      <div style="display: flex; align-items: center; gap: 4px;"><div style="width: 8px; height: 8px; border: 1px dashed rgba(255,255,255,0.25); border-radius: 2px;"></div> Free</div>
+                    </div>
+                  </div>
+                </div>
+              `;
+            }
+          }
+
+          return `
+            <div class="staff-card" style="display: flex; flex-direction: column; justify-content: space-between;">
+              <div>
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+                  <div style="display: flex; align-items: center; gap: 12px;">
+                    <img src="${st.profileImageUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'}" style="width: 44px; height: 44px; border-radius: 50%; object-fit: cover; border: 2px solid rgba(255,255,255,0.12);" />
+                    <div>
+                      <div style="font-weight: 700; font-size: 1.05rem; color: #fff; line-height: 1.2;">${st.name || 'Specialist'}</div>
+                      <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">${st.phone || 'No phone'}</div>
+                    </div>
+                  </div>
+                  <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
+                    <span class="badge ${st.status === 'ACTIVE' ? 'badge-completed' : 'badge-cancelled'} btn-toggle-staff" data-id="${st.id}" style="font-size: 0.65rem; cursor: pointer;" title="Click to toggle Active/Inactive">
+                      ${st.status || 'ACTIVE'}
+                    </span>
+                    ${isAbsentToday ? `
+                      <span class="badge" style="background: rgba(251, 113, 133, 0.15); color: #fb7185; border: 1px solid rgba(251,113,133,0.3); font-size: 0.62rem; font-weight: 700;">
+                        🚫 ON LEAVE
+                      </span>
+                    ` : ''}
+                  </div>
+                </div>
+
+                <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 12px;">
+                  <div style="display: flex; align-items: center; justify-content: space-between;">
+                    <div style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; font-weight: 600;">
+                      <span class="status-dot ${statusDot}"></span>
+                      <span style="color: #fff;">${statusText}</span>
+                    </div>
+                    <span style="font-size: 0.72rem; color: var(--text-muted);">
+                      Today: <strong style="color: #fff;">${confirmedCount}</strong> Active • <strong style="color: #fff;">${completedCount}</strong> Done
+                    </span>
+                  </div>
+
+                  <!-- Toggle Button for On-Demand Schedule & Timeline -->
+                  <button type="button" class="btn-toggle-staff-schedule" data-id="${st.id}" style="width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; margin-top: 10px; background: ${isScheduleOpen ? 'rgba(99, 102, 241, 0.14)' : 'rgba(255, 255, 255, 0.04)'}; border: 1px solid ${isScheduleOpen ? 'rgba(99, 102, 241, 0.35)' : 'rgba(255, 255, 255, 0.08)'}; border-radius: 6px; color: ${isScheduleOpen ? '#a5b4fc' : '#cbd5e1'}; font-size: 0.76rem; font-weight: 600; cursor: pointer; transition: all 0.15s;">
+                    <span style="display: flex; align-items: center; gap: 6px;">
+                      <span>📅</span>
+                      <span>${isScheduleOpen ? "Hide Today's Schedule" : "View Today's Schedule & Timeline"}</span>
+                    </span>
+                    <span style="display: flex; align-items: center; gap: 6px;">
+                      <span style="font-size: 0.68rem; padding: 1px 6px; border-radius: 4px; background: ${dailyApptsCount > 0 ? 'rgba(52, 211, 153, 0.18)' : 'rgba(255,255,255,0.06)'}; color: ${dailyApptsCount > 0 ? '#34d399' : '#94a3b8'};">
+                        ${dailyApptsCount} Appt${dailyApptsCount === 1 ? '' : 's'}${shiftBreaks.length > 0 ? ` • ${shiftBreaks.length} Break` : ''}
+                      </span>
+                      <span style="font-size: 0.72rem;">${isScheduleOpen ? '▲' : '▼'}</span>
+                    </span>
+                  </button>
+
+                  ${scheduleWidgetHtml}
+                </div>
+
+                <div style="margin-bottom: 12px;">
+                  <div class="meta-bullet-row">
+                    <span style="color: var(--text-muted); font-size: 0.75rem;">QUALIFIED SERVICES (${st.services?.length || 0}):</span>
+                    <span style="color: var(--text-secondary); font-size: 0.78rem; font-weight: 500;">
+                      ${(st.services && st.services.length > 0)
+                        ? st.services.map((svc) => svc.service?.name || 'Service').join(', ')
+                        : 'None assigned'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 100% Retained Direct Action Buttons -->
+              <div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px;">
+                  <button class="btn btn-secondary btn-sm btn-edit-staff" data-id="${st.id}" data-name="${st.name || ''}" data-phone="${st.phone || ''}" data-email="${st.email || ''}" data-img="${st.profileImageUrl || ''}" style="font-size: 0.76rem; gap: 4px; justify-content: center;">
+                    ${Icons.edit({ size: 13 })}
+                    <span>Edit Info</span>
+                  </button>
+                  <button class="btn btn-secondary btn-sm btn-assign-services" data-id="${st.id}" data-name="${st.name || ''}" style="font-size: 0.76rem; gap: 4px; justify-content: center;">
+                    ${Icons.scissors({ size: 13 })}
+                    <span>Services</span>
+                  </button>
+                </div>
+
+                <div class="segmented-action-bar">
+                  <button class="segmented-action-btn btn-edit-hours" data-id="${st.id}" data-name="${st.name || ''}" title="Shift Working Hours">
+                    <span>Hours</span>
+                  </button>
+                  <button class="segmented-action-btn btn-add-break" data-id="${st.id}" data-name="${st.name || ''}" title="Shift Breaks">
+                    <span>Break</span>
+                  </button>
+                  <button class="segmented-action-btn btn-mark-absent" data-id="${st.id}" data-name="${st.name || ''}" style="color: #fb7185;" title="Record Leave">
+                    <span>Leave</span>
+                  </button>
+                  <button class="segmented-action-btn btn-leave-history" data-id="${st.id}" data-name="${st.name || ''}" style="color: #818cf8;" title="Leave History & Actions">
+                    <span>History</span>
+                  </button>
+                  <button class="segmented-action-btn danger-btn btn-delete-staff" data-id="${st.id}" data-name="${st.name || ''}" title="Delete Stylist">
+                    ${Icons.trash({ size: 12 })}
+                  </button>
+                </div>
+              </div>
+            </div>
+          `;
         }).join('');
-        
+
         contentHtml = `
             <div class="staff-capacity-grid">
               ${staffCardsHtml}
             </div>
         `;
       }
+
+      const allSchedulesOpen = this.staffList.length > 0 && this.staffList.every((s) => (this.openStaffScheduleIds || new Set()).has(s.id));
 
       return closureHtml + `
         <div class="glass-panel">
@@ -2042,6 +2312,9 @@ export class SalonDashboard {
               <p style="color: var(--text-secondary); font-size: 0.85rem;">Manage staff members, personal details, weekly shift hours, and qualified services.</p>
             </div>
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+              <button class="btn btn-secondary btn-sm" id="btn-toggle-all-schedules" style="gap: 6px;">
+                <span>${allSchedulesOpen ? '⊟ Collapse All Schedules' : '⊞ Expand All Schedules'}</span>
+              </button>
               <button class="btn btn-secondary btn-sm" id="btn-block-time" style="gap: 6px; border-color: rgba(251,113,133,0.3); color: #fb7185;">
                 ${Icons.clock({ size: 14, color: '#fb7185' })}
                 <span>Block Barber Time</span>
@@ -2173,32 +2446,44 @@ export class SalonDashboard {
   renderCustomersTab() {
     const activeFilter = this.activeCustomerFilter || 'ALL';
     return `
-      <div class="glass-panel">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
-          <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+      <div class="glass-panel" style="padding: 16px;">
+        <div class="cust-panel-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
             <button class="btn-back-nav" id="btn-cust-back" title="Back to Live Queue Overview">
               ← Back
             </button>
             <div>
-              <h3 style="font-size: 1.25rem; font-family: var(--font-heading); font-weight: 800;">Customer Management & Strike Hub</h3>
-              <p style="color: var(--text-secondary); font-size: 0.85rem;">Manage customer accounts, penalty strikes (0–3), booking restrictions, and visit history.</p>
+              <h3 style="font-size: 1.15rem; font-family: var(--font-heading); font-weight: 800; margin: 0 0 2px 0;">Customer CRM & Strike Hub</h3>
+              <p class="settings-panel-subtitle" style="color: var(--text-secondary); font-size: 0.8rem; margin: 0;">Manage customer directory, penalty strikes (0–3), and visit history.</p>
             </div>
           </div>
-          <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; width: 100%; max-width: 380px;">
-            <input type="text" class="form-control" id="customer-search-input" placeholder="Search customer by name or phone..." value="${this.searchQuery || ''}" style="flex: 1;" />
+          <div class="cust-search-wrap">
+            <input type="text" class="form-control" id="customer-search-input" placeholder="Search customer by name or phone..." value="${this.searchQuery || ''}" />
           </div>
         </div>
 
-        <!-- Strike Status Filter Chips -->
-        <div style="display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap;" id="customer-strike-filters">
-          <button class="cust-filter-btn ${activeFilter === 'ALL' ? 'active' : ''}" data-filter="ALL">All Customers <span class="cust-filter-count">0</span></button>
-          <button class="cust-filter-btn ${activeFilter === 'BLOCKED' ? 'active' : ''}" data-filter="BLOCKED">🔴 Blocked <span class="cust-filter-count">0</span></button>
-          <button class="cust-filter-btn ${activeFilter === 'WARNING' ? 'active' : ''}" data-filter="WARNING">⚠️ Warnings <span class="cust-filter-count">0</span></button>
-          <button class="cust-filter-btn ${activeFilter === 'CLEAN' ? 'active' : ''}" data-filter="CLEAN">✅ Clean <span class="cust-filter-count">0</span></button>
+        <!-- Strike Status Filter Segmented Control -->
+        <div id="customer-strike-filters">
+          <button class="cust-filter-btn ${activeFilter === 'ALL' ? 'active' : ''}" data-filter="ALL">
+            <span class="cust-filter-text">All</span>
+            <span class="cust-filter-count">0</span>
+          </button>
+          <button class="cust-filter-btn ${activeFilter === 'BLOCKED' ? 'active' : ''}" data-filter="BLOCKED">
+            <span class="cust-filter-text">Blocked</span>
+            <span class="cust-filter-count">0</span>
+          </button>
+          <button class="cust-filter-btn ${activeFilter === 'WARNING' ? 'active' : ''}" data-filter="WARNING">
+            <span class="cust-filter-text">Warn</span>
+            <span class="cust-filter-count">0</span>
+          </button>
+          <button class="cust-filter-btn ${activeFilter === 'CLEAN' ? 'active' : ''}" data-filter="CLEAN">
+            <span class="cust-filter-text">Clean</span>
+            <span class="cust-filter-count">0</span>
+          </button>
         </div>
 
         <div id="customers-table-container">
-          <div style="text-align: center; padding: 40px; color: var(--text-muted);">Loading customer records...</div>
+          <div style="text-align: center; padding: 30px; color: var(--text-muted);">Loading customer records...</div>
         </div>
       </div>
     `;
@@ -2207,7 +2492,7 @@ export class SalonDashboard {
   renderStrikeBadge(c) {
     const strikes = c.yearlyNoShowCount || 0;
     if (c.isBookingBlocked || strikes >= 3) {
-      return `<span class="strike-badge strike-blocked" title="Customer is blocked from booking new slots via WhatsApp due to 3 penalty no-shows">🔴 3/3 BLOCKED</span>`;
+      return `<span class="strike-badge strike-blocked" title="Customer is blocked from booking new slots via WhatsApp due to 3 penalty no-shows">🔴 3/3 Blocked</span>`;
     }
     if (strikes === 2) {
       return `<span class="strike-badge strike-2" title="2 Penalty strikes incurred. 1 more no-show will block customer.">⚠️ 2/3 Strikes</span>`;
@@ -2215,7 +2500,7 @@ export class SalonDashboard {
     if (strikes === 1) {
       return `<span class="strike-badge strike-1" title="1 Penalty strike incurred.">⚡ 1/3 Strike</span>`;
     }
-    return `<span class="strike-badge strike-0" title="Clean record. 0 Penalty strikes.">✅ 0/3 Clean</span>`;
+    return `<span class="strike-badge strike-0" title="Clean record. 0 Penalty strikes.">✓ 0/3 Clean</span>`;
   }
 
   async loadCustomersTable(searchTerm = this.searchQuery || '', filterCategory = this.activeCustomerFilter || 'ALL') {
@@ -2276,18 +2561,17 @@ export class SalonDashboard {
       }
 
       tableContainer.innerHTML = `
-        <!-- Desktop Table Layout (Screens ≥ 768px) -->
-        <div class="desktop-only" style="overflow-x: auto;">
-          <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem;">
+        <!-- Desktop Compact Table Layout (Screens ≥ 768px) -->
+        <div class="desktop-only" style="overflow-x: auto; width: 100%;">
+          <table class="cust-table">
             <thead>
-              <tr style="border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary); text-transform: uppercase; font-size: 0.72rem; letter-spacing: 0.05em;">
-                <th style="padding: 12px;">CUSTOMER</th>
-                <th style="padding: 12px;">PHONE</th>
-                <th style="padding: 12px;">STRIKE STATUS</th>
-                <th style="padding: 12px;">VISITS</th>
-                <th style="padding: 12px;">LIFETIME SPEND</th>
-                <th style="padding: 12px;">LAST VISIT</th>
-                <th style="padding: 12px; text-align: right;">ACTIONS</th>
+              <tr>
+                <th style="min-width: 170px;">Customer & Contact</th>
+                <th style="min-width: 95px;">Strikes</th>
+                <th style="min-width: 70px;">Visits</th>
+                <th style="min-width: 70px;">Spend</th>
+                <th style="min-width: 85px;">Last Visit</th>
+                <th style="text-align: right; min-width: 130px;">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -2295,33 +2579,35 @@ export class SalonDashboard {
         const isBlocked = c.isBookingBlocked || (c.yearlyNoShowCount || 0) >= 3;
         const hasStrikes = (c.yearlyNoShowCount || 0) > 0 || isBlocked;
         return `
-                <tr class="clickable-customer-row" data-id="${c.id}" data-name="${c.name}" style="border-bottom: 1px solid rgba(255,255,255,0.03);">
-                  <td style="padding: 12px;">
-                    <div style="display: flex; align-items: center; gap: 10px;">
+                <tr class="clickable-customer-row" data-id="${c.id}" data-name="${c.name}">
+                  <td>
+                    <div style="display: flex; align-items: center; gap: 8px;">
                       <div class="customer-avatar">${(c.name || 'C').charAt(0).toUpperCase()}</div>
-                      <div>
-                        <div style="font-weight: 700; color: #fff;">${c.name || 'Customer'}</div>
-                        <div style="font-size: 0.75rem; color: var(--text-muted);">${c.email || 'No email'}</div>
+                      <div style="min-width: 0;">
+                        <div style="font-weight: 700; color: #f8fafc; font-size: 0.84rem; line-height: 1.25; white-space: nowrap;">${c.name || 'Customer'}</div>
+                        <div style="font-size: 0.72rem; color: #94a3b8; font-family: var(--font-mono, monospace); line-height: 1.2; white-space: nowrap;">${c.phone || 'No phone'}${c.email ? ` · ${c.email}` : ''}</div>
                       </div>
                     </div>
                   </td>
-                  <td style="padding: 12px; color: var(--text-secondary); font-family: monospace; font-weight: 600;">${c.phone || 'N/A'}</td>
-                  <td style="padding: 12px;">${this.renderStrikeBadge(c)}</td>
-                  <td style="padding: 12px;"><span class="badge" style="background: rgba(99,102,241,0.15); color: #818cf8; font-weight: 700;">${c.totalVisits || 0} visits</span></td>
-                  <td style="padding: 12px; font-weight: 700; color: #10b981; font-family: var(--font-heading);">₹${Number(c.totalSpend || 0).toLocaleString()}</td>
-                  <td style="padding: 12px; color: var(--text-muted); font-size: 0.8rem;">${c.lastVisitAt ? new Date(c.lastVisitAt).toLocaleDateString() : 'New Customer'}</td>
-                  <td style="padding: 12px; text-align: right;">
-                    <div style="display: flex; gap: 6px; justify-content: flex-end;">
-                      <button class="btn btn-secondary btn-sm btn-view-customer-history" data-id="${c.id}" data-name="${c.name}">
-                        📜 History
+                  <td>${this.renderStrikeBadge(c)}</td>
+                  <td><span class="cust-visit-pill">${c.totalVisits || 0} visits</span></td>
+                  <td style="font-weight: 700; color: #34d399; font-size: 0.84rem;">₹${Number(c.totalSpend || 0).toLocaleString()}</td>
+                  <td style="color: #94a3b8; font-size: 0.76rem;">${c.lastVisitAt ? new Date(c.lastVisitAt).toLocaleDateString() : 'New Client'}</td>
+                  <td style="text-align: right;">
+                    <div style="display: flex; gap: 5px; justify-content: flex-end; align-items: center; white-space: nowrap;">
+                      <button class="btn btn-secondary btn-xs btn-view-customer-history" data-id="${c.id}" data-name="${c.name}" title="View client visit history">
+                        ${Icons.history({ size: 12 })}
+                        <span>History</span>
                       </button>
                       ${hasStrikes ? `
-                        <button class="btn btn-success btn-sm btn-adjust-strikes" data-id="${c.id}" data-name="${c.name}" title="Adjust or reset penalty strikes">
-                          🔓 Adjust / Reset
+                        <button class="btn btn-success btn-xs btn-adjust-strikes" data-id="${c.id}" data-name="${c.name}" title="Adjust or reset penalty strikes">
+                          ${Icons.sliders({ size: 12 })}
+                          <span>Adjust</span>
                         </button>
                       ` : `
-                        <button class="btn btn-outline-danger btn-sm btn-block-customer" data-id="${c.id}" data-name="${c.name}" title="Manually block customer from booking">
-                          🔒 Block
+                        <button class="btn btn-outline-danger btn-xs btn-block-customer" data-id="${c.id}" data-name="${c.name}" title="Manually block customer from booking">
+                          ${Icons.lock({ size: 12 })}
+                          <span>Block</span>
                         </button>
                       `}
                     </div>
@@ -2333,56 +2619,52 @@ export class SalonDashboard {
           </table>
         </div>
 
-        <!-- Mobile Card Grid Layout (Screens < 768px) -->
+        <!-- Mobile Ultra-Compact Card Grid Layout (Screens < 768px) -->
         <div class="mobile-only customer-cards-grid">
           ${customers.map((c) => {
         const isBlocked = c.isBookingBlocked || (c.yearlyNoShowCount || 0) >= 3;
         const hasStrikes = (c.yearlyNoShowCount || 0) > 0 || isBlocked;
         return `
               <div class="customer-card clickable-customer-card" data-id="${c.id}" data-name="${c.name}">
-                <div class="customer-card-header">
-                  <div style="display: flex; align-items: center; gap: 10px;">
+                <!-- Row 1: Identity & Strike Badge -->
+                <div class="customer-card-row-top">
+                  <div style="display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1;">
                     <div class="customer-avatar">${(c.name || 'C').charAt(0).toUpperCase()}</div>
-                    <div>
-                      <div style="font-weight: 800; color: #fff; font-size: 1rem;">${c.name || 'Customer'}</div>
-                      <div style="font-size: 0.8rem; color: var(--text-secondary); font-family: monospace;">${c.phone || 'N/A'}</div>
+                    <div style="min-width: 0; flex: 1;">
+                      <div style="font-weight: 700; color: #f8fafc; font-size: 0.86rem; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${c.name || 'Customer'}</div>
+                      <div style="font-size: 0.73rem; color: #94a3b8; font-family: var(--font-mono, monospace); line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px;">${c.phone || 'No phone'}</div>
                     </div>
                   </div>
-                  <div>${this.renderStrikeBadge(c)}</div>
+                  <div style="flex-shrink: 0;">${this.renderStrikeBadge(c)}</div>
                 </div>
 
-                <div class="customer-card-body">
-                  <div>
-                    <div class="customer-stat-label">Visits</div>
-                    <div class="customer-stat-val">${c.totalVisits || 0} visits</div>
+                <!-- Row 2: Metrics Strip & Micro Actions -->
+                <div class="customer-card-row-bottom">
+                  <div class="customer-card-meta">
+                    <span class="card-meta-pill">${c.totalVisits || 0} visits</span>
+                    <span class="card-meta-dot">·</span>
+                    <span class="card-meta-spend">₹${Number(c.totalSpend || 0).toLocaleString()}</span>
+                    <span class="card-meta-dot">·</span>
+                    <span class="card-meta-sub">${c.lastVisitAt ? new Date(c.lastVisitAt).toLocaleDateString() : 'New'}</span>
                   </div>
-                  <div>
-                    <div class="customer-stat-label">Total Spend</div>
-                    <div class="customer-stat-val" style="color: #10b981;">₹${Number(c.totalSpend || 0).toLocaleString()}</div>
-                  </div>
-                  <div>
-                    <div class="customer-stat-label">Last Visit</div>
-                    <div class="customer-stat-val" style="font-size: 0.8rem; color: var(--text-muted);">${c.lastVisitAt ? new Date(c.lastVisitAt).toLocaleDateString() : 'New'}</div>
-                  </div>
-                  <div>
-                    <div class="customer-stat-label">Penalty Strikes</div>
-                    <div class="customer-stat-val">${c.yearlyNoShowCount || 0} / 3</div>
-                  </div>
-                </div>
 
-                <div style="display: flex; gap: 8px; margin-top: 4px;">
-                  <button class="btn btn-secondary btn-sm btn-view-customer-history" data-id="${c.id}" data-name="${c.name}" style="flex: 1; justify-content: center;">
-                    📜 History
-                  </button>
-                  ${hasStrikes ? `
-                    <button class="btn btn-success btn-sm btn-adjust-strikes" data-id="${c.id}" data-name="${c.name}" style="flex: 1; justify-content: center;">
-                      🔓 Adjust / Reset
+                  <div style="display: flex; gap: 6px; flex-shrink: 0;">
+                    <button class="btn btn-secondary btn-micro btn-view-customer-history" data-id="${c.id}" data-name="${c.name}" title="View client visit history">
+                      ${Icons.history({ size: 12 })}
+                      <span>History</span>
                     </button>
-                  ` : `
-                    <button class="btn btn-outline-danger btn-sm btn-block-customer" data-id="${c.id}" data-name="${c.name}" style="flex: 1; justify-content: center;">
-                      🔒 Block
-                    </button>
-                  `}
+                    ${hasStrikes ? `
+                      <button class="btn btn-success btn-micro btn-adjust-strikes" data-id="${c.id}" data-name="${c.name}" title="Adjust penalty strikes">
+                        ${Icons.sliders({ size: 12 })}
+                        <span>Adjust</span>
+                      </button>
+                    ` : `
+                      <button class="btn btn-outline-danger btn-micro btn-block-customer" data-id="${c.id}" data-name="${c.name}" title="Block customer">
+                        ${Icons.lock({ size: 12 })}
+                        <span>Block</span>
+                      </button>
+                    `}
+                  </div>
                 </div>
               </div>
             `;
@@ -2453,252 +2735,1083 @@ export class SalonDashboard {
 
 
   // =========================================================================
-  // TAB 5: PROFILE & SALON HUB
+  // =========================================================================
+  // TAB 5: PROFILE & SETTINGS (SAAS MASTER-DETAIL ARCHITECTURE)
   // =========================================================================
   renderProfileTab() {
     const profile = this.salonProfile || {};
+    const adminUser = this.currentUser || SalonAuth.getUser() || {};
+    const adminName = adminUser.name || profile.name || 'Salon Owner';
+    const salonName = profile.name || 'Salon Operations';
+    const city = profile.city || (profile.address ? profile.address.split(',')[0].trim() : 'Indore');
+    const initials = adminName.split(' ').map(w => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase() || 'SO';
+    const todayClosure = this.getTodayClosure();
+    const isClosedToday = !!todayClosure;
+    const activeSub = this.activeProfileSubtab || 'account';
+    const isDrilled = !!this.mobileSettingsDrilled;
+
+    return `
+      <div class="settings-container ${isDrilled ? 'settings-drilled-active' : ''}">
+        <!-- Page Title Header -->
+        <div class="settings-page-header ${isDrilled ? 'settings-page-header-drilled' : ''}">
+          <h2 class="settings-page-title">Account & Salon Settings</h2>
+          <p class="settings-page-subtitle">Manage personal login credentials, salon storefront, weekly hours, and security preferences.</p>
+        </div>
+
+        <div class="settings-layout ${isDrilled ? 'settings-drilled' : ''}" id="settings-layout-root">
+          <!-- Left Navigation Sidebar -->
+          <div class="settings-sidebar">
+            <!-- Compact Profile Identity Badge -->
+            <div class="settings-identity-card">
+              <div class="settings-avatar-circle">${initials}</div>
+              <div class="settings-identity-meta">
+                <div class="settings-identity-top-row">
+                  <h3 class="settings-identity-name">${adminName}</h3>
+                  <span class="badge ${isClosedToday ? 'badge-cancelled' : 'badge-completed'} settings-identity-badge">
+                    ${isClosedToday ? (todayClosure.closureType === 'HOLIDAY' ? '🌴 HOLIDAY' : '🚨 CLOSED') : (profile.status || 'ACTIVE')}
+                  </span>
+                </div>
+                <div class="settings-identity-sub">${salonName} · ${city}</div>
+              </div>
+            </div>
+
+            <!-- Group 1: ACCOUNT -->
+            <div class="settings-nav-group">
+              <div class="settings-nav-label">Account</div>
+              <div class="settings-nav-list">
+                <button type="button" class="settings-nav-row ${activeSub === 'account' ? 'active' : ''}" data-subtab="account">
+                  <div class="settings-row-icon" style="background: rgba(99, 102, 241, 0.15); color: #818cf8;">
+                    ${Icons.user({ size: 16 })}
+                  </div>
+                  <div class="settings-row-content">
+                    <span class="settings-row-title">Personal Profile</span>
+                    <span class="settings-row-desc">Owner credentials, salon name & address</span>
+                  </div>
+                  <span class="settings-row-chevron">${Icons.chevronRight({ size: 14 })}</span>
+                </button>
+
+                <button type="button" class="settings-nav-row ${activeSub === 'security' ? 'active' : ''}" data-subtab="security">
+                  <div class="settings-row-icon" style="background: rgba(244, 63, 94, 0.15); color: #fb7185;">
+                    ${Icons.lock({ size: 16 })}
+                  </div>
+                  <div class="settings-row-content">
+                    <span class="settings-row-title">Password & Security</span>
+                    <span class="settings-row-desc">Update password & active sessions</span>
+                  </div>
+                  <span class="settings-row-chevron">${Icons.chevronRight({ size: 14 })}</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Group 2: SALON & OPERATIONS -->
+            <div class="settings-nav-group">
+              <div class="settings-nav-label">Salon & Operations</div>
+              <div class="settings-nav-list">
+                <button type="button" class="settings-nav-row ${activeSub === 'storefront' ? 'active' : ''}" data-subtab="storefront">
+                  <div class="settings-row-icon" style="background: rgba(16, 185, 129, 0.15); color: #34d399;">
+                    ${Icons.scissors({ size: 16 })}
+                  </div>
+                  <div class="settings-row-content">
+                    <span class="settings-row-title">Salon Storefront</span>
+                    <span class="settings-row-desc">Public booking link & store details</span>
+                  </div>
+                  <span class="settings-row-chevron">${Icons.chevronRight({ size: 14 })}</span>
+                </button>
+
+                <button type="button" class="settings-nav-row ${activeSub === 'operations' ? 'active' : ''}" data-subtab="operations">
+                  <div class="settings-row-icon" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8;">
+                    ${Icons.calendar({ size: 16 })}
+                  </div>
+                  <div class="settings-row-content">
+                    <span class="settings-row-title">Store Operations</span>
+                    <span class="settings-row-desc">Weekly opening schedule & closures</span>
+                  </div>
+                  <span class="settings-row-chevron">${Icons.chevronRight({ size: 14 })}</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Group 3: STORE USERS & CRM -->
+            <div class="settings-nav-group">
+              <div class="settings-nav-label">Store Users & CRM</div>
+              <div class="settings-nav-list">
+                <button type="button" class="settings-nav-row ${activeSub === 'customers' ? 'active' : ''}" data-subtab="customers">
+                  <div class="settings-row-icon" style="background: rgba(99, 102, 241, 0.15); color: #818cf8;">
+                    ${Icons.users({ size: 16 })}
+                  </div>
+                  <div class="settings-row-content">
+                    <span class="settings-row-title">Store Users & Clients</span>
+                    <span class="settings-row-desc">Customer CRM, penalty strikes (0–3) & blocking</span>
+                  </div>
+                  <span class="settings-row-chevron">${Icons.chevronRight({ size: 14 })}</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Group 4: CHANNELS & GROWTH -->
+            <div class="settings-nav-group">
+              <div class="settings-nav-label">Channels & Growth</div>
+              <div class="settings-nav-list">
+                <button type="button" class="settings-nav-row ${activeSub === 'whatsapp' ? 'active' : ''}" data-subtab="whatsapp">
+                  <div class="settings-row-icon" style="background: rgba(37, 211, 102, 0.15); color: #25D366;">
+                    ${Icons.whatsapp({ size: 16 })}
+                  </div>
+                  <div class="settings-row-content">
+                    <span class="settings-row-title">WhatsApp & Growth</span>
+                    <span class="settings-row-desc">Meta quota, audit logs & QR posters</span>
+                  </div>
+                  <span class="settings-row-chevron">${Icons.chevronRight({ size: 14 })}</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Group 5: SESSION & SIGN OUT -->
+            <div class="settings-nav-group">
+              <div class="settings-nav-list">
+                <button type="button" class="settings-nav-row settings-nav-row--danger" id="card-feature-logout">
+                  <div class="settings-row-icon" style="background: rgba(239, 68, 68, 0.15); color: #f87171;">
+                    ${Icons.logOut ? Icons.logOut({ size: 16 }) : Icons.lock({ size: 16 })}
+                  </div>
+                  <div class="settings-row-content">
+                    <span class="settings-row-title">Sign Out Store Session</span>
+                    <span class="settings-row-desc">End your active authenticated session</span>
+                  </div>
+                  <span class="settings-row-chevron">${Icons.chevronRight({ size: 14 })}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Content Canvas (Active Section Detail Panel) -->
+          <div class="settings-main" id="settings-main-container">
+            <!-- Mobile Back Button (Visible when drilled down on small screens) -->
+            <div class="settings-mobile-header">
+              <button type="button" class="settings-mobile-back-btn" id="btn-settings-mobile-back">
+                ${Icons.chevronLeft({ size: 14 })}
+                <span>Back to Settings</span>
+              </button>
+            </div>
+
+            <!-- Subtab Content Render Target -->
+            <div id="profile-subtab-container">
+              ${this.renderProfileSubtabContent()}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  renderProfileSubtabContent() {
+    const subtab = this.activeProfileSubtab || 'account';
+    const profile = this.salonProfile || {};
+    const adminUser = this.currentUser || SalonAuth.getUser() || {};
+    const slug = profile.slug || 'the-grand-royal-barber-1';
+    const bookingUrl = `${window.location.origin}/#book/${slug}`;
     const staffCount = (this.staffList || []).length;
     const servicesCount = (this.servicesList || []).length;
     const freeChatsLeft = this.summaryData?.whatsappQuota?.remaining !== undefined ? this.summaryData.whatsappQuota.remaining : 1000;
-    const slug = profile.slug || 'the-grand-royal-barber-1';
-    const bookingUrl = `${window.location.origin}/#book/${slug}`;
+    const quotaReset = this.summaryData?.whatsappQuota?.resetsOn || '1st of next month';
     const todayClosure = this.getTodayClosure();
     const isClosedToday = !!todayClosure;
 
-    return `
-      <!-- Hero Profile & Command Center Header -->
-      <div class="profile-hero-card">
-        <div class="profile-hero-top">
-          <div class="profile-hero-identity">
-            <div class="profile-avatar-box">
-              ${Icons.scissors({ size: 26, color: '#a5b4fc' })}
-            </div>
-            <div class="profile-identity-info">
-              <div class="profile-title-row">
-                <h2 class="profile-salon-name">${profile.name || 'Salon Command Operations'}</h2>
-                <span class="badge ${isClosedToday ? 'badge-cancelled' : 'badge-completed'} profile-status-badge">
-                  ${isClosedToday ? (todayClosure.closureType === 'HOLIDAY' ? '🌴 PLANNED HOLIDAY' : '🚨 STORE CLOSED TODAY') : (profile.status || 'ACTIVE STORE')}
-                </span>
+    // SECTION 1: PERSONAL ACCOUNT, SALON PROFILE & ADDRESS
+    if (subtab === 'account') {
+      const adminName = adminUser.name || profile.name || '';
+      const adminEmail = adminUser.email || profile.email || '';
+      const adminPhone = adminUser.phone || profile.phone || '';
+      const currentSalonName = profile.name || 'Salon Operations';
+      const currentCity = profile.city || (profile.address ? profile.address.split(',')[0].trim() : 'Indore');
+
+      return `
+        <div class="settings-panel-card">
+          <div class="settings-panel-header" style="margin-bottom: 14px; padding-bottom: 12px;">
+            <div class="settings-header-left">
+              <div class="settings-header-icon" style="background: rgba(99, 102, 241, 0.15); color: #818cf8;">
+                ${Icons.user({ size: 20 })}
               </div>
-              <div class="profile-meta-row">
-                <span class="profile-meta-item">
-                  ${Icons.mapPin({ size: 13, color: '#818cf8' })}
-                  <span>${profile.address || profile.city || 'Indore, India'}</span>
-                </span>
-                <span class="profile-meta-item">
-                  ${Icons.phone({ size: 13, color: '#34d399' })}
-                  <span>${profile.phone || '+91'}</span>
-                </span>
-                <span class="profile-meta-item">
-                  ${Icons.clock({ size: 13, color: '#fbbf24' })}
-                  <span>${this.summaryData?.timezone || 'Asia/Kolkata'}</span>
-                </span>
+              <div>
+                <h3 class="settings-panel-title">Personal Profile & Salon Identity</h3>
+                <p class="settings-panel-subtitle">Manage login credentials, brand identity, and verified GPS store address.</p>
               </div>
             </div>
+            <span class="badge badge-in_service" style="font-size: 0.68rem; padding: 3px 8px; border-radius: 6px;">
+              👑 ${adminUser.role === 'SALON_OWNER' ? 'Salon Owner' : 'Salon Admin'}
+            </span>
           </div>
 
-          <!-- Direct Customer Booking Link Pill -->
-          <div class="profile-booking-pill">
-            <div class="profile-link-text">
-              ${Icons.link({ size: 14, color: '#818cf8' })}
-              <span class="profile-link-url" title="${bookingUrl}">${bookingUrl}</span>
-            </div>
-            <div class="profile-link-actions">
-              <button class="btn btn-secondary btn-sm profile-action-btn" id="btn-copy-invite" title="Copy public booking link">
-                ${Icons.copy({ size: 13 })}
-                <span>Copy</span>
-              </button>
-              <button class="btn btn-primary btn-sm profile-action-btn" id="btn-open-qr" title="View printable QR posters">
-                ${Icons.qrCode({ size: 13 })}
-                <span>QR Poster</span>
-              </button>
-            </div>
-          </div>
-        </div>
+          <div id="prof-profile-alert"></div>
 
-        <!-- Realtime KPI Metric Stats Grid -->
-        <div class="profile-kpi-grid">
-          <div class="profile-kpi-card">
-            <div class="profile-kpi-icon" style="background: rgba(99, 102, 241, 0.15); color: #818cf8;">
-              ${Icons.users({ size: 18 })}
-            </div>
-            <div class="profile-kpi-content">
-              <div class="profile-kpi-label">Stylist Staff</div>
-              <div class="profile-kpi-value">${staffCount} <span class="profile-kpi-unit">Specialists</span></div>
-            </div>
-          </div>
-
-          <div class="profile-kpi-card">
-            <div class="profile-kpi-icon" style="background: rgba(16, 185, 129, 0.15); color: #34d399;">
-              ${Icons.scissors({ size: 18 })}
-            </div>
-            <div class="profile-kpi-content">
-              <div class="profile-kpi-label">Service Catalog</div>
-              <div class="profile-kpi-value">${servicesCount} <span class="profile-kpi-unit">Offerings</span></div>
-            </div>
-          </div>
-
-          <div class="profile-kpi-card">
-            <div class="profile-kpi-icon" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24;">
-              ${Icons.whatsapp({ size: 18, color: '#fbbf24' })}
-            </div>
-            <div class="profile-kpi-content">
-              <div class="profile-kpi-label">Meta Free Quota</div>
-              <div class="profile-kpi-value" style="color: #34d399;">${freeChatsLeft} <span class="profile-kpi-unit">Left</span></div>
-            </div>
-          </div>
-
-          <div class="profile-kpi-card">
-            <div class="profile-kpi-icon" style="background: ${isClosedToday ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)'}; color: ${isClosedToday ? '#f87171' : '#34d399'};">
-              ${isClosedToday ? (Icons.alertTriangle ? Icons.alertTriangle({ size: 18, color: '#f87171' }) : '🚨') : '🟢'}
-            </div>
-            <div class="profile-kpi-content">
-              <div class="profile-kpi-label">Store Status</div>
-              <div class="profile-kpi-value" style="color: ${isClosedToday ? '#f87171' : '#34d399'}; font-size: 0.98rem;">
-                ${isClosedToday ? `Closed (${todayClosure.closureType})` : 'Live & Online'}
+          <form id="form-update-owner-profile" class="settings-panel-body" onsubmit="return false;" style="gap: 12px;">
+            
+            <!-- Section A: Salon Owner Account -->
+            <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 12px; padding: 12px 14px;">
+              <div style="font-size: 0.72rem; font-weight: 800; color: #a5b4fc; text-transform: uppercase; letter-spacing: 0.06em; display: flex; align-items: center; gap: 6px; margin-bottom: 10px;">
+                ${Icons.user({ size: 13, color: '#818cf8' })}
+                <span>Salon Owner Credentials</span>
               </div>
-            </div>
-          </div>
-        </div>
-      </div>
 
-      <!-- Categorized Command Hub Sections -->
-      <div class="profile-hub-sections">
-
-        <!-- Section 1: Store Operations & Schedules -->
-        <div class="profile-hub-group">
-          <div class="profile-group-header">
-            <div class="profile-group-icon" style="background: rgba(99, 102, 241, 0.15); color: #818cf8;">
-              ${Icons.calendar({ size: 16 })}
-            </div>
-            <div>
-              <h3 class="profile-group-title">Store Operations & Schedules</h3>
-              <p class="profile-group-subtitle">Configure business hours, staff shifts, and emergency store closures.</p>
-            </div>
-          </div>
-
-          <div class="profile-tools-grid">
-            <!-- Weekly Operating Schedule -->
-            <div class="profile-tool-card" id="card-feature-salon-schedule">
-              <div class="profile-tool-icon" style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.25);">
-                ${Icons.calendar({ size: 20, color: '#34d399' })}
-              </div>
-              <div class="profile-tool-info">
-                <div class="profile-tool-title">Weekly Operating Schedule</div>
-                <div class="profile-tool-desc">Set recurring weekly opening hours, salon shifts, and lunch breaks.</div>
-              </div>
-              <div class="profile-tool-arrow">${Icons.chevronRight({ size: 16 })}</div>
-            </div>
-
-            <!-- Store Closures & Holiday Calendar -->
-            <div class="profile-tool-card profile-tool-card--warning" id="card-feature-closures">
-              <div class="profile-tool-icon" style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3);">
-                ${Icons.alertTriangle ? Icons.alertTriangle({ size: 20, color: '#f87171' }) : '🚨'}
-              </div>
-              <div class="profile-tool-info">
-                <div class="profile-tool-title">
-                  <span>Store Closures & Holidays</span>
-                  <span class="profile-tool-chip chip-danger">EMERGENCY & HOLIDAYS</span>
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 10px;">
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label class="form-label" for="prof-manager-name">Owner Full Name *</label>
+                  <input type="text" class="form-control" id="prof-manager-name" value="${adminName.replace(/"/g, '&quot;')}" placeholder="e.g. Trilok Shivhare" required style="height: 38px;" />
                 </div>
-                <div class="profile-tool-desc">Schedule festival holidays or trigger instant 0-penalty emergency store closures.</div>
+
+                <div class="form-group" style="margin-bottom: 0;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                    <label class="form-label" for="prof-manager-phone" style="margin-bottom: 0;">Registered Phone</label>
+                    <span style="font-size: 0.62rem; color: #34d399; font-weight: 700; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25); padding: 1px 6px; border-radius: 4px;">
+                      ✓ Verified Login
+                    </span>
+                  </div>
+                  <input type="tel" class="form-control" id="prof-manager-phone" value="${adminPhone.replace(/"/g, '&quot;')}" readonly disabled style="cursor: not-allowed; opacity: 0.85; background: rgba(15, 23, 42, 0.5); border: 1px solid rgba(255, 255, 255, 0.08); color: #cbd5e1; height: 38px;" />
+                </div>
               </div>
-              <div class="profile-tool-arrow">${Icons.chevronRight({ size: 16 })}</div>
+
+              <div class="form-group" style="margin-bottom: 0;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                  <label class="form-label" for="prof-manager-email" style="margin-bottom: 0;">Recovery Email *</label>
+                  <span style="font-size: 0.64rem; color: #818cf8; font-weight: 600;">Used for password reset</span>
+                </div>
+                <input type="email" class="form-control" id="prof-manager-email" value="${adminEmail.replace(/"/g, '&quot;')}" placeholder="owner@gmail.com" required style="height: 38px;" />
+              </div>
             </div>
 
-            <!-- Stylist Shifts & Working Hours -->
-            <div class="profile-tool-card" id="card-feature-shifts">
-              <div class="profile-tool-icon" style="background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.25);">
-                ${Icons.clock({ size: 20, color: '#38bdf8' })}
+            <!-- Section B: Salon Brand & Physical Store Location -->
+            <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 12px; padding: 12px 14px;">
+              <div style="font-size: 0.72rem; font-weight: 800; color: #34d399; text-transform: uppercase; letter-spacing: 0.06em; display: flex; align-items: center; gap: 6px; margin-bottom: 10px;">
+                ${Icons.scissors({ size: 13, color: '#34d399' })}
+                <span>Salon Brand & Store Location</span>
               </div>
-              <div class="profile-tool-info">
-                <div class="profile-tool-title">Stylist Shifts & Working Hours</div>
-                <div class="profile-tool-desc">Manage individual staff shift timings, breaks, and leave requests.</div>
+
+              <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 10px; margin-bottom: 10px;">
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label class="form-label" for="prof-salon-name">Salon Brand Name *</label>
+                  <input type="text" class="form-control" id="prof-salon-name" value="${currentSalonName.replace(/"/g, '&quot;')}" placeholder="e.g. Developer Bazaar" required style="height: 38px;" />
+                </div>
+
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label class="form-label" for="prof-salon-city">City *</label>
+                  <input type="text" class="form-control" id="prof-salon-city" value="${currentCity.replace(/"/g, '&quot;')}" placeholder="e.g. Indore" required style="height: 38px;" />
+                </div>
               </div>
-              <div class="profile-tool-arrow">${Icons.chevronRight({ size: 16 })}</div>
+
+              <!-- Location & GPS Navigation Component Container -->
+              <div class="form-group" style="margin-bottom: 0;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                  <label class="form-label" style="margin-bottom: 0; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; color: #cbd5e1;">
+                    GPS Navigation & Address Capture
+                  </label>
+                  <span style="font-size: 0.64rem; color: #34d399; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;">
+                    <span>✓</span> Client Turn-by-Turn
+                  </span>
+                </div>
+                <div id="prof-location-picker-container"></div>
+              </div>
+            </div>
+
+            <!-- Save Action Button -->
+            <div style="margin-top: 4px;">
+              <button type="submit" class="btn btn-primary" id="btn-save-profile" style="width: 100%; min-height: 42px; height: 42px; padding: 0 20px; font-weight: 700; font-size: 0.86rem; border-radius: 9px; background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35); display: flex; align-items: center; justify-content: center; gap: 8px;">
+                ${Icons.check({ size: 16 })}
+                <span>Save Profile & Salon Changes</span>
+              </button>
+            </div>
+          </form>
+
+          <!-- Minimal Security Footer (No Developer Jargon) -->
+          <div style="margin-top: 12px; padding: 8px 12px; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 8px; display: flex; align-items: center; justify-content: space-between; font-size: 0.72rem; color: #94a3b8;">
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span style="color: #34d399;">🔒</span>
+              <span>Authenticated Store Session</span>
+            </div>
+            <span style="color: #34d399; font-weight: 600;">✓ Verified Store Credentials</span>
+          </div>
+        </div>
+      `;
+    }
+
+    // SECTION 2: SALON STOREFRONT & PUBLIC BOOKING
+    if (subtab === 'storefront') {
+      const cleanLocation = (() => {
+        const raw = profile.address || profile.city || 'Indore, India';
+        const parts = raw.split(',').map(s => s.trim()).filter(Boolean);
+        return [...new Set(parts)].join(', ');
+      })();
+
+      const whatsappShareUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(`Book your appointment with ${profile.name || 'our salon'} online: ${bookingUrl}`)}`;
+
+      return `
+        <div class="settings-panel-card">
+          <div class="settings-panel-header" style="margin-bottom: 12px; padding-bottom: 10px;">
+            <div class="settings-header-left">
+              <div class="settings-header-icon" style="background: rgba(16, 185, 129, 0.15); color: #34d399;">
+                ${Icons.scissors({ size: 20 })}
+              </div>
+              <div>
+                <h3 class="settings-panel-title">Salon Storefront & Booking Hub</h3>
+                <p class="settings-panel-subtitle">Customer-facing booking website, social sharing, and live status.</p>
+              </div>
+            </div>
+            <span class="badge ${isClosedToday ? 'badge-cancelled' : 'badge-completed'}" style="font-size: 0.68rem; padding: 3px 8px; border-radius: 6px;">
+              ${isClosedToday ? `🔴 Closed (${todayClosure.closureType})` : '🟢 Live & Bookable'}
+            </span>
+          </div>
+
+          <div class="settings-panel-body" style="gap: 12px;">
+            <!-- Public Booking Hub -->
+            <div class="settings-booking-hub" style="background: rgba(30, 41, 59, 0.45); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 12px; padding: 12px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <div style="font-size: 0.72rem; font-weight: 800; color: #a5b4fc; text-transform: uppercase; letter-spacing: 0.05em;">
+                  Direct Customer Booking Link
+                </div>
+                <span style="font-size: 0.65rem; color: #94a3b8;">Share on bio / WhatsApp</span>
+              </div>
+
+              <div class="settings-booking-url-box" style="display: flex; align-items: center; gap: 8px; background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 8px 10px; font-family: monospace; font-size: 0.78rem; color: #c7d2fe;">
+                ${Icons.link({ size: 14, color: '#818cf8' })}
+                <span style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${bookingUrl}</span>
+              </div>
+
+              <!-- 4-Column Action Grid (Zero Stacked Bloat!) -->
+              <div class="settings-booking-actions" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 4px;">
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-copy-invite" style="padding: 0 4px; font-size: 0.72rem; justify-content: center; height: 36px; border-radius: 8px;">
+                  ${Icons.copy({ size: 13 })}
+                  <span>Copy</span>
+                </button>
+                <a href="${bookingUrl}" target="_blank" class="btn btn-secondary btn-sm" id="btn-preview-storefront" style="text-decoration: none; padding: 0 4px; font-size: 0.72rem; justify-content: center; height: 36px; border-radius: 8px; background: rgba(99, 102, 241, 0.15); border-color: rgba(99, 102, 241, 0.35); color: #c7d2fe;">
+                  ${Icons.externalLink({ size: 13 })}
+                  <span>Open</span>
+                </a>
+                <a href="${whatsappShareUrl}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" id="btn-share-whatsapp-store" style="text-decoration: none; padding: 0 4px; font-size: 0.72rem; justify-content: center; height: 36px; border-radius: 8px; color: #25D366; background: rgba(37, 211, 102, 0.1); border-color: rgba(37, 211, 102, 0.3);">
+                  ${Icons.whatsapp ? Icons.whatsapp({ size: 13 }) : '💬'}
+                  <span>Share</span>
+                </a>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-open-qr" style="padding: 0 4px; font-size: 0.72rem; justify-content: center; height: 36px; border-radius: 8px;">
+                  ${Icons.qrCode({ size: 13 })}
+                  <span>Poster</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Live Storefront Details Card -->
+            <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 12px; padding: 12px 14px;">
+              <div style="font-size: 0.72rem; font-weight: 800; color: #34d399; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                <span>Verified Store Identity</span>
+                <span style="font-size: 0.65rem; color: #94a3b8; font-weight: 500;">Public Profile</span>
+              </div>
+
+              <div class="settings-info-card" style="background: transparent; border: none; padding: 0;">
+                <div class="settings-info-row" style="padding: 8px 0;">
+                  <span class="settings-info-label">Salon Brand</span>
+                  <span class="settings-info-value" style="color: #f8fafc; font-weight: 700;">${profile.name || 'Salon Command'}</span>
+                </div>
+                <div class="settings-info-row" style="padding: 8px 0;">
+                  <span class="settings-info-label">Store Handle</span>
+                  <span class="settings-info-value" style="font-family: monospace; color: #a5b4fc; font-weight: 600;">@${slug}</span>
+                </div>
+                <div class="settings-info-row" style="padding: 8px 0;">
+                  <span class="settings-info-label">Store Location</span>
+                  <span class="settings-info-value" style="color: #cbd5e1; max-width: 60%; text-align: right;">${cleanLocation}</span>
+                </div>
+                <div class="settings-info-row" style="padding: 8px 0;">
+                  <span class="settings-info-label">Contact / WhatsApp</span>
+                  <span class="settings-info-value" style="color: #cbd5e1;">${profile.phone || '+91'}</span>
+                </div>
+                <div class="settings-info-row" style="padding: 8px 0;">
+                  <span class="settings-info-label">Storefront Status</span>
+                  <span class="settings-info-value" style="color: ${isClosedToday ? '#f87171' : '#34d399'}; font-weight: 600;">
+                    ${isClosedToday ? `🔴 Closed (${todayClosure.closureType})` : '🟢 Live & Accepting Appointments'}
+                  </span>
+                </div>
+              </div>
+
+              <!-- Quick Highlights -->
+              <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.05); text-align: center;">
+                <div style="background: rgba(255, 255, 255, 0.03); padding: 6px 4px; border-radius: 8px;">
+                  <div style="font-size: 0.85rem; font-weight: 800; color: #fff;">${servicesCount}</div>
+                  <div style="font-size: 0.62rem; color: #94a3b8; text-transform: uppercase;">Services</div>
+                </div>
+                <div style="background: rgba(255, 255, 255, 0.03); padding: 6px 4px; border-radius: 8px;">
+                  <div style="font-size: 0.85rem; font-weight: 800; color: #fff;">${staffCount}</div>
+                  <div style="font-size: 0.62rem; color: #94a3b8; text-transform: uppercase;">Stylists</div>
+                </div>
+                <div style="background: rgba(255, 255, 255, 0.03); padding: 6px 4px; border-radius: 8px;">
+                  <div style="font-size: 0.85rem; font-weight: 800; color: #34d399;">30s</div>
+                  <div style="font-size: 0.62rem; color: #94a3b8; text-transform: uppercase;">Fast Queue</div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
+      `;
+    }
 
-        <!-- Section 2: Marketing, Growth & Audit Tools -->
-        <div class="profile-hub-group">
-          <div class="profile-group-header">
-            <div class="profile-group-icon" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24;">
-              ${Icons.qrCode({ size: 16 })}
+    // SECTION 3: PASSWORD & SECURITY
+    if (subtab === 'security') {
+      return `
+        <div class="settings-panel-card">
+          <div class="settings-panel-header" style="margin-bottom: 12px; padding-bottom: 10px;">
+            <div class="settings-header-left">
+              <div class="settings-header-icon" style="background: rgba(244, 63, 94, 0.15); color: #fb7185;">
+                ${Icons.lock({ size: 20 })}
+              </div>
+              <div>
+                <h3 class="settings-panel-title">Password & Security</h3>
+                <p class="settings-panel-subtitle">Update login credentials and manage active authenticated sessions.</p>
+              </div>
             </div>
-            <div>
-              <h3 class="profile-group-title">Marketing & Customer Intelligence</h3>
-              <p class="profile-group-subtitle">Access QR posters, WhatsApp database audit logs, and customer CRM tools.</p>
-            </div>
+            <span class="badge badge-completed" style="font-size: 0.68rem; padding: 3px 8px; border-radius: 6px;">
+              🛡️ Encrypted & Protected
+            </span>
           </div>
 
-          <div class="profile-tools-grid">
-            <!-- Mirror & Desk QR Posters -->
-            <div class="profile-tool-card" id="card-feature-qr">
-              <div class="profile-tool-icon" style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.25);">
-                ${Icons.qrCode({ size: 20, color: '#fbbf24' })}
+          <div id="prof-pwd-alert"></div>
+
+          <form id="form-change-password" class="settings-panel-body" onsubmit="return false;" style="gap: 12px;">
+            <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 12px; padding: 12px 14px;">
+              <div style="font-size: 0.72rem; font-weight: 800; color: #a5b4fc; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 6px; margin-bottom: 10px;">
+                ${Icons.key ? Icons.key({ size: 13, color: '#818cf8' }) : Icons.lock({ size: 13, color: '#818cf8' })}
+                <span>Change Account Password</span>
               </div>
-              <div class="profile-tool-info">
-                <div class="profile-tool-title">Mirror & Desk QR Posters</div>
-                <div class="profile-tool-desc">Generate printable QR poster templates for salon counter and mirrors.</div>
+
+              <div class="form-group" style="margin-bottom: 10px;">
+                <label class="form-label" for="prof-current-password">Current Password *</label>
+                <div class="pwd-field-wrap">
+                  <input type="password" class="form-control" id="prof-current-password" placeholder="Enter existing password" required autocomplete="current-password" style="height: 38px;" />
+                  <button type="button" class="pwd-toggle-btn" data-target="prof-current-password" title="Toggle visibility">
+                    ${Icons.eye({ size: 15 })}
+                  </button>
+                </div>
               </div>
-              <div class="profile-tool-arrow">${Icons.chevronRight({ size: 16 })}</div>
+
+              <div class="form-group" style="margin-bottom: 10px;">
+                <label class="form-label" for="prof-new-password">New Password *</label>
+                <div class="pwd-field-wrap">
+                  <input type="password" class="form-control" id="prof-new-password" placeholder="Create strong new password" required autocomplete="new-password" style="height: 38px;" />
+                  <button type="button" class="pwd-toggle-btn" data-target="prof-new-password" title="Toggle visibility">
+                    ${Icons.eye({ size: 15 })}
+                  </button>
+                </div>
+
+                <div class="pwd-strength-container" style="margin-top: 6px;">
+                  <div class="pwd-strength-bar">
+                    <div class="pwd-strength-fill" id="prof-strength-fill"></div>
+                  </div>
+                  <div class="pwd-strength-text" style="font-size: 0.7rem; display: flex; justify-content: space-between; margin-top: 3px;">
+                    <span id="prof-strength-label">Password strength: Empty</span>
+                    <span style="color: #94a3b8;">Min 8 characters</span>
+                  </div>
+                  <!-- 3-Column Compact Password Requirements Checklist -->
+                  <div class="pwd-req-list" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 6px; margin-top: 6px; font-size: 0.7rem;">
+                    <div class="pwd-req-item" id="req-length"><span class="pwd-req-dot"></span> 8+ Chars</div>
+                    <div class="pwd-req-item" id="req-mixed"><span class="pwd-req-dot"></span> Upper & Lower</div>
+                    <div class="pwd-req-item" id="req-digit"><span class="pwd-req-dot"></span> Num / Symbol</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-group" style="margin-bottom: 4px;">
+                <label class="form-label" for="prof-confirm-password">Confirm New Password *</label>
+                <div class="pwd-field-wrap">
+                  <input type="password" class="form-control" id="prof-confirm-password" placeholder="Re-type new password" required autocomplete="new-password" style="height: 38px;" />
+                  <button type="button" class="pwd-toggle-btn" data-target="prof-confirm-password" title="Toggle visibility">
+                    ${Icons.eye({ size: 15 })}
+                  </button>
+                </div>
+              </div>
             </div>
 
-            <!-- WhatsApp Bot & Audit Logs -->
-            <div class="profile-tool-card" id="card-feature-whatsapp">
-              <div class="profile-tool-icon" style="background: rgba(37, 211, 102, 0.12); border: 1px solid rgba(37, 211, 102, 0.25);">
-                ${Icons.whatsapp({ size: 20, color: '#25D366' })}
-              </div>
-              <div class="profile-tool-info">
-                <div class="profile-tool-title">WhatsApp Bot & Audit Logs</div>
-                <div class="profile-tool-desc">View real-time PostgreSQL database audit trails of WhatsApp customer messages.</div>
-              </div>
-              <div class="profile-tool-arrow">${Icons.chevronRight({ size: 16 })}</div>
+            <!-- Full-Width Tactile Update Password Button -->
+            <div style="margin-top: 2px;">
+              <button type="submit" class="btn btn-primary" id="btn-submit-change-password" style="width: 100%; min-height: 42px; height: 42px; padding: 0 20px; font-weight: 700; font-size: 0.86rem; border-radius: 9px; background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35); display: flex; align-items: center; justify-content: center; gap: 8px;">
+                ${Icons.shield({ size: 16 })}
+                <span>Update Account Password</span>
+              </button>
+            </div>
+          </form>
+
+          <!-- Active Session & Device Controls (ZERO Developer Jargon!) -->
+          <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 12px; padding: 12px 14px; margin-top: 12px;">
+            <div style="font-size: 0.72rem; font-weight: 800; color: #38bdf8; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+              ${Icons.shield({ size: 14, color: '#38bdf8' })}
+              <span>Session & Device Security</span>
             </div>
 
-            <!-- Customer Management & Strike Hub -->
-            <div class="profile-tool-card" id="card-feature-crm">
-              <div class="profile-tool-icon" style="background: rgba(99, 102, 241, 0.12); border: 1px solid rgba(99, 102, 241, 0.25);">
-                ${Icons.users({ size: 20, color: '#818cf8' })}
+            <div class="settings-info-card" style="background: transparent; border: none; padding: 0;">
+              <div class="settings-info-row" style="padding: 7px 0;">
+                <span class="settings-info-label">Active Browser Session</span>
+                <span class="settings-info-value"><span class="badge badge-completed">🟢 Active & Encrypted</span></span>
               </div>
-              <div class="profile-tool-info">
-                <div class="profile-tool-title">Customer CRM & Strike Hub</div>
-                <div class="profile-tool-desc">View client visit history, penalty strikes (0–3), and block/unblock controls.</div>
+              <div class="settings-info-row" style="padding: 7px 0;">
+                <span class="settings-info-label">Encryption Standard</span>
+                <span class="settings-info-value" style="color: #cbd5e1;">TLS 1.3 / 256-Bit SSL</span>
               </div>
-              <div class="profile-tool-arrow">${Icons.chevronRight({ size: 16 })}</div>
+              <div class="settings-info-row" style="padding: 7px 0;">
+                <span class="settings-info-label">Recovery Verification</span>
+                <span class="settings-info-value" style="color: #cbd5e1;">Verified Email OTP</span>
+              </div>
+              <div class="settings-info-row" style="padding: 7px 0;">
+                <span class="settings-info-label">Auto-Lock Protection</span>
+                <span class="settings-info-value" style="color: #34d399;">✓ Protected & Monitored</span>
+              </div>
+            </div>
+
+            <!-- Sign-Out Controls -->
+            <div style="margin-top: 10px; padding: 12px; background: rgba(239, 68, 68, 0.05); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 10px; display: flex; flex-direction: column; gap: 8px;">
+              <div>
+                <h4 style="font-size: 0.8rem; font-weight: 700; color: #f87171; margin: 0 0 2px 0;">Sign-Out Controls</h4>
+                <p style="font-size: 0.72rem; color: #94a3b8; margin: 0;">Logged in on a public or shared computer? Revoke access immediately across all other devices.</p>
+              </div>
+
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-prof-logout-all" style="width: 100%; border-color: rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.1); color: #fca5a5; min-height: 36px; height: 36px; font-size: 0.76rem; font-weight: 700; justify-content: center; border-radius: 8px;">
+                ${Icons.refreshCw({ size: 13 })}
+                <span>Log Out All Other Devices</span>
+              </button>
             </div>
           </div>
         </div>
+      `;
+    }
 
-        <!-- Section 3: Account & Session Security -->
-        <div class="profile-hub-group">
-          <div class="profile-group-header">
-            <div class="profile-group-icon" style="background: rgba(244, 63, 94, 0.15); color: #fb7185;">
-              ${Icons.lock({ size: 16 })}
-            </div>
-            <div>
-              <h3 class="profile-group-title">Session & Security</h3>
-              <p class="profile-group-subtitle">Manager session controls and sign-out actions.</p>
+    // SECTION 4: STORE OPERATIONS & SCHEDULES
+    if (subtab === 'operations') {
+      return `
+        <div class="settings-panel-card">
+          <div class="settings-panel-header" style="padding-bottom: 8px; margin-bottom: 10px;">
+            <div class="settings-header-left">
+              <div class="settings-header-icon" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; width: 32px; height: 32px; border-radius: 8px;">
+                ${Icons.calendar({ size: 18 })}
+              </div>
+              <div>
+                <h3 class="settings-panel-title" style="font-size: 1.02rem; margin: 0 0 2px 0;">Store Operations & Schedules</h3>
+                <p class="settings-panel-subtitle" style="font-size: 0.78rem;">Configure weekly business hours, facility breaks, and holiday closures.</p>
+              </div>
             </div>
           </div>
 
-          <div class="profile-tools-grid">
-            <!-- Sign Out -->
-            <div class="profile-tool-card profile-tool-card--logout" id="card-feature-logout">
-              <div class="profile-tool-icon" style="background: rgba(244, 63, 94, 0.15); border: 1px solid rgba(244, 63, 94, 0.3);">
-                ${Icons.lock({ size: 20, color: '#fb7185' })}
+          <div class="settings-panel-body" style="gap: 8px;">
+            <!-- Action Navigation Tiles -->
+            <div class="settings-tools-grid">
+              <div class="settings-tool-tile" id="card-feature-salon-schedule">
+                <div class="settings-tile-icon" style="background: rgba(16, 185, 129, 0.12); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.25);">
+                  ${Icons.calendar({ size: 17 })}
+                </div>
+                <div class="settings-tile-content">
+                  <div class="settings-tile-title">Weekly Operating Schedule</div>
+                  <div class="settings-tile-desc">Recurring hours, shifts & facility lunch breaks</div>
+                </div>
+                <div class="settings-tile-arrow">${Icons.chevronRight({ size: 14 })}</div>
               </div>
-              <div class="profile-tool-info">
-                <div class="profile-tool-title" style="color: #fb7185;">Sign Out Store Session</div>
-                <div class="profile-tool-desc">Safely terminate manager active session on this device.</div>
+
+              <div class="settings-tool-tile settings-tool-tile--warning" id="card-feature-closures">
+                <div class="settings-tile-icon" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);">
+                  ${Icons.alertTriangle ? Icons.alertTriangle({ size: 17, color: '#f87171' }) : '🚨'}
+                </div>
+                <div class="settings-tile-content">
+                  <div class="settings-tile-title">
+                    <span>Store Closures & Holidays</span>
+                    <span class="badge badge-cancelled" style="font-size: 0.6rem; padding: 1px 5px; font-weight: 700;">HOLIDAYS</span>
+                  </div>
+                  <div class="settings-tile-desc">Festival off-days & emergency 0-penalty closures</div>
+                </div>
+                <div class="settings-tile-arrow">${Icons.chevronRight({ size: 14 })}</div>
               </div>
-              <div class="profile-tool-arrow" style="color: #fb7185;">${Icons.chevronRight({ size: 16, color: '#fb7185' })}</div>
+            </div>
+
+            <!-- Operations Telemetry Metric Strip (Replaces bulky 4-row list) -->
+            <div class="ops-telemetry-grid">
+              <div class="ops-telemetry-item">
+                <span class="ops-telemetry-label">Store Status</span>
+                <span class="ops-telemetry-val" style="color: ${isClosedToday ? '#f87171' : '#34d399'};">
+                  ${isClosedToday ? `🔴 Closed (${todayClosure.closureType})` : '🟢 Live & Online'}
+                </span>
+              </div>
+              <div class="ops-telemetry-item">
+                <span class="ops-telemetry-label">Timezone</span>
+                <span class="ops-telemetry-val">${this.summaryData?.timezone || 'Asia/Kolkata'}</span>
+              </div>
+              <div class="ops-telemetry-item">
+                <span class="ops-telemetry-label">Stylists</span>
+                <span class="ops-telemetry-val">${staffCount} Active Specialists</span>
+              </div>
+              <div class="ops-telemetry-item">
+                <span class="ops-telemetry-label">Services</span>
+                <span class="ops-telemetry-val">${servicesCount} Active Offerings</span>
+              </div>
             </div>
           </div>
         </div>
+      `;
+    }
 
-      </div>
-    `;
+    // SECTION 5: STORE USERS & CUSTOMER CRM
+    if (subtab === 'customers') {
+      const activeFilter = this.activeCustomerFilter || 'ALL';
+      return `
+        <div class="settings-panel-card">
+          <div class="settings-panel-header cust-panel-header">
+            <div class="settings-header-left">
+              <div class="settings-header-icon" style="background: rgba(99, 102, 241, 0.15); color: #818cf8;">
+                ${Icons.users({ size: 20 })}
+              </div>
+              <div>
+                <h3 class="settings-panel-title">Store Users & Customer CRM</h3>
+                <p class="settings-panel-subtitle">Manage customer directory, track penalty strikes (0–3), restrict no-show abusers, and review visit history.</p>
+              </div>
+            </div>
+            <div class="cust-search-wrap">
+              <input type="text" class="form-control" id="customer-search-input" placeholder="Search customer by name or phone..." value="${this.searchQuery || ''}" />
+            </div>
+          </div>
+
+          <div class="settings-panel-body" style="gap: 8px;">
+            <!-- Strike Status Filter Segmented Control (100% Fit, Zero-Scroll on Mobile) -->
+            <div id="customer-strike-filters">
+              <button class="cust-filter-btn ${activeFilter === 'ALL' ? 'active' : ''}" data-filter="ALL">
+                <span class="cust-filter-text">All</span>
+                <span class="cust-filter-count">0</span>
+              </button>
+              <button class="cust-filter-btn ${activeFilter === 'BLOCKED' ? 'active' : ''}" data-filter="BLOCKED">
+                <span class="cust-filter-text">Blocked</span>
+                <span class="cust-filter-count">0</span>
+              </button>
+              <button class="cust-filter-btn ${activeFilter === 'WARNING' ? 'active' : ''}" data-filter="WARNING">
+                <span class="cust-filter-text">Warn</span>
+                <span class="cust-filter-count">0</span>
+              </button>
+              <button class="cust-filter-btn ${activeFilter === 'CLEAN' ? 'active' : ''}" data-filter="CLEAN">
+                <span class="cust-filter-text">Clean</span>
+                <span class="cust-filter-count">0</span>
+              </button>
+            </div>
+
+            <div id="customers-table-container">
+              <div style="text-align: center; padding: 20px; color: var(--text-muted);">Loading customer records...</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // SECTION 5: WHATSAPP & GROWTH
+    if (subtab === 'whatsapp') {
+      return `
+        <div class="settings-panel-card">
+          <div class="settings-panel-header">
+            <div class="settings-header-left">
+              <div class="settings-header-icon" style="background: rgba(37, 211, 102, 0.15); color: #25D366;">
+                ${Icons.whatsapp({ size: 20 })}
+              </div>
+              <div>
+                <h3 class="settings-panel-title">WhatsApp Cloud API & Growth Tools</h3>
+                <p class="settings-panel-subtitle">Meta Cloud API service quota and customer conversation audit logs.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-panel-body" style="gap: 10px;">
+            <!-- Meta Quota Meter -->
+            <div style="padding: 12px 14px; background: rgba(30, 41, 59, 0.45); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px;">
+              <div>
+                <div style="font-size: 0.72rem; color: #94a3b8; font-weight: 700; text-transform: uppercase;">Meta Free Service Quota</div>
+                <div style="font-size: 1.25rem; font-weight: 800; color: #34d399; margin-top: 2px;">${freeChatsLeft} <span style="font-size: 0.76rem; color: #94a3b8;">/ 1000 left</span></div>
+                <div style="font-size: 0.72rem; color: #64748b; margin-top: 1px;">Resets on ${quotaReset}</div>
+              </div>
+              <div>
+                <div style="font-size: 0.72rem; color: #94a3b8; font-weight: 700; text-transform: uppercase;">Webhook Channel Status</div>
+                <div style="font-size: 1rem; font-weight: 700; color: #38bdf8; margin-top: 3px;">🟢 Live & Connected</div>
+                <div style="font-size: 0.72rem; color: #64748b; margin-top: 1px;">Meta Cloud API v21.0</div>
+              </div>
+            </div>
+
+            <!-- Growth Tools Grid -->
+            <div class="settings-tools-grid" style="margin-top: 6px;">
+              <div class="settings-tool-tile" id="card-feature-whatsapp">
+                <div class="settings-tile-icon" style="background: rgba(37, 211, 102, 0.12); color: #25D366; border: 1px solid rgba(37, 211, 102, 0.25);">
+                  ${Icons.whatsapp({ size: 20 })}
+                </div>
+                <div class="settings-tile-content">
+                  <div class="settings-tile-title">WhatsApp Bot & Audit Logs</div>
+                  <div class="settings-tile-desc">Real-time PostgreSQL audit trail of incoming & outgoing customer conversations.</div>
+                </div>
+                <div class="settings-tile-arrow">${Icons.chevronRight({ size: 16 })}</div>
+              </div>
+
+              <div class="settings-tool-tile" id="card-feature-qr">
+                <div class="settings-tile-icon" style="background: rgba(245, 158, 11, 0.12); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.25);">
+                  ${Icons.qrCode({ size: 20 })}
+                </div>
+                <div class="settings-tile-content">
+                  <div class="settings-tile-title">Mirror & Desk QR Posters</div>
+                  <div class="settings-tile-desc">Print high-resolution QR poster templates for salon counter and mirrors.</div>
+                </div>
+                <div class="settings-tile-arrow">${Icons.chevronRight({ size: 16 })}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    return '';
+  }
+
+  switchProfileSubtab(subtab) {
+    this.activeProfileSubtab = subtab;
+    this.mobileSettingsDrilled = true;
+
+    // Update active row in navigation
+    document.querySelectorAll('.settings-nav-row').forEach((btn) => {
+      btn.classList.toggle('active', btn.getAttribute('data-subtab') === subtab);
+    });
+
+    const layoutRoot = document.getElementById('settings-layout-root');
+    if (layoutRoot) {
+      layoutRoot.classList.add('settings-drilled');
+    }
+    document.querySelector('.settings-container')?.classList.add('settings-drilled-active');
+    document.querySelector('.settings-page-header')?.classList.add('settings-page-header-drilled');
+
+    const container = document.getElementById('profile-subtab-container');
+    if (container) {
+      container.innerHTML = this.renderProfileSubtabContent();
+      this.attachProfileSubtabListeners();
+    }
+
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  attachProfileSubtabListeners() {
+    // 1. Navigation switcher
+    document.querySelectorAll('.settings-nav-row[data-subtab]').forEach((btn) => {
+      btn.onclick = (e) => {
+        e.preventDefault();
+        const sub = btn.getAttribute('data-subtab');
+        if (sub) this.switchProfileSubtab(sub);
+      };
+    });
+
+    // 2. Mobile Back button
+    document.getElementById('btn-settings-mobile-back')?.addEventListener('click', () => {
+      this.mobileSettingsDrilled = false;
+      const layoutRoot = document.getElementById('settings-layout-root');
+      if (layoutRoot) {
+        layoutRoot.classList.remove('settings-drilled');
+      }
+      document.querySelector('.settings-container')?.classList.remove('settings-drilled-active');
+      document.querySelector('.settings-page-header')?.classList.remove('settings-page-header-drilled');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+
+    // 3. Subtab: Account Profile Form
+    // Mount LocationPicker for Profile tab
+    if (document.getElementById('prof-location-picker-container')) {
+      const profile = this.salonProfile || {};
+      this.profileLocationPicker = new LocationPicker('prof-location-picker-container', {
+        hideHeader: true,
+        hideCityInput: true,
+        syncCityInputId: 'prof-salon-city',
+        initialData: {
+          address: profile.address || '',
+          city: profile.city || '',
+          state: profile.state || '',
+          latitude: profile.latitude !== undefined ? profile.latitude : null,
+          longitude: profile.longitude !== undefined ? profile.longitude : null,
+          googleMapsUrl: profile.googleMapsUrl || '',
+          locationType: profile.locationType || 'MANUAL',
+        },
+        getCity: () => document.getElementById('prof-salon-city')?.value?.trim() || profile.city || '',
+        onChange: (locData) => {
+          const cityEl = document.getElementById('prof-salon-city');
+          if (cityEl && locData.city) {
+            cityEl.value = locData.city;
+          }
+        },
+      });
+
+      // Synchronize city input with location search scope
+      document.getElementById('prof-salon-city')?.addEventListener('input', () => {
+        if (this.profileLocationPicker && this.profileLocationPicker.activeMode === 'search') {
+          this.profileLocationPicker.render();
+        }
+      });
+    }
+
+    // 3. Subtab: Account Profile & Salon Form
+    const formProfile = document.getElementById('form-update-owner-profile');
+    if (formProfile) {
+      formProfile.onsubmit = async (e) => {
+        e.preventDefault();
+        const ownerName = document.getElementById('prof-manager-name')?.value.trim();
+        const ownerEmail = document.getElementById('prof-manager-email')?.value.trim();
+        const salonName = document.getElementById('prof-salon-name')?.value.trim();
+        const salonCity = document.getElementById('prof-salon-city')?.value.trim();
+        const btnSave = document.getElementById('btn-save-profile');
+        const alertBox = document.getElementById('prof-profile-alert');
+
+        if (!ownerName || !ownerEmail) {
+          if (alertBox) alertBox.innerHTML = `<div class="toast-error" style="padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; font-size: 0.85rem;">Owner Name and Recovery Email cannot be empty.</div>`;
+          return;
+        }
+
+        if (!salonName) {
+          if (alertBox) alertBox.innerHTML = `<div class="toast-error" style="padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; font-size: 0.85rem;">Salon Name cannot be empty.</div>`;
+          return;
+        }
+
+        const locData = this.profileLocationPicker ? this.profileLocationPicker.getValue() : {};
+
+        const originalBtnHtml = btnSave ? btnSave.innerHTML : '';
+        if (btnSave) {
+          btnSave.disabled = true;
+          btnSave.innerHTML = `<span>Saving...</span>`;
+        }
+
+        try {
+          // 1. Update personal owner profile (owner name, recovery email)
+          const profileRes = await ApiClient.updateProfile({ name: ownerName, email: ownerEmail });
+          if (profileRes?.admin) {
+            this.currentUser = { ...this.currentUser, ...profileRes.admin };
+          }
+
+          // 2. Update salon details (name, address, city, state, coordinates, maps URL)
+          const salonPayload = {
+            name: salonName,
+            address: locData.address || this.salonProfile?.address || '',
+            city: salonCity || locData.city || this.salonProfile?.city || '',
+            state: locData.state || this.salonProfile?.state || '',
+            googleMapsUrl: locData.googleMapsUrl || this.salonProfile?.googleMapsUrl || undefined,
+            locationType: locData.locationType || this.salonProfile?.locationType || 'MANUAL',
+          };
+          if (typeof locData.latitude === 'number' && !isNaN(locData.latitude)) {
+            salonPayload.latitude = locData.latitude;
+          }
+          if (typeof locData.longitude === 'number' && !isNaN(locData.longitude)) {
+            salonPayload.longitude = locData.longitude;
+          }
+
+          const updatedSalon = await ApiClient.updateSalonProfile(salonPayload);
+          if (updatedSalon) {
+            this.salonProfile = { ...this.salonProfile, ...salonPayload };
+          }
+
+          // 3. Update UI elements across header and identity card
+          document.querySelectorAll('.header-salon-name').forEach((el) => {
+            el.textContent = salonName;
+          });
+          document.querySelectorAll('.settings-identity-name').forEach((el) => {
+            el.textContent = ownerName;
+          });
+          document.querySelectorAll('.settings-identity-sub').forEach((el) => {
+            el.textContent = `${salonName} · ${salonPayload.city || 'Indore'}`;
+          });
+
+          if (alertBox) {
+            alertBox.innerHTML = `<div style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.3); color: #34d399; padding: 12px 16px; border-radius: 8px; margin-bottom: 14px; font-size: 0.88rem; display: flex; align-items: center; gap: 8px;"><span>✓</span><span>Owner profile, salon brand name, and verified location updated successfully!</span></div>`;
+          }
+          this.showToast('Profile and salon changes saved successfully!', 'success');
+        } catch (err) {
+          if (alertBox) {
+            alertBox.innerHTML = `<div style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171; padding: 12px 16px; border-radius: 8px; margin-bottom: 14px; font-size: 0.88rem;">${err.message || 'Failed to update profile.'}</div>`;
+          }
+        } finally {
+          if (btnSave) {
+            btnSave.disabled = false;
+            btnSave.innerHTML = originalBtnHtml;
+          }
+        }
+      };
+    }
+
+    // 4. Subtab: Storefront Copy Link & QR
+    const copyLinkHandler = () => {
+      const slug = this.salonProfile?.slug || 'the-grand-royal-barber-1';
+      const url = `${window.location.origin}/#book/${slug}`;
+      navigator.clipboard.writeText(url);
+      this.showToast('Booking link copied to clipboard!', 'success');
+    };
+    document.getElementById('btn-copy-invite')?.addEventListener('click', copyLinkHandler);
+    document.getElementById('btn-copy-invite-subtab')?.addEventListener('click', copyLinkHandler);
+    document.getElementById('btn-open-qr')?.addEventListener('click', () => {
+      this.showQRCodeModal();
+    });
+
+    // 5. Subtab: Security Form (Password change & Live strength meter)
+    const formPwd = document.getElementById('form-change-password');
+    if (formPwd) {
+      // Toggle eye buttons
+      formPwd.querySelectorAll('.pwd-toggle-btn').forEach((btn) => {
+        btn.onclick = () => {
+          const targetId = btn.getAttribute('data-target');
+          const input = document.getElementById(targetId);
+          if (input) {
+            const isPassword = input.type === 'password';
+            input.type = isPassword ? 'text' : 'password';
+            btn.innerHTML = isPassword ? Icons.eyeOff({ size: 16 }) : Icons.eye({ size: 16 });
+          }
+        };
+      });
+
+      // Password strength live evaluator
+      const newPwdInput = document.getElementById('prof-new-password');
+      const fillBar = document.getElementById('prof-strength-fill');
+      const label = document.getElementById('prof-strength-label');
+      const reqLen = document.getElementById('req-length');
+      const reqMix = document.getElementById('req-mixed');
+      const reqDigit = document.getElementById('req-digit');
+
+      newPwdInput?.addEventListener('input', () => {
+        const val = newPwdInput.value;
+        const hasLen = val.length >= 8;
+        const hasMix = /[a-z]/.test(val) && /[A-Z]/.test(val);
+        const hasDigit = /[0-9]/.test(val) || /[^a-zA-Z0-9]/.test(val);
+
+        reqLen?.classList.toggle('met', hasLen);
+        reqMix?.classList.toggle('met', hasMix);
+        reqDigit?.classList.toggle('met', hasDigit);
+
+        let score = 0;
+        if (hasLen) score += 35;
+        if (hasMix) score += 35;
+        if (hasDigit) score += 30;
+
+        if (fillBar) fillBar.style.width = `${val ? Math.max(score, 10) : 0}%`;
+
+        if (!val) {
+          if (label) label.textContent = 'Password strength: Empty';
+          if (fillBar) fillBar.style.backgroundColor = 'transparent';
+        } else if (score < 40) {
+          if (label) label.textContent = 'Password strength: Weak';
+          if (fillBar) fillBar.style.backgroundColor = '#fb7185';
+        } else if (score < 80) {
+          if (label) label.textContent = 'Password strength: Moderate';
+          if (fillBar) fillBar.style.backgroundColor = '#fbbf24';
+        } else {
+          if (label) label.textContent = 'Password strength: Strong';
+          if (fillBar) fillBar.style.backgroundColor = '#34d399';
+        }
+      });
+
+      // Submit password change
+      formPwd.onsubmit = async (e) => {
+        e.preventDefault();
+        const currentPassword = document.getElementById('prof-current-password')?.value;
+        const newPassword = document.getElementById('prof-new-password')?.value;
+        const confirmPassword = document.getElementById('prof-confirm-password')?.value;
+        const alertBox = document.getElementById('prof-pwd-alert');
+        const submitBtn = document.getElementById('btn-submit-change-password');
+
+        if (!currentPassword || !newPassword) {
+          if (alertBox) alertBox.innerHTML = `<div style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171; padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; font-size: 0.85rem;">Please fill in all password fields.</div>`;
+          return;
+        }
+
+        if (newPassword.length < 8) {
+          if (alertBox) alertBox.innerHTML = `<div style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171; padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; font-size: 0.85rem;">New password must be at least 8 characters long.</div>`;
+          return;
+        }
+
+        if (newPassword !== confirmPassword) {
+          if (alertBox) alertBox.innerHTML = `<div style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171; padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; font-size: 0.85rem;">New passwords do not match. Please verify.</div>`;
+          return;
+        }
+
+        const originalBtnHtml = submitBtn ? submitBtn.innerHTML : '';
+        if (submitBtn) {
+          submitBtn.disabled = true;
+          submitBtn.innerHTML = `<span>Updating Password...</span>`;
+        }
+
+        try {
+          const res = await ApiClient.changePassword(currentPassword, newPassword);
+          if (alertBox) {
+            alertBox.innerHTML = `<div style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.3); color: #34d399; padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; font-size: 0.85rem;">${res.message || 'Password changed successfully!'}</div>`;
+          }
+          this.showToast('Password updated successfully!', 'success');
+          formPwd.reset();
+          if (fillBar) fillBar.style.width = '0%';
+          if (label) label.textContent = 'Password strength: Empty';
+          reqLen?.classList.remove('met');
+          reqMix?.classList.remove('met');
+          reqDigit?.classList.remove('met');
+        } catch (err) {
+          if (alertBox) {
+            alertBox.innerHTML = `<div style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171; padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; font-size: 0.85rem;">${err.message || 'Failed to update password.'}</div>`;
+          }
+        } finally {
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = originalBtnHtml;
+          }
+        }
+      };
+
+      // Logout All Devices listener
+      document.getElementById('btn-prof-logout-all')?.addEventListener('click', async () => {
+        if (!confirm('Are you sure you want to log out from all other devices?')) return;
+        try {
+          await ApiClient.logoutAllDevices();
+          this.showToast('Logged out from other devices.', 'info');
+          window.location.hash = '#login';
+          window.location.reload();
+        } catch (err) {
+          this.showToast(err.message || 'Logout failed.', 'error');
+        }
+      });
+    }
+
+    // 6. Common / Shared Tool Card listeners
+    document.getElementById('card-feature-salon-schedule')?.addEventListener('click', () => {
+      this.showSalonScheduleModal();
+    });
+    document.getElementById('card-feature-closures')?.addEventListener('click', () => {
+      this.openSalonClosuresModal();
+    });
+    document.getElementById('card-feature-shifts')?.addEventListener('click', () => {
+      this.switchTab('staff');
+    });
+    document.getElementById('card-feature-crm')?.addEventListener('click', () => {
+      this.switchProfileSubtab('customers');
+    });
+    document.getElementById('card-feature-whatsapp')?.addEventListener('click', () => {
+      this.switchTab('whatsapp-logs');
+    });
+    document.getElementById('card-feature-qr')?.addEventListener('click', () => {
+      this.showQRCodeModal();
+    });
+    document.getElementById('card-feature-logout')?.addEventListener('click', async () => {
+      await ApiClient.logout();
+      window.location.hash = '#login';
+      window.location.reload();
+    });
+
+    // 7. Subtab: Store Users & Customer CRM Table Initialization
+    if (this.activeProfileSubtab === 'customers') {
+      this.loadCustomersTable(this.searchQuery || '', this.activeCustomerFilter || 'ALL');
+
+      const searchInput = document.getElementById('customer-search-input');
+      if (searchInput) {
+        searchInput.oninput = (e) => {
+          clearTimeout(this.customerSearchDebounce);
+          const val = e.target.value.trim();
+          this.searchQuery = val;
+          this.customerSearchDebounce = setTimeout(() => {
+            this.loadCustomersTable(val, this.activeCustomerFilter || 'ALL');
+          }, 300);
+        };
+      }
+
+      document.querySelectorAll('#customer-strike-filters .cust-filter-btn').forEach((btn) => {
+        btn.onclick = () => {
+          const filter = btn.getAttribute('data-filter') || 'ALL';
+          this.activeCustomerFilter = filter;
+          document.querySelectorAll('#customer-strike-filters .cust-filter-btn').forEach((b) => b.classList.remove('active'));
+          btn.classList.add('active');
+          this.loadCustomersTable(this.searchQuery || '', filter);
+        };
+      });
+    }
   }
 
   // =========================================================================
@@ -3180,6 +4293,7 @@ export class SalonDashboard {
     this.container.querySelectorAll('.btn-cancel-absent').forEach((btn) => {
       btn.addEventListener('click', handleCancelAbsent);
     });
+    this.attachStaffScheduleListeners(this.container);
 
     // Edit Service Modal
     this.container.querySelectorAll('.btn-edit-service').forEach((btn) => {
@@ -3439,6 +4553,7 @@ export class SalonDashboard {
     tabContent.querySelectorAll('.btn-cancel-absent').forEach((btn) => {
       btn.addEventListener('click', handleCancelAbsent);
     });
+    this.attachStaffScheduleListeners(tabContent);
 
     // Services Tab Buttons
     document.getElementById('btn-manage-categories')?.addEventListener('click', () => this.showManageCategoriesModal());
@@ -3463,39 +4578,20 @@ export class SalonDashboard {
     });
 
     // Profile Tab
+    if (this.activeTab === 'profile') {
+      this.attachProfileSubtabListeners();
+    }
     document.getElementById('btn-copy-invite')?.addEventListener('click', () => {
-      const slug = this.salonProfile?.slug || 'glamour-studio';
+      const slug = this.salonProfile?.slug || 'the-grand-royal-barber-1';
       const url = `${window.location.origin}/#book/${slug}`;
       navigator.clipboard.writeText(url);
-      alert(`Booking link copied to clipboard:\n${url}`);
+      this.showToast('Booking link copied to clipboard!', 'success');
     });
     tabContent.querySelectorAll('.btn-open-closures-modal').forEach((b) => {
       b.onclick = () => this.openSalonClosuresModal();
     });
     document.getElementById('btn-open-qr')?.addEventListener('click', () => this.showQRCodeModal());
     document.getElementById('btn-block-time')?.addEventListener('click', () => this.showBlockTimeModal());
-
-    // Profile Feature Hub Cards
-    document.getElementById('card-feature-crm')?.addEventListener('click', () => {
-      this.switchTab('customers');
-    });
-    document.getElementById('card-feature-whatsapp')?.addEventListener('click', () => {
-      this.switchTab('whatsapp-logs');
-    });
-    document.getElementById('card-feature-salon-schedule')?.addEventListener('click', () => {
-      this.showSalonScheduleModal();
-    });
-    document.getElementById('card-feature-closures')?.addEventListener('click', () => {
-      this.openSalonClosuresModal();
-    });
-    document.getElementById('card-feature-shifts')?.addEventListener('click', () => {
-      this.switchTab('staff');
-    });
-    document.getElementById('card-feature-logout')?.addEventListener('click', async () => {
-      await ApiClient.logout();
-      window.location.hash = '#login';
-      window.location.reload();
-    });
 
 
     // Back button listener for Customer Management Tab (Navigates to previously active tab)
@@ -3860,6 +4956,93 @@ export class SalonDashboard {
     });
   }
 
+  attachStaffScheduleListeners(root) {
+    if (!root) return;
+
+    // Toggle Single Staff Schedule (On-Demand)
+    root.querySelectorAll('.btn-toggle-staff-schedule').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        if (!id) return;
+        this.openStaffScheduleIds = this.openStaffScheduleIds || new Set();
+        if (this.openStaffScheduleIds.has(id)) {
+          this.openStaffScheduleIds.delete(id);
+        } else {
+          this.openStaffScheduleIds.add(id);
+        }
+        this.refreshActiveTab();
+      });
+    });
+
+    // Toggle All Staff Schedules (Master Toolbar Action)
+    root.querySelector('#btn-toggle-all-schedules')?.addEventListener('click', () => {
+      this.openStaffScheduleIds = this.openStaffScheduleIds || new Set();
+      const allIds = (this.staffList || []).map((s) => s.id);
+      const allOpen = allIds.length > 0 && allIds.every((id) => this.openStaffScheduleIds.has(id));
+      if (allOpen) {
+        this.openStaffScheduleIds.clear();
+      } else {
+        allIds.forEach((id) => this.openStaffScheduleIds.add(id));
+      }
+      this.refreshActiveTab();
+    });
+
+    // Switch View Mode (Timeline vs Agenda)
+    root.querySelectorAll('.btn-switch-sched-view').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const mode = e.currentTarget.getAttribute('data-mode');
+        if (!id || !mode) return;
+        this.staffScheduleViewMode = this.staffScheduleViewMode || {};
+        this.staffScheduleViewMode[id] = mode;
+        this.refreshActiveTab();
+      });
+    });
+
+    // Horizontal Scroll: Jump to NOW
+    root.querySelectorAll('.btn-jump-now').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const track = root.querySelector(`#timeline-track-${id}`) || document.getElementById(`timeline-track-${id}`);
+        const nowLeft = Number(e.currentTarget.getAttribute('data-now-left')) || 0;
+        if (track) {
+          track.scrollTo({ left: Math.max(0, nowLeft - 160), behavior: 'smooth' });
+        }
+      });
+    });
+
+    // Horizontal Scroll: Scroll Earlier
+    root.querySelectorAll('.btn-scroll-earlier').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const track = root.querySelector(`#timeline-track-${id}`) || document.getElementById(`timeline-track-${id}`);
+        if (track) {
+          track.scrollBy({ left: -220, behavior: 'smooth' });
+        }
+      });
+    });
+
+    // Horizontal Scroll: Scroll Later
+    root.querySelectorAll('.btn-scroll-later').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const track = root.querySelector(`#timeline-track-${id}`) || document.getElementById(`timeline-track-${id}`);
+        if (track) {
+          track.scrollBy({ left: 220, behavior: 'smooth' });
+        }
+      });
+    });
+
+    // Center live track initial scroll
+    root.querySelectorAll('.staff-timeline-scroll-track').forEach((track) => {
+      const initialScroll = Number(track.getAttribute('data-initial-scroll')) || 0;
+      if (initialScroll > 0) {
+        setTimeout(() => {
+          track.scrollLeft = initialScroll;
+        }, 50);
+      }
+    });
+  }
 
   async handleToggleStaff(id) {
     if (!id) return;
@@ -3882,6 +5065,9 @@ export class SalonDashboard {
 
   showAddStaffModal() {
     const modalContainer = document.getElementById('modal-container');
+    const defaultPhone = this.salonProfile?.phone || this.currentUser?.salon?.phone || this.currentUser?.phone || '';
+    const defaultEmail = this.salonProfile?.email || this.currentUser?.salon?.email || this.currentUser?.email || '';
+    const hasServices = Array.isArray(this.servicesList) && this.servicesList.length > 0;
 
     modalContainer.innerHTML = `
       <div class="modal-backdrop show">
@@ -3898,25 +5084,52 @@ export class SalonDashboard {
             </div>
 
             <div class="form-group">
-              <label>Phone Number *</label>
-              <input type="tel" class="form-control" id="new-staff-phone" placeholder="+91 98XXXXXX00" required />
-            </div>
-
-            <div class="form-group">
-              <label>Email Address</label>
-              <input type="email" class="form-control" id="new-staff-email" placeholder="vikram@example.com" />
-            </div>
-
-            <div class="form-group">
-              <label>Select Qualified Services</label>
-              <div style="max-height: 140px; overflow-y: auto; background: var(--bg-input); padding: 8px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);">
-                ${this.servicesList.map((s) => `
-                  <label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; margin-bottom: 6px; cursor: pointer;">
-                    <input type="checkbox" class="staff-service-chk" value="${s.id}" checked />
-                    <span>${s.name} (₹${s.price})</span>
-                  </label>
-                `).join('')}
+              <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
+                <label style="margin: 0;">Phone Number *</label>
+                ${defaultPhone ? `<span style="font-size: 0.72rem; color: #34d399; font-weight: 500;">✓ Pre-filled with salon phone</span>` : ''}
               </div>
+              <input type="tel" class="form-control" id="new-staff-phone" value="${defaultPhone}" placeholder="+91 98XXXXXX00" required />
+              <small style="display: block; margin-top: 4px; font-size: 0.75rem; color: var(--text-muted);">Defaulted to salon phone number. You can change this to stylist's personal number.</small>
+            </div>
+
+            <div class="form-group">
+              <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
+                <label style="margin: 0;">Email Address</label>
+                ${defaultEmail ? `<span style="font-size: 0.72rem; color: #818cf8; font-weight: 500;">✓ Pre-filled with salon email</span>` : ''}
+              </div>
+              <input type="email" class="form-control" id="new-staff-email" value="${defaultEmail}" placeholder="stylist@example.com" />
+              <small style="display: block; margin-top: 4px; font-size: 0.75rem; color: var(--text-muted);">Defaulted to salon email. You can change this if needed.</small>
+            </div>
+
+            <div class="form-group">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <label style="margin: 0; font-size: 0.88rem; font-weight: 600;">Select Qualified Services</label>
+                <span style="font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: #a5b4fc; background: rgba(99, 102, 241, 0.12); padding: 2px 8px; border-radius: 9999px; border: 1px solid rgba(99, 102, 241, 0.25);">Optional</span>
+              </div>
+
+              ${hasServices ? `
+                <div style="max-height: 160px; overflow-y: auto; background: var(--bg-input, #0f172a); padding: 10px; border-radius: 8px; border: 1px solid var(--border-subtle, rgba(255,255,255,0.1)); display: flex; flex-direction: column; gap: 6px;">
+                  ${this.servicesList.map((s) => `
+                    <label style="display: flex; align-items: center; gap: 10px; font-size: 0.86rem; padding: 7px 10px; border-radius: 6px; cursor: pointer; transition: background 0.15s ease; background: rgba(255, 255, 255, 0.03);" onmouseover="this.style.background='rgba(99,102,241,0.12)'" onmouseout="this.style.background='rgba(255,255,255,0.03)'">
+                      <input type="checkbox" class="staff-service-chk" value="${s.id}" checked style="accent-color: var(--primary-accent, #6366f1); cursor: pointer; width: 16px; height: 16px;" />
+                      <span style="font-weight: 500; color: #f1f5f9;">${s.name}</span>
+                      <span style="margin-left: auto; color: #94a3b8; font-size: 0.8rem; background: rgba(255,255,255,0.06); padding: 2px 7px; border-radius: 4px; font-weight: 600;">₹${s.price}</span>
+                    </label>
+                  `).join('')}
+                </div>
+              ` : `
+                <div style="background: rgba(30, 41, 59, 0.45); border: 1px dashed rgba(148, 163, 184, 0.25); border-radius: 10px; padding: 16px; text-align: center;">
+                  <div style="display: flex; align-items: center; justify-content: center; gap: 8px; color: #f59e0b; font-size: 0.88rem; font-weight: 600; margin-bottom: 5px;">
+                    <span>✂️ No Services in Catalog Yet</span>
+                  </div>
+                  <p style="font-size: 0.8rem; color: #94a3b8; margin: 0 0 12px 0; line-height: 1.45;">
+                    You can add this stylist now and assign qualified services anytime after adding services in the <strong>Service Menu</strong> tab.
+                  </p>
+                  <button type="button" id="btn-quick-goto-services" style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.78rem; font-weight: 600; color: #818cf8; background: rgba(99, 102, 241, 0.12); border: 1px solid rgba(99, 102, 241, 0.3); border-radius: 6px; padding: 6px 14px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.background='rgba(99,102,241,0.22)'" onmouseout="this.style.background='rgba(99,102,241,0.12)'">
+                    <span>+ Add Services to Menu First</span>
+                  </button>
+                </div>
+              `}
             </div>
 
             <button type="submit" class="btn btn-primary" style="width: 100%;">Create Stylist Member →</button>
@@ -3926,6 +5139,12 @@ export class SalonDashboard {
     `;
 
     document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+
+    document.getElementById('btn-quick-goto-services')?.addEventListener('click', () => {
+      modalContainer.innerHTML = '';
+      this.switchTab('services');
+      setTimeout(() => this.showAddServiceModal(), 120);
+    });
 
     document.getElementById('add-staff-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -3966,6 +5185,7 @@ export class SalonDashboard {
     const modalContainer = document.getElementById('modal-container');
     const staff = this.staffList.find((s) => s.id === staffId);
     const assignedIds = (staff?.services || []).map((s) => s.serviceId || s.service?.id);
+    const hasServices = Array.isArray(this.servicesList) && this.servicesList.length > 0;
 
     modalContainer.innerHTML = `
       <div class="modal-backdrop show">
@@ -3976,24 +5196,42 @@ export class SalonDashboard {
           </div>
           <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 16px;">Configure which services <strong>${staffName}</strong> can perform.</p>
 
-          <form id="assign-services-form">
-            <div style="max-height: 220px; overflow-y: auto; background: var(--bg-input); padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); margin-bottom: 20px;">
-              ${this.servicesList.map((s) => `
-                <label style="display: flex; align-items: center; gap: 8px; font-size: 0.88rem; margin-bottom: 8px; cursor: pointer;">
-                  <input type="checkbox" class="chk-assign-svc" value="${s.id}" ${assignedIds.includes(s.id) ? 'checked' : ''} />
-                  <span style="font-weight: 600;">${s.name}</span>
-                  <span style="color: var(--text-muted); font-size: 0.8rem;">(₹${s.price} • ${s.durationMinutes}m)</span>
-                </label>
-              `).join('')}
-            </div>
+          ${hasServices ? `
+            <form id="assign-services-form">
+              <div style="max-height: 220px; overflow-y: auto; background: var(--bg-input, #0f172a); padding: 12px; border-radius: 8px; border: 1px solid var(--border-subtle); margin-bottom: 20px; display: flex; flex-direction: column; gap: 6px;">
+                ${this.servicesList.map((s) => `
+                  <label style="display: flex; align-items: center; gap: 10px; font-size: 0.88rem; padding: 7px 10px; border-radius: 6px; cursor: pointer; transition: background 0.15s ease; background: rgba(255, 255, 255, 0.03);" onmouseover="this.style.background='rgba(99,102,241,0.12)'" onmouseout="this.style.background='rgba(255,255,255,0.03)'">
+                    <input type="checkbox" class="chk-assign-svc" value="${s.id}" ${assignedIds.includes(s.id) ? 'checked' : ''} style="accent-color: var(--primary-accent, #6366f1); cursor: pointer; width: 16px; height: 16px;" />
+                    <span style="font-weight: 600; color: #f1f5f9;">${s.name}</span>
+                    <span style="margin-left: auto; color: #94a3b8; font-size: 0.8rem; background: rgba(255,255,255,0.06); padding: 2px 7px; border-radius: 4px;">₹${s.price} • ${s.durationMinutes}m</span>
+                  </label>
+                `).join('')}
+              </div>
 
-            <button type="submit" class="btn btn-primary" style="width: 100%;">Save Qualifications →</button>
-          </form>
+              <button type="submit" class="btn btn-primary" style="width: 100%;">Save Qualifications →</button>
+            </form>
+          ` : `
+            <div style="background: rgba(30, 41, 59, 0.45); border: 1px dashed rgba(148, 163, 184, 0.25); border-radius: 10px; padding: 18px 16px; text-align: center; margin-bottom: 16px;">
+              <p style="color: #f59e0b; font-size: 0.9rem; font-weight: 600; margin-bottom: 6px;">⚠️ No Services in Catalog Yet</p>
+              <p style="font-size: 0.8rem; color: #94a3b8; margin: 0 0 14px 0; line-height: 1.45;">
+                There are no active services created in this salon yet. Create services first in the Service Menu tab to assign them to <strong>${staffName}</strong>.
+              </p>
+              <button type="button" id="btn-assign-goto-services" class="btn btn-primary btn-sm" style="margin: 0 auto; display: inline-flex; align-items: center; gap: 6px;">
+                <span>+ Go to Service Menu</span>
+              </button>
+            </div>
+          `}
         </div>
       </div>
     `;
 
     document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+
+    document.getElementById('btn-assign-goto-services')?.addEventListener('click', () => {
+      modalContainer.innerHTML = '';
+      this.switchTab('services');
+      setTimeout(() => this.showAddServiceModal(), 120);
+    });
 
     document.getElementById('assign-services-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -4016,22 +5254,44 @@ export class SalonDashboard {
     });
   }
 
-  showAddBreakModal(staffId, staffName) {
+  async showAddBreakModal(staffId, staffName) {
     const modalContainer = document.getElementById('modal-container');
+
+    const formatTime12h = (t) => {
+      if (!t) return '';
+      const [hStr, mStr] = t.split(':');
+      let h = parseInt(hStr, 10);
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      h = h % 12 || 12;
+      return `${h.toString().padStart(2, '0')}:${mStr || '00'} ${ampm}`;
+    };
 
     modalContainer.innerHTML = `
       <div class="modal-backdrop show">
-        <div class="modal-content">
-          <div class="modal-header">
-            <h3>☕ Add Shift Break</h3>
+        <div class="modal-content modal-content-sheet" style="max-width: 520px; max-height: 90vh; overflow-y: auto;">
+          <div class="sheet-grab-handle"></div>
+          <div class="modal-header" style="margin-bottom: 12px; padding-bottom: 10px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 1.25rem;">☕</span>
+              <div>
+                <h3 style="font-size: 1.15rem; font-weight: 700; color: #fff; margin: 0;">Shift Breaks: ${staffName}</h3>
+                <span style="font-size: 0.74rem; color: #94a3b8;">Review inherited salon downtime and manage personal stylist shift breaks.</span>
+              </div>
+            </div>
             <button class="close-btn" id="btn-close-modal">&times;</button>
           </div>
-          <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 16px;">Set recurring break for <strong>${staffName}</strong> (automatically excludes booking slots).</p>
 
-          <form id="add-break-form">
-            <div class="form-group">
-              <label>Day of Week *</label>
-              <select class="form-control" id="break-day" required>
+          <div style="text-align: center; padding: 30px;" id="break-modal-loading">
+            <span style="font-size: 0.85rem; color: #94a3b8;">Loading breaks schedule for ${staffName}...</span>
+          </div>
+
+          <div id="break-modal-body" style="display: none;">
+            <div class="form-group" style="margin-bottom: 14px;">
+              <label style="font-size: 0.78rem; font-weight: 700; color: #cbd5e1; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between;">
+                <span>Select Day of Week *</span>
+                <span id="day-break-count-badge" style="font-size: 0.72rem; font-weight: 600; color: #34d399;"></span>
+              </label>
+              <select class="form-control" id="break-day" required style="padding: 10px 12px; font-size: 0.88rem; background: rgba(15,23,42,0.8); border: 1px solid rgba(255,255,255,0.12);">
                 <option value="MONDAY">Monday</option>
                 <option value="TUESDAY">Tuesday</option>
                 <option value="WEDNESDAY">Wednesday</option>
@@ -4042,48 +5302,282 @@ export class SalonDashboard {
               </select>
             </div>
 
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-              <div class="form-group">
-                <label>Start Time (HH:mm) *</label>
-                <input type="time" class="form-control" id="break-start" value="13:00" required />
+            <!-- Active Breaks Reference Section for Selected Day -->
+            <div id="active-day-breaks-container" style="margin-bottom: 16px;"></div>
+
+            <!-- Add Additional Personal Break Container -->
+            <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.07); border-radius: var(--radius-md); padding: 14px; margin-bottom: 14px;">
+              <div style="font-size: 0.82rem; font-weight: 700; color: #f1f5f9; margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
+                <span>➕</span>
+                <span>Add Personal Break for <span id="label-selected-day" style="color: #818cf8;">Monday</span></span>
               </div>
-              <div class="form-group">
-                <label>End Time (HH:mm) *</label>
-                <input type="time" class="form-control" id="break-end" value="14:00" required />
-              </div>
+
+              <form id="add-break-form">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                  <div class="form-group" style="margin-bottom: 0;">
+                    <label style="font-size: 0.76rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; display: block;">Start Time *</label>
+                    <input type="time" class="form-control" id="break-start" required style="padding: 9px 12px; font-size: 0.88rem;" />
+                  </div>
+                  <div class="form-group" style="margin-bottom: 0;">
+                    <label style="font-size: 0.76rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; display: block;">End Time *</label>
+                    <input type="time" class="form-control" id="break-end" required style="padding: 9px 12px; font-size: 0.88rem;" />
+                  </div>
+                </div>
+
+                <div id="break-duration-preview" style="display: none; padding: 6px 10px; border-radius: var(--radius-sm); font-size: 0.76rem; font-weight: 600; margin-bottom: 12px;"></div>
+
+                <div class="form-group" style="margin-bottom: 14px;">
+                  <label style="font-size: 0.76rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; display: block;">Break Label (Optional)</label>
+                  <input type="text" class="form-control" id="break-title" placeholder="e.g. Tea Break / Afternoon Rest" style="padding: 9px 12px; font-size: 0.88rem;" />
+                </div>
+
+                <div id="break-form-error" style="display: none; color: #f87171; background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.25); border-radius: 6px; padding: 8px 10px; font-size: 0.76rem; margin-bottom: 12px;"></div>
+
+                <button type="submit" class="btn btn-primary" id="btn-submit-break" style="width: 100%; min-height: 42px; font-weight: 700; background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);">
+                  Save Personal Break →
+                </button>
+              </form>
             </div>
 
-            <div class="form-group">
-              <label>Break Title</label>
-              <input type="text" class="form-control" id="break-title" value="Lunch Break" />
+            <div style="display: flex; justify-content: flex-end;">
+              <button type="button" class="btn btn-secondary" id="btn-cancel-modal" style="min-height: 38px; padding: 6px 20px;">Close</button>
             </div>
-
-            <button type="submit" class="btn btn-primary" style="width: 100%;">Save Shift Break →</button>
-          </form>
+          </div>
         </div>
       </div>
     `;
 
     document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+    document.getElementById('btn-cancel-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+
+    let staffBreaks = [];
+    try {
+      staffBreaks = await ApiClient.getStaffBreaks(staffId, true);
+    } catch (err) {
+      console.warn('[StaffBreaks] Failed to fetch breaks:', err);
+      staffBreaks = [];
+    }
+
+    const loadingDiv = document.getElementById('break-modal-loading');
+    const bodyDiv = document.getElementById('break-modal-body');
+    if (loadingDiv) loadingDiv.style.display = 'none';
+    if (bodyDiv) bodyDiv.style.display = 'block';
+
+    const daySelect = document.getElementById('break-day');
+    const dayLabel = document.getElementById('label-selected-day');
+    const breaksContainer = document.getElementById('active-day-breaks-container');
+    const countBadge = document.getElementById('day-break-count-badge');
+    const bStart = document.getElementById('break-start');
+    const bEnd = document.getElementById('break-end');
+    const preview = document.getElementById('break-duration-preview');
+    const formError = document.getElementById('break-form-error');
+
+    const updateDurationPreview = () => {
+      if (!bStart || !bEnd || !preview) return;
+      if (bStart.value && bEnd.value) {
+        const [sh, sm] = bStart.value.split(':').map(Number);
+        const [eh, em] = bEnd.value.split(':').map(Number);
+        const diff = (eh * 60 + em) - (sh * 60 + sm);
+        if (diff > 0) {
+          const selectedDay = daySelect.value;
+          const currentSalonBreaks = staffBreaks.filter(b => b.dayOfWeek === selectedDay && b.origin === 'SALON');
+          const overlappingSalonBreak = currentSalonBreaks.find(sb => {
+            const [sbSh, sbSm] = sb.startTime.split(':').map(Number);
+            const [sbEh, sbEm] = sb.endTime.split(':').map(Number);
+            const sbStartM = sbSh * 60 + sbSm;
+            const sbEndM = sbEh * 60 + sbEm;
+            const curStartM = sh * 60 + sm;
+            const curEndM = eh * 60 + em;
+            return curStartM < sbEndM && curEndM > sbStartM;
+          });
+
+          preview.style.display = 'block';
+          if (overlappingSalonBreak) {
+            preview.style.background = 'rgba(245, 158, 11, 0.12)';
+            preview.style.border = '1px solid rgba(245, 158, 11, 0.3)';
+            preview.style.color = '#fbbf24';
+            preview.textContent = `⏱️ ${diff} mins • ℹ️ Overlaps with Salon Break (${formatTime12h(overlappingSalonBreak.startTime)} - ${formatTime12h(overlappingSalonBreak.endTime)}). Facility downtime already protects this slot.`;
+          } else {
+            preview.style.background = 'rgba(16, 185, 129, 0.12)';
+            preview.style.border = '1px solid rgba(16, 185, 129, 0.3)';
+            preview.style.color = '#34d399';
+            preview.textContent = `⏱️ Break Duration: ${diff} minutes`;
+          }
+        } else {
+          preview.style.display = 'block';
+          preview.style.background = 'rgba(239, 68, 68, 0.12)';
+          preview.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+          preview.style.color = '#f87171';
+          preview.textContent = `⚠️ End time must be later than start time.`;
+        }
+      } else {
+        preview.style.display = 'none';
+      }
+    };
+
+    bStart?.addEventListener('change', updateDurationPreview);
+    bEnd?.addEventListener('change', updateDurationPreview);
+
+    const renderDayBreaks = (selectedDay) => {
+      const dayBreaks = staffBreaks.filter((b) => b.dayOfWeek === selectedDay);
+      const salonBreaks = dayBreaks.filter((b) => b.origin === 'SALON');
+      const stylistBreaks = dayBreaks.filter((b) => b.origin === 'STYLIST');
+
+      if (dayLabel) {
+        dayLabel.textContent = selectedDay.charAt(0) + selectedDay.slice(1).toLowerCase();
+      }
+
+      if (countBadge) {
+        const total = salonBreaks.length + stylistBreaks.length;
+        countBadge.textContent = total > 0 ? `${total} Active Break${total === 1 ? '' : 's'}` : '0 Breaks';
+      }
+
+      let html = '';
+
+      // 1. Salon Facility Breaks Banner
+      if (salonBreaks.length > 0) {
+        html += `
+          <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 10px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+              <span style="font-size: 0.78rem; font-weight: 700; color: #34d399; display: flex; align-items: center; gap: 6px;">
+                <span>🏢 Active Salon Facility Breaks (${salonBreaks.length})</span>
+              </span>
+              <span class="badge-salon-lock">🔒 Inherited & Active</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              ${salonBreaks.map((sb) => `
+                <div style="display: flex; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.3); padding: 7px 10px; border-radius: 5px; border: 1px solid rgba(16,185,129,0.25);">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 0.84rem; font-weight: 700; color: #fff;">${formatTime12h(sb.startTime)} – ${formatTime12h(sb.endTime)}</span>
+                    <span style="font-size: 0.74rem; color: #a7f3d0; background: rgba(16,185,129,0.18); padding: 1px 7px; border-radius: 4px; font-weight: 600;">
+                      ${sb.title || 'Lunch Break'}
+                    </span>
+                  </div>
+                  <span style="font-size: 0.7rem; color: #34d399; font-weight: 600;">Active for ${staffName}</span>
+                </div>
+              `).join('')}
+            </div>
+            <div style="font-size: 0.72rem; color: #94a3b8; margin-top: 6px; line-height: 1.35;">
+              ℹ️ Inherited from the Salon Operating Schedule. Booking slots during this window are completely blocked across all stylists.
+            </div>
+          </div>
+        `;
+      }
+
+      // 2. Stylist Personal Shift Breaks
+      if (stylistBreaks.length > 0) {
+        html += `
+          <div style="background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.3); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 10px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+              <span style="font-size: 0.78rem; font-weight: 700; color: #c4b5fd; display: flex; align-items: center; gap: 6px;">
+                <span>☕ Stylist Personal Breaks (${stylistBreaks.length})</span>
+              </span>
+              <span class="badge-stylist-personal">👤 Custom Shift</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              ${stylistBreaks.map((pb) => `
+                <div style="display: flex; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.3); padding: 7px 10px; border-radius: 5px; border: 1px solid rgba(139,92,246,0.25);">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 0.84rem; font-weight: 700; color: #fff;">${formatTime12h(pb.startTime)} – ${formatTime12h(pb.endTime)}</span>
+                    <span style="font-size: 0.74rem; color: #ddd6fe; background: rgba(139,92,246,0.18); padding: 1px 7px; border-radius: 4px; font-weight: 600;">
+                      ${pb.title || 'Personal Break'}
+                    </span>
+                  </div>
+                  <button type="button" class="btn-delete-staff-break" data-break-id="${pb.id}" style="background: rgba(239,68,68,0.18); color: #f87171; border: 1px solid rgba(239,68,68,0.3); padding: 3px 8px; font-size: 0.72rem; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                    <span>🗑</span>
+                    <span>Remove</span>
+                  </button>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      }
+
+      if (salonBreaks.length === 0 && stylistBreaks.length === 0) {
+        html += `
+          <div style="background: rgba(255, 255, 255, 0.03); border: 1px dashed rgba(255, 255, 255, 0.1); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 10px; text-align: center;">
+            <span style="color: var(--text-muted); font-size: 0.78rem;">No breaks scheduled for ${selectedDay.charAt(0) + selectedDay.slice(1).toLowerCase()}. Stylist is available throughout the operating shift.</span>
+          </div>
+        `;
+      }
+
+      breaksContainer.innerHTML = html;
+
+      // Wire delete buttons for personal breaks
+      breaksContainer.querySelectorAll('.btn-delete-staff-break').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+          const breakId = e.currentTarget.getAttribute('data-break-id');
+          if (!confirm('Are you sure you want to remove this personal break?')) return;
+          try {
+            await ApiClient.deleteStaffBreak(staffId, breakId);
+            staffBreaks = await ApiClient.getStaffBreaks(staffId, true);
+            renderDayBreaks(daySelect.value);
+            this.loadData(true).then(() => {
+              this.refreshActiveTab();
+            }).catch(() => {});
+          } catch (err) {
+            alert(err.message || 'Failed to delete break');
+          }
+        });
+      });
+
+      updateDurationPreview();
+    };
+
+    daySelect?.addEventListener('change', (e) => {
+      renderDayBreaks(e.target.value);
+    });
+
+    // Default to MONDAY or current day
+    renderDayBreaks(daySelect.value || 'MONDAY');
 
     document.getElementById('add-break-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
+      const submitBtn = document.getElementById('btn-submit-break');
+      if (formError) formError.style.display = 'none';
+      if (submitBtn) {
+        submitBtn.textContent = 'Saving Shift Break...';
+        submitBtn.setAttribute('disabled', 'true');
+      }
+
       try {
         await ApiClient.createStaffBreak(staffId, {
-          dayOfWeek: document.getElementById('break-day').value,
+          dayOfWeek: daySelect.value,
           startTime: document.getElementById('break-start').value,
           endTime: document.getElementById('break-end').value,
-          title: document.getElementById('break-title').value,
+          title: document.getElementById('break-title').value || 'Personal Break',
         });
 
-        modalContainer.innerHTML = '';
-        this.render();
+        // Refetch breaks and update view
+        staffBreaks = await ApiClient.getStaffBreaks(staffId, true);
+        renderDayBreaks(daySelect.value);
+
+        // Reset form inputs
+        document.getElementById('break-start').value = '';
+        document.getElementById('break-end').value = '';
+        document.getElementById('break-title').value = '';
+        if (preview) preview.style.display = 'none';
+
+        if (submitBtn) {
+          submitBtn.textContent = 'Save Personal Break →';
+          submitBtn.removeAttribute('disabled');
+        }
 
         this.loadData(true).then(() => {
           this.refreshActiveTab();
-        }).catch(() => { });
+        }).catch(() => {});
       } catch (err) {
-        alert(err.message);
+        if (formError) {
+          formError.textContent = err.message || 'Failed to save shift break';
+          formError.style.display = 'block';
+        } else {
+          alert(err.message);
+        }
+        if (submitBtn) {
+          submitBtn.textContent = 'Save Personal Break →';
+          submitBtn.removeAttribute('disabled');
+        }
       }
     });
   }
@@ -4724,35 +6218,41 @@ export class SalonDashboard {
     const modalContainer = document.getElementById('modal-container');
     modalContainer.innerHTML = `
       <div class="modal-backdrop show">
-        <div class="modal-content modal-content-lg" style="max-height: 90vh; overflow-y: auto; padding: 24px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <div class="modal-content modal-content-sheet" style="max-width: 580px;">
+          <div class="sheet-grab-handle"></div>
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
             <div>
-              <h3 style="font-size: 1.3rem; font-weight: 800; color: #fff; margin-bottom: 2px;">🗓️ Weekly Operating Schedule</h3>
-              <p style="color: #34d399; font-size: 0.82rem; font-weight: 600; margin: 0;">This schedule repeats every week.</p>
+              <h3 style="font-size: 1.15rem; font-weight: 800; color: #fff; margin: 0; display: flex; align-items: center; gap: 8px;">
+                <span>🗓️ Weekly Operating Schedule</span>
+              </h3>
+              <p style="color: #94a3b8; font-size: 0.76rem; margin: 2px 0 0 0;">Defines master salon boundary. Stylists inherit these hours by default.</p>
             </div>
-            <button class="close-btn" id="btn-close-salon-sched">&times;</button>
+            <button class="close-btn" id="btn-close-salon-sched" style="width: 28px; height: 28px; font-size: 1.1rem;">&times;</button>
           </div>
 
-          <div style="background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.25); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px; font-size: 0.8rem; color: var(--text-secondary); line-height: 1.5;">
-            ℹ️ The <strong>Salon Operating Schedule</strong> defines the absolute outer availability boundary. All stylists inherit these default operating hours and default salon breaks unless custom overrides are enabled.
+          <div id="salon-sched-loading" style="text-align: center; padding: 20px; color: var(--text-muted); font-size: 0.84rem;">
+            ⏳ Fetching 7-Day Salon Schedule...
           </div>
 
-          <div id="salon-sched-loading" style="text-align: center; padding: 30px; color: var(--text-muted);">
-            ⏳ Fetching 7-Day Salon Schedule from PostgreSQL...
-          </div>
+          <form id="form-salon-schedule" style="display: none; display: flex; flex-direction: column;">
+            <div class="day-sched-subbar">
+              <span class="day-sched-subbar-title">7-Day Hours & Breaks</span>
+              <button type="button" class="day-sched-copy-btn" id="btn-apply-mon-to-all">
+                <span>✨ Copy Mon to All</span>
+              </button>
+            </div>
 
-          <form id="form-salon-schedule" style="display: none;">
-            <div id="salon-sched-days-container" style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px;">
+            <div id="salon-sched-days-container" style="display: flex; flex-direction: column; gap: 7px; margin-bottom: 12px; max-height: 60vh; overflow-y: auto; padding-right: 2px;">
               <!-- Dynamically populated 7 days -->
             </div>
 
             <!-- Conflict / Error Alert Banner -->
-            <div id="salon-sched-error" style="background: rgba(244,63,94,0.15); border: 1px solid var(--danger-border); color: #f43f5e; padding: 12px; border-radius: var(--radius-sm); font-size: 0.85rem; margin-bottom: 16px; display: none;"></div>
+            <div id="salon-sched-error" style="background: rgba(244,63,94,0.15); border: 1px solid var(--danger-border); color: #f43f5e; padding: 8px 12px; border-radius: var(--radius-sm); font-size: 0.8rem; margin-bottom: 10px; display: none;"></div>
 
-            <div style="display: flex; justify-content: flex-end; gap: 10px;">
+            <div class="sticky-modal-footer">
               <button type="button" class="btn btn-secondary" id="btn-cancel-salon-sched">Cancel</button>
               <button type="submit" class="btn btn-primary" id="btn-save-salon-sched" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); font-weight: 700;">
-                💾 Save Weekly Schedule →
+                💾 Save Schedule
               </button>
             </div>
           </form>
@@ -4780,21 +6280,24 @@ export class SalonDashboard {
         { key: 'SUNDAY', label: 'Sunday' },
       ];
 
+      // Strict Schedule State Hydration Invariant:
+      // If found.breaks is an array (even []), PRESERVE IT VERBATIM as Continuous Operations.
       let salonSchedState = days.map((d) => {
         const found = (existingHours || []).find((h) => h.dayOfWeek === d.key) || {};
         const isClosed = found.isClosed !== undefined ? found.isClosed : false;
         let breaks = [];
-        if (Array.isArray(found.breaks) && found.breaks.length > 0) {
+        if (Array.isArray(found.breaks)) {
           breaks = found.breaks.map((b) => ({
-            id: b.id || `brk-${d.key}-${Math.random()}`,
+            id: b.id || `brk-${d.key}-${Math.random().toString(36).substring(2, 7)}`,
             startTime: b.startTime || '13:00',
             endTime: b.endTime || '14:00',
             title: b.title || 'Lunch Break',
           }));
         } else if (found.breakStartTime && found.breakEndTime) {
           breaks = [{ id: `brk-${d.key}-legacy`, startTime: found.breakStartTime, endTime: found.breakEndTime, title: 'Lunch Break' }];
-        } else if (!isClosed) {
-          breaks = [{ id: `brk-${d.key}-1`, startTime: '13:00', endTime: '14:00', title: 'Lunch Break' }];
+        } else {
+          // Zero breaks: default to Continuous Operations mode
+          breaks = [];
         }
 
         return {
@@ -4812,51 +6315,69 @@ export class SalonDashboard {
         if (!container) return;
 
         container.innerHTML = salonSchedState.map((day, idx) => `
-          <div style="background: var(--bg-input); border: 1px solid ${day.isClosed ? 'rgba(239,68,68,0.2)' : 'var(--border-subtle)'}; border-radius: var(--radius-sm); padding: 12px 14px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: ${day.isClosed ? '0' : '10px'};">
-              <div style="display: flex; align-items: center; gap: 10px;">
-                <strong style="color: #fff; font-size: 0.95rem; min-width: 90px;">${day.label}</strong>
-                <span class="badge" style="background: ${day.isClosed ? 'rgba(239,68,68,0.15)' : 'rgba(16,185,129,0.15)'}; color: ${day.isClosed ? '#f87171' : '#34d399'}; border: 1px solid ${day.isClosed ? 'rgba(239,68,68,0.3)' : 'rgba(16,185,129,0.3)'}; font-size: 0.68rem; font-weight: 800;">
-                  ${day.isClosed ? 'CLOSED' : 'OPEN'}
-                </span>
+          <div class="day-sched-card ${day.isClosed ? 'is-closed' : ''}">
+            <div class="day-sched-header">
+              <div class="day-sched-title-wrap">
+                <strong class="day-sched-name">${day.label}</strong>
+                ${day.isClosed ? '<span class="day-sched-closed-tag">Closed</span>' : ''}
               </div>
-              <button type="button" class="btn btn-secondary btn-sm btn-toggle-salon-day" data-idx="${idx}" style="font-size: 0.75rem; padding: 4px 10px; background: ${day.isClosed ? 'rgba(16,185,129,0.18)' : 'rgba(239,68,68,0.18)'}; color: ${day.isClosed ? '#34d399' : '#f87171'}; border: 1px solid ${day.isClosed ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'};">
-                ${day.isClosed ? 'Set to OPEN' : 'Set to CLOSED'}
+              <button type="button" class="btn-toggle-salon-day day-sched-toggle-btn ${day.isClosed ? 'is-closed' : 'is-open'}" data-idx="${idx}" title="${day.isClosed ? 'Click to open this day' : 'Click to close this day'}">
+                <span class="day-sched-toggle-dot"></span>
+                <span>${day.isClosed ? 'Closed' : 'Open'}</span>
               </button>
             </div>
 
             ${!day.isClosed ? `
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
-                <div>
-                  <label style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 2px;">Opening Time</label>
-                  <input type="time" class="form-control salon-day-start" data-idx="${idx}" value="${day.startTime}" style="padding: 6px 10px; font-size: 0.85rem;" />
+              <div class="day-sched-times-grid">
+                <div class="day-sched-time-col">
+                  <label class="day-sched-lbl">Opens</label>
+                  <input type="time" class="day-sched-time-inp salon-day-start" data-idx="${idx}" value="${day.startTime}" aria-label="${day.label} Opening Time" />
                 </div>
-                <div>
-                  <label style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 2px;">Closing Time</label>
-                  <input type="time" class="form-control salon-day-end" data-idx="${idx}" value="${day.endTime}" style="padding: 6px 10px; font-size: 0.85rem;" />
+                <div class="day-sched-time-col">
+                  <label class="day-sched-lbl">Closes</label>
+                  <input type="time" class="day-sched-time-inp salon-day-end" data-idx="${idx}" value="${day.endTime}" aria-label="${day.label} Closing Time" />
                 </div>
               </div>
 
-              <div style="border-top: 1px dashed var(--border-subtle); padding-top: 8px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                  <span style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600;">Salon Default Breaks (${day.breaks.length})</span>
-                  <button type="button" class="btn btn-secondary btn-sm btn-add-salon-break" data-idx="${idx}" style="font-size: 0.7rem; padding: 2px 8px;">
-                    + Add Break
+              <div class="day-sched-breaks-bar">
+                <div class="day-sched-breaks-title-wrap">
+                  <span class="day-sched-breaks-title">Breaks</span>
+                  ${day.breaks.length > 0 ? `<span class="day-sched-badge-count">${day.breaks.length}</span>` : ''}
+                </div>
+                <div class="day-sched-break-btns">
+                  <button type="button" class="day-sched-sm-btn btn-quick-lunch-break" data-idx="${idx}" title="Quick-add 1:00 PM – 2:00 PM Lunch Break">
+                    + Lunch
+                  </button>
+                  <button type="button" class="day-sched-sm-btn btn-add-salon-break" data-idx="${idx}" title="Add custom break">
+                    + Custom
                   </button>
                 </div>
-
-                ${day.breaks.length === 0 ? `
-                  <div style="font-size: 0.72rem; color: var(--text-muted); font-style: italic;">No default breaks configured for ${day.label}.</div>
-                ` : day.breaks.map((b, bIdx) => `
-                  <div style="display: flex; gap: 6px; align-items: center; margin-bottom: 6px;">
-                    <input type="text" class="form-control salon-brk-title" data-idx="${idx}" data-bidx="${bIdx}" value="${b.title || 'Break'}" placeholder="Title" style="flex: 1; padding: 4px 8px; font-size: 0.78rem;" />
-                    <input type="time" class="form-control salon-brk-start" data-idx="${idx}" data-bidx="${bIdx}" value="${b.startTime}" style="width: 100px; padding: 4px 6px; font-size: 0.78rem;" />
-                    <span style="color: var(--text-muted); font-size: 0.75rem;">-</span>
-                    <input type="time" class="form-control salon-brk-end" data-idx="${idx}" data-bidx="${bIdx}" value="${b.endTime}" style="width: 100px; padding: 4px 6px; font-size: 0.78rem;" />
-                    <button type="button" class="btn btn-secondary btn-sm btn-del-salon-break" data-idx="${idx}" data-bidx="${bIdx}" style="padding: 2px 6px; color: #f87171; font-size: 0.75rem;">✕</button>
-                  </div>
-                `).join('')}
               </div>
+
+              ${day.breaks.length === 0 ? `
+                <div class="day-sched-continuous-banner">
+                  <span class="day-sched-green-dot"></span>
+                  <span>Continuous operations (no breaks)</span>
+                </div>
+              ` : `
+                <div class="day-sched-breaks-container">
+                  ${day.breaks.map((b, bIdx) => `
+                    <div class="day-sched-break-box">
+                      <div class="day-sched-break-row1">
+                        <input type="text" class="day-sched-break-name-inp salon-brk-title" data-idx="${idx}" data-bidx="${bIdx}" value="${b.title || 'Lunch Break'}" placeholder="Break Title (e.g. Lunch)" />
+                        <button type="button" class="day-sched-break-trash btn-del-salon-break" data-idx="${idx}" data-bidx="${bIdx}" title="Delete Break" aria-label="Delete Break">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                        </button>
+                      </div>
+                      <div class="day-sched-break-row2">
+                        <input type="time" class="day-sched-time-inp salon-brk-start" data-idx="${idx}" data-bidx="${bIdx}" value="${b.startTime}" aria-label="Break Start Time" />
+                        <span class="day-sched-to-sep">to</span>
+                        <input type="time" class="day-sched-time-inp salon-brk-end" data-idx="${idx}" data-bidx="${bIdx}" value="${b.endTime}" aria-label="Break End Time" />
+                      </div>
+                    </div>
+                  `).join('')}
+                </div>
+              `}
             ` : ''}
           </div>
         `).join('');
@@ -4897,6 +6418,25 @@ export class SalonDashboard {
           });
         });
 
+        container.querySelectorAll('.btn-quick-lunch-break').forEach((b) => {
+          b.addEventListener('click', (e) => {
+            const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+            const day = salonSchedState[idx];
+            if (day) {
+              const alreadyHas = day.breaks.some(br => br.startTime === '13:00' && br.endTime === '14:00');
+              if (!alreadyHas) {
+                day.breaks.push({
+                  id: `brk-${day.dayOfWeek}-${Math.random().toString(36).substring(2, 7)}`,
+                  startTime: '13:00',
+                  endTime: '14:00',
+                  title: 'Lunch Break',
+                });
+                renderDays();
+              }
+            }
+          });
+        });
+
         container.querySelectorAll('.btn-del-salon-break').forEach((b) => {
           b.addEventListener('click', (e) => {
             const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
@@ -4932,6 +6472,34 @@ export class SalonDashboard {
       };
 
       renderDays();
+
+      document.getElementById('btn-apply-mon-to-all')?.addEventListener('click', () => {
+        const mon = salonSchedState[0];
+        if (!mon) return;
+
+        for (let i = 1; i < salonSchedState.length; i++) {
+          if (!salonSchedState[i].isClosed) {
+            salonSchedState[i].startTime = mon.startTime;
+            salonSchedState[i].endTime = mon.endTime;
+            salonSchedState[i].breaks = (mon.breaks || []).map((b) => ({
+              id: `brk-${salonSchedState[i].dayOfWeek}-${Math.random().toString(36).substring(2, 7)}`,
+              startTime: b.startTime,
+              endTime: b.endTime,
+              title: b.title || 'Lunch Break',
+            }));
+          }
+        }
+
+        renderDays();
+        const notice = document.getElementById('salon-sched-error');
+        if (notice) {
+          notice.style.background = 'rgba(16,185,129,0.15)';
+          notice.style.borderColor = 'rgba(16,185,129,0.3)';
+          notice.style.color = '#34d399';
+          notice.textContent = '✨ Copied Monday shift hours and breaks to all open days! Review and click "Save Weekly Schedule" to confirm.';
+          notice.style.display = 'block';
+        }
+      });
 
       document.getElementById('form-salon-schedule')?.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -5396,14 +6964,14 @@ export class SalonDashboard {
                 ${staffState.map((d, idx) => {
                   const isDayActive = d.isWorking && !d.salonClosed;
                   return `
-                    <div class="schedule-day-row ${!isDayActive ? 'off-day' : ''}">
-                      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-                        <div style="display: flex; align-items: center; gap: 12px;">
+                    <div class="schedule-day-row ${!isDayActive ? 'off-day' : ''}" style="padding: 9px 12px; border-radius: 9px; gap: 6px;">
+                      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
                           <label class="switch-toggle" style="margin: 0;">
                             <input type="checkbox" class="st-day-chk" data-idx="${idx}" ${isDayActive ? 'checked' : ''} ${followsSalonSchedule || d.salonClosed ? 'disabled' : ''} />
                             <span class="switch-slider"></span>
                           </label>
-                          <span style="font-weight: 700; color: #fff; font-size: 0.95rem; min-width: 95px;">${d.label}</span>
+                          <span style="font-weight: 700; color: #fff; font-size: 0.92rem; min-width: 85px;">${d.label}</span>
                           ${d.salonClosed ? `
                             <span class="badge" style="background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.3); font-size: 0.65rem;">SALON CLOSED</span>
                           ` : isDayActive ? `
@@ -5414,60 +6982,81 @@ export class SalonDashboard {
                         </div>
 
                         ${!d.salonClosed && isDayActive ? `
-                          <div style="display: flex; align-items: center; gap: 8px;">
-                            <input type="time" class="time-input-compact st-shift-start" data-idx="${idx}" value="${followsSalonSchedule ? d.salonOpen : d.startTime}" ${followsSalonSchedule ? 'disabled' : ''} style="width: 110px;" />
-                            <span style="color: var(--text-muted); font-size: 0.8rem; font-weight: 600;">to</span>
-                            <input type="time" class="time-input-compact st-shift-end" data-idx="${idx}" value="${followsSalonSchedule ? d.salonClose : d.endTime}" ${followsSalonSchedule ? 'disabled' : ''} style="width: 110px;" />
+                          <div style="display: flex; align-items: center; gap: 6px;">
+                            <input type="time" class="day-sched-time-inp st-shift-start" data-idx="${idx}" value="${followsSalonSchedule ? d.salonOpen : d.startTime}" ${followsSalonSchedule ? 'disabled' : ''} style="width: 110px; min-height: 34px; padding: 4px 8px; font-size: 0.84rem;" />
+                            <span style="color: var(--text-muted); font-size: 0.74rem; font-weight: 600;">to</span>
+                            <input type="time" class="day-sched-time-inp st-shift-end" data-idx="${idx}" value="${followsSalonSchedule ? d.salonClose : d.endTime}" ${followsSalonSchedule ? 'disabled' : ''} style="width: 110px; min-height: 34px; padding: 4px 8px; font-size: 0.84rem;" />
                           </div>
                         ` : `
-                          <div style="font-size: 0.82rem; color: var(--text-muted); font-style: italic;">
+                          <div style="font-size: 0.78rem; color: var(--text-muted); font-style: italic;">
                             ${d.salonClosed ? 'Salon Closed' : 'Day Off'}
                           </div>
                         `}
                       </div>
 
                       ${!d.salonClosed && (d.isWorking || followsSalonSchedule) ? `
-                        <!-- Break Override Selection -->
-                        <div style="border-top: 1px dashed var(--border-subtle); padding-top: 8px; margin-top: 4px;">
-                          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
-                            <div style="display: flex; gap: 14px; align-items: center;">
-                              <label style="font-size: 0.76rem; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; gap: 5px; margin: 0;">
-                                <input type="radio" name="break-opt-${idx}" class="st-break-rad" data-idx="${idx}" value="inherit" ${!d.hasBreakOverride ? 'checked' : ''} ${followsSalonSchedule ? 'disabled' : ''} style="accent-color: #6366f1;" />
-                                Inherit Salon Breaks
-                              </label>
-                              <label style="font-size: 0.76rem; color: #a5b4fc; cursor: pointer; display: flex; align-items: center; gap: 5px; margin: 0;">
-                                <input type="radio" name="break-opt-${idx}" class="st-break-rad" data-idx="${idx}" value="custom" ${d.hasBreakOverride ? 'checked' : ''} ${followsSalonSchedule ? 'disabled' : ''} style="accent-color: #6366f1;" />
-                                Custom Break Override
-                              </label>
+                        <!-- Break Section: Salon Facility Foundation & Stylist Personal Breaks -->
+                        <div style="border-top: 1px dashed var(--border-subtle); padding-top: 8px; margin-top: 6px;">
+                          <!-- Salon Facility Breaks Banner -->
+                          <div style="background: rgba(16, 185, 129, 0.05); border: 1px dashed rgba(16, 185, 129, 0.25); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px;">
+                            <div style="display: flex; align-items: center; justify-content: space-between;">
+                              <span style="font-size: 0.72rem; font-weight: 700; color: #34d399;">🏢 Salon Facility Breaks</span>
+                              <span class="badge-salon-lock">🔒 Active</span>
                             </div>
-
-                            ${d.hasBreakOverride && !followsSalonSchedule ? `
-                              <button type="button" class="btn btn-secondary btn-sm btn-st-add-break" data-idx="${idx}" style="font-size: 0.7rem; padding: 2px 8px;">
-                                + Add Break
-                              </button>
-                            ` : ''}
+                            ${d.salonBreaks && d.salonBreaks.length > 0 ? `
+                              <div style="display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px;">
+                                ${d.salonBreaks.map(sb => `
+                                  <span class="break-chip-salon" style="padding: 2px 6px; font-size: 0.72rem;">
+                                    <span>• ${sb.startTime} – ${sb.endTime} (${sb.title || 'Lunch'})</span>
+                                  </span>
+                                `).join('')}
+                              </div>
+                            ` : `
+                              <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 2px; font-style: italic;">
+                                Continuous operations (no salon downtime).
+                              </div>
+                            `}
                           </div>
 
-                          ${!d.hasBreakOverride ? `
-                            <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px; font-style: italic;">
-                              Inheriting salon breaks: ${d.salonBreaks.length > 0 ? d.salonBreaks.map((sb) => `${sb.startTime}-${sb.endTime} (${sb.title || 'Lunch'})`).join(', ') : 'No salon default breaks.'}
+                          <!-- Stylist Personal Shift Breaks -->
+                          <div style="margin-top: 4px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                              <span style="font-size: 0.74rem; font-weight: 700; color: #c7d2fe;">
+                                👤 Personal Shift Breaks (${d.breaks.length})
+                              </span>
+                              ${!followsSalonSchedule ? `
+                                <button type="button" class="btn btn-secondary btn-sm btn-st-add-break" data-idx="${idx}" style="font-size: 0.7rem; padding: 2px 7px; font-weight: 600;">
+                                  + Add Personal Break
+                                </button>
+                              ` : ''}
                             </div>
-                          ` : `
-                            <div style="font-size: 0.72rem; color: #a5b4fc; margin-top: 4px; margin-bottom: 4px;">
-                              ℹ️ Custom breaks replace salon default breaks for this stylist.
-                            </div>
+
                             ${d.breaks.length === 0 ? `
-                              <div style="font-size: 0.72rem; color: var(--text-muted); font-style: italic;">No custom breaks added yet.</div>
-                            ` : d.breaks.map((b, bIdx) => `
-                              <div style="display: flex; gap: 6px; align-items: center; margin-bottom: 6px;">
-                                <input type="text" class="form-control st-brk-title" data-idx="${idx}" data-bidx="${bIdx}" value="${b.title || 'Break'}" placeholder="Title" style="flex: 1; padding: 4px 8px; font-size: 0.78rem;" />
-                                <input type="time" class="time-input-compact st-brk-start" data-idx="${idx}" data-bidx="${bIdx}" value="${b.startTime}" style="width: 100px; padding: 4px 6px; font-size: 0.78rem;" />
-                                <span style="color: var(--text-muted); font-size: 0.75rem;">-</span>
-                                <input type="time" class="time-input-compact st-brk-end" data-idx="${idx}" data-bidx="${bIdx}" value="${b.endTime}" style="width: 100px; padding: 4px 6px; font-size: 0.78rem;" />
-                                <button type="button" class="btn btn-secondary btn-sm btn-st-del-break" data-idx="${idx}" data-bidx="${bIdx}" style="padding: 2px 6px; color: #f87171; font-size: 0.75rem;">✕</button>
-                              </div>
-                            `).join('')}
-                          `}
+                              <div style="font-size: 0.7rem; color: var(--text-muted); font-style: italic;">No personal breaks added.</div>
+                            ` : d.breaks.map((b, bIdx) => {
+                              const hasOverlap = (d.salonBreaks || []).some(sb => b.startTime < sb.endTime && b.endTime > sb.startTime);
+                              return `
+                                <div class="day-sched-break-box" style="margin-bottom: 5px;">
+                                  <div class="day-sched-break-row1">
+                                    <input type="text" class="day-sched-break-name-inp st-brk-title" data-idx="${idx}" data-bidx="${bIdx}" value="${b.title || 'Personal Break'}" placeholder="Break Title" />
+                                    <button type="button" class="day-sched-break-trash btn-st-del-break" data-idx="${idx}" data-bidx="${bIdx}" title="Remove Personal Break" aria-label="Remove Personal Break">
+                                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                                    </button>
+                                  </div>
+                                  <div class="day-sched-break-row2">
+                                    <input type="time" class="day-sched-time-inp st-brk-start" data-idx="${idx}" data-bidx="${bIdx}" value="${b.startTime}" aria-label="Break Start Time" />
+                                    <span class="day-sched-to-sep">to</span>
+                                    <input type="time" class="day-sched-time-inp st-brk-end" data-idx="${idx}" data-bidx="${bIdx}" value="${b.endTime}" aria-label="Break End Time" />
+                                  </div>
+                                  ${hasOverlap ? `
+                                    <div class="break-overlap-notice" style="margin: 3px 0 0 0; padding: 2px 7px; font-size: 0.68rem;">
+                                      <span>⚠️ Overlaps with Salon Break. Both will be observed.</span>
+                                    </div>
+                                  ` : ''}
+                                </div>
+                              `;
+                            }).join('')}
+                          </div>
                         </div>
                       ` : ''}
                     </div>
@@ -5636,17 +7225,17 @@ export class SalonDashboard {
           isWorking: followsSalonSchedule ? !d.salonClosed : d.isWorking,
           startTime: followsSalonSchedule ? d.salonOpen : d.startTime,
           endTime: followsSalonSchedule ? d.salonClose : d.endTime,
-          hasBreakOverride: d.hasBreakOverride === true,
-          breaks: d.hasBreakOverride ? d.breaks.map((b) => ({
+          hasBreakOverride: d.breaks.length > 0,
+          breaks: d.breaks.map((b) => ({
             id: b.id,
             startTime: b.startTime,
             endTime: b.endTime,
-            title: b.title || 'Break',
-          })) : [],
+            title: b.title || 'Personal Break',
+          })),
         }));
 
         try {
-          await ApiClient.updateStaffWorkingHours(staffId, hoursPayload);
+          await ApiClient.updateStaffWorkingHours(staffId, hoursPayload, followsSalonSchedule);
           const idx = this.staffList.findIndex((s) => String(s.id) === String(staffId));
           if (idx !== -1) {
             this.staffList[idx] = {
@@ -5763,15 +7352,20 @@ export class SalonDashboard {
 
     modalContainer.innerHTML = `
       <div class="modal-backdrop show">
-        <div class="modal-content modal-content-lg" style="max-width: 780px;">
-          <div class="modal-header" style="display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 14px;">
-            <div style="display: flex; align-items: center; gap: 12px;">
-              <button class="btn-back-nav" id="btn-back-to-customers">← Back to Customers</button>
-              <h3 style="font-size: 1.15rem; font-family: var(--font-heading); margin: 0;">Customer Profile & Booking History</h3>
+        <div class="modal-content modal-content-lg" style="max-width: 680px;">
+          <!-- Sleek, Perfectly-Aligned Header -->
+          <div class="modal-header" style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; padding-bottom: 10px;">
+            <div style="display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1;">
+              <button class="close-btn" id="btn-back-to-customers" title="Back to Customers" style="width: 28px; height: 28px; border-radius: 6px; flex-shrink: 0; font-size: 0.85rem;">
+                ←
+              </button>
+              <h3 style="font-size: 1.02rem; font-family: var(--font-heading); font-weight: 700; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                Customer Profile & History
+              </h3>
             </div>
-            <button class="close-btn" id="btn-close-modal">&times;</button>
+            <button class="close-btn" id="btn-close-modal" style="width: 28px; height: 28px; font-size: 1.1rem; flex-shrink: 0;">&times;</button>
           </div>
-          <div id="cust-history-body" style="padding: 20px; text-align: center; color: var(--text-muted);">
+          <div id="cust-history-body" style="padding: 4px 0; text-align: center; color: var(--text-muted);">
             Loading customer details & booking history...
           </div>
         </div>
@@ -5794,103 +7388,124 @@ export class SalonDashboard {
 
       historyBody.style.textAlign = 'left';
       historyBody.innerHTML = `
-        <!-- Customer Summary Header Card -->
-        <div style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; padding: 16px; margin-bottom: 18px; display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px;">
-          <div>
-            <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase;">Customer Name</div>
-            <div style="font-size: 1.1rem; font-weight: 800; color: #fff;">${customer.name || customerName}</div>
+        <!-- Customer Summary Header Card (Ultra-Clean 2-Row Identity & Metrics) -->
+        <div style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; padding: 10px 12px; margin-bottom: 12px;">
+          <!-- Row 1: Identity & Strike Badge -->
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px;">
+            <div style="display: flex; align-items: center; gap: 9px; min-width: 0;">
+              <div class="customer-avatar">${(customer.name || customerName || 'C').charAt(0).toUpperCase()}</div>
+              <div style="min-width: 0;">
+                <div style="font-size: 0.92rem; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${customer.name || customerName}</div>
+                <div style="font-size: 0.73rem; color: #94a3b8; font-family: monospace; line-height: 1.2;">${customer.phone || 'No phone'}</div>
+              </div>
+            </div>
+            <div style="flex-shrink: 0;">${this.renderStrikeBadge(customer)}</div>
           </div>
-          <div>
-            <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase;">Phone / WhatsApp</div>
-            <div style="font-size: 0.95rem; font-weight: 700; color: #c7d2fe; font-family: monospace;">${customer.phone || 'N/A'}</div>
-          </div>
-          <div>
-            <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase;">Total Appointments</div>
-            <div style="font-size: 0.95rem; font-weight: 700; color: #fff;">${appts.length} Bookings</div>
-          </div>
-          <div>
-            <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase;">Total Spend</div>
-            <div style="font-size: 0.95rem; font-weight: 800; color: #10b981; font-family: var(--font-heading);">₹${totalSpend.toLocaleString()}</div>
+
+          <!-- Row 2: 2-Column Compact Metric Strip -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.05);">
+            <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.04); border-radius: 8px; padding: 6px 10px;">
+              <div style="font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Total Bookings</div>
+              <div style="font-size: 0.88rem; font-weight: 700; color: #f1f5f9;">${appts.length} Bookings</div>
+            </div>
+            <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.04); border-radius: 8px; padding: 6px 10px;">
+              <div style="font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Total Spend</div>
+              <div style="font-size: 0.88rem; font-weight: 800; color: #34d399;">₹${totalSpend.toLocaleString()}</div>
+            </div>
           </div>
         </div>
 
         <!-- Penalty Strike & Booking Access Control Panel -->
-        <div style="background: rgba(99, 102, 241, 0.06); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 12px; padding: 16px; margin-bottom: 20px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 12px;">
-            <div>
-              <div style="font-size: 0.75rem; font-weight: 800; color: #a5b4fc; text-transform: uppercase; letter-spacing: 0.04em;">⚡ PENALTY STRIKES & BOOKING STATUS</div>
-              <div style="display: flex; align-items: center; gap: 10px; margin-top: 4px;">
-                <span style="font-size: 1.2rem; font-weight: 800; color: #fff;">${strikes} / 3 Strikes</span>
-                ${this.renderStrikeBadge(customer)}
-              </div>
+        <div style="background: rgba(99, 102, 241, 0.05); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: 12px; padding: 10px 12px; margin-bottom: 12px;">
+          <!-- Section Title & Strikes Ratio -->
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span style="font-size: 0.72rem; font-weight: 800; color: #a5b4fc; text-transform: uppercase; letter-spacing: 0.04em;">⚡ Strike Level:</span>
+              <span style="font-size: 0.88rem; font-weight: 800; color: #fff;">${strikes} / 3 Strikes</span>
             </div>
-
-            <!-- Quick Action Buttons -->
-            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-              <button class="btn btn-success btn-sm" id="btn-modal-unblock" style="font-weight: 700;">
-                🔓 Reset All Strikes (0/3)
-              </button>
-              <button class="btn btn-outline-danger btn-sm" id="btn-modal-block" style="font-weight: 700;">
-                🔒 Block Customer (3/3)
-              </button>
-            </div>
+            <span style="font-size: 0.7rem; color: #94a3b8;">Click tier to set</span>
           </div>
 
-          <!-- Direct Strike Adjuster Pills -->
-          <div style="display: flex; align-items: center; gap: 8px; font-size: 0.8rem; color: var(--text-secondary); flex-wrap: wrap;">
-            <span>Adjust Strikes Manually:</span>
-            <button class="btn btn-secondary btn-sm btn-strike-set" data-count="0" style="${strikes === 0 ? 'background: #10b981; color: #fff;' : ''}">0 Clean</button>
-            <button class="btn btn-secondary btn-sm btn-strike-set" data-count="1" style="${strikes === 1 ? 'background: #f59e0b; color: #fff;' : ''}">1 Warning</button>
-            <button class="btn btn-secondary btn-sm btn-strike-set" data-count="2" style="${strikes === 2 ? 'background: #f97316; color: #fff;' : ''}">2 Critical</button>
-            <button class="btn btn-secondary btn-sm btn-strike-set" data-count="3" style="${strikes >= 3 ? 'background: #ef4444; color: #fff;' : ''}">3 Blocked</button>
+          <!-- Direct 4-Segment Strike Level Selector (100% Full-Width, ZERO-Wrap) -->
+          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin-bottom: 8px;">
+            <button class="btn btn-strike-set" data-count="0" style="min-height: 28px; padding: 4px 2px; font-size: 0.72rem; font-weight: 700; border-radius: 6px; border: 1px solid ${strikes === 0 ? 'rgba(16, 185, 129, 0.6)' : 'rgba(255,255,255,0.08)'}; background: ${strikes === 0 ? 'rgba(16, 185, 129, 0.25)' : 'rgba(255,255,255,0.03)'}; color: ${strikes === 0 ? '#34d399' : '#94a3b8'};">
+              0 Clean
+            </button>
+            <button class="btn btn-strike-set" data-count="1" style="min-height: 28px; padding: 4px 2px; font-size: 0.72rem; font-weight: 700; border-radius: 6px; border: 1px solid ${strikes === 1 ? 'rgba(245, 158, 11, 0.6)' : 'rgba(255,255,255,0.08)'}; background: ${strikes === 1 ? 'rgba(245, 158, 11, 0.25)' : 'rgba(255,255,255,0.03)'}; color: ${strikes === 1 ? '#fbbf24' : '#94a3b8'};">
+              1 Warn
+            </button>
+            <button class="btn btn-strike-set" data-count="2" style="min-height: 28px; padding: 4px 2px; font-size: 0.72rem; font-weight: 700; border-radius: 6px; border: 1px solid ${strikes === 2 ? 'rgba(249, 115, 22, 0.6)' : 'rgba(255,255,255,0.08)'}; background: ${strikes === 2 ? 'rgba(249, 115, 22, 0.25)' : 'rgba(255,255,255,0.03)'}; color: ${strikes === 2 ? '#fb923c' : '#94a3b8'};">
+              2 Critical
+            </button>
+            <button class="btn btn-strike-set" data-count="3" style="min-height: 28px; padding: 4px 2px; font-size: 0.72rem; font-weight: 700; border-radius: 6px; border: 1px solid ${strikes >= 3 ? 'rgba(239, 68, 68, 0.6)' : 'rgba(255,255,255,0.08)'}; background: ${strikes >= 3 ? 'rgba(239, 68, 68, 0.25)' : 'rgba(255,255,255,0.03)'}; color: ${strikes >= 3 ? '#fca5a5' : '#94a3b8'};">
+              3 Blocked
+            </button>
+          </div>
+
+          <!-- Quick Action Buttons: 2-Column Balanced Grid -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+            <button class="btn btn-sm" id="btn-modal-unblock" style="min-height: 30px; font-weight: 700; font-size: 0.74rem; padding: 0 8px; border-radius: 6px; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); color: #34d399; justify-content: center; gap: 4px;">
+              🔓 Reset (0/3)
+            </button>
+            <button class="btn btn-sm" id="btn-modal-block" style="min-height: 30px; font-weight: 700; font-size: 0.74rem; padding: 0 8px; border-radius: 6px; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.35); color: #fca5a5; justify-content: center; gap: 4px;">
+              🔒 Block (3/3)
+            </button>
           </div>
         </div>
 
         <!-- Booking History Timeline -->
-        <h4 style="font-size: 0.95rem; font-weight: 800; color: #fff; margin-bottom: 12px; font-family: var(--font-heading);">📜 Booking History Timeline</h4>
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+          <h4 style="font-size: 0.88rem; font-weight: 700; color: #fff; margin: 0; font-family: var(--font-heading); display: flex; align-items: center; gap: 6px;">
+            <span>📜</span>
+            <span>Booking History</span>
+          </h4>
+          <span style="font-size: 0.72rem; color: #94a3b8;">${appts.length} appointments</span>
+        </div>
+
         ${appts.length === 0 ? `
-          <div style="text-align: center; padding: 30px; color: var(--text-muted); background: rgba(0,0,0,0.2); border-radius: 10px;">
+          <div style="text-align: center; padding: 20px 14px; color: var(--text-muted); background: rgba(0,0,0,0.2); border-radius: 10px; border: 1px solid rgba(255,255,255,0.04); font-size: 0.8rem;">
             No past appointment records found for this customer.
           </div>
         ` : `
-          <div style="max-height: 280px; overflow-y: auto; border: 1px solid rgba(255,255,255,0.06); border-radius: 10px;">
-            <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.86rem;">
+          <div style="max-height: 240px; overflow-y: auto; overflow-x: auto; border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; background: rgba(0,0,0,0.15);">
+            <table class="cust-history-table">
               <thead>
-                <tr style="border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary); background: rgba(0,0,0,0.3); font-size: 0.72rem; text-transform: uppercase;">
-                  <th style="padding: 10px;">DATE & TIME</th>
-                  <th style="padding: 10px;">SERVICE</th>
-                  <th style="padding: 10px;">STYLIST</th>
-                  <th style="padding: 10px;">PRICE</th>
-                  <th style="padding: 10px;">STATUS</th>
+                <tr>
+                  <th>Date & Time</th>
+                  <th>Service</th>
+                  <th>Stylist</th>
+                  <th>Price</th>
+                  <th style="text-align: right;">Status</th>
                 </tr>
               </thead>
               <tbody>
                 ${appts.map((a) => {
-        const dateStr = a.startAt ? new Date(a.startAt).toLocaleDateString() : 'N/A';
-        const timeStr = a.startAt ? new Date(a.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-        const statusColors = {
-          CONFIRMED: 'rgba(99,102,241,0.2); color: #818cf8',
-          COMPLETED: 'rgba(16,185,129,0.2); color: #34d399',
-          CANCELLED: 'rgba(239,68,68,0.2); color: #f87171',
-          NO_SHOW: 'rgba(245,158,11,0.2); color: #fbbf24',
-          IN_SERVICE: 'rgba(168,85,247,0.2); color: #c084fc',
-        };
-        const badgeStyle = statusColors[a.status] || 'rgba(255,255,255,0.1); color: #fff';
-        return `
-                    <tr style="border-bottom: 1px solid rgba(255,255,255,0.03);">
-                      <td style="padding: 10px;">
+                  const dateStr = a.startAt ? new Date(a.startAt).toLocaleDateString() : 'N/A';
+                  const timeStr = a.startAt ? new Date(a.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+                  const statusColors = {
+                    CONFIRMED: 'rgba(99,102,241,0.2); color: #818cf8',
+                    COMPLETED: 'rgba(16,185,129,0.2); color: #34d399',
+                    CANCELLED: 'rgba(239,68,68,0.2); color: #f87171',
+                    NO_SHOW: 'rgba(245,158,11,0.2); color: #fbbf24',
+                    IN_SERVICE: 'rgba(168,85,247,0.2); color: #c084fc',
+                    SEATED_IN_CHAIR: 'rgba(168,85,247,0.2); color: #c084fc',
+                  };
+                  const badgeStyle = statusColors[a.status] || 'rgba(255,255,255,0.1); color: #fff';
+                  return `
+                    <tr>
+                      <td>
                         <div style="font-weight: 700; color: #fff;">${dateStr}</div>
-                        <div style="font-size: 0.75rem; color: var(--text-muted);">${timeStr}</div>
+                        <div style="font-size: 0.72rem; color: #94a3b8;">${timeStr}</div>
                       </td>
-                      <td style="padding: 10px; font-weight: 700; color: #c7d2fe;">${getApptServices(a).map((s) => s.name).join(' + ') || a.serviceNameSnapshot || a.service?.name || 'Service'}</td>
-                      <td style="padding: 10px; color: var(--text-secondary);">${a.stylist?.name || 'Any Staff'}</td>
-                      <td style="padding: 10px; font-weight: 700; color: #10b981;">₹${a.price || 0}</td>
-                      <td style="padding: 10px;">
-                        <span class="badge" style="background: ${badgeStyle}; font-weight: 800; font-size: 0.72rem; padding: 3px 8px; border-radius: 6px;">${a.status}</span>
+                      <td style="font-weight: 600; color: #c7d2fe;">${getApptServices(a).map((s) => s.name).join(' + ') || a.serviceNameSnapshot || a.service?.name || 'Service'}</td>
+                      <td style="color: #94a3b8;">${a.stylist?.name || 'Any Staff'}</td>
+                      <td style="font-weight: 700; color: #34d399;">₹${a.price || 0}</td>
+                      <td style="text-align: right;">
+                        <span class="badge" style="background: ${badgeStyle}; font-weight: 700; font-size: 0.7rem; padding: 2px 7px; border-radius: 5px;">${a.status}</span>
                       </td>
                     </tr>
                   `;
-      }).join('')}
+                }).join('')}
               </tbody>
             </table>
           </div>
@@ -5931,7 +7546,11 @@ export class SalonDashboard {
           const count = parseInt(e.currentTarget.getAttribute('data-count'), 10);
           const blockState = count >= 3;
           try {
-            await ApiClient.updateCustomerStrikes(customerId, count, blockState);
+            if (count === 0) {
+              await ApiClient.unblockCustomer(customerId);
+            } else {
+              await ApiClient.updateCustomerStrikes(customerId, count, blockState);
+            }
             this.showCustomerHistoryModal(customerId, customerName);
             this.loadCustomersTable(this.searchQuery);
           } catch (err) {
@@ -5954,55 +7573,81 @@ export class SalonDashboard {
 
     modalContainer.innerHTML = `
       <div class="modal-backdrop show">
-        <div class="modal-content" style="max-width: 480px;">
-          <div class="modal-header" style="display: flex; align-items: center; justify-content: space-between;">
-            <h3 style="font-size: 1.15rem; font-family: var(--font-heading); margin: 0;">⚙️ Adjust Penalty Strikes</h3>
-            <button class="close-btn" id="btn-close-modal">&times;</button>
+        <div class="modal-content" style="max-width: 440px;">
+          <div class="modal-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding-bottom: 10px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 1.1rem;">⚙️</span>
+              <h3 style="font-size: 1.02rem; font-family: var(--font-heading); font-weight: 700; margin: 0;">Adjust Penalty Strikes</h3>
+            </div>
+            <button class="close-btn" id="btn-close-modal" style="width: 28px; height: 28px; font-size: 1.1rem;">&times;</button>
           </div>
 
-          <div style="padding: 16px 0;">
-            <div style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.06); padding: 12px 16px; border-radius: 10px; margin-bottom: 18px; display: flex; justify-content: space-between; align-items: center;">
-              <div>
-                <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase;">Customer</div>
-                <div style="font-size: 1.05rem; font-weight: 800; color: #fff; margin-top: 2px;">
+          <div style="padding: 2px 0 0 0;">
+            <!-- Customer Identity & Current Status Strip -->
+            <div style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.06); padding: 10px 12px; border-radius: 10px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+              <div style="min-width: 0;">
+                <div style="font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700; letter-spacing: 0.04em;">Customer</div>
+                <div style="font-size: 0.95rem; font-weight: 700; color: #fff; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                   ${customer.name || 'Customer'}
                 </div>
-                <div style="font-size: 0.78rem; color: var(--text-secondary); font-family: monospace;">${customer.phone || ''}</div>
+                <div style="font-size: 0.74rem; color: #94a3b8; font-family: monospace;">${customer.phone || 'No phone'}</div>
               </div>
-              <div>${this.renderStrikeBadge(customer)}</div>
+              <div style="flex-shrink: 0;">${this.renderStrikeBadge(customer)}</div>
             </div>
 
-            <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 16px;">
-              Select how many strikes to adjust or reset for <strong>${customer.name || 'this customer'}</strong>:
-            </p>
+            <div style="font-size: 0.74rem; color: var(--text-muted); margin-bottom: 8px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.04em;">
+              Set Strike Level Directly:
+            </div>
 
-            <div style="display: flex; flex-direction: column; gap: 10px;">
+            <!-- Direct 4-Tier Strike Grid -->
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 14px;">
+              <button class="btn btn-strike-tier" data-count="0" style="padding: 6px 4px; font-size: 0.72rem; font-weight: 700; border-radius: 8px; border: 1px solid ${currentStrikes === 0 ? 'rgba(16, 185, 129, 0.5)' : 'rgba(255,255,255,0.08)'}; background: ${currentStrikes === 0 ? 'rgba(16, 185, 129, 0.25)' : 'rgba(255,255,255,0.04)'}; color: ${currentStrikes === 0 ? '#34d399' : '#cbd5e1'};">
+                ✓ 0 Clean
+              </button>
+              <button class="btn btn-strike-tier" data-count="1" style="padding: 6px 4px; font-size: 0.72rem; font-weight: 700; border-radius: 8px; border: 1px solid ${currentStrikes === 1 ? 'rgba(245, 158, 11, 0.5)' : 'rgba(255,255,255,0.08)'}; background: ${currentStrikes === 1 ? 'rgba(245, 158, 11, 0.25)' : 'rgba(255,255,255,0.04)'}; color: ${currentStrikes === 1 ? '#fbbf24' : '#cbd5e1'};">
+                ⚡ 1 Warn
+              </button>
+              <button class="btn btn-strike-tier" data-count="2" style="padding: 6px 4px; font-size: 0.72rem; font-weight: 700; border-radius: 8px; border: 1px solid ${currentStrikes === 2 ? 'rgba(249, 115, 22, 0.5)' : 'rgba(255,255,255,0.08)'}; background: ${currentStrikes === 2 ? 'rgba(249, 115, 22, 0.25)' : 'rgba(255,255,255,0.04)'}; color: ${currentStrikes === 2 ? '#fb923c' : '#cbd5e1'};">
+                ⚠️ 2 Alert
+              </button>
+              <button class="btn btn-strike-tier" data-count="3" style="padding: 6px 4px; font-size: 0.72rem; font-weight: 700; border-radius: 8px; border: 1px solid ${currentStrikes >= 3 ? 'rgba(239, 68, 68, 0.5)' : 'rgba(255,255,255,0.08)'}; background: ${currentStrikes >= 3 ? 'rgba(239, 68, 68, 0.25)' : 'rgba(255,255,255,0.04)'}; color: ${currentStrikes >= 3 ? '#fca5a5' : '#cbd5e1'};">
+                🔴 3 Block
+              </button>
+            </div>
+
+            <div style="font-size: 0.74rem; color: var(--text-muted); margin-bottom: 8px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.04em;">
+              Quick Operations:
+            </div>
+
+            <!-- Sleek, Compact Action Rows (Height ~38px, Dark Luxury Styling) -->
+            <div style="display: flex; flex-direction: column; gap: 6px;">
               <!-- Option 1: Reset All to 0 -->
-              <button class="btn btn-success" id="btn-opt-reset-all" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; font-weight: 700;">
-                <span>🧹 Reset All Strikes (Set to 0/3 Clean)</span>
-                <span style="font-size: 0.75rem; background: rgba(0,0,0,0.2); padding: 2px 8px; border-radius: 6px;">Clear 100%</span>
+              <button class="btn" id="btn-opt-reset-all" style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; font-size: 0.8rem; font-weight: 600; border-radius: 8px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25); color: #34d399; transition: all 0.15s ease;">
+                <span style="display: flex; align-items: center; gap: 6px;">
+                  <span>🧹</span>
+                  <span>Reset All Strikes (Set to 0/3)</span>
+                </span>
+                <span style="font-size: 0.68rem; font-weight: 700; background: rgba(16, 185, 129, 0.2); padding: 2px 7px; border-radius: 6px; color: #6ee7b7;">Clear 100%</span>
               </button>
 
               ${currentStrikes > 0 ? `
                 <!-- Option 2: Remove 1 Strike -->
-                <button class="btn btn-secondary" id="btn-opt-remove-1" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; font-weight: 700; background: rgba(99,102,241,0.15); border-color: rgba(99,102,241,0.4); color: #c7d2fe;">
-                  <span>➖ Remove 1 Strike (Set to ${Math.max(0, currentStrikes - 1)}/3)</span>
-                  <span style="font-size: 0.75rem; background: rgba(0,0,0,0.3); padding: 2px 8px; border-radius: 6px;">-1 Strike</span>
+                <button class="btn" id="btn-opt-remove-1" style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; font-size: 0.8rem; font-weight: 600; border-radius: 8px; background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.25); color: #c7d2fe; transition: all 0.15s ease;">
+                  <span style="display: flex; align-items: center; gap: 6px;">
+                    <span>➖</span>
+                    <span>Remove 1 Strike (Set to ${Math.max(0, currentStrikes - 1)}/3)</span>
+                  </span>
+                  <span style="font-size: 0.68rem; font-weight: 700; background: rgba(99, 102, 241, 0.25); padding: 2px 7px; border-radius: 6px; color: #e0e7ff;">-1 Strike</span>
                 </button>
               ` : ''}
 
-              ${currentStrikes >= 2 ? `
-                <!-- Option 3: Remove 2 Strikes -->
-                <button class="btn btn-secondary" id="btn-opt-remove-2" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; font-weight: 700; background: rgba(99,102,241,0.15); border-color: rgba(99,102,241,0.4); color: #c7d2fe;">
-                  <span>➖ Remove 2 Strikes (Set to ${Math.max(0, currentStrikes - 2)}/3)</span>
-                  <span style="font-size: 0.75rem; background: rgba(0,0,0,0.3); padding: 2px 8px; border-radius: 6px;">-2 Strikes</span>
-                </button>
-              ` : ''}
-
-              <!-- Option 4: Block Customer (Set to 3) -->
-              <button class="btn btn-outline-danger" id="btn-opt-block" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; font-weight: 700;">
-                <span>🔒 Block Customer (Set to 3/3 Blocked)</span>
-                <span style="font-size: 0.75rem; background: rgba(0,0,0,0.3); padding: 2px 8px; border-radius: 6px;">3 Strikes</span>
+              <!-- Option: Block / Unblock Customer -->
+              <button class="btn" id="btn-opt-block" style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; font-size: 0.8rem; font-weight: 600; border-radius: 8px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.25); color: #fca5a5; transition: all 0.15s ease;">
+                <span style="display: flex; align-items: center; gap: 6px;">
+                  <span>🔒</span>
+                  <span>Block Customer (Set to 3/3 Blocked)</span>
+                </span>
+                <span style="font-size: 0.68rem; font-weight: 700; background: rgba(239, 68, 68, 0.2); padding: 2px 7px; border-radius: 6px; color: #fecdd3;">3 Strikes</span>
               </button>
             </div>
           </div>
@@ -6012,6 +7657,26 @@ export class SalonDashboard {
 
     const closeModal = () => (modalContainer.innerHTML = '');
     document.getElementById('btn-close-modal')?.addEventListener('click', closeModal);
+
+    // Direct Strike Tier Handler
+    modalContainer.querySelectorAll('.btn-strike-tier').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        const count = parseInt(e.currentTarget.getAttribute('data-count'), 10);
+        const blockState = count >= 3;
+        try {
+          if (count === 0) {
+            await ApiClient.unblockCustomer(customer.id);
+          } else {
+            await ApiClient.updateCustomerStrikes(customer.id, count, blockState);
+          }
+          alert(`⚡ Updated penalty strikes to ${count}/3 for ${customer.name || 'Customer'}.`);
+          closeModal();
+          this.loadCustomersTable(this.searchQuery);
+        } catch (err) {
+          alert(`Error updating strikes: ${err.message}`);
+        }
+      });
+    });
 
     // Handler: Reset All (Set to 0)
     document.getElementById('btn-opt-reset-all')?.addEventListener('click', async () => {
@@ -6028,19 +7693,6 @@ export class SalonDashboard {
     // Handler: Remove 1 Strike
     document.getElementById('btn-opt-remove-1')?.addEventListener('click', async () => {
       const newCount = Math.max(0, currentStrikes - 1);
-      try {
-        await ApiClient.updateCustomerStrikes(customer.id, newCount, newCount >= 3);
-        alert(`⚡ Reduced penalty strikes to ${newCount}/3 for ${customer.name || 'Customer'}.`);
-        closeModal();
-        this.loadCustomersTable(this.searchQuery);
-      } catch (err) {
-        alert(`Error updating strikes: ${err.message}`);
-      }
-    });
-
-    // Handler: Remove 2 Strikes
-    document.getElementById('btn-opt-remove-2')?.addEventListener('click', async () => {
-      const newCount = Math.max(0, currentStrikes - 2);
       try {
         await ApiClient.updateCustomerStrikes(customer.id, newCount, newCount >= 3);
         alert(`⚡ Reduced penalty strikes to ${newCount}/3 for ${customer.name || 'Customer'}.`);

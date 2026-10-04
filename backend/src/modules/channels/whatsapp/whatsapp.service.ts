@@ -117,6 +117,7 @@ export class WhatsAppService {
         quickBookingAction,
         bookingAction,
         this,
+        this.availabilityService as any,
       );
     }
     if (this.whatsAppActionHandlerService) {

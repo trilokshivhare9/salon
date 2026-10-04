@@ -14,6 +14,7 @@ import { AppointmentAction } from '../actions/appointment.action';
 import { DraftRecoveryAction } from '../actions/draft-recovery.action';
 import { QuickBookingAction } from '../actions/quick-booking.action';
 import { BookingAction } from '../actions/booking.action';
+import { AvailabilityService } from '../../../salon-admin/availability/availability.service';
 
 @Injectable()
 export class WhatsAppActionHandlerService {
@@ -32,6 +33,7 @@ export class WhatsAppActionHandlerService {
     private readonly bookingAction: BookingAction,
     @Inject(forwardRef(() => WhatsAppService))
     @Optional() public whatsAppService?: WhatsAppService,
+    @Optional() private readonly availabilityService?: AvailabilityService,
   ) {}
 
   public setWhatsAppService(service: any): void {
@@ -262,7 +264,15 @@ export class WhatsAppActionHandlerService {
         activeAppointment ? activeAppointment.id : null,
         ActionUtils.getClearDraftData(),
       );
-      const welcome = this.templates.buildWelcomeMessage(salon, activeAppointment);
+      let isQuickBookOpen = true;
+      if (this.availabilityService) {
+        try {
+          isQuickBookOpen = await this.availabilityService.isQuickBookingOperationalToday(salonId, tz);
+        } catch (err) {
+          isQuickBookOpen = true;
+        }
+      }
+      const welcome = this.templates.buildWelcomeMessage(salon, activeAppointment, { isQuickBookOpen });
       await this.sendMessage(cleanNumber, welcome, phoneNumberId, salonId);
       return { replyMessage: welcome.bodyText, state: ConversationState.START };
     }
@@ -271,6 +281,13 @@ export class WhatsAppActionHandlerService {
       const infoMsg = this.templates.buildSalonInfoMessage(salon);
       await this.sendMessage(cleanNumber, infoMsg, phoneNumberId, salonId);
       return { replyMessage: infoMsg.bodyText, state: conversation.state };
+    }
+
+    if (input === WhatsAppButtonId.FEEDBACK_GREAT || input === 'btn_feedback_great') {
+      const reviewUrl = salon.googleMapsUrl || undefined;
+      const feedbackMsg = this.templates.buildFeedbackThanksReply(salon.name, reviewUrl);
+      await this.sendMessage(cleanNumber, feedbackMsg, phoneNumberId, salonId);
+      return { replyMessage: feedbackMsg.bodyText, state: conversation.state };
     }
 
     // Assemble Strongly Typed Context
@@ -343,6 +360,10 @@ export class WhatsAppActionHandlerService {
       input.startsWith('date_') ||
       input.startsWith('slot_') ||
       input.startsWith('addon_') ||
+      input === WhatsAppButtonId.CHANGE_TIME ||
+      input === 'btn_change_time' ||
+      input === WhatsAppButtonId.CHANGE_DATE ||
+      input === 'btn_change_date' ||
       input.startsWith('btn_confirm');
 
     if (isFunnelAction) {
@@ -405,12 +426,17 @@ export class WhatsAppActionHandlerService {
     }
 
     // B. Cancellation Actions
-    if (input === WhatsAppButtonId.CANCEL_PENDING_QUICK) {
+    if (
+      input === WhatsAppButtonId.CANCEL_PENDING_QUICK ||
+      (!activeAppointment && pendingAppointment && (normalizedInput === 'cancel' || normalizedInput === 'cancel request'))
+    ) {
       return this.quickBookingAction.cancelPendingQuickBook(ctx);
     }
 
     if (
       [WhatsAppButtonId.CANCEL_APPT, WhatsAppButtonId.REMIND_CANCEL, WhatsAppButtonId.ETA_CANCEL].includes(input as any) ||
+      normalizedInput === 'cancel' ||
+      normalizedInput === 'cancel appointment' ||
       (conversation.state === ConversationState.CONFIRM_CANCEL &&
         [WhatsAppButtonId.CANCEL_YES, WhatsAppButtonId.CANCEL_NO, 'yes', 'no', 'keep', '1', '2'].some((kw) =>
           normalizedInput.includes(kw),

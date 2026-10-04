@@ -239,6 +239,7 @@ model Admin {
   sessions            UserSession[]
   createdAbsences     StylistAbsence[] @relation("AdminCreatedAbsences")
   createdClosures     SalonClosure[]   @relation("AdminCreatedClosures")
+  passwordResets      AdminPasswordReset[]
 
   @@index([email])
   @@index([salonId])
@@ -270,6 +271,26 @@ model UserSession {
 }
 
 // -----------------------------------------------------------------------------
+// 1C. ADMIN PASSWORD RESETS (Email OTP Security & Brute-Force Guards)
+// -----------------------------------------------------------------------------
+model AdminPasswordReset {
+  id           String    @id @default(uuid())
+  adminId      String    @map("admin_id")
+  otpHash      String    @map("otp_hash")
+  attempts     Int       @default(0)
+  isUsed       Boolean   @default(false)
+  expiresAt    DateTime  @map("expires_at")
+  ipAddress    String?   @map("ip_address")
+  userAgent    String?   @map("user_agent")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  admin Admin @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([adminId, isUsed, expiresAt])
+  @@map("admin_password_resets")
+}
+
+// -----------------------------------------------------------------------------
 // 2. SALONS
 // -----------------------------------------------------------------------------
 model Salon {
@@ -284,6 +305,10 @@ model Salon {
   city                 String?
   state                String?
   country              String      @default("IN")
+  latitude             Float?      @map("latitude")
+  longitude            Float?      @map("longitude")
+  googleMapsUrl        String?     @map("google_maps_url")
+  locationType         String?     @default("MANUAL") @map("location_type")
   timezone             String      @default("Asia/Kolkata")
   description          String?
   status               SalonStatus @default(ACTIVE)

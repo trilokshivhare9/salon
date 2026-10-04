@@ -6,6 +6,7 @@ import { AppointmentsService } from '../appointments.service';
 import { DateTime } from 'luxon';
 import { AppointmentStatus, ClientEtaStatus, ReassignmentOutcome, AbsenceStatus, CancelledBy } from '@prisma/client';
 import { TimeUtility } from '../../../../common/utils/time.utility';
+import { resolveSalonDirectionsUrl } from '../../../../common/utils/location.utility';
 
 @Injectable()
 export class RemindersService implements OnModuleInit, OnModuleDestroy {
@@ -125,6 +126,7 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
                 ? user.name
                 : 'there';
 
+            const directionsUrl = resolveSalonDirectionsUrl(salon);
             const payload = this.whatsAppTemplateService.build2HourReminderPrompt(
               salon.name,
               displayName,
@@ -134,6 +136,7 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
               dateStr,
               timeStr,
               salon.address || '',
+              directionsUrl,
             );
 
             const sent = await this.whatsAppService.sendMetaMessage(

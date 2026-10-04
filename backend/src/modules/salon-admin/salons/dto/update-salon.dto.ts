@@ -30,6 +30,20 @@ export class UpdateSalonDto {
   country?: string;
 
   @IsOptional()
+  latitude?: number;
+
+  @IsOptional()
+  longitude?: number;
+
+  @IsOptional()
+  @IsString()
+  googleMapsUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  locationType?: string;
+
+  @IsOptional()
   @IsString()
   timezone?: string;
 

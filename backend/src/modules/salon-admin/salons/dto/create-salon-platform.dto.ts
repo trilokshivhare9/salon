@@ -10,6 +10,7 @@ import {
   IsUUID,
   IsBoolean,
   IsIn,
+  IsNumber,
 } from 'class-validator';
 
 export class CreateSalonPlatformDto {
@@ -68,6 +69,26 @@ export class CreateSalonPlatformDto {
   @IsOptional()
   @IsString()
   address?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => (value !== undefined && value !== null && value !== '' ? Number(value) : undefined))
+  @IsNumber({}, { message: 'Latitude must be a valid number' })
+  latitude?: number;
+
+  @IsOptional()
+  @Transform(({ value }) => (value !== undefined && value !== null && value !== '' ? Number(value) : undefined))
+  @IsNumber({}, { message: 'Longitude must be a valid number' })
+  longitude?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  googleMapsUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['GPS', 'SEARCH', 'MAPS_PIN', 'MANUAL'], { message: 'Invalid location type' })
+  locationType?: string;
 
   @IsOptional()
   @IsString()

@@ -349,12 +349,12 @@ export class RealtimeNotifier {
           (payload.type === 'STATUS_UPDATED' && payload.data?.status === 'CANCELLED')
         ) {
           const appt = payload.data;
-          const clientName = appt?.customer?.name || 'Client';
+          const clientName = appt?.customer?.name || appt?.user?.name || appt?.salonUser?.user?.name || 'Client';
           const svcs = (typeof window !== 'undefined' && window.getApptServices) ? window.getApptServices(appt) : [];
           const serviceName = svcs.length > 0
             ? svcs.map((s) => s.name).join(' + ')
             : (appt?.serviceNameSnapshot || appt?.service?.name || 'Service');
-          const timeStr = appt?.startTime ? formatTime12h(appt.startTime) : '';
+          const timeStr = appt?.startTime ? formatTime12h(appt.startTime) : (appt?.startAt ? formatTime12h(appt.startAt) : '');
           const reason = appt?.cancellationReason || appt?.reason || 'Reservation cancelled';
           const eventKey = `cancel:${appt?.id}:${Date.now()}`;
 
@@ -364,7 +364,7 @@ export class RealtimeNotifier {
             badgeText: 'Slot Released',
             title: '❌ Appointment Cancelled',
             clientName,
-            details: `${serviceName} • ${timeStr} cancelled (${reason})`,
+            details: `${serviceName}${timeStr ? ` • ${timeStr}` : ''} cancelled (${reason})`,
             icon: '✕',
             variant: 'danger',
             eventKey,
@@ -374,6 +374,15 @@ export class RealtimeNotifier {
               }
             },
           });
+
+          // Auto-refresh the quick requests modal if it's already open
+          if (document.getElementById('modal-quick-requests')) {
+            setTimeout(() => {
+              if (window.salonDashboard?.openQuickRequestsModal) {
+                window.salonDashboard.openQuickRequestsModal();
+              }
+            }, 300);
+          }
 
         } else if (payload.type === 'STATUS_UPDATED') {
           const appt = payload.data;
@@ -392,7 +401,18 @@ export class RealtimeNotifier {
               variant: 'warning',
               eventKey,
             });
-          } else if (status === 'IN_SERVICE') {
+          } else if (status === 'ON_THE_WAY') {
+            SoundManager.playCheckinChime();
+            this.dispatchNotification({
+              badgeText: 'On The Way',
+              title: '🚗 Client En Route',
+              clientName,
+              details: 'Customer notified they are on the way',
+              icon: '🚗',
+              variant: 'info',
+              eventKey,
+            });
+          } else if (status === 'IN_SERVICE' || status === 'SEATED_IN_CHAIR') {
             SoundManager.playCheckinChime();
             this.dispatchNotification({
               badgeText: 'In Chair',
@@ -452,6 +472,11 @@ export class RealtimeNotifier {
             variant: 'info',
             eventKey: `service:${Date.now()}`,
           });
+        } else if (payload.type === 'APPOINTMENT_UPDATED') {
+          // ETA updates, auto-completion, reschedule confirmations — silent dashboard refresh
+          if (this.onEventCallback) {
+            this.onEventCallback(payload);
+          }
         }
 
         // Trigger callback to refresh dashboard data in real-time

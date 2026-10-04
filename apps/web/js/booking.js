@@ -52,8 +52,16 @@ export class BookingWizard {
         <div class="salon-hero">
           <h1 class="gradient-text">${salon.name}</h1>
           <p>${salon.description || 'Welcome to our online appointment booking portal.'}</p>
-          <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 6px;">
-            📍 ${salon.address || salon.city || 'India'} &nbsp;•&nbsp; 📞 ${salon.phone}
+          <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 6px; display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap;">
+            <span>📍 ${salon.address || salon.city || 'India'}</span>
+            <span>•</span>
+            <span>📞 ${salon.phone}</span>
+            ${salon.directionsUrl ? `
+              <span>•</span>
+              <a href="${salon.directionsUrl}" target="_blank" rel="noopener noreferrer" style="color: #a5b4fc; text-decoration: underline; font-weight: 600; display: inline-flex; align-items: center; gap: 3px;">
+                🚗 Directions ↗
+              </a>
+            ` : ''}
           </div>
         </div>
 
@@ -297,7 +305,12 @@ export class BookingWizard {
 
           <div>
             <div style="font-size: 0.85rem; color: var(--text-muted);">Location</div>
-            <div style="font-size: 0.9rem; color: var(--text-secondary);">${appt.salon.name}, ${appt.salon.address || ''}</div>
+            <div style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 8px;">${appt.salon.name}, ${appt.salon.address || ''}</div>
+            ${appt.salon?.directionsUrl || this.state.salon?.directionsUrl ? `
+              <a href="${appt.salon?.directionsUrl || this.state.salon?.directionsUrl}" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-primary" style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.82rem; padding: 8px 16px; text-decoration: none; border-radius: 8px; margin-top: 4px;">
+                🚗 Open Google Directions ↗
+              </a>
+            ` : ''}
           </div>
         </div>
 

@@ -69,4 +69,8 @@ export class UpdateWorkingHoursDto {
   @ValidateNested({ each: true })
   @Type(() => DayWorkingHourDto)
   hours: DayWorkingHourDto[];
+
+  @IsBoolean()
+  @IsOptional()
+  autoReschedule?: boolean;
 }
