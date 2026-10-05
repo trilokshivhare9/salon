@@ -71,8 +71,8 @@ export class LeaveValidationService {
 
     if (!allowPastDates) {
       const todayInSalon = DateTime.now().setZone(timezone).startOf('day');
-      if (endDateParsed < todayInSalon) {
-        throw new BadRequestException('Cannot mark leave for past dates.');
+      if (startDateParsed < todayInSalon) {
+        throw new BadRequestException('Cannot schedule leaves for dates that have already passed.');
       }
     }
 

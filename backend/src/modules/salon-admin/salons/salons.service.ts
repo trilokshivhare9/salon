@@ -883,8 +883,27 @@ Here are your salon owner login credentials:
       throw new BadRequestException('Closure start date must be on or before end date.');
     }
 
+    const todayDt = DateTime.now().setZone(tz).startOf('day');
+    if (startDt < todayDt) {
+      throw new BadRequestException('Cannot schedule closures or holidays for dates that have already passed.');
+    }
+
     const startJS = startDt.toJSDate();
     const endJS = endDt.toJSDate();
+
+    // Check for overlapping active closures
+    const overlapping = await this.prisma.salonClosure.findFirst({
+      where: {
+        salonId,
+        startDate: { lte: endJS },
+        endDate: { gte: startJS },
+      },
+    });
+    if (overlapping) {
+      throw new BadRequestException(
+        `A closure already exists for this period (${overlapping.reason || 'Salon Closure'}). Reopen or cancel the existing closure first.`,
+      );
+    }
 
     const nowJS = new Date();
 
@@ -991,6 +1010,14 @@ Here are your salon owner login credentials:
       where: { id: closureId, salonId },
     });
     if (!closure) throw new NotFoundException('Salon closure record not found.');
+
+    const salon = await this.prisma.salon.findUnique({ where: { id: salonId } });
+    const tz = salon?.timezone || 'Asia/Kolkata';
+    const todayDt = DateTime.now().setZone(tz).startOf('day');
+    const closureEndDt = DateTime.fromJSDate(closure.endDate, { zone: tz }).endOf('day');
+    if (closureEndDt < todayDt) {
+      throw new BadRequestException('Past historical closures cannot be reopened.');
+    }
 
     await this.prisma.salonClosure.delete({
       where: { id: closureId },

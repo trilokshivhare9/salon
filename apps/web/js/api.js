@@ -707,6 +707,15 @@ export class ApiClient {
     return res;
   }
 
+  static async cancelStaffAbsence(staffId, absenceId) {
+    this.invalidateCache('/staff');
+    const res = await this.request(`/staff/${staffId}/absence/${absenceId}`, {
+      method: 'DELETE',
+    });
+    this.invalidateCache('/staff');
+    return res;
+  }
+
   static async previewStaffAbsence(staffId, queryParams) {
     let url = `/staff/${staffId}/absence/preview`;
     if (typeof queryParams === 'string') {

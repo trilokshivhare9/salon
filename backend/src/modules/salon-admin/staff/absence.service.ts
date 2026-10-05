@@ -73,6 +73,21 @@ export class AbsenceService {
     const normalizedDates = this.validationService.validateAndNormalizeDates(dto, timezone);
     this.validationService.validateLeavePortion(dto.leavePortion, dto.customStartTime, dto.customEndTime);
 
+    const existingAbsence = await this.prisma.stylistAbsence.findFirst({
+      where: {
+        salonId,
+        stylistId,
+        status: AbsenceStatus.ACTIVE,
+        startDate: { lte: normalizedDates.endDateObj },
+        endDate: { gte: normalizedDates.startDateObj },
+      },
+    });
+    if (existingAbsence) {
+      throw new BadRequestException(
+        `${stylist.name || 'Specialist'} already has an active leave scheduled for this date range.`,
+      );
+    }
+
     const result = await this.processingService.processLeaveCreation(
       salonId,
       stylistId,

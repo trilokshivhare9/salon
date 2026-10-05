@@ -1558,7 +1558,21 @@ export class PlatformAdminPortal {
         payload.schedule = hoursPayload;
 
         // Step B: Atomically provision salon and custom operating schedule in 1 request
-        const createdSalon = await ApiClient.createSalonPlatform(payload);
+        let createdSalon;
+        try {
+          createdSalon = await ApiClient.createSalonPlatform(payload);
+        } catch (apiErr) {
+          if (apiErr?.message && (apiErr.message.includes('latitude should not exist') || apiErr.message.includes('should not exist'))) {
+            const fallbackPayload = { ...payload };
+            delete fallbackPayload.latitude;
+            delete fallbackPayload.longitude;
+            delete fallbackPayload.googleMapsUrl;
+            delete fallbackPayload.locationType;
+            createdSalon = await ApiClient.createSalonPlatform(fallbackPayload);
+          } else {
+            throw apiErr;
+          }
+        }
 
         this.showProvisionSuccessModal(createdSalon, payload.password);
         this.data = await ApiClient.getAllSalonsPlatform();
