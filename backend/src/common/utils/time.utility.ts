@@ -211,6 +211,43 @@ export class TimeUtility {
   }
 
   /**
+   * Resolves evaluation DateTime and start/end Date boundaries for any target date in salon timezone.
+   * If targetDate is undefined, uses current salon time and today's full boundaries.
+   */
+  public static getDayBoundaries(
+    targetDate?: string | Date | DateTime,
+    timezone?: string,
+  ): { evalDt: DateTime; startOfDay: Date; endOfDay: Date } {
+    const zone = timezone || this.DEFAULT_TIMEZONE;
+    const now = this.now(zone);
+
+    let evalDt: DateTime;
+    if (!targetDate) {
+      evalDt = now;
+    } else if (typeof targetDate === 'string') {
+      const parsed = DateTime.fromISO(targetDate, { zone });
+      if (targetDate.includes('T')) {
+        evalDt = parsed;
+      } else {
+        evalDt = parsed.set({
+          hour: now.hour,
+          minute: now.minute,
+        });
+      }
+    } else if (targetDate instanceof Date) {
+      evalDt = DateTime.fromJSDate(targetDate, { zone });
+    } else {
+      evalDt = targetDate.setZone(zone);
+    }
+
+    return {
+      evalDt,
+      startOfDay: evalDt.startOf('day').toJSDate(),
+      endOfDay: evalDt.endOf('day').toJSDate(),
+    };
+  }
+
+  /**
    * Resolves the DayOfWeek enum ("MONDAY", "TUESDAY", etc.) for a given date in the salon timezone.
    */
   public static getDayOfWeekEnum(

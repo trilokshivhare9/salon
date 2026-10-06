@@ -395,7 +395,7 @@ export class LocationPicker {
         <div id="loc-panel-search" style="display: ${this.activeMode === 'search' ? 'block' : 'none'}; position: relative; margin-bottom: 8px;">
           <div style="font-size: 0.72rem; color: #a5b4fc; margin-bottom: 5px; display: flex; align-items: center; justify-content: space-between; gap: 6px;">
             <span style="display: inline-flex; align-items: center; gap: 4px;">
-              <span style="color: #818cf8;">🎯</span> Target City: <strong style="color: #f1f5f9;">${activeCity || 'India'}</strong>
+              <span style="color: #A855F7;">🎯</span> Target City: <strong style="color: #f1f5f9;">${activeCity || 'India'}</strong>
             </span>
             <span style="font-size: 0.68rem; color: var(--text-muted);">Scoped search</span>
           </div>
@@ -403,7 +403,7 @@ export class LocationPicker {
             <input type="text" class="form-control" id="loc-search-input" value="${(this.state.searchQuery || '').replace(/"/g, '&quot;')}" placeholder="${activeCity ? `Search landmark, market, or mall in ${activeCity}...` : 'Type area, landmark, or market...'}" style="font-size: 0.82rem; padding-left: 32px; height: 38px;" autocomplete="off" />
             <span style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); font-size: 0.85rem; color: var(--text-muted); pointer-events: none;">🔍</span>
           </div>
-          <div id="loc-search-dropdown" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: #182234; border: 1px solid rgba(99,102,241,0.4); border-radius: 8px; z-index: 999; margin-top: 4px; box-shadow: 0 10px 25px rgba(0,0,0,0.7); max-height: 240px; overflow-y: auto;"></div>
+          <div id="loc-search-dropdown" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: #182234; border: 1px solid rgba(139, 61, 255,0.4); border-radius: 8px; z-index: 999; margin-top: 4px; box-shadow: 0 10px 25px rgba(0,0,0,0.7); max-height: 240px; overflow-y: auto;"></div>
         </div>
 
         <!-- Mode 2: Live GPS -->
@@ -454,14 +454,14 @@ export class LocationPicker {
 
         <!-- Live Google Directions Route Preview Chip -->
         ${directionsUrl ? `
-          <div style="margin-top: 8px; padding: 7px 10px; background: rgba(99,102,241,0.08); border: 1px solid rgba(99,102,241,0.22); border-radius: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+          <div style="margin-top: 8px; padding: 7px 10px; background: rgba(139, 61, 255,0.08); border: 1px solid rgba(139, 61, 255,0.22); border-radius: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
             <div style="display: flex; align-items: center; gap: 6px; font-size: 0.74rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
               <span>📍</span>
               <span style="color: #c7d2fe; font-weight: 600;">
                 ${hasCoordinates ? `GPS Active (${this.state.latitude ? this.state.latitude.toFixed(4) : ''}, ${this.state.longitude ? this.state.longitude.toFixed(4) : ''})` : 'Search Navigation Active'}
               </span>
             </div>
-            <a href="${directionsUrl}" target="_blank" rel="noopener noreferrer" style="font-size: 0.72rem; padding: 4px 10px; background: rgba(99,102,241,0.2); border: 1px solid rgba(99,102,241,0.38); color: #c7d2fe; text-decoration: none; border-radius: 6px; font-weight: 600; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;">
+            <a href="${directionsUrl}" target="_blank" rel="noopener noreferrer" style="font-size: 0.72rem; padding: 4px 10px; background: rgba(139, 61, 255,0.2); border: 1px solid rgba(139, 61, 255,0.38); color: #c7d2fe; text-decoration: none; border-radius: 6px; font-weight: 600; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;">
               🗺️ Test Route ↗
             </a>
           </div>
@@ -476,9 +476,9 @@ export class LocationPicker {
   getTabStyle(mode) {
     const isActive = this.activeMode === mode;
     return `
-      background: ${isActive ? 'rgba(99, 102, 241, 0.28)' : 'transparent'};
+      background: ${isActive ? 'rgba(139, 61, 255, 0.28)' : 'transparent'};
       color: ${isActive ? '#ffffff' : '#94a3b8'};
-      border: ${isActive ? '1px solid rgba(99, 102, 241, 0.55)' : '1px solid transparent'};
+      border: ${isActive ? '1px solid rgba(139, 61, 255, 0.55)' : '1px solid transparent'};
       box-shadow: ${isActive ? '0 1px 4px rgba(0, 0, 0, 0.25)' : 'none'};
       font-size: 0.72rem;
       font-weight: ${isActive ? '700' : '600'};
@@ -553,12 +553,12 @@ export class LocationPicker {
     // Always include a 1-click fallback to use the typed query directly
     if (query.length >= 2) {
       itemsHtml += `
-        <div id="btn-loc-custom-fallback" style="padding: 10px 14px; background: rgba(99,102,241,0.15); border-top: 1px solid rgba(99,102,241,0.3); cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
+        <div id="btn-loc-custom-fallback" style="padding: 10px 14px; background: rgba(139, 61, 255,0.15); border-top: 1px solid rgba(139, 61, 255,0.3); cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
           <div>
             <div style="font-weight: 700; color: #a5b4fc; font-size: 0.78rem;">✨ Use "${query}" as shop address</div>
             <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 2px;">City: ${activeCity || 'Selected City'} • Will generate Google Directions link</div>
           </div>
-          <span style="font-size: 0.72rem; padding: 4px 8px; background: rgba(99,102,241,0.35); border-radius: 4px; color: #fff; font-weight: 600;">Select ↵</span>
+          <span style="font-size: 0.72rem; padding: 4px 8px; background: rgba(139, 61, 255,0.35); border-radius: 4px; color: #fff; font-weight: 600;">Select ↵</span>
         </div>
       `;
     }
@@ -568,7 +568,7 @@ export class LocationPicker {
 
     // Click handlers for search results
     drop.querySelectorAll('.loc-search-item').forEach((el) => {
-      el.addEventListener('mouseenter', () => (el.style.background = 'rgba(99,102,241,0.2)'));
+      el.addEventListener('mouseenter', () => (el.style.background = 'rgba(139, 61, 255,0.2)'));
       el.addEventListener('mouseleave', () => (el.style.background = 'transparent'));
       el.addEventListener('click', () => {
         const idx = parseInt(el.getAttribute('data-idx'), 10);

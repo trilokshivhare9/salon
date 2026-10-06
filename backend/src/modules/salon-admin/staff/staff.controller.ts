@@ -41,16 +41,20 @@ export class StaffController {
   ) {}
 
   @Get()
-  async getStaff(@CurrentSalonId() salonId: string) {
-    return this.staffService.getSalonStaff(salonId);
+  async getStaff(
+    @CurrentSalonId() salonId: string,
+    @Query('date') dateStr?: string,
+  ) {
+    return this.staffService.getSalonStaff(salonId, dateStr);
   }
 
   @Get(':id')
   async getStaffById(
     @CurrentSalonId() salonId: string,
     @Param('id') staffId: string,
+    @Query('date') dateStr?: string,
   ) {
-    return this.staffService.getStaffById(salonId, staffId);
+    return this.staffService.getStaffById(salonId, staffId, dateStr);
   }
 
   @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)

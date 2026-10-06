@@ -220,7 +220,7 @@ export class WhatsAppTemplateService {
       ...staffList.map((st) => ({
         id: `staff_${st.id}`,
         title: st.name.slice(0, 24),
-        description: st.role ? st.role.slice(0, 72) : 'Specialist',
+        description: (st.customerStatusText || st.role || 'Specialist').slice(0, 72),
       })),
     ];
 

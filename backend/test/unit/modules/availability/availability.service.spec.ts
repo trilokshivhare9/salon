@@ -1,6 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AvailabilityService } from '../../../../src/modules/salon-admin/availability/availability.service';
 import { AvailabilityEngineService } from '../../../../src/modules/salon-admin/availability/availability-engine.service';
+import { SlotSqueezePolicy } from '../../../../src/modules/salon-admin/availability/policies/slot-squeeze.policy';
+import { StylistStatusEngine } from '../../../../src/modules/salon-admin/staff/engines/stylist-status.engine';
 import { PrismaService } from '../../../../src/database/prisma.service';
 import { DayOfWeek } from '@prisma/client';
 import { DateTime } from 'luxon';
@@ -87,16 +89,18 @@ describe('AvailabilityService (Unit Tests)', () => {
       providers: [
         AvailabilityService,
         AvailabilityEngineService,
+        SlotSqueezePolicy,
+        StylistStatusEngine,
         {
           provide: PrismaService,
           useValue: {
             salon: { findUnique: jest.fn() },
             service: { findMany: jest.fn() },
-            salonWorkingHours: { findUnique: jest.fn() },
+            salonWorkingHours: { findUnique: jest.fn(), findMany: jest.fn() },
             stylist: { findMany: jest.fn(), count: jest.fn() },
             stylistAbsence: { findMany: jest.fn() },
             appointment: { findMany: jest.fn() },
-            salonClosure: { findFirst: jest.fn().mockResolvedValue(null) },
+            salonClosure: { findFirst: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]) },
           },
         },
       ],
@@ -377,6 +381,31 @@ describe('AvailabilityService (Unit Tests)', () => {
       );
       expect(result.availableSlots).toEqual([]);
       expect(result.status).toBe('FULLY_BOOKED');
+    });
+
+    it('should enrich qualified stylists with real-time operational status and customerStatusText', async () => {
+      jest.spyOn(prisma.salon, 'findUnique').mockResolvedValue(mockSalon as any);
+      jest.spyOn(prisma.salonWorkingHours, 'findMany').mockResolvedValue([mockSalonWorkingHours] as any);
+      jest.spyOn(prisma.salonClosure, 'findMany').mockResolvedValue([]);
+      jest.spyOn(prisma.stylistAbsence, 'findMany').mockResolvedValue([]);
+      jest.spyOn(prisma.appointment, 'findMany').mockResolvedValue([]);
+      jest.spyOn(prisma.stylist, 'findMany').mockResolvedValue([
+        {
+          id: mockStylistId1,
+          name: 'Rahul Sharma',
+          role: 'Hair Specialist',
+          status: 'ACTIVE',
+          followsSalonSchedule: true,
+          workingHours: [],
+          services: [{ serviceId: mockServiceId1 }],
+        },
+      ] as any);
+
+      const result = await service.getQualifiedStylists(mockSalonId, mockService1.id);
+      expect(result).toHaveLength(1);
+      expect(result[0].customerStatusText).toBeDefined();
+      expect(result[0].customerStatusText).toContain('Available');
+      expect(result[0].isAvailableToday).toBe(true);
     });
   });
 });

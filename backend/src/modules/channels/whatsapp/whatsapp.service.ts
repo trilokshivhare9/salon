@@ -159,6 +159,27 @@ export class WhatsAppService {
     return this.whatsAppSenderService.sendMetaMessage(toPhone, payload, phoneNumberId, salonId);
   }
 
+  async sendMetaTemplateMessage(
+    toPhone: string,
+    templateName: string,
+    parameters: Array<{ type: 'text'; text: string }> = [],
+    languageCode = 'en',
+    phoneNumberId?: string,
+    salonId?: string,
+  ): Promise<boolean> {
+    if (this.whatsAppSenderService) {
+      (this.whatsAppSenderService as any).whatsAppService = this;
+    }
+    return this.whatsAppSenderService.sendTemplateMessage(
+      toPhone,
+      templateName,
+      parameters,
+      languageCode,
+      phoneNumberId,
+      salonId,
+    );
+  }
+
   // 3. Core Action Handler (Delegates 100% to WhatsAppActionHandlerService)
   async handleIncomingMessage(
     salonId: string,

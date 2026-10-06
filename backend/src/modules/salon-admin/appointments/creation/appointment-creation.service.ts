@@ -5,6 +5,7 @@ import {
   BadRequestException,
   NotFoundException,
   Inject,
+  Optional,
   forwardRef,
 } from '@nestjs/common';
 import { PrismaService } from '../../../../database/prisma.service';
@@ -21,6 +22,9 @@ import {
   ServiceStatus,
   AbsenceStatus,
   LeavePortion,
+  NotificationChannel,
+  NotificationStatus,
+  AdminRole,
 } from '@prisma/client';
 import { DateTime } from 'luxon';
 import { TimeUtility } from '../../../../common/utils/time.utility';
@@ -30,6 +34,7 @@ import {
   hashToSignedInt32,
   sanitizePhone,
 } from '../utils/appointment-helpers';
+import { WhatsAppService } from '../../../channels/whatsapp/whatsapp.service';
 
 @Injectable()
 export class AppointmentCreationService {
@@ -40,6 +45,9 @@ export class AppointmentCreationService {
     private availabilityService: AvailabilityService,
     private engine: AvailabilityEngineService,
     private eventsService: AppointmentEventsService,
+    @Optional()
+    @Inject(forwardRef(() => WhatsAppService))
+    private whatsappService?: WhatsAppService,
   ) {}
 
   /**
@@ -657,6 +665,17 @@ export class AppointmentCreationService {
 
       const formatted = formatAppointment(createdAppt);
       this.eventsService.emitSalonEvent(salonId, 'NEW_BOOKING', formatted);
+
+      // Multi-channel Salon Owner & Desk Notification Dispatch
+      this.dispatchSalonOwnerNewBookingNotification(
+        salonId,
+        createdAppt,
+        dto,
+        cleanPhone,
+        serviceNameSnapshot,
+        totalPrice,
+      );
+
       return formatted;
     } catch (err: any) {
       if (err?.code === '23P01') {
@@ -674,5 +693,155 @@ export class AppointmentCreationService {
       this.logger.error(`Error creating appointment: ${err.message}`, err.stack);
       throw err;
     }
+  }
+
+  /**
+   * Dispatches immediate multi-channel notification to the Salon Owner / Desk Admins.
+   * Runs detached via setImmediate so appointment creation transaction is not delayed.
+   */
+  private dispatchSalonOwnerNewBookingNotification(
+    salonId: string,
+    appointment: any,
+    dto: CreateAppointmentDto,
+    cleanCustomerPhone: string,
+    serviceNameSnapshot: string,
+    totalPrice: number,
+  ) {
+    setImmediate(async () => {
+      try {
+        const salon = await this.prisma.salon.findUnique({
+          where: { id: salonId },
+          include: { whatsappAccount: true },
+        });
+
+        if (!salon) return;
+
+        // Resolve salon notification recipient phone:
+        // Priority 1: Salon's official phone
+        // Priority 2: Admin owners/managers of this salon
+        let recipientPhone = salon.phone ? sanitizePhone(salon.phone) : null;
+
+        if (!recipientPhone) {
+          const ownerAdmin = await this.prisma.admin.findFirst({
+            where: {
+              salonId,
+              role: { in: [AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN] },
+              phone: { not: null },
+            },
+            select: { phone: true },
+          });
+          if (ownerAdmin?.phone) {
+            recipientPhone = sanitizePhone(ownerAdmin.phone);
+          }
+        }
+
+        if (!recipientPhone) {
+          this.logger.warn(
+            `[AppointmentCreationService] No salon or admin phone number found to notify for salon ${salonId}`,
+          );
+          return;
+        }
+
+        const isQuick =
+          appointment.bookingType === BookingType.QUICK ||
+          appointment.status === AppointmentStatus.PENDING_ACCEPTANCE;
+
+        const customerDisplayName = dto.customerName || 'Client';
+        const formattedDate = dto.date.includes('T') ? dto.date.split('T')[0] : dto.date;
+        const stylistDisplayName = appointment.stylist?.name || 'Any Specialist';
+
+        const alertHeader = isQuick
+          ? '⚡ *EXPRESS QUICK BOOKING REQUEST!*'
+          : '🔔 *NEW SALON APPOINTMENT BOOKED!*';
+
+        const alertBody =
+          `${alertHeader}\n\n` +
+          `• *Customer:* ${customerDisplayName} (${cleanCustomerPhone})\n` +
+          `• *Service:* ${serviceNameSnapshot}\n` +
+          `• *Date & Time:* ${formattedDate} at ${dto.startTime}\n` +
+          `• *Specialist:* ${stylistDisplayName}\n` +
+          `• *Amount:* ₹${totalPrice}\n\n` +
+          (isQuick
+            ? `⏳ *Status: Awaiting Desk Acceptance*\nPlease open your dashboard to accept or seat the client!`
+            : `✅ *Status: Confirmed*\nPlease prepare chair for client arrival.`);
+
+        // 1. Ledger row in Notification table
+        const notifRecord = await this.prisma.notification.create({
+          data: {
+            salonId,
+            appointmentId: appointment.id,
+            recipientPhone,
+            channel: NotificationChannel.WHATSAPP,
+            templateName: 'salon_new_booking_alert',
+            messageBody: alertBody,
+            status: NotificationStatus.PENDING,
+          },
+        });
+
+        // 2. Dispatch via WhatsApp
+        if (salon.whatsappAccount?.phoneNumberId && this.whatsappService) {
+          const phoneNumberId = salon.whatsappAccount.phoneNumberId;
+
+          // Attempt Meta Pre-Approved Template dispatch first (bypasses 24h window)
+          const templateParams = [
+            { type: 'text' as const, text: salon.name },
+            { type: 'text' as const, text: `${customerDisplayName} (${cleanCustomerPhone})` },
+            { type: 'text' as const, text: serviceNameSnapshot },
+            { type: 'text' as const, text: `${formattedDate} at ${dto.startTime}` },
+            { type: 'text' as const, text: isQuick ? 'Quick Booking' : 'Appointment' },
+          ];
+
+          let sent = await this.whatsappService.sendMetaTemplateMessage(
+            recipientPhone,
+            'salon_new_booking_alert',
+            templateParams,
+            'en',
+            phoneNumberId,
+            salonId,
+          ).catch(() => false);
+
+          // If template sending fails (e.g. template not created in Meta WABA yet),
+          // fallback to interactive/text notification
+          if (!sent) {
+            sent = await this.whatsappService.sendMetaMessage(
+              recipientPhone,
+              {
+                textBody: alertBody,
+                interactiveType: isQuick ? 'button' : undefined,
+                buttons: isQuick
+                  ? [
+                      { id: 'btn_owner_view_dashboard', title: '📋 Open Desk' },
+                    ]
+                  : undefined,
+              },
+              phoneNumberId,
+              salonId,
+            ).catch((err) => {
+              this.logger.warn(`Failed to dispatch direct WhatsApp notice to salon owner: ${err.message}`);
+              return false;
+            });
+          }
+
+          // Update Notification ledger
+          if (sent) {
+            await this.prisma.notification.update({
+              where: { id: notifRecord.id },
+              data: { status: NotificationStatus.SENT, sentAt: new Date() },
+            });
+            this.logger.log(`[AppointmentCreationService] ✅ Salon owner notified successfully at ${recipientPhone}`);
+          } else {
+            await this.prisma.notification.update({
+              where: { id: notifRecord.id },
+              data: { status: NotificationStatus.FAILED, errorDetails: 'WhatsApp dispatch failed' },
+            });
+          }
+        }
+      } catch (err: any) {
+        this.logger.error(
+          `[AppointmentCreationService] Failed in salon owner notification pipeline: ${err.message}`,
+          err.stack,
+        );
+      }
+    });
   }
 }

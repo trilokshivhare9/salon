@@ -6,6 +6,7 @@ import {
   Body,
   Param,
   Query,
+  Headers,
   UseGuards,
   Sse,
   MessageEvent,
@@ -23,7 +24,7 @@ import { CurrentSalonId } from '../../../common/decorators/tenant.decorator';
 import { CurrentUser, AuthenticatedUser } from '../../../common/decorators/current-user.decorator';
 import { Public } from '../../../common/decorators/public.decorator';
 import { AppointmentStatus, AdminRole } from '@prisma/client';
-import { Observable } from 'rxjs';
+import { Observable, interval, merge } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { RemindersService } from './reminders/reminders.service';
 
@@ -45,12 +46,26 @@ export class AppointmentsController {
   @Sse('stream/:salonId')
   stream(
     @Param('salonId') salonId: string,
+    @Headers('last-event-id') lastEventIdHeader?: string,
+    @Query('lastEventId') lastEventIdQuery?: string,
   ): Observable<MessageEvent> {
-    return this.appointmentsService.getSalonEvents(salonId).pipe(
+    const lastEventId = lastEventIdHeader || lastEventIdQuery;
+    const events$ = this.appointmentsService.getSalonEvents(salonId, lastEventId).pipe(
       map((event) => ({
+        id: String(event.id || ''),
         data: event,
-      })),
+      } as MessageEvent)),
     );
+
+    // 20-second heartbeat keep-alive ping prevents reverse proxies and carrier NAT from silently terminating the socket
+    const heartbeat$ = interval(20000).pipe(
+      map(() => ({
+        id: 'ping',
+        data: { type: 'PING', timestamp: new Date().toISOString() },
+      } as MessageEvent)),
+    );
+
+    return merge(events$, heartbeat$);
   }
 
   @Get()

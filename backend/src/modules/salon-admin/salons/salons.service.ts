@@ -282,7 +282,7 @@ export class SalonsService {
           longitude: dto.longitude !== undefined && dto.longitude !== null ? Number(dto.longitude) : null,
           googleMapsUrl: dto.googleMapsUrl?.trim() || null,
           locationType: dto.locationType || 'MANUAL',
-          timezone: dto.timezone || 'Asia/Kolkata',
+          timezone: dto.timezone || TimeUtility.DEFAULT_TIMEZONE,
           status: SalonStatus.ACTIVE,
           defaultStartTime: openTime,
           defaultEndTime: closeTime,
@@ -487,8 +487,7 @@ Here are your salon owner login credentials:
     const salon = await this.prisma.salon.findUnique({ where: { id: salonId } });
     if (!salon) throw new NotFoundException('Salon not found.');
 
-    const todayISO = DateTime.now().setZone(salon.timezone || 'Asia/Kolkata').toISODate();
-    const startOfToday = DateTime.fromISO(todayISO, { zone: salon.timezone || 'Asia/Kolkata' }).toJSDate();
+    const { startOfDay: startOfToday } = TimeUtility.getDayBoundaries(undefined, salon.timezone);
 
     const activeBookings = await this.prisma.appointment.findMany({
       where: {
@@ -525,8 +524,7 @@ Here are your salon owner login credentials:
 
     // If salon is currently ACTIVE and Super Admin is attempting to DEACTIVATE it
     if (salon.status === SalonStatus.ACTIVE) {
-      const todayISO = DateTime.now().setZone(salon.timezone || 'Asia/Kolkata').toISODate();
-      const startOfToday = DateTime.fromISO(todayISO, { zone: salon.timezone || 'Asia/Kolkata' }).toJSDate();
+      const { startOfDay: startOfToday } = TimeUtility.getDayBoundaries(undefined, salon.timezone);
 
       const activeBookings = await this.prisma.appointment.findMany({
         where: {
@@ -706,7 +704,7 @@ Here are your salon owner login credentials:
   async updateWorkingHours(salonId: string, dto: UpdateWorkingHoursDto) {
     const salon = await this.prisma.salon.findUnique({ where: { id: salonId } });
     if (!salon) throw new NotFoundException('Salon not found.');
-    const tz = salon.timezone || 'Asia/Kolkata';
+    const tz = salon.timezone || TimeUtility.DEFAULT_TIMEZONE;
 
     return this.prisma.$transaction(async (tx) => {
       for (const item of dto.hours) {
@@ -875,7 +873,7 @@ Here are your salon owner login credentials:
     const salon = await this.prisma.salon.findUnique({ where: { id: salonId } });
     if (!salon) throw new NotFoundException('Salon not found.');
 
-    const tz = salon.timezone || 'Asia/Kolkata';
+    const tz = salon.timezone || TimeUtility.DEFAULT_TIMEZONE;
     const startDt = DateTime.fromISO(dto.startDate, { zone: tz }).startOf('day');
     const endDt = DateTime.fromISO(dto.endDate, { zone: tz }).endOf('day');
 
@@ -1012,7 +1010,7 @@ Here are your salon owner login credentials:
     if (!closure) throw new NotFoundException('Salon closure record not found.');
 
     const salon = await this.prisma.salon.findUnique({ where: { id: salonId } });
-    const tz = salon?.timezone || 'Asia/Kolkata';
+    const tz = salon?.timezone || TimeUtility.DEFAULT_TIMEZONE;
     const todayDt = DateTime.now().setZone(tz).startOf('day');
     const closureEndDt = DateTime.fromJSDate(closure.endDate, { zone: tz }).endOf('day');
     if (closureEndDt < todayDt) {

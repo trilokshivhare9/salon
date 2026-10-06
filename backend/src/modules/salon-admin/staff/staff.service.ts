@@ -14,6 +14,8 @@ import {
 } from './dto/create-staff.dto';
 import { StylistStatus, ServiceStatus, SalonStatus, DayOfWeek, AppointmentStatus } from '@prisma/client';
 import { AppointmentsService } from '../appointments/appointments.service';
+import { StylistStatusEngine, StylistOperationalStatus } from './engines/stylist-status.engine';
+import { TimeUtility } from '../../../common/utils/time.utility';
 import { DateTime } from 'luxon';
 import * as crypto from 'crypto';
 
@@ -22,6 +24,7 @@ export class StaffService {
   constructor(
     private prisma: PrismaService,
     private appointmentsService: AppointmentsService,
+    private statusEngine: StylistStatusEngine,
   ) {}
 
   private hashToSignedInt32(input: string): number {
@@ -43,8 +46,8 @@ export class StaffService {
     });
   }
 
-  async getSalonStaff(salonId: string) {
-    return this.prisma.stylist.findMany({
+  async getSalonStaff(salonId: string, targetDateStr?: string) {
+    const stylists = await this.prisma.stylist.findMany({
       where: { salonId },
       include: {
         services: {
@@ -61,9 +64,16 @@ export class StaffService {
       },
       orderBy: { createdAt: 'asc' },
     });
+
+    const statusMap = await this.statusEngine.resolveSalonStaffStatuses(salonId, {
+      targetDate: targetDateStr,
+      stylists,
+    });
+
+    return stylists.map((st) => this.statusEngine.attachOperationalStatus(st, statusMap.get(st.id)));
   }
 
-  async getStaffById(salonId: string, staffId: string) {
+  async getStaffById(salonId: string, staffId: string, targetDateStr?: string) {
     const stylist = await this.prisma.stylist.findFirst({
       where: { id: staffId, salonId },
       include: {
@@ -83,7 +93,13 @@ export class StaffService {
       throw new NotFoundException('Stylist not found.');
     }
 
-    return stylist;
+    const statusMap = await this.statusEngine.resolveSalonStaffStatuses(salonId, {
+      targetDate: targetDateStr,
+      stylistId: staffId,
+      stylists: [stylist],
+    });
+
+    return this.statusEngine.attachOperationalStatus(stylist, statusMap.get(staffId));
   }
 
   async createStaff(salonId: string, dto: CreateStaffDto) {
@@ -160,7 +176,7 @@ export class StaffService {
     // If switching to follow salon schedule, ensure future appointments fit within salon operating hours
     if (dto.followsSalonSchedule === true && !existing.followsSalonSchedule) {
       const salon = await this.prisma.salon.findUnique({ where: { id: salonId } });
-      const tz = salon?.timezone || 'Asia/Kolkata';
+      const tz = salon?.timezone || TimeUtility.DEFAULT_TIMEZONE;
       const salonHours = await this.prisma.salonWorkingHours.findMany({ where: { salonId } });
       const hoursMap = new Map(salonHours.map((h) => [h.dayOfWeek, h]));
 
@@ -263,14 +279,21 @@ export class StaffService {
     await this.getStaffById(salonId, staffId);
     const salon = await this.prisma.salon.findUnique({ where: { id: salonId } });
     if (!salon) throw new NotFoundException('Salon not found.');
-    const tz = salon.timezone || 'Asia/Kolkata';
+    const tz = salon.timezone || TimeUtility.DEFAULT_TIMEZONE;
 
     const res = await this.prisma.$transaction(async (tx) => {
-      const followsSchedule = dto.followsSalonSchedule !== undefined ? dto.followsSalonSchedule : false;
+      const followsSchedule = dto.followsSalonSchedule !== undefined ? dto.followsSalonSchedule : (dto.hours && dto.hours.length > 0 ? false : true);
       await tx.stylist.update({
         where: { id: staffId },
         data: { followsSalonSchedule: followsSchedule },
       });
+
+      if (followsSchedule) {
+        await tx.stylistWorkingHours.deleteMany({
+          where: { stylistId: staffId },
+        });
+        return [];
+      }
 
       const now = new Date();
       const futureAppointments = await tx.appointment.findMany({
@@ -611,7 +634,7 @@ export class StaffService {
     }
 
     const salon = await this.prisma.salon.findUnique({ where: { id: salonId } });
-    const tz = salon?.timezone || 'Asia/Kolkata';
+    const tz = salon?.timezone || TimeUtility.DEFAULT_TIMEZONE;
 
     // Verify break does not conflict with existing future appointments for this stylist
     const now = new Date();

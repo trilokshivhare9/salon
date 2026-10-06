@@ -345,4 +345,121 @@ export class WhatsAppSenderService {
       return false;
     }
   }
+
+  /**
+   * Dispatches a pre-approved Meta WhatsApp Template message.
+   * Required for business-initiated notifications outside the 24-hour customer service window
+   * (e.g. notifications sent to Salon Owners or Desk Managers).
+   */
+  async sendTemplateMessage(
+    toPhone: string,
+    templateName: string,
+    parameters: Array<{ type: 'text'; text: string }> = [],
+    languageCode = 'en',
+    phoneNumberId?: string,
+    salonId?: string,
+  ): Promise<boolean> {
+    let accessToken =
+      this.configService.get<string>('whatsapp.accessToken') ||
+      process.env.WHATSAPP_ACCESS_TOKEN;
+    let phoneId =
+      phoneNumberId ||
+      this.configService.get<string>('whatsapp.phoneNumberId');
+
+    if (salonId) {
+      const acc = await this.getCachedAccount(salonId);
+      if (acc) {
+        if (acc.phoneNumberId) phoneId = acc.phoneNumberId;
+        if (acc.accessTokenEncrypted && acc.accessTokenEncrypted !== 'system_managed') {
+          accessToken = acc.accessTokenEncrypted;
+        }
+      }
+    }
+
+    const cleanTo = this.cleanPhone(toPhone);
+
+    if (!phoneId || !accessToken) {
+      this.logger.warn(
+        `[WhatsAppSenderService] Cannot send WhatsApp template to ${toPhone}: Missing phoneId or accessToken.`,
+      );
+      return false;
+    }
+
+    try {
+      const url = `https://graph.facebook.com/v20.0/${phoneId}/messages`;
+      const bodyData: any = {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: cleanTo.replace('+', ''),
+        type: 'template',
+        template: {
+          name: templateName,
+          language: { code: languageCode },
+          components: parameters.length > 0 ? [
+            {
+              type: 'body',
+              parameters,
+            },
+          ] : undefined,
+        },
+      };
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+          Connection: 'keep-alive',
+        },
+        body: JSON.stringify(bodyData),
+        keepalive: true,
+        signal: AbortSignal.timeout(6000),
+      });
+
+      const resJson: any = await response.json();
+
+      if (!response.ok) {
+        this.logger.error(
+          `Meta WhatsApp Template API error (${response.status}): ${JSON.stringify(resJson)}`,
+        );
+        setImmediate(() => {
+          this.prisma.whatsAppLog
+            .create({
+              data: {
+                salonId: salonId || null,
+                phone: cleanTo,
+                direction: WhatsAppMessageDirection.OUTBOUND,
+                messageText: `[TEMPLATE: ${templateName}]`,
+                status: 'FAILED',
+                errorMessage: JSON.stringify(resJson),
+              },
+            })
+            .catch(() => {});
+        });
+        return false;
+      }
+
+      const metaMsgId = resJson?.messages?.[0]?.id || null;
+      setImmediate(() => {
+        this.prisma.whatsAppLog
+          .create({
+            data: {
+              salonId: salonId || null,
+              phone: cleanTo,
+              direction: WhatsAppMessageDirection.OUTBOUND,
+              messageText: `[TEMPLATE: ${templateName}]`,
+              status: 'SENT',
+              rawPayload: resJson,
+              metaMessageId: metaMsgId,
+            },
+          })
+          .catch(() => {});
+      });
+
+      return true;
+    } catch (err: any) {
+      this.logger.error(`Exception dispatching Meta WhatsApp template: ${err.message}`, err.stack);
+      return false;
+    }
+  }
 }

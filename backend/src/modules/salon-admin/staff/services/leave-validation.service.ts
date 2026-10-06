@@ -6,7 +6,7 @@ import {
 import { DateTime } from 'luxon';
 import { PrismaService } from '../../../../database/prisma.service';
 import { MarkAbsentDto, PreviewAbsenceQueryDto, ExtendLeaveDto } from '../dto/absence.dto';
-import { LeavePortion } from '@prisma/client';
+import { LeavePortion, StylistStatus } from '@prisma/client';
 
 export interface NormalizedLeaveDates {
   startIso: string;
@@ -27,10 +27,15 @@ export class LeaveValidationService {
   async validateStylistAndSalon(salonId: string, stylistId: string) {
     const stylist = await this.prisma.stylist.findFirst({
       where: { id: stylistId, salonId },
-      select: { id: true, name: true, phone: true, followsSalonSchedule: true },
+      select: { id: true, name: true, phone: true, status: true, followsSalonSchedule: true },
     });
     if (!stylist) {
       throw new NotFoundException('Stylist not found in this salon.');
+    }
+
+    const effectiveStatus = stylist.status ?? StylistStatus.ACTIVE;
+    if (effectiveStatus !== StylistStatus.ACTIVE) {
+      throw new BadRequestException('Cannot schedule leaves for an inactive stylist account.');
     }
 
     const salon = await this.prisma.salon.findUnique({

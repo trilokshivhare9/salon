@@ -16,13 +16,54 @@ export class RealtimeNotifier {
     this.onEventCallback = onEventCallback;
     this.eventSource = null;
     this.dedupCache = new Map(); // key -> expiry timestamp
+    this.lastPacketAt = Date.now();
+    this.watchdogTimer = null;
+
+    this.handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        const elapsed = Date.now() - this.lastPacketAt;
+        console.log(`[Realtime] 👁️ Tab became visible (last packet ${Math.round(elapsed / 1000)}s ago)`);
+        if (!this.eventSource || this.eventSource.readyState !== EventSource.OPEN || elapsed > 35000) {
+          console.log('[Realtime] 🔄 Re-establishing live stream on tab focus...');
+          this.connect();
+        }
+        if (window.salonDashboard && typeof window.salonDashboard.loadData === 'function') {
+          window.salonDashboard.loadData(true).catch(() => {});
+        }
+      }
+    };
+
+    this.handleOnline = () => {
+      console.log('[Realtime] 🌐 Network online: Re-establishing live stream and syncing data...');
+      this.connect();
+      if (window.salonDashboard && typeof window.salonDashboard.loadData === 'function') {
+        window.salonDashboard.loadData(true).catch(() => {});
+      }
+    };
 
     this.init();
   }
 
   init() {
     this.requestNotificationPermission();
+    document.addEventListener('visibilitychange', this.handleVisibilityChange);
+    window.addEventListener('online', this.handleOnline);
+    this.startWatchdog();
     this.connect();
+  }
+
+  startWatchdog() {
+    if (this.watchdogTimer) clearInterval(this.watchdogTimer);
+    this.watchdogTimer = setInterval(() => {
+      const elapsed = Date.now() - this.lastPacketAt;
+      if (elapsed > 45000) {
+        console.warn(`[Realtime] ⏱️ Watchdog: Missed ping for ${Math.round(elapsed / 1000)}s. Force-reconnecting live stream...`);
+        this.connect();
+        if (window.salonDashboard && typeof window.salonDashboard.loadData === 'function') {
+          window.salonDashboard.loadData(true).catch(() => {});
+        }
+      }
+    }, 10000);
   }
 
   async requestNotificationPermission() {
@@ -35,8 +76,9 @@ export class RealtimeNotifier {
     }
   }
 
-  // Deduplication check: prevents multiple triggers for the exact same event within 6 seconds
+  // Deduplication check: prevents multiple triggers for the exact same event within 8 seconds
   isDuplicateEvent(eventKey) {
+    if (!eventKey) return false;
     const now = Date.now();
     // Clean expired entries
     for (const [key, expiry] of this.dedupCache.entries()) {
@@ -49,13 +91,13 @@ export class RealtimeNotifier {
       return true;
     }
 
-    this.dedupCache.set(eventKey, now + 6000);
+    this.dedupCache.set(eventKey, now + 8000);
     return false;
   }
 
   // Smart Dispatcher: Only shows OS native notification when app is in BACKGROUND.
   // When in FOREGROUND, shows only the sleek in-app luxury banner.
-  dispatchNotification({ title, body, badgeText, clientName, details, specialist, icon = '⚡', variant = 'success', eventKey, actionCallback }) {
+  dispatchNotification({ title, body, badgeText, clientName, details, specialist, icon = '⚡', variant = 'success', eventKey, actionCallback, showActionBtn = false }) {
     if (eventKey && this.isDuplicateEvent(eventKey)) {
       console.log('[Realtime] Ignored duplicate event:', eventKey);
       return;
@@ -74,6 +116,7 @@ export class RealtimeNotifier {
         icon,
         variant,
         actionCallback,
+        showActionBtn,
       });
     } else {
       // 2. BACKGROUND MODE: Native Phone/OS Push via Service Worker (Rings/vibrates when locked/minimized)
@@ -119,26 +162,25 @@ export class RealtimeNotifier {
     }
   }
 
-  // Luxury Glassmorphic In-App Banner with Mobile Safe-Area Inset Protection
-  showLuxuryBanner({ badgeText, title, clientName, details, specialist, icon = '⚡', variant = 'success', actionCallback }) {
+  // Luxury Glassmorphic In-App Banner with Mobile-First Capsule & Stack Limiter
+  showLuxuryBanner({ badgeText, title, clientName, details, specialist, icon = '⚡', variant = 'success', actionCallback, showActionBtn = false }) {
     let container = document.getElementById('live-banner-container');
     if (!container) {
       container = document.createElement('div');
       container.id = 'live-banner-container';
-      // Professional Safe Area positioning: Never cut off by iPhone Dynamic Island / notch / Android status bar
-      container.style.cssText = `
-        position: fixed;
-        top: max(16px, env(safe-area-inset-top, 0px) + 14px);
-        right: max(16px, env(safe-area-inset-right, 0px) + 14px);
-        left: max(16px, env(safe-area-inset-left, 0px) + 14px);
-        z-index: 999999;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 12px;
-        pointer-events: none;
-      `;
       document.body.appendChild(container);
+    }
+
+    // Stack Limiter: Max 1 on mobile, Max 2 on desktop (prevents multiple banners cascading down)
+    const isMobile = window.innerWidth <= 640;
+    const maxAllowed = isMobile ? 1 : 2;
+    const existingBanners = Array.from(container.querySelectorAll('.live-luxury-banner'));
+    if (existingBanners.length >= maxAllowed) {
+      for (let i = 0; i <= existingBanners.length - maxAllowed; i++) {
+        const oldBanner = existingBanners[i];
+        oldBanner.classList.remove('banner-visible');
+        setTimeout(() => oldBanner.remove(), 250);
+      }
     }
 
     // Color tokens based on variant
@@ -155,110 +197,94 @@ export class RealtimeNotifier {
       glowColor = 'rgba(245, 158, 11, 0.25)';
       badgeBg = 'rgba(245, 158, 11, 0.15)';
     } else if (variant === 'info') {
-      accentColor = '#6366f1'; // Indigo
-      glowColor = 'rgba(99, 102, 241, 0.25)';
-      badgeBg = 'rgba(99, 102, 241, 0.15)';
+      accentColor = '#8B3DFF'; // Indigo
+      glowColor = 'rgba(139, 61, 255, 0.25)';
+      badgeBg = 'rgba(139, 61, 255, 0.15)';
     }
 
     const banner = document.createElement('div');
-    banner.style.cssText = `
-      width: 100%;
-      max-width: 440px;
-      margin-left: auto;
-      pointer-events: auto;
-      background: rgba(15, 23, 42, 0.94);
-      backdrop-filter: blur(24px);
-      -webkit-backdrop-filter: blur(24px);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-left: 4px solid ${accentColor};
-      border-radius: 16px;
-      box-shadow: 0 20px 45px -10px rgba(0, 0, 0, 0.8), 0 0 28px ${glowColor};
-      padding: 14px 16px;
-      color: #fff;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      position: relative;
-      overflow: hidden;
-      transform: translateY(-24px);
-      opacity: 0;
-      transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.35s ease;
-      cursor: pointer;
-    `;
+    banner.className = 'live-luxury-banner';
+    banner.style.setProperty('--banner-accent', accentColor);
+    banner.style.setProperty('--banner-glow', glowColor);
+    banner.style.setProperty('--banner-bg', badgeBg);
 
     banner.innerHTML = `
-      <!-- Top Tag Strip -->
-      <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-        <div style="display: flex; align-items: center; gap: 6px;">
-          <span style="display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: ${accentColor}; box-shadow: 0 0 8px ${accentColor};"></span>
-          <span style="font-size: 0.72rem; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase; color: ${accentColor}; background: ${badgeBg}; padding: 2px 8px; border-radius: 6px;">
+      <!-- Top Tag Strip (Desktop) -->
+      <div class="banner-top-strip">
+        <div class="banner-tag-wrap">
+          <span class="banner-status-dot"></span>
+          <span class="banner-tag-badge">
             ${badgeText || title}
           </span>
         </div>
-        <button class="banner-close-btn" style="background: transparent; border: none; color: #94a3b8; font-size: 1.1rem; cursor: pointer; padding: 2px 6px; border-radius: 4px; line-height: 1; transition: color 0.2s;">
-          &times;
-        </button>
+        <button type="button" class="banner-close-btn" aria-label="Dismiss">&times;</button>
       </div>
 
       <!-- Main Body -->
-      <div style="display: flex; align-items: center; gap: 12px; margin-top: 2px;">
-        <div style="width: 40px; height: 40px; border-radius: 10px; background: ${badgeBg}; display: flex; align-items: center; justify-content: center; font-size: 1.25rem; flex-shrink: 0; border: 1px solid rgba(255,255,255,0.06);">
+      <div class="banner-body-row">
+        <div class="banner-icon-box">
           ${icon}
         </div>
-        <div style="flex: 1; min-width: 0;">
-          <div style="font-weight: 800; font-size: 0.96rem; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-heading);">
-            ${clientName}
+        <div class="banner-text-wrap">
+          <div class="banner-title">
+            ${clientName || title}
           </div>
-          <div style="font-size: 0.8rem; color: #cbd5e1; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-            ${details}
-          </div>
-          ${specialist ? `<div style="font-size: 0.73rem; color: #94a3b8; margin-top: 2px;">Specialist: <strong style="color: #e2e8f0;">${specialist}</strong></div>` : ''}
+          ${details ? `<div class="banner-details">${details}</div>` : ''}
+          ${specialist ? `<div class="banner-details">Specialist: <strong>${specialist}</strong></div>` : ''}
         </div>
+        <button type="button" class="banner-close-btn mobile-close" aria-label="Dismiss">&times;</button>
       </div>
 
-      <!-- Bottom Interactive Bar -->
-      <div style="display: flex; align-items: center; justify-content: space-between; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 8px; margin-top: 4px;">
-        <span style="font-size: 0.7rem; color: #64748b;">Just now • Tap to view queue</span>
-        <button class="banner-action-btn" style="background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1); color: #fff; font-size: 0.75rem; font-weight: 700; padding: 4px 10px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+      <!-- Bottom Interactive Bar (Only when actionCallback or showActionBtn is enabled) -->
+      ${showActionBtn || actionCallback ? `
+      <div class="banner-footer-row">
+        <span class="banner-footer-text">Just now • Tap to view queue</span>
+        <button type="button" class="banner-action-btn">
           <span>View Queue</span>
-          <span style="font-size: 0.85rem;">→</span>
+          <span>→</span>
         </button>
       </div>
+      ` : ''}
 
       <!-- Auto-dismiss Progress Bar -->
-      <div class="banner-progress" style="position: absolute; bottom: 0; left: 0; height: 2.5px; background: linear-gradient(90deg, ${accentColor}, transparent); width: 100%; transform-origin: left; animation: bannerCountdown 5s linear forwards;"></div>
+      <div class="banner-progress"></div>
     `;
 
     container.appendChild(banner);
 
     // Trigger Entrance Animation
     requestAnimationFrame(() => {
-      banner.style.transform = 'translateY(0)';
-      banner.style.opacity = '1';
+      banner.classList.add('banner-visible');
     });
 
+    let dismissTimer = null;
     const dismissBanner = () => {
-      banner.style.transform = 'translateY(-20px)';
-      banner.style.opacity = '0';
-      setTimeout(() => banner.remove(), 350);
+      if (dismissTimer) clearTimeout(dismissTimer);
+      banner.classList.remove('banner-visible');
+      setTimeout(() => banner.remove(), 250);
     };
 
-    // Click on banner or "View Queue" invokes action
-    banner.addEventListener('click', (e) => {
-      if (e.target.closest('.banner-close-btn')) {
+    // Close button dismisses
+    banner.querySelectorAll('.banner-close-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
         dismissBanner();
-        return;
-      }
+      });
+    });
+
+    // Click on banner invokes action
+    banner.addEventListener('click', (e) => {
+      if (e.target.closest('.banner-close-btn')) return;
       dismissBanner();
       if (actionCallback) {
         actionCallback();
-      } else {
+      } else if (showActionBtn) {
         window.location.hash = '#admin';
       }
     });
 
-    // Auto-dismiss after 5 seconds
-    setTimeout(dismissBanner, 5000);
+    // Auto-dismiss after 4.5 seconds
+    dismissTimer = setTimeout(dismissBanner, 4500);
   }
 
   connect() {
@@ -275,7 +301,14 @@ export class RealtimeNotifier {
 
     this.eventSource.onmessage = (event) => {
       try {
+        this.lastPacketAt = Date.now();
         const payload = JSON.parse(event.data);
+
+        // Heartbeat keepalive ping from backend
+        if (payload?.type === 'PING') {
+          return;
+        }
+
         console.log('[Realtime] 📡 Received live event:', payload);
 
         if (payload.type === 'NEW_BOOKING') {
@@ -330,17 +363,18 @@ export class RealtimeNotifier {
             });
           }
 
+          // Deterministic async sync: await loadData before refreshing open quick requests modal
           if (window.salonDashboard && typeof window.salonDashboard.loadData === 'function') {
-            window.salonDashboard.loadData(true);
-          }
-
-          // Auto-refresh the quick requests modal if it's already open
-          if (isQuickRequest && document.getElementById('modal-quick-requests')) {
-            setTimeout(() => {
-              if (window.salonDashboard?.openQuickRequestsModal) {
-                window.salonDashboard.openQuickRequestsModal();
+            window.salonDashboard.loadData(true).then(() => {
+              if (isQuickRequest && document.getElementById('modal-quick-requests')) {
+                window.salonDashboard?.openQuickRequestsModal?.();
               }
-            }, 500);
+              if (window.salonDashboard?.updateQuickRequestsBadge) {
+                window.salonDashboard.updateQuickRequestsBadge();
+              }
+            }).catch((err) => {
+              console.warn('[Realtime] loadData error on NEW_BOOKING:', err);
+            });
           }
 
         } else if (
@@ -356,7 +390,7 @@ export class RealtimeNotifier {
             : (appt?.serviceNameSnapshot || appt?.service?.name || 'Service');
           const timeStr = appt?.startTime ? formatTime12h(appt.startTime) : (appt?.startAt ? formatTime12h(appt.startAt) : '');
           const reason = appt?.cancellationReason || appt?.reason || 'Reservation cancelled';
-          const eventKey = `cancel:${appt?.id}:${Date.now()}`;
+          const eventKey = `cancel:${appt?.id || 'unknown'}`;
 
           SoundManager.playCancelAlert();
 
@@ -436,47 +470,67 @@ export class RealtimeNotifier {
             });
           }
         } else if (payload.type === 'STAFF_UPDATED') {
-          const action = payload.data?.action || 'UPDATED';
-          let msg = 'Stylist schedule or profile updated';
-          let icon = '👥';
-          if (action === 'CREATE') { msg = 'New stylist added to team'; icon = '✨'; }
-          else if (action === 'DELETE') { msg = 'Stylist removed from team'; icon = '🗑️'; }
-          else if (action === 'ASSIGN_SERVICES') { msg = 'Stylist service qualifications updated'; icon = '✂️'; }
-          else if (action === 'UPDATE_HOURS') { msg = 'Stylist shift hours updated'; icon = '⏰'; }
+          // Check for self-action suppression:
+          // If the user recently triggered an admin action on staff (within last 4 seconds),
+          // suppress the incoming toast to prevent self-echo notification storms.
+          const isLocalStaffAction = window.salonDashboard?.lastLocalActionTimestamp &&
+            (Date.now() - window.salonDashboard.lastLocalActionTimestamp < 4000);
 
-          SoundManager.playCheckinChime();
-          this.dispatchNotification({
-            badgeText: 'Team Update',
-            title: '👥 Stylists Updated',
-            clientName: msg,
-            details: 'Live salon roster synced',
-            icon,
-            variant: 'info',
-            eventKey: `staff:${Date.now()}`,
-          });
+          if (!isLocalStaffAction) {
+            const action = payload.data?.action || 'UPDATED';
+            const staffId = payload.data?.staffId || payload.data?.id || 'all';
+            const eventKey = `staff:${staffId}:${action}`;
+
+            let msg = 'Stylist schedule or profile updated';
+            let icon = '👥';
+            if (action === 'CREATE') { msg = 'New stylist added to team'; icon = '✨'; }
+            else if (action === 'DELETE') { msg = 'Stylist removed from team'; icon = '🗑️'; }
+            else if (action === 'ASSIGN_SERVICES') { msg = 'Stylist service qualifications updated'; icon = '✂️'; }
+            else if (action === 'UPDATE_HOURS') { msg = 'Stylist shift hours updated'; icon = '⏰'; }
+
+            SoundManager.playCheckinChime();
+            this.dispatchNotification({
+              badgeText: 'Team Update',
+              title: '👥 Stylists Updated',
+              clientName: msg,
+              details: 'Live salon roster synced',
+              icon,
+              variant: 'info',
+              eventKey,
+              showActionBtn: false,
+            });
+          }
         } else if (payload.type === 'SERVICE_UPDATED') {
-          const action = payload.data?.action || 'UPDATED';
-          let msg = 'Service catalogue updated';
-          let icon = '✂️';
-          if (action === 'CREATE') { msg = 'New service added to menu'; icon = '✨'; }
-          else if (action === 'DELETE') { msg = 'Service removed from menu'; icon = '🗑️'; }
-          else if (action === 'UPDATE') { msg = 'Service pricing or details updated'; icon = '✏️'; }
+          // Check for self-action suppression:
+          const isLocalServiceAction = window.salonDashboard?.lastLocalActionTimestamp &&
+            (Date.now() - window.salonDashboard.lastLocalActionTimestamp < 4000);
 
-          SoundManager.playCheckinChime();
-          this.dispatchNotification({
-            badgeText: 'Menu Update',
-            title: '✂️ Service Menu Synced',
-            clientName: msg,
-            details: 'Real-time catalogue live',
-            icon,
-            variant: 'info',
-            eventKey: `service:${Date.now()}`,
-          });
+          if (!isLocalServiceAction) {
+            const action = payload.data?.action || 'UPDATED';
+            const serviceId = payload.data?.serviceId || payload.data?.id || 'all';
+            const eventKey = `service:${serviceId}:${action}`;
+
+            let msg = 'Service catalogue updated';
+            let icon = '✂️';
+            if (action === 'CREATE') { msg = 'New service added to menu'; icon = '✨'; }
+            else if (action === 'DELETE') { msg = 'Service removed from menu'; icon = '🗑️'; }
+            else if (action === 'UPDATE') { msg = 'Service pricing or details updated'; icon = '✏️'; }
+
+            SoundManager.playCheckinChime();
+            this.dispatchNotification({
+              badgeText: 'Menu Update',
+              title: '✂️ Service Menu Synced',
+              clientName: msg,
+              details: 'Real-time catalogue live',
+              icon,
+              variant: 'info',
+              eventKey,
+              showActionBtn: false,
+            });
+          }
         } else if (payload.type === 'APPOINTMENT_UPDATED') {
           // ETA updates, auto-completion, reschedule confirmations — silent dashboard refresh
-          if (this.onEventCallback) {
-            this.onEventCallback(payload);
-          }
+          // (Handled by the generic onEventCallback below)
         }
 
         // Trigger callback to refresh dashboard data in real-time
@@ -489,11 +543,26 @@ export class RealtimeNotifier {
     };
 
     this.eventSource.onerror = (err) => {
-      console.warn('[Realtime] EventSource error, will reconnect automatically:', err);
+      console.warn('[Realtime] EventSource error or disconnect:', err);
+      if (this.eventSource && this.eventSource.readyState === EventSource.CLOSED) {
+        setTimeout(() => {
+          if (this.eventSource && this.eventSource.readyState === EventSource.CLOSED) {
+            console.log('[Realtime] 🔄 Auto-reconnecting closed EventSource stream...');
+            this.connect();
+          }
+        }, 2500);
+      }
     };
   }
 
   destroy() {
+    if (this.watchdogTimer) {
+      clearInterval(this.watchdogTimer);
+      this.watchdogTimer = null;
+    }
+    document.removeEventListener('visibilitychange', this.handleVisibilityChange);
+    window.removeEventListener('online', this.handleOnline);
+
     if (this.eventSource) {
       console.log('[Realtime] Closing EventSource stream');
       this.eventSource.close();

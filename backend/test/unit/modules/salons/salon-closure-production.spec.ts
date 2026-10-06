@@ -6,6 +6,8 @@ import { AvailabilityService } from '../../../../src/modules/salon-admin/availab
 import { AvailabilityEngineService } from '../../../../src/modules/salon-admin/availability/availability-engine.service';
 import { ConfigService } from '@nestjs/config';
 import { WhatsAppService } from '../../../../src/modules/channels/whatsapp/whatsapp.service';
+import { SlotSqueezePolicy } from '../../../../src/modules/salon-admin/availability/policies/slot-squeeze.policy';
+import { StylistStatusEngine } from '../../../../src/modules/salon-admin/staff/engines/stylist-status.engine';
 import { SalonClosureType, AppointmentStatus } from '@prisma/client';
 
 describe('Production Suite: Salon Closures, Quick Bookings & Auto Service Completion', () => {
@@ -84,6 +86,8 @@ describe('Production Suite: Salon Closures, Quick Bookings & Auto Service Comple
       providers: [
         SalonsService,
         AvailabilityService,
+        SlotSqueezePolicy,
+        StylistStatusEngine,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: AppointmentsService, useValue: mockAppointmentsService },
         { provide: AvailabilityEngineService, useValue: mockAvailabilityEngineService },

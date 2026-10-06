@@ -9,6 +9,7 @@ import { DayOfWeek, AppointmentStatus } from '@prisma/client';
 import { AvailabilityEngineService, MinuteInterval } from './availability-engine.service';
 import { TimeUtility } from '../../../common/utils/time.utility';
 import { SlotSqueezePolicy } from './policies/slot-squeeze.policy';
+import { StylistStatusEngine, StylistOperationalStatus } from '../staff/engines/stylist-status.engine';
 
 export type AvailabilityStatus =
   | 'AVAILABLE'
@@ -100,6 +101,7 @@ export class AvailabilityService {
     private prisma: PrismaService,
     private engine: AvailabilityEngineService,
     private squeezePolicy: SlotSqueezePolicy,
+    private statusEngine?: StylistStatusEngine,
   ) { }
 
   private parseTimeStringToMinutes(timeStr: string): number {
@@ -159,7 +161,7 @@ export class AvailabilityService {
       throw new NotFoundException('Salon is inactive or not found.');
     }
 
-    const timezone = salon.timezone || 'Asia/Kolkata';
+    const timezone = salon.timezone || TimeUtility.DEFAULT_TIMEZONE;
 
     // Parse date in salon local timezone
     const requestedDate = DateTime.fromISO(dateStr, { zone: timezone }).startOf('day');
@@ -555,13 +557,15 @@ export class AvailabilityService {
 
   /**
    * Dedicated Domain Method: Queries active stylists qualified/assigned to perform the specified service(s).
+   * Enriches stylists with their real-time operational status and customer-friendly text.
    */
   async getQualifiedStylists(
     salonId: string,
     serviceIdOrIds: string | string[],
-  ) {
+    options?: { targetDate?: string; enrichStatus?: boolean },
+  ): Promise<any[]> {
     const serviceIds = Array.isArray(serviceIdOrIds) ? serviceIdOrIds : [serviceIdOrIds];
-    return this.prisma.stylist.findMany({
+    const stylists = await this.prisma.stylist.findMany({
       where: {
         salonId,
         status: 'ACTIVE',
@@ -569,9 +573,29 @@ export class AvailabilityService {
       },
       include: {
         services: true,
+        workingHours: true,
       },
       orderBy: [{ name: 'asc' }, { createdAt: 'asc' }],
     });
+
+    if (options?.enrichStatus === false || !this.statusEngine) {
+      return stylists;
+    }
+
+    try {
+      const salon = await this.getCachedSalon(salonId);
+      const timezone = salon?.timezone || TimeUtility.DEFAULT_TIMEZONE;
+
+      const statusMap = await this.statusEngine.resolveSalonStaffStatuses(salonId, {
+        targetDate: options?.targetDate,
+        stylists,
+        timezone,
+      });
+
+      return stylists.map((st) => this.statusEngine!.attachCustomerFacingStatus(st, statusMap.get(st.id)));
+    } catch {
+      return stylists;
+    }
   }
 
   /**
@@ -701,7 +725,7 @@ export class AvailabilityService {
   ): Promise<QuickBookingOperatingStatus> {
     const salon = await this.getCachedSalon(salonId);
     if (!salon || salon.status !== 'ACTIVE') {
-      return { isOpen: false, reason: 'SALON_CLOSED_TODAY', salonTimezone: tzOverride || 'Asia/Kolkata' };
+      return { isOpen: false, reason: 'SALON_CLOSED_TODAY', salonTimezone: tzOverride || TimeUtility.DEFAULT_TIMEZONE };
     }
 
     const timezone = tzOverride || salon.timezone || TimeUtility.DEFAULT_TIMEZONE;

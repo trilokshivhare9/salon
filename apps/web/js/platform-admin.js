@@ -38,7 +38,7 @@ export class PlatformAdminPortal {
   renderLoading() {
     this.container.innerHTML = `
       <div style="min-height: 80vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 40px;">
-        <div class="brand-icon-box" style="width: 52px; height: 52px; font-size: 1.6rem; margin-bottom: 16px; background: linear-gradient(135deg, rgba(236,72,153,0.3), rgba(99,102,241,0.3));">⚡</div>
+        <div class="brand-icon-box" style="width: 52px; height: 52px; font-size: 1.6rem; margin-bottom: 16px; background: linear-gradient(135deg, rgba(236,72,153,0.3), rgba(139, 61, 255,0.3));">⚡</div>
         <div style="font-size: 1.3rem; font-family: var(--font-heading); color: var(--accent); font-weight: 700;">Loading Multi-Tenant Control Engine...</div>
         <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 4px;">Auditing tenant database shards & platform volume</p>
       </div>
@@ -53,7 +53,7 @@ export class PlatformAdminPortal {
       <header class="portal-header" style="border-bottom-color: rgba(236,72,153,0.25);">
         <div class="portal-header-content">
           <div style="display: flex; align-items: center; gap: 14px;">
-            <div class="brand-icon-box" style="background: linear-gradient(135deg, rgba(236,72,153,0.3), rgba(99,102,241,0.3)); border-color: rgba(236,72,153,0.4);">⚡</div>
+            <div class="brand-icon-box" style="background: linear-gradient(135deg, rgba(236,72,153,0.3), rgba(139, 61, 255,0.3)); border-color: rgba(236,72,153,0.4);">⚡</div>
             <div>
               <div style="display: flex; align-items: center; gap: 8px;">
                 <span style="font-family: var(--font-heading); font-size: 1.15rem; font-weight: 800; color: #fff;">SalonFlow Multi-Tenant Engine</span>
@@ -119,7 +119,7 @@ export class PlatformAdminPortal {
         </div>
         <div class="stat-card">
           <div class="stat-label">LIFETIME PLATFORM BOOKINGS</div>
-          <div class="stat-value" style="color: #818cf8;">${stats.totalAppointments}</div>
+          <div class="stat-value" style="color: #A855F7;">${stats.totalAppointments}</div>
           <div class="stat-sub">Total bookings processed</div>
         </div>
         <div class="stat-card">
@@ -137,7 +137,7 @@ export class PlatformAdminPortal {
             <p style="color: var(--text-secondary); font-size: 0.85rem;">Manage tenant lifecycle, inspect real staff/service counts, and toggle active status.</p>
           </div>
           <div style="display: flex; gap: 8px;">
-            <button class="btn btn-secondary btn-sm" id="btn-manage-master-categories" style="background: rgba(99,102,241,0.15); border-color: rgba(99,102,241,0.3); color: #a5b4fc;">🏷️ Master Categories</button>
+            <button class="btn btn-secondary btn-sm" id="btn-manage-master-categories" style="background: rgba(139, 61, 255,0.15); border-color: rgba(139, 61, 255,0.3); color: #a5b4fc;">🏷️ Master Categories</button>
             <button class="btn btn-secondary btn-sm" id="btn-refresh-platform">🔄 Refresh List</button>
           </div>
         </div>
@@ -251,7 +251,7 @@ export class PlatformAdminPortal {
           </div>
           <div class="stat-card">
             <div class="stat-label">TOTAL RECORDED ERRORS</div>
-            <div class="stat-value" style="color: #818cf8;">${meta.total || 0}</div>
+            <div class="stat-value" style="color: #A855F7;">${meta.total || 0}</div>
             <div class="stat-sub">Historical system log records</div>
           </div>
         </div>
@@ -423,7 +423,7 @@ export class PlatformAdminPortal {
                 <div style="font-size: 0.72rem; color: #a5b4fc; font-weight: 800; text-transform: uppercase; margin-bottom: 8px;">🌐 HTTP & REQUEST CONTEXT</div>
                 <div style="font-size: 0.82rem; color: var(--text-secondary); line-height: 1.6;">
                   <div><strong>Method:</strong> <span style="color: #fff; font-weight: 700;">${log.httpMethod}</span></div>
-                  <div><strong>Endpoint:</strong> <code style="color: #818cf8;">${log.endpoint}</code></div>
+                  <div><strong>Endpoint:</strong> <code style="color: #A855F7;">${log.endpoint}</code></div>
                   <div><strong>Status Code:</strong> <span style="color: ${log.statusCode >= 500 ? '#ef4444' : '#f59e0b'}; font-weight: 700;">${log.statusCode}</span></div>
                   <div><strong>Correlation ID:</strong> <code>${log.correlationId || 'N/A'}</code></div>
                 </div>
@@ -444,7 +444,7 @@ export class PlatformAdminPortal {
 
             <!-- Code Origin Context -->
             ${log.originFile ? `
-              <div style="background: rgba(99,102,241,0.1); border: 1px solid rgba(99,102,241,0.3); border-radius: 10px; padding: 12px; margin-bottom: 20px; font-size: 0.82rem;">
+              <div style="background: rgba(139, 61, 255,0.1); border: 1px solid rgba(139, 61, 255,0.3); border-radius: 10px; padding: 12px; margin-bottom: 20px; font-size: 0.82rem;">
                 <div style="font-size: 0.72rem; color: #a5b4fc; font-weight: 800; text-transform: uppercase; margin-bottom: 4px;">📍 CODE ORIGIN LOCATION</div>
                 <code style="color: #e0e7ff; word-break: break-all;">${log.originFile}</code>
               </div>
@@ -592,7 +592,7 @@ export class PlatformAdminPortal {
   renderLoading() {
     this.container.innerHTML = `
       <div style="min-height: 80vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 40px;">
-        <div class="brand-icon-box" style="width: 52px; height: 52px; font-size: 1.6rem; margin-bottom: 16px; background: linear-gradient(135deg, rgba(236,72,153,0.3), rgba(99,102,241,0.3));">⚡</div>
+        <div class="brand-icon-box" style="width: 52px; height: 52px; font-size: 1.6rem; margin-bottom: 16px; background: linear-gradient(135deg, rgba(236,72,153,0.3), rgba(139, 61, 255,0.3));">⚡</div>
         <div style="font-size: 1.3rem; font-family: var(--font-heading); color: var(--accent); font-weight: 700;">Loading Multi-Tenant Control Engine...</div>
         <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 4px;">Auditing tenant database shards & platform volume</p>
       </div>
@@ -607,7 +607,7 @@ export class PlatformAdminPortal {
       <header class="portal-header" style="border-bottom-color: rgba(236,72,153,0.25);">
         <div class="portal-header-content">
           <div style="display: flex; align-items: center; gap: 14px;">
-            <div class="brand-icon-box" style="background: linear-gradient(135deg, rgba(236,72,153,0.3), rgba(99,102,241,0.3)); border-color: rgba(236,72,153,0.4);">⚡</div>
+            <div class="brand-icon-box" style="background: linear-gradient(135deg, rgba(236,72,153,0.3), rgba(139, 61, 255,0.3)); border-color: rgba(236,72,153,0.4);">⚡</div>
             <div>
               <div style="display: flex; align-items: center; gap: 8px;">
                 <span style="font-family: var(--font-heading); font-size: 1.15rem; font-weight: 800; color: #fff;">SalonFlow Multi-Tenant Engine</span>
@@ -646,7 +646,7 @@ export class PlatformAdminPortal {
           </div>
           <div class="stat-card">
             <div class="stat-label">LIFETIME PLATFORM BOOKINGS</div>
-            <div class="stat-value" style="color: #818cf8;">${stats.totalAppointments}</div>
+            <div class="stat-value" style="color: #A855F7;">${stats.totalAppointments}</div>
             <div class="stat-sub">Total bookings processed</div>
           </div>
           <div class="stat-card">
@@ -664,7 +664,7 @@ export class PlatformAdminPortal {
               <p style="color: var(--text-secondary); font-size: 0.85rem;">Manage tenant lifecycle, inspect real staff/service counts, and toggle active status.</p>
             </div>
             <div style="display: flex; gap: 8px;">
-              <button class="btn btn-secondary btn-sm" id="btn-manage-master-categories" style="background: rgba(99,102,241,0.15); border-color: rgba(99,102,241,0.3); color: #a5b4fc;">🏷️ Master Categories</button>
+              <button class="btn btn-secondary btn-sm" id="btn-manage-master-categories" style="background: rgba(139, 61, 255,0.15); border-color: rgba(139, 61, 255,0.3); color: #a5b4fc;">🏷️ Master Categories</button>
               <button class="btn btn-secondary btn-sm" id="btn-refresh-platform">🔄 Refresh List</button>
             </div>
           </div>
@@ -684,7 +684,7 @@ export class PlatformAdminPortal {
                     <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px;">
                       <div>
                         <div style="font-weight: 800; font-size: 1.15rem; color: #fff;">${s.name}</div>
-                        <div style="font-size: 0.8rem; color: #818cf8; font-family: monospace;">/#book/${s.slug}</div>
+                        <div style="font-size: 0.8rem; color: #A855F7; font-family: monospace;">/#book/${s.slug}</div>
                       </div>
                       <span class="badge ${isOperational ? 'badge-completed' : 'badge-cancelled'}" style="font-size: 0.65rem; ${!hasMinCatalog ? 'background: rgba(245,158,11,0.15); border-color: rgba(245,158,11,0.4); color: #f59e0b;' : ''}">
                         ${isOperational ? '● ACTIVE' : (!hasMinCatalog ? '⚪ INACTIVE (Setup Req)' : '⚪ INACTIVE (Paused)')}
@@ -769,7 +769,7 @@ export class PlatformAdminPortal {
         <div class="modal-content" style="max-width: 580px; max-height: 90vh; overflow-y: auto;">
           <div class="modal-header">
             <div style="display: flex; align-items: center; gap: 10px;">
-              <div class="brand-icon-box" style="width: 38px; height: 38px; font-size: 1.2rem; background: linear-gradient(135deg, rgba(236,72,153,0.3), rgba(99,102,241,0.3));">⚡</div>
+              <div class="brand-icon-box" style="width: 38px; height: 38px; font-size: 1.2rem; background: linear-gradient(135deg, rgba(236,72,153,0.3), rgba(139, 61, 255,0.3));">⚡</div>
               <div>
                 <h3 style="font-size: 1.25rem; font-weight: 800; color: #fff;">Create New Salon</h3>
                 <p style="font-size: 0.78rem; color: var(--text-muted);">Starts clean as Deactivated until owner adds staff & services</p>
@@ -804,7 +804,7 @@ export class PlatformAdminPortal {
               <label for="prov-whatsapp-phone-id">Meta WhatsApp Phone Number ID *</label>
               <div style="display: flex; gap: 8px; align-items: stretch;">
                 <input type="text" class="form-control" id="prov-whatsapp-phone-id" placeholder="Enter 15-17 digit Phone Number ID (e.g. 109876543210987)" style="flex: 1; min-width: 0;" required />
-                <button type="button" id="btn-verify-meta-phone" class="btn btn-secondary btn-sm" style="flex-shrink: 0; white-space: nowrap; font-size: 0.8rem; padding: 8px 14px; background: rgba(99,102,241,0.18); border: 1px solid rgba(99,102,241,0.4); color: #a5b4fc; cursor: pointer; border-radius: var(--radius-sm); font-weight: 600;">
+                <button type="button" id="btn-verify-meta-phone" class="btn btn-secondary btn-sm" style="flex-shrink: 0; white-space: nowrap; font-size: 0.8rem; padding: 8px 14px; background: rgba(139, 61, 255,0.18); border: 1px solid rgba(139, 61, 255,0.4); color: #a5b4fc; cursor: pointer; border-radius: var(--radius-sm); font-weight: 600;">
                   🔍 Verify & Fetch Phone
                 </button>
               </div>
@@ -852,7 +852,7 @@ export class PlatformAdminPortal {
               <!-- STEP 1: Basic Salon & Owner Info -->
               <div id="prov-step-1" class="prov-wizard-step" style="display: block;">
                 <!-- Operating Hours Summary Header -->
-                <div style="background: rgba(99,102,241,0.08); border: 1px solid rgba(99,102,241,0.25); border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 16px; font-size: 0.82rem; color: var(--text-secondary); display: flex; align-items: center; justify-content: space-between;">
+                <div style="background: rgba(139, 61, 255,0.08); border: 1px solid rgba(139, 61, 255,0.25); border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 16px; font-size: 0.82rem; color: var(--text-secondary); display: flex; align-items: center; justify-content: space-between;">
                   <div>
                     <strong style="color: #fff;">🗓️ Step 1 of 3: Basic Salon Info & Credentials</strong>
                     <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px;">Enter owner details and Meta Phone ID. Step 2 configures the 7-day weekly operating schedule.</div>
@@ -1384,8 +1384,8 @@ export class PlatformAdminPortal {
       isMetaPhoneVerified = false;
       verifiedMetaData = null;
       btnVerifyMeta.textContent = '🔍 Verify & Fetch Phone';
-      btnVerifyMeta.style.background = 'rgba(99,102,241,0.18)';
-      btnVerifyMeta.style.borderColor = 'rgba(99,102,241,0.4)';
+      btnVerifyMeta.style.background = 'rgba(139, 61, 255,0.18)';
+      btnVerifyMeta.style.borderColor = 'rgba(139, 61, 255,0.4)';
       btnVerifyMeta.style.color = '#a5b4fc';
       waVerifyResult.style.display = 'none';
       phoneInput.value = '';
@@ -1451,8 +1451,8 @@ export class PlatformAdminPortal {
         isMetaPhoneVerified = false;
         verifiedMetaData = null;
         btnVerifyMeta.textContent = '🔍 Verify & Fetch Phone';
-        btnVerifyMeta.style.background = 'rgba(99,102,241,0.18)';
-        btnVerifyMeta.style.borderColor = 'rgba(99,102,241,0.4)';
+        btnVerifyMeta.style.background = 'rgba(139, 61, 255,0.18)';
+        btnVerifyMeta.style.borderColor = 'rgba(139, 61, 255,0.4)';
         btnVerifyMeta.style.color = '#a5b4fc';
 
         waVerifyResult.innerHTML = `
@@ -1612,7 +1612,7 @@ export class PlatformAdminPortal {
               <label for="link-phone-id-input" style="margin-bottom: 6px;">WhatsApp Phone Number or Phone ID *</label>
               <div style="display: flex; gap: 8px; align-items: stretch;">
                 <input type="text" class="form-control" id="link-phone-id-input" placeholder="e.g. +91 98XXXXXX00 or 109876543210987" style="flex: 1; min-width: 0;" required />
-                <button type="button" id="btn-verify-link-meta" class="btn btn-secondary btn-sm" style="flex-shrink: 0; white-space: nowrap; font-size: 0.8rem; padding: 8px 14px; background: rgba(99,102,241,0.18); border: 1px solid rgba(99,102,241,0.4); color: #a5b4fc; cursor: pointer;">
+                <button type="button" id="btn-verify-link-meta" class="btn btn-secondary btn-sm" style="flex-shrink: 0; white-space: nowrap; font-size: 0.8rem; padding: 8px 14px; background: rgba(139, 61, 255,0.18); border: 1px solid rgba(139, 61, 255,0.4); color: #a5b4fc; cursor: pointer;">
                   Verify
                 </button>
               </div>
@@ -1730,7 +1730,7 @@ export class PlatformAdminPortal {
             <div><strong>📱 Login Mobile:</strong> <code style="color: #38bdf8; font-weight: 700; font-size: 0.95rem;">${salon.phone}</code></div>
             <div><strong>🔑 Password:</strong> <code style="color: #10b981; font-weight: 700;">${rawPassword}</code></div>
             <div><strong>📧 Owner Email:</strong> <code style="color: #94a3b8;">${salon.email}</code></div>
-            <div><strong>🚀 Salon Admin Portal:</strong> <a href="${loginUrl}" target="_blank" style="color: #818cf8;">${loginUrl}</a></div>
+            <div><strong>🚀 Salon Admin Portal:</strong> <a href="${loginUrl}" target="_blank" style="color: #A855F7;">${loginUrl}</a></div>
             <div style="margin-top: 10px; padding: 10px 12px; background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.3); border-radius: 8px; font-size: 0.78rem; color: #34d399; line-height: 1.5;">
               📲 <strong>WhatsApp Notification Sent:</strong> Login mobile, password, and portal link have been sent directly to <strong>${salon.phone}</strong> on WhatsApp!
             </div>
@@ -1916,7 +1916,7 @@ export class PlatformAdminPortal {
         <div class="modal-content" style="max-width: 620px; max-height: 90vh; overflow-y: auto;">
           <div class="modal-header">
             <div style="display: flex; align-items: center; gap: 10px;">
-              <div class="brand-icon-box" style="width: 38px; height: 38px; font-size: 1.2rem; background: linear-gradient(135deg, rgba(99,102,241,0.3), rgba(236,72,153,0.3));">🏷️</div>
+              <div class="brand-icon-box" style="width: 38px; height: 38px; font-size: 1.2rem; background: linear-gradient(135deg, rgba(139, 61, 255,0.3), rgba(236,72,153,0.3));">🏷️</div>
               <div>
                 <h3 style="font-size: 1.25rem; font-weight: 800; color: #fff;">Super Admin Master Categories</h3>
                 <p style="font-size: 0.78rem; color: var(--text-muted);">Global categories inherited by every newly created salon upon provisioning.</p>

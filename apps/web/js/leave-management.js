@@ -89,7 +89,7 @@ export class LeaveManagementUI {
             </div>
 
             <!-- Date Range -->
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px;">
+            <div class="leave-form-row">
               <div class="form-group" style="margin: 0;">
                 <label style="font-weight: 600; font-size: 0.82rem; color: #e2e8f0; display: block; margin-bottom: 4px;">Start Date *</label>
                 <input type="date" class="form-control" id="leave-start-date" value="${initialDate}" required />
@@ -101,7 +101,7 @@ export class LeaveManagementUI {
             </div>
 
             <!-- Leave Type & Portion -->
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px;">
+            <div class="leave-form-row">
               <div class="form-group" style="margin: 0;">
                 <label style="font-weight: 600; font-size: 0.82rem; color: #e2e8f0; display: block; margin-bottom: 4px;">Leave Type *</label>
                 <select class="form-control" id="leave-type" required>
@@ -124,9 +124,9 @@ export class LeaveManagementUI {
             </div>
 
             <!-- Custom Hours Input (Conditional) -->
-            <div id="leave-custom-hours-group" style="display: none; background: rgba(99,102,241,0.08); border: 1px solid rgba(99,102,241,0.2); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 14px;">
-              <div style="font-size: 0.8rem; font-weight: 600; color: #818cf8; margin-bottom: 8px;">⏰ Custom Hours Window:</div>
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div id="leave-custom-hours-group" style="display: none; background: rgba(139, 61, 255,0.08); border: 1px solid rgba(139, 61, 255,0.2); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 14px;">
+              <div style="font-size: 0.8rem; font-weight: 600; color: #A855F7; margin-bottom: 8px;">⏰ Custom Hours Window:</div>
+              <div class="leave-form-row" style="margin-bottom: 0;">
                 <div class="form-group" style="margin: 0;">
                   <label style="font-size: 0.78rem;">Start Time</label>
                   <input type="time" class="form-control" id="leave-custom-start-time" value="09:00" />
@@ -153,7 +153,7 @@ export class LeaveManagementUI {
             <!-- Live Impact Preview Box -->
             <div id="leave-impact-preview-box" style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 16px;">
               <div style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text-secondary);">
-                <div class="spinner-small" style="display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.2); border-top-color: #818cf8; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+                <div class="spinner-small" style="display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.2); border-top-color: #A855F7; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
                 <span>Fetching live impact preview from server...</span>
               </div>
             </div>
@@ -226,7 +226,7 @@ export class LeaveManagementUI {
 
       previewBox.innerHTML = `
         <div style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text-secondary);">
-          <div class="spinner-small" style="display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.2); border-top-color: #818cf8; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+          <div class="spinner-small" style="display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.2); border-top-color: #A855F7; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
           <span>Calculating impact for ${formatDateFriendly(sDate)} ${sDate !== eDate ? `→ ${formatDateFriendly(eDate)}` : ''}...</span>
         </div>
       `;
@@ -472,18 +472,18 @@ export class LeaveManagementUI {
             </h3>
             <button class="close-btn" id="btn-close-history-modal">&times;</button>
           </div>
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-            <p style="color: var(--text-secondary); font-size: 0.85rem; margin: 0;">
+          <div class="leave-history-subbar">
+            <p>
               Manage leave periods, extend dates, review processing outcomes, or cancel active leaves.
             </p>
-            <button class="btn btn-primary btn-sm" id="btn-history-new-leave" style="gap: 6px;">
+            <button class="btn btn-primary btn-sm" id="btn-history-new-leave" style="gap: 6px; white-space: nowrap; flex-shrink: 0;">
               <span>+ Record Leave</span>
             </button>
           </div>
 
           <div id="leave-history-content" style="min-height: 200px;">
             <div style="display: flex; align-items: center; justify-content: center; height: 160px; color: var(--text-secondary); gap: 10px;">
-              <div class="spinner-small" style="width: 20px; height: 20px; border: 2px solid rgba(255,255,255,0.2); border-top-color: #818cf8; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+              <div class="spinner-small" style="width: 20px; height: 20px; border: 2px solid rgba(255,255,255,0.2); border-top-color: #A855F7; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
               <span>Loading leave records...</span>
             </div>
           </div>
@@ -526,47 +526,55 @@ export class LeaveManagementUI {
             const isActive = ab.status === 'ACTIVE';
 
             return `
-              <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 14px; display: flex; flex-direction: column; gap: 10px;">
-                <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                  <div>
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                      <span style="font-weight: 700; font-size: 0.95rem; color: #fff;">
-                        ${formatDateFriendly(sDate)} ${isMultiDay ? `→ ${formatDateFriendly(eDate)}` : ''}
-                      </span>
-                      <span class="badge" style="background: rgba(99,102,241,0.15); color: #818cf8; border: 1px solid rgba(99,102,241,0.3); font-size: 0.72rem;">
-                        ${leaveTypeLabel}
-                      </span>
-                      <span class="badge" style="background: rgba(255,255,255,0.06); color: var(--text-secondary); font-size: 0.72rem;">
-                        ${portionLabel} ${ab.leavePortion === 'CUSTOM_HOURS' ? `(${ab.customStartTime || ''}-${ab.customEndTime || ''})` : ''}
-                      </span>
-                    </div>
-                    ${ab.notes ? `<div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 4px;">Notes: ${ab.notes}</div>` : ''}
+              <div class="leave-history-card">
+                <!-- Top Row: Date on Left, Status Badges on Right -->
+                <div class="leave-card-header">
+                  <div class="leave-card-date">
+                    <span style="opacity: 0.85;">📅</span>
+                    <span>${formatDateFriendly(sDate)}${isMultiDay ? ` → ${formatDateFriendly(eDate)}` : ''}</span>
                   </div>
-                  <div style="display: flex; items-center; gap: 6px;">
-                    <span class="badge ${isActive ? 'badge-completed' : 'badge-cancelled'}" style="font-size: 0.7rem; font-weight: 700;">
+                  <div class="leave-card-status-strip">
+                    <span class="badge ${isActive ? 'badge-completed' : 'badge-cancelled'}" style="font-size: 0.68rem; font-weight: 800;">
                       ${ab.status || 'ACTIVE'}
                     </span>
-                    <span class="badge" style="background: ${procBadge.bg}; color: ${procBadge.color}; border: 1px solid ${procBadge.border}; font-size: 0.7rem; font-weight: 700;">
+                    <span class="badge" style="background: ${procBadge.bg}; color: ${procBadge.color}; border: 1px solid ${procBadge.border}; font-size: 0.68rem; font-weight: 800;">
                       ${procBadge.icon} ${procBadge.label}
                     </span>
                   </div>
                 </div>
 
-                <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 10px; font-size: 0.8rem;">
-                  <div style="display: flex; gap: 12px; color: var(--text-secondary);">
+                <!-- Chips Row: Leave Type, Portion -->
+                <div class="leave-card-chips">
+                  <span class="badge" style="background: rgba(139, 61, 255,0.15); color: #A855F7; border: 1px solid rgba(139, 61, 255,0.3); font-size: 0.72rem;">
+                    ${leaveTypeLabel}
+                  </span>
+                  <span class="badge" style="background: rgba(255,255,255,0.06); color: var(--text-secondary); border: 1px solid rgba(255,255,255,0.08); font-size: 0.72rem;">
+                    ${portionLabel} ${ab.leavePortion === 'CUSTOM_HOURS' ? `(${ab.customStartTime || ''}-${ab.customEndTime || ''})` : ''}
+                  </span>
+                </div>
+
+                ${ab.notes ? `
+                  <div style="font-size: 0.78rem; color: var(--text-muted); background: rgba(0,0,0,0.2); padding: 6px 10px; border-radius: var(--radius-xs); border: 1px solid rgba(255,255,255,0.04); margin-top: 2px;">
+                    <span style="color: var(--text-secondary); font-weight: 600;">Notes:</span> ${ab.notes}
+                  </div>
+                ` : ''}
+
+                <!-- Footer: Metrics & Actions -->
+                <div class="leave-card-footer">
+                  <div class="leave-card-metrics">
                     <span>Affected: <strong style="color:#fff;">${ab.affectedBookingsCount || 0}</strong></span>
                     <span>Reassigned: <strong style="color:#34d399;">${ab.reassignedCount || 0}</strong></span>
                     <span>Unresolved: <strong style="color:${(ab.unresolvableCount || 0) > 0 ? '#fb7185' : '#fff'};">${ab.unresolvableCount || 0}</strong></span>
                   </div>
-                  <div style="display: flex; gap: 8px;">
-                    <button class="btn btn-secondary btn-sm btn-view-leave-detail" data-absence-id="${ab.id}" style="font-size: 0.75rem; padding: 4px 10px;">
+                  <div class="leave-card-actions">
+                    <button class="btn btn-secondary btn-sm btn-view-leave-detail" data-absence-id="${ab.id}">
                       Details
                     </button>
                     ${isActive ? `
-                      <button class="btn btn-secondary btn-sm btn-extend-leave" data-absence-id="${ab.id}" data-end-date="${eDate}" style="font-size: 0.75rem; padding: 4px 10px; color: #818cf8; border-color: rgba(99,102,241,0.3);">
+                      <button class="btn btn-secondary btn-sm btn-extend-leave" data-absence-id="${ab.id}" data-end-date="${eDate}">
                         Extend Date
                       </button>
-                      <button class="btn btn-warning-outline btn-sm btn-cancel-leave-action" data-absence-id="${ab.id}" style="font-size: 0.75rem; padding: 4px 10px; color: #f59e0b; border-color: rgba(245,158,11,0.3);">
+                      <button class="btn btn-warning-outline btn-sm btn-cancel-leave-action" data-absence-id="${ab.id}">
                         Cancel Leave
                       </button>
                     ` : ''}
@@ -662,12 +670,12 @@ export class LeaveManagementUI {
             <!-- Live Incremental Impact Preview Box -->
             <div id="extend-impact-preview-box" style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
               <div style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text-secondary);">
-                <div class="spinner-small" style="display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.2); border-top-color: #818cf8; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+                <div class="spinner-small" style="display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.2); border-top-color: #A855F7; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
                 <span>Calculating incremental impact...</span>
               </div>
             </div>
 
-            <div style="background: rgba(99,102,241,0.08); border: 1px solid rgba(99,102,241,0.2); border-radius: var(--radius-sm); padding: 10px 14px; margin-bottom: 16px; font-size: 0.78rem; color: #a5b4fc;">
+            <div style="background: rgba(139, 61, 255,0.08); border: 1px solid rgba(139, 61, 255,0.2); border-radius: var(--radius-sm); padding: 10px 14px; margin-bottom: 16px; font-size: 0.78rem; color: #a5b4fc;">
               ℹ️ Incremental date processing: Only newly added dates will be processed for availability overrides & reassignments. Existing leave dates remain untouched.
             </div>
 
@@ -783,7 +791,7 @@ export class LeaveManagementUI {
 
           <!-- Metadata Summary -->
           <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 16px;">
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 0.83rem;">
+            <div class="leave-detail-meta-grid">
               <div>
                 <span style="color: var(--text-muted);">Specialist:</span> <strong style="color:#fff;">${staffName}</strong>
               </div>
@@ -814,7 +822,7 @@ export class LeaveManagementUI {
           </div>
 
           <!-- Counters -->
-          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 16px;">
+          <div class="leave-detail-counters-grid">
             <div style="background: rgba(255,255,255,0.04); padding: 10px; border-radius: var(--radius-sm); text-align: center;">
               <div style="font-size: 1.2rem; font-weight: 700; color: #fff;">${absence.affectedBookingsCount || 0}</div>
               <div style="font-size: 0.7rem; color: var(--text-muted);">Total Affected</div>
@@ -842,8 +850,8 @@ export class LeaveManagementUI {
                   const appt = r.appointment || {};
                   const isAuto = r.outcome === 'AUTO_ASSIGNED' || r.outcome === 'CUSTOMER_ACCEPTED';
                   return `
-                    <div style="background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.06); border-radius: 6px; padding: 10px; display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem;">
-                      <div>
+                    <div class="leave-appt-reassign-row">
+                      <div style="flex: 1; min-width: 180px;">
                         <div style="font-weight: 600; color: #fff;">
                           Appt #${appt.appointmentNumber || r.appointmentId?.slice(0, 8)}
                         </div>
@@ -854,7 +862,7 @@ export class LeaveManagementUI {
                           Scheduled: ${(appt.startAt || '').replace('T', ' ').slice(0, 16)}
                         </div>
                       </div>
-                      <div style="text-align: right;">
+                      <div style="flex-shrink: 0;">
                         <span class="badge" style="background: ${isAuto ? 'rgba(52, 211, 153, 0.15)' : 'rgba(251, 113, 133, 0.15)'}; color: ${isAuto ? '#34d399' : '#fb7185'}; border: 1px solid ${isAuto ? 'rgba(52,211,153,0.3)' : 'rgba(251,113,133,0.3)'}; font-size: 0.7rem; font-weight: 700;">
                           ${r.outcome === 'AUTO_ASSIGNED' ? 'Auto-Reassigned' : r.outcome === 'CUSTOMER_ACCEPTED' ? 'Accepted by Client' : '⚠️ No Replacement'}
                         </span>

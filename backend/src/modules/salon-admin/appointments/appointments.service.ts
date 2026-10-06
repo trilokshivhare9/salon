@@ -96,6 +96,7 @@ export class AppointmentsService {
         this.availabilityService!,
         this.engine!,
         this.eventsService!,
+        this.whatsappService,
       );
     }
     return this.creationService;
@@ -336,9 +337,9 @@ export class AppointmentsService {
   // REAL-TIME EVENT STREAM
   // ---------------------------------------------------------------------------
 
-  getSalonEvents(salonId: string): Observable<SalonRealtimeEvent> {
+  getSalonEvents(salonId: string, lastEventId?: string | number): Observable<SalonRealtimeEvent> {
     this.ensureInitializedServices();
-    return this.eventsService!.getSalonEvents(salonId);
+    return this.eventsService!.getSalonEvents(salonId, lastEventId);
   }
 
   emitSalonEvent(salonId: string, type: SalonRealtimeEvent['type'], data: any) {

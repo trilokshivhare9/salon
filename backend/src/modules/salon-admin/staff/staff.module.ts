@@ -4,6 +4,7 @@ import { AbsenceService } from './absence.service';
 import { StaffController } from './staff.controller';
 import { LeaveIntervalEngine } from './engines/leave-interval.engine';
 import { LeaveReassignmentEngine } from './engines/leave-reassignment.engine';
+import { StylistStatusEngine } from './engines/stylist-status.engine';
 import { LeaveValidationService } from './services/leave-validation.service';
 import { LeaveProcessingService } from './services/leave-processing.service';
 import { AppointmentsModule } from '../appointments/appointments.module';
@@ -22,6 +23,7 @@ import { WhatsAppModule } from '../../channels/whatsapp/whatsapp.module';
     AbsenceService,
     LeaveIntervalEngine,
     LeaveReassignmentEngine,
+    StylistStatusEngine,
     LeaveValidationService,
     LeaveProcessingService,
   ],
@@ -30,6 +32,7 @@ import { WhatsAppModule } from '../../channels/whatsapp/whatsapp.module';
     AbsenceService,
     LeaveIntervalEngine,
     LeaveReassignmentEngine,
+    StylistStatusEngine,
     LeaveValidationService,
     LeaveProcessingService,
   ],

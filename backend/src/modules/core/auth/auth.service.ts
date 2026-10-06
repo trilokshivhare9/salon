@@ -615,12 +615,17 @@ export class AuthService {
       }
     }
 
+    // Guard: Admin mobile number is immutable
+    if (dto.phone && admin.phone && dto.phone.trim() !== admin.phone) {
+      throw new BadRequestException('Mobile number is immutable and cannot be modified from profile settings.');
+    }
+
     const updated = await this.prisma.admin.update({
       where: { id: adminId },
       data: {
         name: dto.name !== undefined ? dto.name.trim() : admin.name,
         email: dto.email !== undefined ? dto.email.toLowerCase().trim() : admin.email,
-        phone: dto.phone !== undefined ? dto.phone.trim() : admin.phone,
+        phone: admin.phone, // Preserves original phone without allowing mutation
       },
       include: { salon: true },
     });
