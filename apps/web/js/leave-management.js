@@ -31,12 +31,109 @@ export const LEAVE_PORTION_LABELS = {
   CUSTOM_HOURS: 'Custom Hours',
 };
 
+// Helper to format date with weekday (e.g. "Fri, Oct 9, 2026")
+export function formatDateWithWeekday(dateStr) {
+  if (!dateStr) return '';
+  const cleanStr = String(dateStr).split('T')[0];
+  const parts = cleanStr.split('-');
+  if (parts.length !== 3) return dateStr;
+  const dateObj = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+  return dateObj.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+// Helper to calculate duration in days
+export function calculateDurationDays(sDate, eDate) {
+  if (!sDate) return '1 Day';
+  const start = new Date(String(sDate).split('T')[0]);
+  const end = new Date(String(eDate || sDate).split('T')[0]);
+  const diffTime = Math.abs(end.getTime() - start.getTime());
+  const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24)) + 1;
+  return diffDays <= 1 ? '1 Day' : `${diffDays} Days`;
+}
+
+// Helper to format application timestamp "Applied Oct 9, 2026 · 6:12 PM"
+export function formatAppliedTimestamp(isoString) {
+  if (!isoString) return 'Earlier';
+  try {
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return 'Earlier';
+    const dateFormatted = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const timeFormatted = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+    return `${dateFormatted} · ${timeFormatted}`;
+  } catch {
+    return 'Earlier';
+  }
+}
+
+// Helper to get styled leave type details
+export function getLeaveTypeDetails(type, reason) {
+  switch (type) {
+    case 'SICK_LEAVE':
+      return { icon: '🤒', label: 'Sick Leave', color: '#f472b6', bg: 'rgba(244, 114, 182, 0.12)', border: 'rgba(244, 114, 182, 0.28)' };
+    case 'CASUAL_LEAVE':
+      return { icon: '🌴', label: 'Casual Leave', color: '#2dd4bf', bg: 'rgba(45, 212, 191, 0.12)', border: 'rgba(45, 212, 191, 0.28)' };
+    case 'EMERGENCY_LEAVE':
+      return { icon: '🚨', label: 'Emergency Leave', color: '#fb7185', bg: 'rgba(251, 113, 133, 0.12)', border: 'rgba(251, 113, 133, 0.28)' };
+    case 'UNPAID_LEAVE':
+      return { icon: '📄', label: 'Unpaid Leave', color: '#c084fc', bg: 'rgba(192, 132, 252, 0.12)', border: 'rgba(192, 132, 252, 0.28)' };
+    default:
+      return { icon: '📝', label: reason || 'Other Leave', color: '#94a3b8', bg: 'rgba(148, 163, 184, 0.12)', border: 'rgba(148, 163, 184, 0.25)' };
+  }
+}
+
+// Helper to get leave portion & shift window details
+export function getPortionDetails(portion, customStart, customEnd) {
+  switch (portion) {
+    case 'FIRST_HALF':
+      return { icon: '🌅', label: 'First Half', shiftText: 'Morning Shift', fullLabel: 'First Half (Morning Shift)' };
+    case 'SECOND_HALF':
+      return { icon: '🌇', label: 'Second Half', shiftText: 'Afternoon Shift', fullLabel: 'Second Half (Afternoon Shift)' };
+    case 'CUSTOM_HOURS':
+      return { icon: '⏱️', label: 'Custom Hours', shiftText: `${customStart || '00:00'} – ${customEnd || '00:00'}`, fullLabel: `Custom (${customStart || ''} – ${customEnd || ''})` };
+    case 'FULL_DAY':
+    default:
+      return { icon: '⏰', label: 'Full Day', shiftText: 'All Working Shifts', fullLabel: 'Full Working Shift' };
+  }
+}
+
 export const PROCESSING_STATUS_BADGES = {
   PENDING: { label: 'Pending', bg: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', border: 'rgba(245, 158, 11, 0.3)', icon: '⏳' },
   PROCESSING: { label: 'Processing...', bg: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: 'rgba(59, 130, 246, 0.3)', icon: '🔄' },
   COMPLETED: { label: 'Completed', bg: 'rgba(52, 211, 153, 0.15)', color: '#34d399', border: 'rgba(52, 211, 153, 0.3)', icon: '✅' },
   FAILED: { label: 'Action Required', bg: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: 'rgba(239, 68, 68, 0.3)', icon: '⚠️' },
 };
+
+export const LEAVE_STATUS_MAP = {
+  ON_LEAVE: {
+    key: 'ON_LEAVE',
+    label: 'On Leave',
+    title: '🟢 On Leave',
+    icon: '🟢',
+    bg: 'rgba(52, 211, 153, 0.15)',
+    color: '#34d399',
+    border: 'rgba(52, 211, 153, 0.3)',
+    summaryText: 'Specialist is on leave and calendar availability is blocked for this period.',
+  },
+  CANCELLED: {
+    key: 'CANCELLED',
+    label: 'Cancelled',
+    title: '❌ Cancelled',
+    icon: '❌',
+    bg: 'rgba(239, 68, 68, 0.15)',
+    color: '#f87171',
+    border: 'rgba(239, 68, 68, 0.3)',
+    summaryText: 'Leave was cancelled. Specialist availability has been restored to the normal salon schedule.',
+  },
+};
+
+/**
+ * Resolves a single, human-friendly unified status for leaves:
+ * Only two valid business states: "🟢 On Leave" or "❌ Cancelled".
+ */
+export function getUnifiedLeaveStatus(absence) {
+  const isCancelled = absence.status === 'CANCELLED' || absence.statusKey === 'CANCELLED';
+  return isCancelled ? LEAVE_STATUS_MAP.CANCELLED : LEAVE_STATUS_MAP.ON_LEAVE;
+}
 
 export class LeaveManagementUI {
   constructor(dashboardApp) {
@@ -381,14 +478,14 @@ export class LeaveManagementUI {
 
     const summary = result?.reassignmentSummary || { total: 0, reassigned: 0, unresolvable: 0, details: [] };
     const absence = result?.absence || result || {};
-    const procBadge = PROCESSING_STATUS_BADGES[absence.processingStatus] || PROCESSING_STATUS_BADGES.COMPLETED;
+    const statusInfo = getUnifiedLeaveStatus(absence);
 
     modalContainer.innerHTML = `
       <div class="modal-backdrop show">
         <div class="modal-content" style="max-width: 540px;">
           <div class="modal-header">
             <h3 style="display: flex; align-items: center; gap: 8px;">
-              <span>${procBadge.icon}</span>
+              <span>${statusInfo.icon}</span>
               <span>Leave Recorded — Operational Summary</span>
             </h3>
             <button class="close-btn" id="btn-close-result-modal">&times;</button>
@@ -398,9 +495,9 @@ export class LeaveManagementUI {
               Leave configured for <strong>${staffName}</strong> from <strong>${formatDateFriendly(absence.startDate || absence.absenceDate)}</strong> to <strong>${formatDateFriendly(absence.endDate || absence.absenceDate)}</strong>.
             </p>
             <div style="display: flex; align-items: center; gap: 8px;">
-              <span style="font-size: 0.78rem; color: var(--text-muted);">Processing Status:</span>
-              <span class="badge" style="background: ${procBadge.bg}; color: ${procBadge.color}; border: 1px solid ${procBadge.border}; font-weight: 700; font-size: 0.75rem;">
-                ${procBadge.icon} ${procBadge.label}
+              <span style="font-size: 0.78rem; color: var(--text-muted);">Leave Status:</span>
+              <span class="badge" style="background: ${statusInfo.bg}; color: ${statusInfo.color}; border: 1px solid ${statusInfo.border}; font-weight: 700; font-size: 0.75rem;">
+                ${statusInfo.title}
               </span>
             </div>
           </div>
@@ -465,20 +562,12 @@ export class LeaveManagementUI {
     modalContainer.innerHTML = `
       <div class="modal-backdrop show">
         <div class="modal-content" style="max-width: 800px; max-height: 90vh; overflow-y: auto;">
-          <div class="modal-header">
+          <div class="modal-header" style="margin-bottom: 16px;">
             <h3 style="display: flex; align-items: center; gap: 8px;">
               <span>🗓️</span>
               <span>Leave Records & History — ${staffName}</span>
             </h3>
             <button class="close-btn" id="btn-close-history-modal">&times;</button>
-          </div>
-          <div class="leave-history-subbar">
-            <p>
-              Manage leave periods, extend dates, review processing outcomes, or cancel active leaves.
-            </p>
-            <button class="btn btn-primary btn-sm" id="btn-history-new-leave" style="gap: 6px; white-space: nowrap; flex-shrink: 0;">
-              <span>+ Record Leave</span>
-            </button>
           </div>
 
           <div id="leave-history-content" style="min-height: 200px;">
@@ -493,10 +582,6 @@ export class LeaveManagementUI {
 
     const closeHistory = () => { modalContainer.innerHTML = ''; };
     document.getElementById('btn-close-history-modal')?.addEventListener('click', closeHistory);
-    document.getElementById('btn-history-new-leave')?.addEventListener('click', () => {
-      closeHistory();
-      this.showCreateLeaveModal(staffId, staffName);
-    });
 
     try {
       const absences = await ApiClient.getStaffAbsences(staffId);
@@ -520,65 +605,137 @@ export class LeaveManagementUI {
             const sDate = ab.startDate || ab.absenceDate;
             const eDate = ab.endDate || ab.absenceDate;
             const isMultiDay = sDate && eDate && sDate !== eDate;
-            const leaveTypeLabel = LEAVE_TYPE_LABELS[ab.leaveType] || ab.reason || 'Leave';
-            const portionLabel = LEAVE_PORTION_LABELS[ab.leavePortion] || 'Full Day';
-            const procBadge = PROCESSING_STATUS_BADGES[ab.processingStatus] || PROCESSING_STATUS_BADGES.COMPLETED;
-            const isActive = ab.status === 'ACTIVE';
+            const dateDisplay = isMultiDay
+              ? `${formatDateFriendly(sDate)} → ${formatDateFriendly(eDate)}`
+              : formatDateWithWeekday(sDate);
+            const durationText = calculateDurationDays(sDate, eDate);
+
+            const statusInfo = getUnifiedLeaveStatus(ab);
+            const isCancelled = ab.status === 'CANCELLED' || statusInfo.key === 'CANCELLED';
+            const isPast = ab.isPast !== undefined ? ab.isPast : (() => {
+              const today = new Date().toISOString().split('T')[0];
+              const endIso = eDate ? (typeof eDate === 'string' ? eDate.split('T')[0] : new Date(eDate).toISOString().split('T')[0]) : '';
+              return endIso < today;
+            })();
+            const isActive = !isCancelled;
+            const canCancel = ab.canCancel !== undefined ? ab.canCancel : (isActive && !isPast);
+
+            let statusClass = 'lhc-status-onleave';
+            let statusTitle = 'On Leave';
+            if (isCancelled) {
+              statusClass = 'lhc-status-cancelled';
+              statusTitle = 'Cancelled';
+            } else if (isPast) {
+              statusClass = 'lhc-status-completed';
+              statusTitle = 'Completed';
+            }
+
+            const typeInfo = getLeaveTypeDetails(ab.leaveType, ab.reason);
+            const portionInfo = getPortionDetails(ab.leavePortion, ab.customStartTime, ab.customEndTime);
+            const appliedFormatted = formatAppliedTimestamp(ab.createdAt);
+
+            const affectedCount = ab.affectedBookingsCount || 0;
+            const reassignedCount = ab.reassignedCount || 0;
+            const unresolvedCount = ab.unresolvableCount || 0;
+
+            let impactClass = 'lhc-impact-clean';
+            let impactIcon = '✓';
+            let impactMainText = `Clean Schedule — 0 client bookings affected`;
+            let impactTag = '(Roster blocked)';
+
+            if (affectedCount === 0) {
+              impactClass = 'lhc-impact-clean';
+              impactIcon = '✓';
+              impactMainText = `Clean Schedule — 0 client bookings affected`;
+              impactTag = '(Roster blocked)';
+            } else if (unresolvedCount > 0) {
+              impactClass = 'lhc-impact-conflict';
+              impactIcon = '⚠️';
+              impactMainText = `Schedule Conflict — ${affectedCount} booking${affectedCount > 1 ? 's' : ''} affected`;
+              impactTag = `(${unresolvedCount} need action)`;
+            } else {
+              impactClass = 'lhc-impact-reassigned';
+              impactIcon = '🔄';
+              impactMainText = `${affectedCount} booking${affectedCount > 1 ? 's' : ''} auto-reassigned`;
+              impactTag = '(Protected)';
+            }
+
+            const noteOrReason = ab.notes || ab.reason;
 
             return `
               <div class="leave-history-card">
-                <!-- Top Row: Date on Left, Status Badges on Right -->
-                <div class="leave-card-header">
-                  <div class="leave-card-date">
-                    <span style="opacity: 0.85;">📅</span>
-                    <span>${formatDateFriendly(sDate)}${isMultiDay ? ` → ${formatDateFriendly(eDate)}` : ''}</span>
+                <!-- Top Header Row: Calendar Icon, Date, Duration Tag & Glowing Status Pill -->
+                <div class="lhc-header-row">
+                  <div class="lhc-header-left">
+                    <span class="lhc-cal-icon">📅</span>
+                    <strong class="lhc-date-title">${dateDisplay}</strong>
+                    <span class="lhc-duration-tag">${durationText}</span>
                   </div>
-                  <div class="leave-card-status-strip">
-                    <span class="badge ${isActive ? 'badge-completed' : 'badge-cancelled'}" style="font-size: 0.68rem; font-weight: 800;">
-                      ${ab.status || 'ACTIVE'}
-                    </span>
-                    <span class="badge" style="background: ${procBadge.bg}; color: ${procBadge.color}; border: 1px solid ${procBadge.border}; font-size: 0.68rem; font-weight: 800;">
-                      ${procBadge.icon} ${procBadge.label}
-                    </span>
+                  <div class="lhc-status-pill ${statusClass}">
+                    <span class="lhc-status-dot"></span>
+                    <span>${statusTitle}</span>
                   </div>
                 </div>
 
-                <!-- Chips Row: Leave Type, Portion -->
-                <div class="leave-card-chips">
-                  <span class="badge" style="background: rgba(139, 61, 255,0.15); color: #A855F7; border: 1px solid rgba(139, 61, 255,0.3); font-size: 0.72rem;">
-                    ${leaveTypeLabel}
-                  </span>
-                  <span class="badge" style="background: rgba(255,255,255,0.06); color: var(--text-secondary); border: 1px solid rgba(255,255,255,0.08); font-size: 0.72rem;">
-                    ${portionLabel} ${ab.leavePortion === 'CUSTOM_HOURS' ? `(${ab.customStartTime || ''}-${ab.customEndTime || ''})` : ''}
-                  </span>
+                <!-- Middle Info Panel: Type, Shift, Applied Timestamp & Ref ID -->
+                <div class="lhc-meta-panel">
+                  <div class="lhc-meta-row">
+                    <div class="lhc-meta-cell lhc-meta-left">
+                      <span class="lhc-type-dot" style="color: ${typeInfo.color};">●</span>
+                      <span class="lhc-meta-label">Type:</span>
+                      <strong class="lhc-meta-type-val" style="color: ${typeInfo.color};">${typeInfo.label}</strong>
+                    </div>
+                    <div class="lhc-meta-cell lhc-meta-right">
+                      <span class="lhc-meta-icon">🕒</span>
+                      <span class="lhc-meta-label">Shift:</span>
+                      <strong class="lhc-meta-shift-val">${portionInfo.label}</strong>
+                    </div>
+                  </div>
+                  <div class="lhc-meta-row">
+                    <div class="lhc-meta-cell lhc-meta-left">
+                      <span class="lhc-meta-label">Applied:</span>
+                      <span class="lhc-meta-applied-val">${appliedFormatted}</span>
+                    </div>
+                    <div class="lhc-meta-cell lhc-meta-right">
+                      <span class="lhc-meta-label">Ref:</span>
+                      <span class="lhc-meta-ref-val">#${ab.id.slice(0, 8)}</span>
+                    </div>
+                  </div>
+                  ${noteOrReason ? `
+                    <div class="lhc-meta-note-row">
+                      <span class="lhc-meta-label">Note:</span>
+                      <span class="lhc-meta-note-val">${noteOrReason}</span>
+                    </div>
+                  ` : ''}
                 </div>
 
-                ${ab.notes ? `
-                  <div style="font-size: 0.78rem; color: var(--text-muted); background: rgba(0,0,0,0.2); padding: 6px 10px; border-radius: var(--radius-xs); border: 1px solid rgba(255,255,255,0.04); margin-top: 2px;">
-                    <span style="color: var(--text-secondary); font-weight: 600;">Notes:</span> ${ab.notes}
+                <!-- Schedule Impact Pill -->
+                <div class="lhc-impact-pill ${impactClass}">
+                  <div class="lhc-impact-left">
+                    <span class="lhc-impact-check">${impactIcon}</span>
+                    <span class="lhc-impact-text">${impactMainText}</span>
                   </div>
-                ` : ''}
+                  <span class="lhc-impact-tag">${impactTag}</span>
+                </div>
 
-                <!-- Footer: Metrics & Actions -->
-                <div class="leave-card-footer">
-                  <div class="leave-card-metrics">
-                    <span>Affected: <strong style="color:#fff;">${ab.affectedBookingsCount || 0}</strong></span>
-                    <span>Reassigned: <strong style="color:#34d399;">${ab.reassignedCount || 0}</strong></span>
-                    <span>Unresolved: <strong style="color:${(ab.unresolvableCount || 0) > 0 ? '#fb7185' : '#fff'};">${ab.unresolvableCount || 0}</strong></span>
-                  </div>
-                  <div class="leave-card-actions">
-                    <button class="btn btn-secondary btn-sm btn-view-leave-detail" data-absence-id="${ab.id}">
-                      Details
+                <!-- Action Buttons: Details, Extend, Cancel Leave -->
+                <div class="lhc-actions-row">
+                  <button type="button" class="lhc-btn lhc-btn-details btn-view-leave-detail" data-absence-id="${ab.id}">
+                    <span class="lhc-btn-icon">👁️</span>
+                    <span>Details</span>
+                  </button>
+                  ${canCancel ? `
+                    <button type="button" class="lhc-btn lhc-btn-extend btn-extend-leave" data-absence-id="${ab.id}" data-end-date="${eDate}">
+                      <span class="lhc-btn-icon">📅</span>
+                      <span>Extend</span>
                     </button>
-                    ${isActive ? `
-                      <button class="btn btn-secondary btn-sm btn-extend-leave" data-absence-id="${ab.id}" data-end-date="${eDate}">
-                        Extend Date
-                      </button>
-                      <button class="btn btn-warning-outline btn-sm btn-cancel-leave-action" data-absence-id="${ab.id}">
-                        Cancel Leave
-                      </button>
-                    ` : ''}
-                  </div>
+                    <button type="button" class="lhc-btn lhc-btn-cancel btn-cancel-leave-action" data-absence-id="${ab.id}">
+                      <span class="lhc-btn-icon">✕</span>
+                      <span>Cancel Leave</span>
+                    </button>
+                  ` : (isActive && isPast ? `
+                    <span class="lhc-past-badge">Past Record</span>
+                  ` : '')}
                 </div>
               </div>
             `;
@@ -591,7 +748,7 @@ export class LeaveManagementUI {
         btn.addEventListener('click', (e) => {
           const abId = e.currentTarget.getAttribute('data-absence-id');
           const ab = absences.find((a) => a.id === abId);
-          if (ab) this.showLeaveDetailModal(ab, staffName);
+          if (ab) this.showLeaveDetailModal(ab, staffName, staffId);
         });
       });
 
@@ -768,114 +925,204 @@ export class LeaveManagementUI {
   /**
    * 4. LEAVE DETAIL VIEW MODAL
    */
-  showLeaveDetailModal(absence, staffName) {
+  showLeaveDetailModal(absence, staffName, staffId) {
     const modalContainer = document.getElementById('modal-container');
     if (!modalContainer) return;
 
     const sDate = absence.startDate || absence.absenceDate;
     const eDate = absence.endDate || absence.absenceDate;
     const isMultiDay = sDate && eDate && sDate !== eDate;
-    const procBadge = PROCESSING_STATUS_BADGES[absence.processingStatus] || PROCESSING_STATUS_BADGES.COMPLETED;
+    const dateDisplay = isMultiDay
+      ? `${formatDateFriendly(sDate)} → ${formatDateFriendly(eDate)}`
+      : formatDateWithWeekday(sDate);
+    const durationText = calculateDurationDays(sDate, eDate);
+
+    const statusInfo = getUnifiedLeaveStatus(absence);
+    const isCancelled = absence.status === 'CANCELLED' || statusInfo.key === 'CANCELLED';
+    const isPast = absence.isPast !== undefined ? absence.isPast : (() => {
+      const today = new Date().toISOString().split('T')[0];
+      const endIso = eDate ? (typeof eDate === 'string' ? eDate.split('T')[0] : new Date(eDate).toISOString().split('T')[0]) : '';
+      return endIso < today;
+    })();
+    const isActive = !isCancelled;
+    const canCancel = absence.canCancel !== undefined ? absence.canCancel : (isActive && !isPast);
+
+    let statusClass = 'lhc-status-active';
+    let statusTitle = '🟢 On Leave';
+    if (isCancelled) {
+      statusClass = 'lhc-status-cancelled';
+      statusTitle = '❌ Cancelled';
+    } else if (isPast) {
+      statusClass = 'lhc-status-completed';
+      statusTitle = '⚪ Completed';
+    }
+
+    const typeInfo = getLeaveTypeDetails(absence.leaveType, absence.reason);
+    const portionInfo = getPortionDetails(absence.leavePortion, absence.customStartTime, absence.customEndTime);
+    const appliedFormatted = formatAppliedTimestamp(absence.createdAt);
+
     const reassignments = absence.reassignments || [];
+    const affectedCount = absence.affectedBookingsCount || 0;
+    const reassignedCount = absence.reassignedCount || 0;
+    const unresolvedCount = absence.unresolvableCount || 0;
 
     modalContainer.innerHTML = `
       <div class="modal-backdrop show">
-        <div class="modal-content" style="max-width: 650px; max-height: 90vh; overflow-y: auto;">
-          <div class="modal-header">
-            <h3 style="display: flex; align-items: center; gap: 8px;">
-              <span>📋</span>
-              <span>Leave Details & Booking Outcomes</span>
-            </h3>
-            <button class="close-btn" id="btn-close-detail-modal">&times;</button>
-          </div>
-
-          <!-- Metadata Summary -->
-          <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 16px;">
-            <div class="leave-detail-meta-grid">
-              <div>
-                <span style="color: var(--text-muted);">Specialist:</span> <strong style="color:#fff;">${staffName}</strong>
-              </div>
-              <div>
-                <span style="color: var(--text-muted);">Leave Type:</span> <strong style="color:#fff;">${LEAVE_TYPE_LABELS[absence.leaveType] || absence.reason || 'Leave'}</strong>
-              </div>
-              <div>
-                <span style="color: var(--text-muted);">Date Range:</span> <strong style="color:#fff;">${formatDateFriendly(sDate)} ${isMultiDay ? `→ ${formatDateFriendly(eDate)}` : ''}</strong>
-              </div>
-              <div>
-                <span style="color: var(--text-muted);">Leave Portion:</span> <strong style="color:#fff;">${LEAVE_PORTION_LABELS[absence.leavePortion] || 'Full Day'}</strong> ${absence.leavePortion === 'CUSTOM_HOURS' ? `(${absence.customStartTime || ''}-${absence.customEndTime || ''})` : ''}
-              </div>
-              <div>
-                <span style="color: var(--text-muted);">Business Status:</span> <span class="badge ${absence.status === 'ACTIVE' ? 'badge-completed' : 'badge-cancelled'}" style="font-size: 0.7rem;">${absence.status}</span>
-              </div>
-              <div>
-                <span style="color: var(--text-muted);">Processing Status:</span>
-                <span class="badge" style="background: ${procBadge.bg}; color: ${procBadge.color}; border: 1px solid ${procBadge.border}; font-size: 0.7rem;">
-                  ${procBadge.icon} ${procBadge.label}
-                </span>
+        <div class="leave-detail-dialog">
+          <!-- Header -->
+          <div class="ld-header">
+            <div class="ld-header-left">
+              <div class="ld-avatar">${staffName ? staffName.charAt(0).toUpperCase() : 'S'}</div>
+              <div class="ld-title-group">
+                <h3>${staffName} · Leave Details</h3>
+                <div class="ld-title-sub">${dateDisplay} (${durationText})</div>
               </div>
             </div>
-            ${absence.notes ? `
-              <div style="margin-top: 10px; font-size: 0.8rem; color: var(--text-secondary); border-top: 1px dashed rgba(255,255,255,0.1); padding-top: 8px;">
-                <strong>Notes:</strong> ${absence.notes}
-              </div>
-            ` : ''}
-          </div>
-
-          <!-- Counters -->
-          <div class="leave-detail-counters-grid">
-            <div style="background: rgba(255,255,255,0.04); padding: 10px; border-radius: var(--radius-sm); text-align: center;">
-              <div style="font-size: 1.2rem; font-weight: 700; color: #fff;">${absence.affectedBookingsCount || 0}</div>
-              <div style="font-size: 0.7rem; color: var(--text-muted);">Total Affected</div>
-            </div>
-            <div style="background: rgba(52, 211, 153, 0.1); border: 1px solid rgba(52, 211, 153, 0.2); padding: 10px; border-radius: var(--radius-sm); text-align: center;">
-              <div style="font-size: 1.2rem; font-weight: 700; color: #34d399;">${absence.reassignedCount || 0}</div>
-              <div style="font-size: 0.7rem; color: #34d399;">Reassigned</div>
-            </div>
-            <div style="background: rgba(251, 113, 133, 0.1); border: 1px solid rgba(251, 113, 133, 0.2); padding: 10px; border-radius: var(--radius-sm); text-align: center;">
-              <div style="font-size: 1.2rem; font-weight: 700; color: #fb7185;">${absence.unresolvableCount || 0}</div>
-              <div style="font-size: 0.7rem; color: #fb7185;">Unresolved</div>
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span class="lhc-status-badge ${statusClass}">
+                <span class="lhc-status-dot"></span>
+                <span>${statusTitle}</span>
+              </span>
+              <button class="ld-close-btn" id="btn-close-detail-modal" title="Close dialog">&times;</button>
             </div>
           </div>
 
-          <!-- Affected Appointments Table -->
-          <div style="margin-bottom: 16px;">
-            <h4 style="font-size: 0.9rem; margin-bottom: 8px; color: #fff;">Affected Appointments & Reassignment Outcomes</h4>
-            ${reassignments.length === 0 ? `
-              <div style="font-size: 0.82rem; color: var(--text-muted); padding: 16px; background: rgba(0,0,0,0.2); border-radius: var(--radius-sm); text-align: center;">
-                No individual appointment reassignment entries logged for this leave.
+          <!-- 4-Card Overview Matrix -->
+          <div class="ld-matrix-grid">
+            <div class="ld-matrix-card">
+              <div class="ld-matrix-card-header">
+                <span>📅</span> <span>Leave Period</span>
+              </div>
+              <div class="ld-matrix-val">${formatDateFriendly(sDate)}${isMultiDay ? ` → ${formatDateFriendly(eDate)}` : ''}</div>
+              <div class="ld-matrix-sub">${durationText} · ${isMultiDay ? 'Multi-day span' : formatDateWithWeekday(sDate)}</div>
+            </div>
+
+            <div class="ld-matrix-card">
+              <div class="ld-matrix-card-header">
+                <span>${portionInfo.icon}</span> <span>Shift & Timing</span>
+              </div>
+              <div class="ld-matrix-val">${portionInfo.label}</div>
+              <div class="ld-matrix-sub">${portionInfo.fullLabel} (${portionInfo.shiftText})</div>
+            </div>
+
+            <div class="ld-matrix-card">
+              <div class="ld-matrix-card-header">
+                <span>${typeInfo.icon}</span> <span>Leave Category</span>
+              </div>
+              <div class="ld-matrix-val" style="color: ${typeInfo.color};">${typeInfo.label}</div>
+              <div class="ld-matrix-sub">Type: ${absence.leaveType ? absence.leaveType.replace('_', ' ') : 'General'}</div>
+            </div>
+
+            <div class="ld-matrix-card">
+              <div class="ld-matrix-card-header">
+                <span>🕒</span> <span>Application Audit</span>
+              </div>
+              <div class="ld-matrix-val">${appliedFormatted}</div>
+              <div class="ld-matrix-sub">Recorded via Salon Admin Portal</div>
+            </div>
+          </div>
+
+          <!-- Notes & Reason Card (if present) -->
+          ${(absence.notes || absence.reason) ? `
+            <div class="ld-notes-card">
+              <div class="ld-notes-label">
+                <span>💬</span> <span>Reason & Justification</span>
+              </div>
+              <div class="ld-notes-text">
+                ${absence.notes || absence.reason}
+              </div>
+            </div>
+          ` : ''}
+
+          <!-- Client Booking Impact Section -->
+          <div class="ld-impact-section">
+            <div class="ld-impact-header">
+              <h4>Client Booking Impact</h4>
+              ${affectedCount > 0 ? `
+                <span style="font-size: 0.75rem; color: var(--text-secondary);">${affectedCount} client appointment${affectedCount > 1 ? 's' : ''} overlapped</span>
+              ` : ''}
+            </div>
+
+            ${affectedCount === 0 ? `
+              <div class="ld-clean-banner">
+                <div class="ld-clean-icon">✨</div>
+                <div>
+                  <div class="ld-clean-title">Clean Schedule — Zero Customer Disruption</div>
+                  <div class="ld-clean-desc">
+                    No client appointments were booked with ${staffName} during this leave window. The salon calendar was cleanly blocked with zero customer friction.
+                  </div>
+                </div>
               </div>
             ` : `
-              <div style="max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;">
-                ${reassignments.map((r) => {
-                  const appt = r.appointment || {};
-                  const isAuto = r.outcome === 'AUTO_ASSIGNED' || r.outcome === 'CUSTOMER_ACCEPTED';
-                  return `
-                    <div class="leave-appt-reassign-row">
-                      <div style="flex: 1; min-width: 180px;">
-                        <div style="font-weight: 600; color: #fff;">
-                          Appt #${appt.appointmentNumber || r.appointmentId?.slice(0, 8)}
-                        </div>
-                        <div style="color: var(--text-secondary); font-size: 0.75rem;">
-                          ${appt.service?.name || 'Service'} • ${appt.customer?.name || 'Customer'} (${appt.customer?.phone || 'WhatsApp'})
-                        </div>
-                        <div style="font-size: 0.72rem; color: var(--text-muted);">
-                          Scheduled: ${(appt.startAt || '').replace('T', ' ').slice(0, 16)}
-                        </div>
-                      </div>
-                      <div style="flex-shrink: 0;">
-                        <span class="badge" style="background: ${isAuto ? 'rgba(52, 211, 153, 0.15)' : 'rgba(251, 113, 133, 0.15)'}; color: ${isAuto ? '#34d399' : '#fb7185'}; border: 1px solid ${isAuto ? 'rgba(52,211,153,0.3)' : 'rgba(251,113,133,0.3)'}; font-size: 0.7rem; font-weight: 700;">
-                          ${r.outcome === 'AUTO_ASSIGNED' ? 'Auto-Reassigned' : r.outcome === 'CUSTOMER_ACCEPTED' ? 'Accepted by Client' : '⚠️ No Replacement'}
-                        </span>
-                      </div>
-                    </div>
-                  `;
-                }).join('')}
+              <!-- KPI Summary Counters -->
+              <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 12px;">
+                <div style="background: rgba(255,255,255,0.04); padding: 10px 12px; border-radius: 10px; text-align: center; border: 1px solid rgba(255,255,255,0.08);">
+                  <div style="font-size: 1.25rem; font-weight: 700; color: #fff;">${affectedCount}</div>
+                  <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase;">Total Affected</div>
+                </div>
+                <div style="background: rgba(52, 211, 153, 0.08); padding: 10px 12px; border-radius: 10px; text-align: center; border: 1px solid rgba(52, 211, 153, 0.25);">
+                  <div style="font-size: 1.25rem; font-weight: 700; color: #34d399;">${reassignedCount}</div>
+                  <div style="font-size: 0.7rem; color: #34d399; text-transform: uppercase;">Auto-Reassigned</div>
+                </div>
+                <div style="background: ${unresolvedCount > 0 ? 'rgba(251, 113, 133, 0.12)' : 'rgba(255,255,255,0.04)'}; padding: 10px 12px; border-radius: 10px; text-align: center; border: 1px solid ${unresolvedCount > 0 ? 'rgba(251, 113, 133, 0.3)' : 'rgba(255,255,255,0.08)'};">
+                  <div style="font-size: 1.25rem; font-weight: 700; color: ${unresolvedCount > 0 ? '#fb7185' : '#fff'};">${unresolvedCount}</div>
+                  <div style="font-size: 0.7rem; color: ${unresolvedCount > 0 ? '#fb7185' : 'var(--text-muted)'}; text-transform: uppercase;">Action Needed</div>
+                </div>
               </div>
+
+              <!-- Reassignment List -->
+              ${reassignments.length === 0 ? `
+                <div style="font-size: 0.8rem; color: var(--text-muted); padding: 12px; background: rgba(0,0,0,0.2); border-radius: 10px; text-align: center;">
+                  No individual appointment reassignment logs found.
+                </div>
+              ` : `
+                <div style="max-height: 230px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;">
+                  ${reassignments.map((r) => {
+                    const appt = r.appointment || {};
+                    const isAuto = r.outcome === 'AUTO_ASSIGNED' || r.outcome === 'CUSTOMER_ACCEPTED';
+                    const serviceName = appt.service?.name || appt.serviceNameSnapshot || 'Hair Service';
+                    const customerName = appt.salonUser?.user?.name || appt.customer?.name || 'Valued Client';
+                    const customerPhone = appt.salonUser?.user?.phone || appt.customer?.phone || '';
+                    const apptTime = appt.startAt ? new Date(appt.startAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }) : 'Scheduled Time';
+                    return `
+                      <div class="ld-appt-card">
+                        <div class="ld-appt-client">
+                          <div class="ld-appt-avatar">${customerName.charAt(0).toUpperCase()}</div>
+                          <div class="ld-appt-info">
+                            <div class="ld-appt-name">${customerName} <span style="font-size: 0.72rem; color: var(--text-muted); font-weight: normal;">${customerPhone ? `(${customerPhone})` : ''}</span></div>
+                            <div class="ld-appt-sub">${serviceName} · Appt #${appt.appointmentNumber || r.appointmentId?.slice(0, 8)}</div>
+                            <div class="ld-appt-time">🕒 Slot: ${apptTime}</div>
+                          </div>
+                        </div>
+                        <div>
+                          <span class="badge" style="background: ${isAuto ? 'rgba(52, 211, 153, 0.15)' : 'rgba(251, 113, 133, 0.15)'}; color: ${isAuto ? '#34d399' : '#fb7185'}; border: 1px solid ${isAuto ? 'rgba(52,211,153,0.3)' : 'rgba(251,113,133,0.3)'}; font-size: 0.72rem; font-weight: 700; padding: 5px 10px; border-radius: 999px;">
+                            ${isAuto ? '✓ Reassigned to Peer' : '⚠️ Action Needed'}
+                          </span>
+                        </div>
+                      </div>
+                    `;
+                  }).join('')}
+                </div>
+              `}
             `}
           </div>
 
-          <div style="display: flex; justify-content: flex-end;">
-            <button class="btn btn-secondary" id="btn-close-detail-done">Close</button>
+          <!-- Modal Footer Actions -->
+          <div class="ld-footer">
+            <div style="font-size: 0.72rem; color: var(--text-muted); font-family: monospace;">
+              Record #${absence.id.slice(0, 12)}
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              ${canCancel && staffId ? `
+                <button class="btn-leave-extend btn-detail-extend-action" id="btn-detail-extend">
+                  <span>📅</span> <span>Extend Date</span>
+                </button>
+                <button class="btn-leave-cancel btn-detail-cancel-action" id="btn-detail-cancel">
+                  <span>✕</span> <span>Cancel Leave</span>
+                </button>
+              ` : ''}
+              <button class="btn btn-secondary btn-sm" id="btn-close-detail-done">Close</button>
+            </div>
           </div>
         </div>
       </div>
@@ -884,5 +1131,26 @@ export class LeaveManagementUI {
     const close = () => { modalContainer.innerHTML = ''; };
     document.getElementById('btn-close-detail-modal')?.addEventListener('click', close);
     document.getElementById('btn-close-detail-done')?.addEventListener('click', close);
+
+    if (canCancel && staffId) {
+      document.getElementById('btn-detail-extend')?.addEventListener('click', () => {
+        close();
+        this.showExtendLeaveModal(staffId, staffName, absence);
+      });
+
+      document.getElementById('btn-detail-cancel')?.addEventListener('click', async () => {
+        if (confirm(`Cancel leave for ${staffName}? Specialist availability will be restored for unblocked intervals.`)) {
+          try {
+            await ApiClient.cancelStaffAbsence(staffId, absence.id);
+            this.toast(`Leave cancelled for ${staffName}`, 'success');
+            close();
+            if (typeof this.app.loadData === 'function') await this.app.loadData(true);
+            if (typeof this.app.render === 'function') this.app.render();
+          } catch (err) {
+            this.toast(err.message || 'Failed to cancel leave', 'error');
+          }
+        }
+      });
+    }
   }
 }

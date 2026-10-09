@@ -3,12 +3,11 @@ import * as crypto from 'crypto';
 import { DateTime } from 'luxon';
 import {
   AbsenceStatus,
-  ReassignmentOutcome,
   DayOfWeek,
   AppointmentStatus,
   StylistStatus,
 } from '@prisma/client';
-import { AvailabilityEngineService } from '../../availability/availability-engine.service';
+import { AvailabilityEngineService } from '../../../availability/availability-engine.service';
 
 export interface ReassignmentResult {
   reassignedCount: number;
@@ -24,10 +23,6 @@ export class LeaveReassignmentEngine {
 
   private hashToSignedInt32(input: string): number {
     return crypto.createHash('sha256').update(input).digest().readInt32BE(0);
-  }
-
-  private parseTimeStringToMinutes(timeStr: string): number {
-    return this.availabilityEngine.parseTimeStringToMinutes(timeStr);
   }
 
   private getDayOfWeekEnum(luxonDateTime: DateTime): DayOfWeek {
@@ -46,6 +41,11 @@ export class LeaveReassignmentEngine {
 
   /**
    * Evaluates candidate replacement stylists for a specific appointment time window.
+   * Checks:
+   * 1. Active specialist in the same salon (excluding on-leave specialist).
+   * 2. Service Qualification: Specialist must offer the requested service(s).
+   * 3. Working Shift: Specialist must be scheduled to work during that time.
+   * 4. No conflicting breaks or other appointments (with PostgreSQL advisory locking).
    */
   async findReplacementStylistCandidate(
     tx: any,
@@ -138,6 +138,7 @@ export class LeaveReassignmentEngine {
         where: {
           salonId,
           stylistId: candidate.id,
+          appointmentDate: absenceDate,
           status: {
             in: [
               AppointmentStatus.BOOKED,
@@ -147,14 +148,16 @@ export class LeaveReassignmentEngine {
               AppointmentStatus.SEATED_IN_CHAIR,
             ],
           },
-          startAt: { lt: endAt },
-          endAt: { gt: startAt },
+          AND: [
+            { startAt: { lt: endAt } },
+            { endAt: { gt: startAt } },
+          ],
         },
       });
 
-      if (!conflictAppt) {
-        return candidate.id;
-      }
+      if (conflictAppt) continue;
+
+      return candidate.id;
     }
 
     return null;

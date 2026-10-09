@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { LeavePortion } from '@prisma/client';
-import { DateTime } from 'luxon';
+import { LeavePortion, DayOfWeek } from '@prisma/client';
+import { AvailabilityEngineService } from '../../../availability/availability-engine.service';
 
 export interface LeaveInterval {
   start: number; // Minutes from 00:00
@@ -16,12 +16,50 @@ export interface DayScheduleDetails {
 
 @Injectable()
 export class LeaveIntervalEngine {
+  constructor(private readonly availabilityEngine: AvailabilityEngineService) {}
+
   /**
    * Helper to parse time string "HH:mm" to total minutes from midnight.
    */
   parseTimeStringToMinutes(timeStr: string): number {
     const [hours, mins] = timeStr.split(':').map((v) => parseInt(v, 10));
     return hours * 60 + mins;
+  }
+
+  /**
+   * Resolves working hours & break interval for a stylist on a calendar date.
+   */
+  async resolveDaySchedule(
+    tx: any,
+    salonId: string,
+    stylistId: string,
+    followsSalonSchedule: boolean,
+    dayOfWeek: DayOfWeek,
+  ): Promise<DayScheduleDetails> {
+    const [salonWH, stylistWH] = await Promise.all([
+      tx.salonWorkingHours.findFirst({ where: { salonId, dayOfWeek } }),
+      tx.stylistWorkingHours.findFirst({ where: { stylistId, dayOfWeek } }),
+    ]);
+
+    const stylist = { followsSalonSchedule };
+    const shiftWindow = this.availabilityEngine.getEffectiveShiftWindow(salonWH, stylist, stylistWH);
+
+    if (
+      !shiftWindow.isWorking ||
+      shiftWindow.effectiveOpenMinutes === null ||
+      shiftWindow.effectiveCloseMinutes === null
+    ) {
+      return { openMin: 0, closeMin: 0, breakInterval: null, isOff: true };
+    }
+
+    const firstBreak = shiftWindow.effectiveBreaks.length > 0 ? shiftWindow.effectiveBreaks[0] : null;
+
+    return {
+      openMin: shiftWindow.effectiveOpenMinutes,
+      closeMin: shiftWindow.effectiveCloseMinutes,
+      breakInterval: firstBreak,
+      isOff: false,
+    };
   }
 
   /**

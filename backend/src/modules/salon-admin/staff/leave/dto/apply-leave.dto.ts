@@ -1,17 +1,16 @@
 import {
   IsDateString,
   IsEnum,
-  IsNotEmpty,
   IsOptional,
   IsString,
   Matches,
 } from 'class-validator';
 import { LeaveType, LeavePortion } from '@prisma/client';
 
-export class MarkAbsentDto {
+export class ApplyLeaveDto {
   @IsDateString()
   @IsOptional()
-  date?: string; // "YYYY-MM-DD" (backward compatibility)
+  date?: string; // "YYYY-MM-DD" (Single-day legacy support)
 
   @IsDateString()
   @IsOptional()
@@ -52,44 +51,5 @@ export class MarkAbsentDto {
   notes?: string;
 }
 
-export class PreviewAbsenceQueryDto {
-  @IsDateString()
-  @IsOptional()
-  date?: string; // "YYYY-MM-DD"
-
-  @IsDateString()
-  @IsOptional()
-  startDate?: string; // "YYYY-MM-DD"
-
-  @IsDateString()
-  @IsOptional()
-  endDate?: string; // "YYYY-MM-DD"
-
-  @IsEnum(LeavePortion)
-  @IsOptional()
-  leavePortion?: LeavePortion;
-
-  @IsString()
-  @IsOptional()
-  customStartTime?: string;
-
-  @IsString()
-  @IsOptional()
-  customEndTime?: string;
-}
-
-export class GetAbsencesQueryDto {
-  @IsDateString()
-  @IsOptional()
-  startDate?: string;
-
-  @IsDateString()
-  @IsOptional()
-  endDate?: string;
-}
-
-export class ExtendLeaveDto {
-  @IsDateString()
-  @IsNotEmpty()
-  newEndDate: string; // "YYYY-MM-DD"
-}
+// Backward-compatible alias
+export class MarkAbsentDto extends ApplyLeaveDto {}

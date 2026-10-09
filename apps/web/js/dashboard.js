@@ -676,7 +676,7 @@ export class SalonDashboard {
       </header>
 
       <!-- Main Workspace -->
-      <main id="main-content" style="max-width: 1300px; margin: 0 auto; padding: 24px 16px;">
+      <main id="main-content" style="max-width: 1300px; margin: 0 auto; padding: 10px 14px 80px 14px;">
 
         <!-- Universal Pull-to-Refresh Indicator (Always available on all screens) -->
         <div class="ptr-wrapper" id="ptr-wrapper">
@@ -2027,15 +2027,23 @@ export class SalonDashboard {
 
     return `
       <div class="stylist-detail-shell">
-        <!-- Separate Top Back Navigation -->
+        <!-- Top Navigation Bar: Back link on left + Active Toggle on right -->
         <div class="stylist-detail-nav">
           <button type="button" class="stylist-back-link-btn" id="btn-back-to-staff-list" aria-label="Back to Stylists">
             <span class="back-chevron">‹</span>
             <span>Back to Stylists</span>
           </button>
+
+          <!-- Modern Active / Inactive Toggle Switch Button -->
+          <button type="button" class="btn-detail-toggle stylist-toggle-switch ${st.status === 'ACTIVE' ? 'is-active' : 'is-inactive'}" data-id="${st.id}" title="${st.status === 'ACTIVE' ? 'Staff is Active (Click to Deactivate)' : 'Staff is Inactive (Click to Activate)'}" aria-label="Toggle Active Status">
+            <span class="toggle-track">
+              <span class="toggle-thumb"></span>
+            </span>
+            <span class="toggle-label">${st.status === 'ACTIVE' ? 'Active' : 'Inactive'}</span>
+          </button>
         </div>
 
-        <!-- Sleek Unified Stylist Identity Card -->
+        <!-- Sleek Unified Stylist Identity Card with Edit Button on Right -->
         <div class="stylist-detail-card">
           <!-- Left: Identity Block -->
           <div class="stylist-card-identity">
@@ -2058,24 +2066,13 @@ export class SalonDashboard {
             </div>
           </div>
 
-          <!-- Right: Action Controls (Icon Edit + Toggle Switch) -->
-          <div class="stylist-card-actions">
-            <!-- Sleek Edit Icon Button -->
-            <button type="button" class="btn-icon-action btn-detail-edit" data-id="${st.id}" data-name="${st.name}" data-phone="${st.phone || ''}" data-email="${st.email || ''}" data-img="${st.profileImageUrl || ''}" title="Edit Profile" aria-label="Edit Profile">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-              </svg>
-            </button>
-
-            <!-- Modern Active / Inactive Toggle Switch Button -->
-            <button type="button" class="btn-detail-toggle stylist-toggle-switch ${st.status === 'ACTIVE' ? 'is-active' : 'is-inactive'}" data-id="${st.id}" title="${st.status === 'ACTIVE' ? 'Staff is Active (Click to Deactivate)' : 'Staff is Inactive (Click to Activate)'}" aria-label="Toggle Active Status">
-              <span class="toggle-track">
-                <span class="toggle-thumb"></span>
-              </span>
-              <span class="toggle-label">${st.status === 'ACTIVE' ? 'Active' : 'Inactive'}</span>
-            </button>
-          </div>
+          <!-- Right: Edit Profile Button inside Card -->
+          <button type="button" class="btn-icon-action btn-detail-edit" data-id="${st.id}" data-name="${st.name}" data-phone="${st.phone || ''}" data-email="${st.email || ''}" data-img="${st.profileImageUrl || ''}" title="Edit Profile" aria-label="Edit Profile">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+            </svg>
+          </button>
         </div>
 
         <!-- Modern 3-Segment Tab Control (100% Width on Mobile) -->
@@ -2084,7 +2081,7 @@ export class SalonDashboard {
             <span>📅 Leaves</span>
           </button>
           <button type="button" class="stylist-tab-segment ${this.activeStaffSubtab === 'hours' ? 'active' : ''}" data-staff-subtab="hours">
-            <span>⏰ Work Hours</span>
+            <span>⏰ Schedule</span>
           </button>
           <button type="button" class="stylist-tab-segment ${this.activeStaffSubtab === 'services' ? 'active' : ''}" data-staff-subtab="services">
             <span>✂️ Services (${(st.services || []).length})</span>
@@ -2115,13 +2112,18 @@ export class SalonDashboard {
     const daysArr = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
     const followsSalon = st.followsSalonSchedule !== false;
 
-    // Build normalized 7-day schedule
-    const daysData = daysArr.map((day) => {
+    // Build normalized 7-day schedule map & detect routine breaks
+    const daysObj = {};
+    let detectedMasterStart = '10:00';
+    let detectedMasterEnd = '19:00';
+    const allBreaksFound = [];
+
+    daysArr.forEach((day) => {
       const customWh = Array.isArray(st.workingHours) ? st.workingHours.find((h) => h.dayOfWeek === day) : null;
       const salonWh = (this.salonWorkingHours || []).find((h) => h.dayOfWeek === day);
 
       const isSalonClosed = salonWh ? Boolean(salonWh.isClosed) : false;
-      const salonStart = salonWh?.startTime || '09:00';
+      const salonStart = salonWh?.startTime || '10:00';
       const salonEnd = salonWh?.endTime || '19:00';
 
       let isWorking = true;
@@ -2134,7 +2136,11 @@ export class SalonDashboard {
         startTime = customWh.startTime || salonStart;
         endTime = customWh.endTime || salonEnd;
         if (Array.isArray(customWh.breaks)) {
-          breaks = customWh.breaks;
+          breaks = customWh.breaks.map((b) => ({
+            title: (b.title || 'Break').trim(),
+            startTime: b.startTime,
+            endTime: b.endTime,
+          }));
         } else if (customWh.breakStartTime && customWh.breakEndTime) {
           breaks = [{ title: 'Lunch Break', startTime: customWh.breakStartTime, endTime: customWh.breakEndTime }];
         }
@@ -2143,13 +2149,22 @@ export class SalonDashboard {
         startTime = salonStart;
         endTime = salonEnd;
         if (Array.isArray(salonWh.breaks)) {
-          breaks = salonWh.breaks;
+          breaks = salonWh.breaks.map((b) => ({
+            title: (b.title || 'Break').trim(),
+            startTime: b.startTime,
+            endTime: b.endTime,
+          }));
         }
       }
 
-      return {
+      breaks.forEach((b) => {
+        allBreaksFound.push({ ...b, day });
+      });
+
+      daysObj[day] = {
         day,
         friendlyDay: day.charAt(0) + day.slice(1).toLowerCase(),
+        dayShort: day.slice(0, 3),
         isWorking,
         isSalonClosed,
         startTime,
@@ -2158,103 +2173,1005 @@ export class SalonDashboard {
         salonEnd,
         breaks,
       };
+
+      if (isWorking && (!detectedMasterStart || detectedMasterStart === '10:00')) {
+        detectedMasterStart = startTime;
+        detectedMasterEnd = endTime;
+      }
     });
 
+    // Group breaks into Routine Breaks
+    let detectedRoutineBreaks = [];
+    if (allBreaksFound.length > 0) {
+      const grouped = {};
+      allBreaksFound.forEach((b) => {
+        const key = `${b.title || 'Break'}_${b.startTime}_${b.endTime}`;
+        if (!grouped[key]) {
+          grouped[key] = {
+            id: `rb-${Math.random().toString(36).substr(2, 6)}`,
+            title: b.title || 'Break',
+            startTime: b.startTime,
+            endTime: b.endTime,
+            days: [],
+          };
+        }
+        if (!grouped[key].days.includes(b.day)) {
+          grouped[key].days.push(b.day);
+        }
+      });
+      detectedRoutineBreaks = Object.values(grouped);
+    } else {
+      detectedRoutineBreaks = [];
+    }
+
+    const currentTab = this.currentStaffHoursState?.activeSubTab || 'shifts';
+
+    this.currentStaffHoursState = {
+      staffId: st.id,
+      staffName: st.name,
+      followsSalon,
+      activeSubTab: currentTab,
+      masterShift: {
+        startTime: detectedMasterStart || '10:00',
+        endTime: detectedMasterEnd || '19:00',
+      },
+      routineBreaks: detectedRoutineBreaks,
+      days: daysObj,
+    };
+
+    // Ensure breaks are mapped to active working days
+    this.syncRoutineBreaksToDays();
+
+    const masterStart = this.currentStaffHoursState.masterShift.startTime;
+    const masterEnd = this.currentStaffHoursState.masterShift.endTime;
+    const activeWorkingDaysCount = daysArr.filter((d) => this.currentStaffHoursState.days[d]?.isWorking).length;
+
     return `
-      <div class="stylist-routine-card" style="display: flex; flex-direction: column; gap: 14px;">
-        <!-- Top Toolbar & Salon Schedule Inheritance Switch -->
-        <div style="background: rgba(139, 61, 255, 0.07); border: 1px solid rgba(139, 61, 255, 0.22); border-radius: 12px; padding: 14px 16px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
-            <label style="display: flex; align-items: flex-start; gap: 12px; cursor: pointer; margin: 0;">
-              <input type="checkbox" id="chk-staff-follow-salon" data-staff-id="${st.id}" ${followsSalon ? 'checked' : ''} style="width: 18px; height: 18px; accent-color: #8B3DFF; margin-top: 3px; cursor: pointer;" />
-              <div>
-                <strong style="color: #fff; font-size: 0.92rem; display: block;">Follow Salon Operating Schedule &amp; Week Offs</strong>
-                <p id="staff-follow-salon-hint" style="font-size: 0.74rem; color: #94a3b8; margin: 2px 0 0 0;">
-                  ${followsSalon
-        ? 'Stylist strictly inherits salon operating hours (09:00 - 19:00) and salon open days. Uncheck to configure custom shift times, personal week offs, and individual breaks.'
-        : 'Custom stylist schedule active. Stylist has individual working days, custom shift hours, and daily breaks.'}
-                </p>
+      <div class="stylist-routine-card">
+        <!-- Top Navigation: [ Segmented Tabs ] -->
+        <div class="stylist-schedule-top-row">
+          <div class="stylist-schedule-segmented-tabs" id="stylist-schedule-tabs">
+            <button type="button" class="schedule-tab-btn ${currentTab === 'shifts' ? 'active' : ''}" data-tab="shifts" id="tab-btn-shifts">
+              <span>⏰ Shift Hours</span>
+            </button>
+            <button type="button" class="schedule-tab-btn ${currentTab === 'breaks' ? 'active' : ''}" data-tab="breaks" id="tab-btn-breaks">
+              <span>☕ Daily Breaks</span>
+              <span class="breaks-count-chip" id="schedule-tab-breaks-count">${this.currentStaffHoursState.routineBreaks.length}</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- TAB 1: SHIFT HOURS VIEW -->
+        <div id="tab-content-shifts" style="display: ${currentTab === 'shifts' ? 'block' : 'none'};">
+          <div style="display: flex; flex-direction: column; gap: 10px;">
+            <!-- Bulk Shift Setter Card (Realtime Auto-apply, No Manual Button Needed) -->
+            <div class="stylist-bulk-setter-card" id="stylist-bulk-setter-container">
+              <div class="bulk-setter-row">
+                <div class="bulk-setter-info">
+                  <span class="bulk-setter-title">
+                    ${Icons.zap ? Icons.zap({ size: 13, color: '#fbbf24' }) : '⚡'}
+                    <span>All-Day Default Shift</span>
+                  </span>
+                  <span class="bulk-setter-sub">Changes auto-apply live across active days</span>
+                </div>
+                <div class="bulk-time-inputs">
+                  <div class="bulk-time-group">
+                    <span class="bulk-time-label">Shift Start</span>
+                    <div class="bulk-time-inp-wrap">
+                      <input type="time" class="form-control bulk-time-inp" id="master-bulk-start" value="${masterStart}" />
+                      <span class="bulk-time-preview" id="master-bulk-start-preview">${formatTime12h(masterStart)}</span>
+                    </div>
+                  </div>
+                  <span class="bulk-time-sep">to</span>
+                  <div class="bulk-time-group">
+                    <span class="bulk-time-label">Shift End</span>
+                    <div class="bulk-time-inp-wrap">
+                      <input type="time" class="form-control bulk-time-inp" id="master-bulk-end" value="${masterEnd}" />
+                      <span class="bulk-time-preview" id="master-bulk-end-preview">${formatTime12h(masterEnd)}</span>
+                    </div>
+                  </div>
+                </div>
               </div>
-            </label>
-            <div style="display: flex; align-items: center; gap: 10px;">
-              <span id="badge-staff-schedule-mode" class="badge" style="background: ${followsSalon ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)'}; color: ${followsSalon ? '#34d399' : '#fbbf24'}; border: 1px solid ${followsSalon ? 'rgba(16, 185, 129, 0.3)' : 'rgba(245, 158, 11, 0.3)'}; font-size: 0.72rem; padding: 4px 10px; font-weight: 700;">
-                ${followsSalon ? 'SYNCED WITH SALON' : 'CUSTOM SCHEDULE'}
-              </span>
-              <button type="button" class="btn btn-primary btn-sm" id="btn-save-staff-hours" data-staff-id="${st.id}" style="font-size: 0.76rem; font-weight: 700; height: 32px; padding: 0 14px;">
-                💾 Save Schedule
-              </button>
+            </div>
+
+            <!-- Individual Day Roster (Pure Shifts View) -->
+            <div class="stylist-roster-card">
+              <div class="stylist-roster-header">
+                <div class="stylist-roster-header-left">
+                  ${Icons.calendar ? Icons.calendar({ size: 14, color: '#a78bfa' }) : '📅'}
+                  <span class="stylist-roster-title">Weekly Schedule</span>
+                </div>
+                <span class="stylist-roster-count" id="roster-active-days-count">${activeWorkingDaysCount} of 7 Active Days</span>
+              </div>
+              <div id="stylist-roster-rows-container">
+                ${this.renderStaffRosterRowsHtml()}
+              </div>
             </div>
           </div>
         </div>
 
-        <!-- 7-Day Working Routine & Daily Breaks List -->
-        <div id="stylist-routine-days-container" style="display: flex; flex-direction: column; gap: 10px;">
-          ${daysData.map((d) => {
-          const isWorking = followsSalon ? !d.isSalonClosed : d.isWorking;
-          return `
-              <div class="stylist-routine-day-card ${!isWorking ? 'is-off' : ''}" data-day="${d.day}" style="background: rgba(255, 255, 255, 0.02); border: 1px solid ${!isWorking ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255, 255, 255, 0.07)'}; border-radius: 10px; padding: 12px 14px; transition: all 0.2s ease;">
-                <!-- Day Header: Toggle & Shift Times -->
-                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-                  <div style="display: flex; align-items: center; gap: 10px; min-width: 150px;">
-                    <button type="button" class="btn-toggle-stylist-day" data-day="${d.day}" data-staff-id="${st.id}" ${followsSalon ? 'disabled' : ''} style="height: 28px; padding: 0 10px; font-size: 0.7rem; font-weight: 700; border-radius: 6px; cursor: ${followsSalon ? 'not-allowed' : 'pointer'}; ${isWorking ? 'color: #34d399; border: 1px solid rgba(52, 211, 153, 0.35); background: rgba(52, 211, 153, 0.1);' : 'color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.1);'}">
-                      ${isWorking ? '✓ Working' : '💤 Weekly Off'}
-                    </button>
-                    <span style="font-weight: 700; font-size: 0.86rem; color: #fff;">${d.friendlyDay}</span>
-                    ${d.isSalonClosed ? `<span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #f87171; font-size: 0.62rem; padding: 2px 6px;">SALON CLOSED</span>` : ''}
-                  </div>
-
-                  <div class="routine-time-pickers" style="display: flex; align-items: center; gap: 8px; opacity: ${isWorking ? '1' : '0.4'}; pointer-events: ${isWorking && !followsSalon ? 'auto' : 'none'};">
-                    <div style="display: flex; align-items: center; gap: 4px;">
-                      <span style="font-size: 0.68rem; color: #94a3b8;">Shift:</span>
-                      <input type="time" class="form-control st-hours-start" data-day="${d.day}" value="${d.startTime}" ${followsSalon ? 'disabled' : ''} style="height: 30px; font-size: 0.76rem; width: 105px; padding: 2px 6px;" />
-                    </div>
-                    <span style="color: #64748b; font-size: 0.72rem;">to</span>
-                    <div style="display: flex; align-items: center; gap: 4px;">
-                      <input type="time" class="form-control st-hours-end" data-day="${d.day}" value="${d.endTime}" ${followsSalon ? 'disabled' : ''} style="height: 30px; font-size: 0.76rem; width: 105px; padding: 2px 6px;" />
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Daily Breaks Sub-section (Active when day is working) -->
-                <div class="st-day-breaks-section" style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed rgba(255, 255, 255, 0.08); display: ${isWorking ? 'block' : 'none'};">
-                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                    <div style="display: flex; align-items: center; gap: 6px;">
-                      <span style="font-size: 0.74rem; font-weight: 700; color: #cbd5e1;">☕ Daily Breaks</span>
-                      <span class="badge st-breaks-count" style="background: rgba(139, 61, 255, 0.15); color: #a5b4fc; font-size: 0.62rem; padding: 1px 6px;">
-                        ${d.breaks.length} break${d.breaks.length === 1 ? '' : 's'}
-                      </span>
-                    </div>
-                    <button type="button" class="btn btn-secondary btn-sm btn-add-stylist-break" data-day="${d.day}" ${followsSalon ? 'disabled title="Switch to Custom Schedule to add personal breaks"' : ''} style="font-size: 0.68rem; height: 26px; padding: 0 8px; font-weight: 600;">
-                      ➕ Add Break
-                    </button>
-                  </div>
-
-                  <div class="st-breaks-container" data-day="${d.day}" style="display: flex; flex-direction: column; gap: 6px;">
-                    ${d.breaks.length === 0 ? `
-                      <div class="empty-breaks-msg" style="font-size: 0.72rem; color: #64748b; font-style: italic; padding: 4px 0;">
-                        No breaks scheduled. Available continuously during shift.
-                      </div>
-                    ` : d.breaks.map((b, bIdx) => `
-                      <div class="st-break-row" data-day="${d.day}" data-break-idx="${bIdx}" style="display: flex; align-items: center; gap: 8px; background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 6px; padding: 5px 8px; flex-wrap: wrap;">
-                        <input type="text" class="form-control st-break-title" data-day="${d.day}" value="${b.title || 'Break'}" placeholder="Break Title e.g. Lunch" ${followsSalon ? 'disabled' : ''} style="height: 28px; font-size: 0.72rem; flex: 1; min-width: 110px; padding: 2px 6px;" />
-                        <div style="display: flex; align-items: center; gap: 4px;">
-                          <input type="time" class="form-control st-break-start" data-day="${d.day}" value="${b.startTime || '13:00'}" ${followsSalon ? 'disabled' : ''} style="height: 28px; font-size: 0.72rem; width: 95px; padding: 2px 4px;" />
-                          <span style="font-size: 0.68rem; color: #64748b;">to</span>
-                          <input type="time" class="form-control st-break-end" data-day="${d.day}" value="${b.endTime || '14:00'}" ${followsSalon ? 'disabled' : ''} style="height: 28px; font-size: 0.72rem; width: 95px; padding: 2px 4px;" />
-                        </div>
-                        <button type="button" class="btn-del-stylist-break" data-day="${d.day}" ${followsSalon ? 'disabled' : ''} title="Remove Break" style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.25); color: #f87171; border-radius: 4px; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; cursor: ${followsSalon ? 'not-allowed' : 'pointer'};">
-                          ✕
-                        </button>
-                      </div>
-                    `).join('')}
-                  </div>
-                </div>
+        <!-- TAB 2: ROUTINE BREAKS VIEW -->
+        <div id="tab-content-breaks" style="display: ${currentTab === 'breaks' ? 'block' : 'none'};">
+          <div class="stylist-breaks-container">
+            <div class="stylist-breaks-header-row">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <h4 style="font-size: 0.88rem; font-weight: 800; color: #fff; margin: 0; display: flex; align-items: center; gap: 6px;">
+                  ${Icons.coffee ? Icons.coffee({ size: 15, color: '#fbbf24' }) : '☕'}
+                  <span>Routine Daily Breaks</span>
+                </h4>
+                <span class="breaks-count-chip" id="breaks-header-count">${this.currentStaffHoursState.routineBreaks.length}</span>
               </div>
-            `;
-        }).join('')}
+              <button type="button" class="btn-compact-add-break" id="btn-add-routine-break">
+                ${Icons.plus ? Icons.plus({ size: 13, color: '#fff' }) : '➕'}
+                <span>Add Break</span>
+              </button>
+            </div>
+
+            <div id="stylist-routine-breaks-list" style="display: flex; flex-direction: column; gap: 8px;">
+              ${this.renderRoutineBreaksHtml()}
+            </div>
+          </div>
         </div>
       </div>
     `;
+  }
+
+  autoSaveStaffSchedule(staffId, immediate = false) {
+    if (!this.currentStaffHoursState || this.currentStaffHoursState.staffId !== staffId) return;
+
+    const statusBadge = document.getElementById('stylist-schedule-autosave-status');
+    if (statusBadge) {
+      statusBadge.innerHTML = `<span class="autosave-dot saving"></span><span class="autosave-text">Saving...</span>`;
+    }
+
+    if (this._autoSaveScheduleTimer) {
+      clearTimeout(this._autoSaveScheduleTimer);
+      this._autoSaveScheduleTimer = null;
+    }
+
+    const doSave = async () => {
+      this.syncRoutineBreaksToDays();
+
+      const daysArr = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+      const hoursPayload = [];
+
+      for (const day of daysArr) {
+        const d = this.currentStaffHoursState?.days ? this.currentStaffHoursState.days[day] : null;
+        const isWorking = d ? Boolean(d.isWorking) : true;
+        const start = d?.startTime || '10:00';
+        const end = d?.endTime || '19:00';
+        const breaks = (d?.breaks || []).map((b) => ({
+          title: (b.title || 'Break').trim(),
+          startTime: b.startTime,
+          endTime: b.endTime,
+        })).filter((b) => b.startTime && b.endTime);
+
+        if (isWorking && start < end) {
+          hoursPayload.push({
+            dayOfWeek: day,
+            isWorking,
+            startTime: start,
+            endTime: end,
+            breaks,
+            breakStartTime: null,
+            breakEndTime: null,
+            hasBreakOverride: true,
+          });
+        } else {
+          hoursPayload.push({
+            dayOfWeek: day,
+            isWorking: false,
+            startTime: start,
+            endTime: end,
+            breaks: [],
+            breakStartTime: null,
+            breakEndTime: null,
+            hasBreakOverride: true,
+          });
+        }
+      }
+
+      try {
+        const updated = await ApiClient.updateStaffWorkingHours(staffId, hoursPayload, false);
+        const st = (this.staffList || []).find((s) => s.id === staffId);
+        if (st) {
+          st.workingHours = updated && Array.isArray(updated) && updated.length > 0 ? updated : hoursPayload;
+        }
+        if (statusBadge) {
+          statusBadge.innerHTML = `<span class="autosave-dot"></span><span class="autosave-text">✓ Auto-saved</span>`;
+        }
+      } catch (err) {
+        console.error('Failed to auto-save schedule:', err);
+        if (statusBadge) {
+          statusBadge.innerHTML = `<span class="autosave-dot error"></span><span class="autosave-text" title="${err.message || 'Error'}">⚠️ Save error</span>`;
+        }
+      }
+    };
+
+    if (immediate) {
+      doSave();
+    } else {
+      this._autoSaveScheduleTimer = setTimeout(doSave, 350);
+    }
+  }
+
+  syncRoutineBreaksToDays() {
+    if (!this.currentStaffHoursState?.days) return;
+    const daysArr = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+    const routineBreaks = this.currentStaffHoursState.routineBreaks || [];
+
+    daysArr.forEach((dayKey) => {
+      const d = this.currentStaffHoursState.days[dayKey];
+      if (d) {
+        const matchingBreaks = routineBreaks
+          .filter((rb) => Array.isArray(rb.days) && rb.days.includes(dayKey))
+          .map((rb) => ({
+            title: (rb.title || 'Break').trim(),
+            startTime: rb.startTime,
+            endTime: rb.endTime,
+          }));
+        d.breaks = matchingBreaks;
+      }
+    });
+  }
+
+  renderStaffRosterRowsHtml() {
+    if (!this.currentStaffHoursState?.days) return '';
+    const daysArr = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+
+    return daysArr.map((day) => {
+      const d = this.currentStaffHoursState.days[day];
+      if (!d) return '';
+      const isWorking = Boolean(d.isWorking);
+
+      return `
+        <div class="stylist-roster-row ${!isWorking ? 'is-off' : ''}" data-day="${day}" title="Tap to customize ${d.friendlyDay} hours">
+          <div class="stylist-roster-left">
+            <span class="stylist-day-badge ${isWorking ? 'working' : 'off'}">${d.dayShort}</span>
+            <div class="stylist-roster-timing-wrap">
+              <span class="stylist-roster-clock-icon ${!isWorking ? 'is-off' : ''}">
+                ${Icons.clock ? Icons.clock({ size: 12, color: isWorking ? '#a78bfa' : '#64748b' }) : ''}
+              </span>
+              <span class="stylist-roster-time ${!isWorking ? 'is-off' : ''}">
+                ${isWorking ? `${formatTime12h(d.startTime)} – ${formatTime12h(d.endTime)}` : 'Weekly Off'}
+              </span>
+            </div>
+          </div>
+          <div class="stylist-roster-right">
+            <label class="roster-day-switch" title="Turn ${d.friendlyDay} ${isWorking ? 'Off' : 'On'}">
+              <input type="checkbox" class="roster-switch-input" data-day="${day}" ${isWorking ? 'checked' : ''} />
+              <span class="roster-switch-slider"></span>
+            </label>
+            <button type="button" class="stylist-roster-action-btn btn-open-roster-modal" data-day="${day}" title="Customize ${d.friendlyDay} Hours">
+              ${Icons.edit ? Icons.edit({ size: 12, color: '#cbd5e1' }) : '✏️'}
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  formatRoutineDaysSummary(days = []) {
+    if (!Array.isArray(days) || days.length === 0) return 'No days';
+    if (days.length === 7) return 'Everyday (Mon–Sun)';
+    const weekdays = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
+    const weekMonSat = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
+    if (days.length === 5 && weekdays.every((d) => days.includes(d))) return 'Mon–Fri';
+    if (days.length === 6 && weekMonSat.every((d) => days.includes(d))) return 'Mon–Sat';
+    if (days.length === 2 && days.includes('SATURDAY') && days.includes('SUNDAY')) return 'Weekends';
+    return days.map((d) => d.slice(0, 3)).join(', ');
+  }
+
+  renderRoutineBreaksHtml() {
+    const routineBreaks = this.currentStaffHoursState?.routineBreaks || [];
+    if (routineBreaks.length === 0) {
+      return `
+        <div class="empty-routine-breaks">
+          <div class="empty-breaks-icon">
+            ${Icons.coffee ? Icons.coffee({ size: 20, color: '#fbbf24' }) : '☕'}
+          </div>
+          <div class="empty-breaks-text">
+            <strong>No Routine Breaks Configured</strong>
+            <span>Stylist is available continuously throughout working shifts</span>
+          </div>
+          <button type="button" class="btn btn-sm btn-primary btn-trigger-add-break" style="font-size: 0.72rem; padding: 4px 14px; margin-top: 4px; font-weight: 700;">
+            + Add First Break
+          </button>
+        </div>
+      `;
+    }
+
+    const daysKeys = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+    const daysLetters = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+
+    return routineBreaks.map((b, idx) => {
+      const activeDays = Array.isArray(b.days) ? b.days : [];
+
+      return `
+        <div class="routine-break-row-card" data-idx="${idx}" title="Tap to edit ${b.title || 'Break'}">
+          <div class="routine-break-card-top">
+            <div class="routine-break-title-wrap">
+              <div class="routine-break-icon-wrap">
+                ${Icons.coffee ? Icons.coffee({ size: 13, color: '#fbbf24' }) : '☕'}
+              </div>
+              <span class="routine-break-row-title">${b.title || 'Routine Break'}</span>
+            </div>
+            <div class="routine-break-row-actions">
+              <button type="button" class="btn-edit-routine-break" data-idx="${idx}" title="Edit Break">
+                ${Icons.edit ? Icons.edit({ size: 12, color: '#cbd5e1' }) : '✏️'}
+              </button>
+              <button type="button" class="btn-del-routine-break-direct" data-idx="${idx}" title="Delete Break">
+                ${Icons.trash ? Icons.trash({ size: 12, color: '#f87171' }) : '✕'}
+              </button>
+            </div>
+          </div>
+          <div class="routine-break-card-bottom">
+            <div class="routine-break-time-badge">
+              ${Icons.clock ? Icons.clock({ size: 10, color: '#a78bfa' }) : ''}
+              <span class="break-time-text">${formatTime12h(b.startTime)}&nbsp;–&nbsp;${formatTime12h(b.endTime)}</span>
+            </div>
+            <div class="routine-break-days-matrix" title="Active on: ${activeDays.map((d) => d.slice(0, 3)).join(', ')}">
+              ${daysLetters.map((letter, dayIdx) => {
+                const dayKey = daysKeys[dayIdx];
+                const isActive = activeDays.includes(dayKey);
+                return `<span class="break-matrix-day ${isActive ? 'active' : ''}">${letter}</span>`;
+              }).join('')}
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  updateStaffHoursTableUI() {
+    const rowsContainer = document.getElementById('stylist-roster-rows-container');
+    if (rowsContainer) {
+      rowsContainer.innerHTML = this.renderStaffRosterRowsHtml();
+    }
+    const countBadge = document.getElementById('roster-active-days-count');
+    if (countBadge) {
+      const daysArr = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+      const activeCount = daysArr.filter((d) => this.currentStaffHoursState?.days[d]?.isWorking).length;
+      countBadge.textContent = `${activeCount} of 7 Active Days`;
+    }
+    const breaksList = document.getElementById('stylist-routine-breaks-list');
+    if (breaksList) {
+      breaksList.innerHTML = this.renderRoutineBreaksHtml();
+    }
+    const breaksTabCount = document.getElementById('schedule-tab-breaks-count');
+    if (breaksTabCount) {
+      breaksTabCount.textContent = (this.currentStaffHoursState?.routineBreaks || []).length;
+    }
+    const breaksHeaderCount = document.getElementById('breaks-header-count');
+    if (breaksHeaderCount) {
+      breaksHeaderCount.textContent = (this.currentStaffHoursState?.routineBreaks || []).length;
+    }
+    this.attachStaffRosterListeners();
+    this.attachRoutineBreaksListeners();
+  }
+
+  attachStaffRosterListeners() {
+    const rowsContainer = document.getElementById('stylist-roster-rows-container');
+    if (!rowsContainer) return;
+
+    // 1. Instant Working/Off Toggle Switch (1-click, auto-saves)
+    rowsContainer.querySelectorAll('.roster-switch-input').forEach((toggle) => {
+      toggle.onclick = (e) => {
+        e.stopPropagation();
+      };
+      toggle.onchange = (e) => {
+        e.stopPropagation();
+        const day = toggle.getAttribute('data-day');
+        if (!this.currentStaffHoursState?.days[day]) return;
+
+        const isWorking = toggle.checked;
+        this.currentStaffHoursState.days[day].isWorking = isWorking;
+
+        if (isWorking && (!this.currentStaffHoursState.days[day].startTime || !this.currentStaffHoursState.days[day].endTime)) {
+          this.currentStaffHoursState.days[day].startTime = this.currentStaffHoursState.masterShift?.startTime || '10:00';
+          this.currentStaffHoursState.days[day].endTime = this.currentStaffHoursState.masterShift?.endTime || '19:00';
+        }
+
+        this.syncRoutineBreaksToDays();
+        this.updateStaffHoursTableUI();
+        this.autoSaveStaffSchedule(this.currentStaffHoursState.staffId);
+      };
+    });
+
+    // 2. Click row to open customize modal (ignores clicks on the switch toggle)
+    rowsContainer.querySelectorAll('.stylist-roster-row').forEach((row) => {
+      row.onclick = (e) => {
+        if (e.target.closest('.roster-day-switch')) return;
+        const day = row.getAttribute('data-day');
+        this.openStaffDayRosterModal(day);
+      };
+    });
+
+    // 3. Edit button opens customize modal
+    rowsContainer.querySelectorAll('.btn-open-roster-modal').forEach((btn) => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const day = btn.getAttribute('data-day');
+        this.openStaffDayRosterModal(day);
+      };
+    });
+  }
+
+  attachRoutineBreaksListeners() {
+    const container = document.getElementById('tab-content-breaks');
+    if (!container) return;
+
+    // 1. Add break header trigger
+    const addBtn = container.querySelector('#btn-add-routine-break');
+    if (addBtn) {
+      addBtn.onclick = (e) => {
+        e.preventDefault();
+        this.openRoutineBreakBottomSheet(-1);
+      };
+    }
+
+    // 2. Empty state trigger
+    const emptyAddBtn = container.querySelector('.btn-trigger-add-break');
+    if (emptyAddBtn) {
+      emptyAddBtn.onclick = (e) => {
+        e.preventDefault();
+        this.openRoutineBreakBottomSheet(-1);
+      };
+    }
+
+    // 3. Click break row or Edit button to open Bottom Sheet
+    container.querySelectorAll('.routine-break-row-card').forEach((card) => {
+      card.onclick = (e) => {
+        if (e.target.closest('.btn-del-routine-break-direct')) return;
+        const idx = parseInt(card.getAttribute('data-idx'), 10);
+        this.openRoutineBreakBottomSheet(idx);
+      };
+    });
+
+    container.querySelectorAll('.btn-edit-routine-break').forEach((btn) => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const idx = parseInt(btn.getAttribute('data-idx'), 10);
+        this.openRoutineBreakBottomSheet(idx);
+      };
+    });
+
+    // 4. Quick Delete Button
+    container.querySelectorAll('.btn-del-routine-break-direct').forEach((btn) => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        const idx = parseInt(btn.getAttribute('data-idx'), 10);
+        if (this.currentStaffHoursState?.routineBreaks && this.currentStaffHoursState.routineBreaks[idx]) {
+          const title = this.currentStaffHoursState.routineBreaks[idx].title || 'Break';
+          this.currentStaffHoursState.routineBreaks.splice(idx, 1);
+          this.syncRoutineBreaksToDays();
+
+          // Immediately sync to in-memory staffList record
+          const st = (this.staffList || []).find((s) => s.id === this.currentStaffHoursState.staffId);
+          if (st) {
+            const daysArr = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+            if (!Array.isArray(st.workingHours) || st.workingHours.length === 0) {
+              st.workingHours = daysArr.map((d) => ({
+                dayOfWeek: d,
+                isWorking: this.currentStaffHoursState.days[d]?.isWorking ?? true,
+                startTime: this.currentStaffHoursState.days[d]?.startTime || '10:00',
+                endTime: this.currentStaffHoursState.days[d]?.endTime || '19:00',
+                breaks: (this.currentStaffHoursState.days[d]?.breaks || []).slice(),
+                breakStartTime: null,
+                breakEndTime: null,
+                hasBreakOverride: true,
+              }));
+            } else {
+              st.workingHours.forEach((wh) => {
+                const d = this.currentStaffHoursState.days[wh.dayOfWeek];
+                wh.breaks = d && Array.isArray(d.breaks) ? [...d.breaks] : [];
+                wh.breakStartTime = null;
+                wh.breakEndTime = null;
+                wh.hasBreakOverride = true;
+              });
+            }
+          }
+
+          this.updateStaffHoursTableUI();
+          this.autoSaveStaffSchedule(this.currentStaffHoursState.staffId, true);
+          this.showToast(`Removed routine break "${title}".`, 'info');
+        }
+      };
+    });
+  }
+
+  openRoutineBreakBottomSheet(editIndex = -1) {
+    if (!this.currentStaffHoursState) return;
+    const isEditing = editIndex >= 0 && Array.isArray(this.currentStaffHoursState.routineBreaks) && Boolean(this.currentStaffHoursState.routineBreaks[editIndex]);
+    const breakData = isEditing ? this.currentStaffHoursState.routineBreaks[editIndex] : null;
+
+    const daysArr = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+    
+    let currentTitle = breakData ? (breakData.title || 'Lunch Break') : (this.currentStaffHoursState.routineBreaks?.length === 0 ? 'Lunch Break' : 'Evening Tea Break');
+    let currentStart = breakData ? (breakData.startTime || '13:00') : (this.currentStaffHoursState.routineBreaks?.length === 0 ? '13:00' : '16:30');
+    let currentEnd = breakData ? (breakData.endTime || '14:00') : (this.currentStaffHoursState.routineBreaks?.length === 0 ? '14:00' : '17:00');
+    let selectedDays = breakData && Array.isArray(breakData.days) ? [...breakData.days] : ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
+
+    let sheetContainer = document.getElementById('routine-break-sheet-modal');
+    if (!sheetContainer) {
+      sheetContainer = document.createElement('div');
+      sheetContainer.id = 'routine-break-sheet-modal';
+      document.body.appendChild(sheetContainer);
+    }
+
+    sheetContainer.innerHTML = `
+      <div class="routine-break-sheet-backdrop" id="routine-break-sheet-backdrop">
+        <div class="routine-break-sheet-container" id="routine-break-sheet-container">
+          <div class="sheet-drag-handle"></div>
+
+          <div class="sheet-header">
+            <div class="sheet-title-group">
+              <div class="sheet-icon-badge">
+                ${Icons.coffee ? Icons.coffee({ size: 16, color: '#fbbf24' }) : '☕'}
+              </div>
+              <div>
+                <h3 class="sheet-title">${isEditing ? 'Edit Routine Break' : 'Add Routine Break'}</h3>
+                <p class="sheet-subtitle">Repeats automatically across working shifts</p>
+              </div>
+            </div>
+            <button type="button" class="sheet-close-btn" id="btn-close-break-sheet">&times;</button>
+          </div>
+
+          <div class="sheet-body">
+            <!-- 1. Break Name & Quick Presets -->
+            <div class="sheet-form-group">
+              <label class="sheet-label">Break Name</label>
+              <input type="text" class="form-control sheet-inp" id="sheet-break-title" value="${currentTitle}" placeholder="e.g. Lunch Break" />
+              
+              <div class="sheet-presets-row">
+                <button type="button" class="sheet-preset-chip" data-title="Lunch Break" data-start="13:00" data-end="14:00">🍱 Lunch (1-2 PM)</button>
+                <button type="button" class="sheet-preset-chip" data-title="Evening Tea Break" data-start="16:30" data-end="17:00">☕ Tea (4:30-5 PM)</button>
+                <button type="button" class="sheet-preset-chip" data-title="Prayer & Rest" data-start="14:00" data-end="14:30">🧘 Prayer (2-2:30 PM)</button>
+                <button type="button" class="sheet-preset-chip" data-title="Snack Break" data-start="11:30" data-end="12:00">🥪 Snack</button>
+              </div>
+            </div>
+
+            <!-- 2. Time Window -->
+            <div class="sheet-form-group">
+              <label class="sheet-label">Break Time Window</label>
+              <div class="sheet-time-grid">
+                <div class="sheet-time-box">
+                  <span class="sheet-time-box-label">Starts At</span>
+                  <input type="time" class="form-control bulk-time-inp sheet-time-inp" id="sheet-break-start" value="${currentStart}" />
+                  <span class="sheet-time-preview" id="sheet-break-start-preview">${formatTime12h(currentStart)}</span>
+                </div>
+                <span class="sheet-time-arrow">→</span>
+                <div class="sheet-time-box">
+                  <span class="sheet-time-box-label">Ends At</span>
+                  <input type="time" class="form-control bulk-time-inp sheet-time-inp" id="sheet-break-end" value="${currentEnd}" />
+                  <span class="sheet-time-preview" id="sheet-break-end-preview">${formatTime12h(currentEnd)}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 3. Active Days Selector -->
+            <div class="sheet-form-group">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <label class="sheet-label" style="margin: 0;">Repeat On Days</label>
+                <div class="sheet-quick-days">
+                  <button type="button" class="sheet-quick-day-btn" id="btn-days-all">All Days</button>
+                  <button type="button" class="sheet-quick-day-btn" id="btn-days-weekdays">Mon–Fri</button>
+                  <button type="button" class="sheet-quick-day-btn" id="btn-days-sat">Mon–Sat</button>
+                </div>
+              </div>
+              <div class="sheet-days-chips-grid">
+                ${daysArr.map((dKey) => {
+                  const dShort = dKey.slice(0, 3);
+                  const isSelected = selectedDays.includes(dKey);
+                  return `
+                    <button type="button" class="sheet-day-pill ${isSelected ? 'active' : ''}" data-day="${dKey}">
+                      ${dShort}
+                    </button>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          </div>
+
+          <div class="sheet-footer">
+            ${isEditing ? `
+              <button type="button" class="btn btn-outline-danger sheet-btn-delete" id="btn-sheet-delete-break">
+                ${Icons.trash ? Icons.trash({ size: 13, color: '#f87171' }) : '🗑️'}
+                <span>Delete</span>
+              </button>
+            ` : `
+              <button type="button" class="btn btn-secondary sheet-btn-cancel" id="btn-sheet-cancel">Cancel</button>
+            `}
+            <div style="display: flex; gap: 8px; margin-left: auto;">
+              ${isEditing ? `<button type="button" class="btn btn-secondary sheet-btn-cancel" id="btn-sheet-cancel-edit">Cancel</button>` : ''}
+              <button type="button" class="btn btn-primary sheet-btn-save" id="btn-sheet-save-break">
+                ${isEditing ? '✓ Save Changes' : '+ Add Break'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const closeSheet = () => {
+      const backdrop = sheetContainer.querySelector('#routine-break-sheet-backdrop');
+      const container = sheetContainer.querySelector('#routine-break-sheet-container');
+      if (backdrop && container) {
+        backdrop.classList.add('closing');
+        container.classList.add('closing');
+        setTimeout(() => {
+          sheetContainer.innerHTML = '';
+        }, 200);
+      } else {
+        sheetContainer.innerHTML = '';
+      }
+    };
+
+    // Close buttons & backdrop click
+    sheetContainer.querySelector('#btn-close-break-sheet')?.addEventListener('click', closeSheet);
+    sheetContainer.querySelector('#btn-sheet-cancel')?.addEventListener('click', closeSheet);
+    sheetContainer.querySelector('#btn-sheet-cancel-edit')?.addEventListener('click', closeSheet);
+    sheetContainer.querySelector('#routine-break-sheet-backdrop')?.addEventListener('click', (e) => {
+      if (e.target.id === 'routine-break-sheet-backdrop') closeSheet();
+    });
+
+    // Time input live previews
+    const startInp = sheetContainer.querySelector('#sheet-break-start');
+    const endInp = sheetContainer.querySelector('#sheet-break-end');
+    const startPrev = sheetContainer.querySelector('#sheet-break-start-preview');
+    const endPrev = sheetContainer.querySelector('#sheet-break-end-preview');
+    const titleInp = sheetContainer.querySelector('#sheet-break-title');
+
+    startInp?.addEventListener('input', () => {
+      if (startPrev) startPrev.textContent = formatTime12h(startInp.value);
+    });
+    endInp?.addEventListener('input', () => {
+      if (endPrev) endPrev.textContent = formatTime12h(endInp.value);
+    });
+
+    // Preset chips
+    sheetContainer.querySelectorAll('.sheet-preset-chip').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        const pTitle = chip.getAttribute('data-title');
+        const pStart = chip.getAttribute('data-start');
+        const pEnd = chip.getAttribute('data-end');
+        if (pTitle && titleInp) titleInp.value = pTitle;
+        if (pStart && startInp) {
+          startInp.value = pStart;
+          if (startPrev) startPrev.textContent = formatTime12h(pStart);
+        }
+        if (pEnd && endInp) {
+          endInp.value = pEnd;
+          if (endPrev) endPrev.textContent = formatTime12h(pEnd);
+        }
+      });
+    });
+
+    // Quick days selectors
+    const dayPills = sheetContainer.querySelectorAll('.sheet-day-pill');
+    const syncDayPillsUI = () => {
+      dayPills.forEach((p) => {
+        const dKey = p.getAttribute('data-day');
+        if (selectedDays.includes(dKey)) {
+          p.classList.add('active');
+        } else {
+          p.classList.remove('active');
+        }
+      });
+    };
+
+    sheetContainer.querySelector('#btn-days-all')?.addEventListener('click', () => {
+      selectedDays = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+      syncDayPillsUI();
+    });
+    sheetContainer.querySelector('#btn-days-weekdays')?.addEventListener('click', () => {
+      selectedDays = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
+      syncDayPillsUI();
+    });
+    sheetContainer.querySelector('#btn-days-sat')?.addEventListener('click', () => {
+      selectedDays = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
+      syncDayPillsUI();
+    });
+
+    // Day pill toggle
+    dayPills.forEach((p) => {
+      p.addEventListener('click', () => {
+        const dKey = p.getAttribute('data-day');
+        if (selectedDays.includes(dKey)) {
+          selectedDays = selectedDays.filter((d) => d !== dKey);
+        } else {
+          selectedDays.push(dKey);
+        }
+        syncDayPillsUI();
+      });
+    });
+
+    // Save Break Button
+    sheetContainer.querySelector('#btn-sheet-save-break')?.addEventListener('click', () => {
+      const finalTitle = titleInp ? titleInp.value.trim() || 'Break' : 'Break';
+      const sVal = startInp ? startInp.value : '13:00';
+      const eVal = endInp ? endInp.value : '14:00';
+
+      if (!sVal || !eVal || sVal >= eVal) {
+        alert('Break start time must be earlier than break end time.');
+        return;
+      }
+      if (selectedDays.length === 0) {
+        alert('Please select at least one day for this routine break.');
+        return;
+      }
+
+      if (!Array.isArray(this.currentStaffHoursState.routineBreaks)) {
+        this.currentStaffHoursState.routineBreaks = [];
+      }
+
+      if (isEditing) {
+        this.currentStaffHoursState.routineBreaks[editIndex] = {
+          id: breakData.id || `rb-${Date.now()}`,
+          title: finalTitle,
+          startTime: sVal,
+          endTime: eVal,
+          days: selectedDays,
+        };
+      } else {
+        this.currentStaffHoursState.routineBreaks.push({
+          id: `rb-${Date.now()}`,
+          title: finalTitle,
+          startTime: sVal,
+          endTime: eVal,
+          days: selectedDays,
+        });
+      }
+
+      this.syncRoutineBreaksToDays();
+
+      // Immediately sync to in-memory staffList record
+      const st = (this.staffList || []).find((s) => s.id === this.currentStaffHoursState.staffId);
+      if (st) {
+        const daysArr = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+        if (!Array.isArray(st.workingHours) || st.workingHours.length === 0) {
+          st.workingHours = daysArr.map((d) => ({
+            dayOfWeek: d,
+            isWorking: this.currentStaffHoursState.days[d]?.isWorking ?? true,
+            startTime: this.currentStaffHoursState.days[d]?.startTime || '10:00',
+            endTime: this.currentStaffHoursState.days[d]?.endTime || '19:00',
+            breaks: (this.currentStaffHoursState.days[d]?.breaks || []).slice(),
+            breakStartTime: null,
+            breakEndTime: null,
+            hasBreakOverride: true,
+          }));
+        } else {
+          st.workingHours.forEach((wh) => {
+            const d = this.currentStaffHoursState.days[wh.dayOfWeek];
+            wh.breaks = d && Array.isArray(d.breaks) ? [...d.breaks] : [];
+            wh.breakStartTime = null;
+            wh.breakEndTime = null;
+            wh.hasBreakOverride = true;
+          });
+        }
+      }
+
+      this.updateStaffHoursTableUI();
+      this.autoSaveStaffSchedule(this.currentStaffHoursState.staffId, true);
+      closeSheet();
+      this.showToast(`Routine break "${finalTitle}" saved!`, 'success');
+    });
+
+    // Delete Break Button (in edit mode)
+    sheetContainer.querySelector('#btn-sheet-delete-break')?.addEventListener('click', () => {
+      if (isEditing) {
+        const deletedTitle = breakData.title || 'Break';
+        this.currentStaffHoursState.routineBreaks.splice(editIndex, 1);
+        this.syncRoutineBreaksToDays();
+
+        // Immediately sync to in-memory staffList record
+        const st = (this.staffList || []).find((s) => s.id === this.currentStaffHoursState.staffId);
+        if (st) {
+          const daysArr = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+          if (!Array.isArray(st.workingHours) || st.workingHours.length === 0) {
+            st.workingHours = daysArr.map((d) => ({
+              dayOfWeek: d,
+              isWorking: this.currentStaffHoursState.days[d]?.isWorking ?? true,
+              startTime: this.currentStaffHoursState.days[d]?.startTime || '10:00',
+              endTime: this.currentStaffHoursState.days[d]?.endTime || '19:00',
+              breaks: (this.currentStaffHoursState.days[d]?.breaks || []).slice(),
+              breakStartTime: null,
+              breakEndTime: null,
+              hasBreakOverride: true,
+            }));
+          } else {
+            st.workingHours.forEach((wh) => {
+              const d = this.currentStaffHoursState.days[wh.dayOfWeek];
+              wh.breaks = d && Array.isArray(d.breaks) ? [...d.breaks] : [];
+              wh.breakStartTime = null;
+              wh.breakEndTime = null;
+              wh.hasBreakOverride = true;
+            });
+          }
+        }
+
+        this.updateStaffHoursTableUI();
+        this.autoSaveStaffSchedule(this.currentStaffHoursState.staffId, true);
+        closeSheet();
+        this.showToast(`Removed routine break "${deletedTitle}".`, 'info');
+      }
+    });
+  }
+
+  openStaffDayRosterModal(dayKey) {
+    if (!this.currentStaffHoursState?.days) return;
+    const dayData = this.currentStaffHoursState.days[dayKey];
+    if (!dayData) return;
+
+    const modalContainer = document.getElementById('modal-container') || document.body;
+    let isWorking = dayData.isWorking !== false;
+
+    modalContainer.innerHTML = `
+      <div class="modal-backdrop show" id="staff-day-roster-modal-backdrop">
+        <div class="modal-content wh-edit-modal">
+          <div class="modal-header" style="border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 12px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span class="wh-modal-day-badge">${dayData.dayShort}</span>
+              <div>
+                <h3 style="margin: 0; font-size: 1.05rem; font-weight: 800; color: #fff;">${dayData.friendlyDay} Shift</h3>
+                <p style="margin: 2px 0 0 0; font-size: 0.72rem; color: #94a3b8;">Set working hours for ${this.currentStaffHoursState.staffName}</p>
+              </div>
+            </div>
+            <button class="close-btn" id="btn-close-roster-modal">&times;</button>
+          </div>
+
+          <div class="modal-body" style="padding: 16px 0; display: flex; flex-direction: column; gap: 14px;">
+            <!-- Working / Weekly Off Toggle -->
+            <div style="display: flex; align-items: center; justify-content: space-between; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 10px 14px;">
+              <div>
+                <strong style="color: #fff; font-size: 0.86rem; display: block;">Working Day</strong>
+                <span style="font-size: 0.7rem; color: #94a3b8;" id="modal-roster-status-hint">${isWorking ? 'Stylist is available for appointments' : 'Marked as Weekly Off'}</span>
+              </div>
+              <label class="switch-toggle" style="margin: 0;">
+                <input type="checkbox" id="modal-chk-roster-working" ${isWorking ? 'checked' : ''} />
+                <span class="switch-slider"></span>
+              </label>
+            </div>
+
+            <!-- Working Shift Hours Section -->
+            <div id="modal-roster-shift-wrap" style="display: ${isWorking ? 'block' : 'none'};">
+              <label style="display: flex; align-items: center; gap: 6px; font-size: 0.76rem; font-weight: 700; color: #cbd5e1; margin-bottom: 8px;">
+                ${Icons.clock ? Icons.clock({ size: 14, color: '#a78bfa' }) : '⏰'}
+                <span>Shift Working Hours</span>
+              </label>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div class="form-group" style="margin: 0;">
+                  <label style="font-size: 0.7rem; color: #94a3b8; margin-bottom: 4px; display: block;">Start Time</label>
+                  <input type="time" class="form-control bulk-time-inp" id="modal-roster-start" value="${dayData.startTime}" />
+                  <div id="modal-roster-start-preview" style="font-size: 0.7rem; color: #a5b4fc; margin-top: 3px; text-align: center; font-weight: 600;">
+                    ${formatTime12h(dayData.startTime)}
+                  </div>
+                </div>
+                <div class="form-group" style="margin: 0;">
+                  <label style="font-size: 0.7rem; color: #94a3b8; margin-bottom: 4px; display: block;">End Time</label>
+                  <input type="time" class="form-control bulk-time-inp" id="modal-roster-end" value="${dayData.endTime}" />
+                  <div id="modal-roster-end-preview" style="font-size: 0.7rem; color: #a5b4fc; margin-top: 3px; text-align: center; font-weight: 600;">
+                    ${formatTime12h(dayData.endTime)}
+                  </div>
+                </div>
+              </div>
+
+              <!-- Routine Breaks Indicator -->
+              ${(() => {
+                const routineBreaks = (this.currentStaffHoursState?.routineBreaks || []).filter((rb) => Array.isArray(rb.days) && rb.days.includes(dayKey));
+                if (routineBreaks.length > 0) {
+                  return `
+                    <div style="font-size: 0.72rem; color: #c4b5fd; background: rgba(139, 61, 255, 0.08); border: 1px solid rgba(139, 61, 255, 0.2); border-radius: 8px; padding: 8px 12px; margin-top: 10px;">
+                      <div style="font-weight: 700; margin-bottom: 4px;">☕ Routine Breaks for ${dayData.friendlyDay}:</div>
+                      <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                        ${routineBreaks.map((b) => `<span style="background: rgba(139, 61, 255, 0.2); border: 1px solid rgba(139, 61, 255, 0.4); border-radius: 4px; padding: 2px 7px; font-weight: 700; color: #fff; font-size: 0.68rem;">${b.title || 'Break'} (${formatTime12h(b.startTime)} - ${formatTime12h(b.endTime)})</span>`).join('')}
+                      </div>
+                    </div>
+                  `;
+                }
+                return `
+                  <div style="font-size: 0.7rem; color: #94a3b8; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 8px; padding: 8px 12px; margin-top: 10px;">
+                    ☕ No routine breaks assigned for ${dayData.friendlyDay}. (Configure in Daily Breaks tab)
+                  </div>
+                `;
+              })()}
+            </div>
+
+            <!-- Quick Option: Copy to All 7 Days -->
+            <div style="background: rgba(139, 61, 255, 0.07); border: 1px dashed rgba(139, 61, 255, 0.3); border-radius: 8px; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+              <span style="font-size: 0.72rem; color: #c4b5fd;">Copy this shift across the week?</span>
+              <button type="button" class="btn btn-secondary btn-sm" id="modal-btn-copy-shift-all" style="font-size: 0.68rem; height: 26px; padding: 0 10px; white-space: nowrap; font-weight: 700;">
+                ⚡ Copy to All 7 Days
+              </button>
+            </div>
+          </div>
+
+          <div class="modal-footer" style="border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 12px; display: flex; justify-content: space-between;">
+            <button type="button" class="btn btn-secondary" id="modal-btn-roster-cancel" style="font-size: 0.78rem;">Cancel</button>
+            <button type="button" class="btn btn-primary" id="modal-btn-roster-save" style="font-size: 0.78rem; font-weight: 700; padding: 0 18px;">
+              ✓ Update Shift
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const modalBackdrop = modalContainer.querySelector('#staff-day-roster-modal-backdrop');
+    const closeModal = () => (modalContainer.innerHTML = '');
+
+    modalContainer.querySelector('#btn-close-roster-modal')?.addEventListener('click', closeModal);
+    modalContainer.querySelector('#modal-btn-roster-cancel')?.addEventListener('click', closeModal);
+    modalBackdrop?.addEventListener('click', (e) => {
+      if (e.target === modalBackdrop) closeModal();
+    });
+
+    const chkWorking = modalContainer.querySelector('#modal-chk-roster-working');
+    const shiftWrap = modalContainer.querySelector('#modal-roster-shift-wrap');
+    const hint = modalContainer.querySelector('#modal-roster-status-hint');
+
+    chkWorking?.addEventListener('change', () => {
+      isWorking = chkWorking.checked;
+      if (shiftWrap) shiftWrap.style.display = isWorking ? 'block' : 'none';
+      if (hint) hint.textContent = isWorking ? 'Stylist is available for appointments' : 'Marked as Weekly Off';
+    });
+
+    const startInp = modalContainer.querySelector('#modal-roster-start');
+    const endInp = modalContainer.querySelector('#modal-roster-end');
+    const startPrev = modalContainer.querySelector('#modal-roster-start-preview');
+    const endPrev = modalContainer.querySelector('#modal-roster-end-preview');
+
+    startInp?.addEventListener('input', () => {
+      if (startPrev) startPrev.textContent = formatTime12h(startInp.value);
+    });
+    endInp?.addEventListener('input', () => {
+      if (endPrev) endPrev.textContent = formatTime12h(endInp.value);
+    });
+
+    modalContainer.querySelector('#modal-btn-copy-shift-all')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      const sVal = startInp ? startInp.value : '10:00';
+      const eVal = endInp ? endInp.value : '19:00';
+      if (isWorking && (!sVal || !eVal || sVal >= eVal)) {
+        alert(`Shift start (${formatTime12h(sVal)}) must be earlier than shift end (${formatTime12h(eVal)}).`);
+        return;
+      }
+      const daysArr = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+      daysArr.forEach((dKey) => {
+        if (this.currentStaffHoursState.days[dKey]) {
+          this.currentStaffHoursState.days[dKey].isWorking = isWorking;
+          this.currentStaffHoursState.days[dKey].startTime = sVal;
+          this.currentStaffHoursState.days[dKey].endTime = eVal;
+        }
+      });
+      if (isWorking) {
+        this.currentStaffHoursState.masterShift = { startTime: sVal, endTime: eVal };
+      }
+      closeModal();
+      this.updateStaffHoursTableUI();
+      this.autoSaveStaffSchedule(this.currentStaffHoursState?.staffId);
+      this.showToast(`Applied ${dayData.friendlyDay} shift to all 7 days (auto-saved)`, 'success');
+    });
+
+    modalContainer.querySelector('#modal-btn-roster-save')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      const sVal = startInp ? startInp.value : '10:00';
+      const eVal = endInp ? endInp.value : '19:00';
+      if (isWorking) {
+        if (!sVal || !eVal || sVal >= eVal) {
+          alert(`Shift start (${formatTime12h(sVal)}) must be earlier than shift end (${formatTime12h(eVal)}).`);
+          return;
+        }
+      }
+      this.currentStaffHoursState.days[dayKey].isWorking = isWorking;
+      this.currentStaffHoursState.days[dayKey].startTime = sVal;
+      this.currentStaffHoursState.days[dayKey].endTime = eVal;
+
+      closeModal();
+      this.updateStaffHoursTableUI();
+      this.autoSaveStaffSchedule(this.currentStaffHoursState?.staffId);
+      this.showToast(`${dayData.friendlyDay} shift updated (auto-saved)`, 'success');
+    });
   }
 
   renderStaffServicesSubtab(st) {
@@ -6042,313 +6959,80 @@ export class SalonDashboard {
         };
       });
     } else if (subtab === 'hours') {
-      // Helper to update break count badge and empty state
-      const updateDayBreakUI = (day) => {
-        const card = container.querySelector(`.stylist-routine-day-card[data-day="${day}"]`);
-        if (!card) return;
-        const count = card.querySelectorAll('.st-break-row').length;
-        const countBadge = card.querySelector('.st-breaks-count');
-        if (countBadge) {
-          countBadge.textContent = `${count} break${count === 1 ? '' : 's'}`;
-        }
-        const bContainer = card.querySelector('.st-breaks-container');
-        const emptyMsg = card.querySelector('.empty-breaks-msg');
-        if (count === 0 && !emptyMsg && bContainer) {
-          const div = document.createElement('div');
-          div.className = 'empty-breaks-msg';
-          div.style.cssText = 'font-size: 0.72rem; color: #64748b; font-style: italic; padding: 4px 0;';
-          div.textContent = 'No breaks scheduled. Available continuously during shift.';
-          bContainer.appendChild(div);
-        } else if (count > 0 && emptyMsg) {
-          emptyMsg.remove();
-        }
-      };
+      // 1. Attach roster and routine breaks listeners
+      this.attachStaffRosterListeners();
+      this.attachRoutineBreaksListeners();
 
-      // Follow Salon Schedule Checkbox Listener
-      const chkFollowSalon = container.querySelector('#chk-staff-follow-salon');
-      if (chkFollowSalon) {
-        chkFollowSalon.onchange = () => {
-          const isFollow = chkFollowSalon.checked;
-          const badge = container.querySelector('#badge-staff-schedule-mode');
-          const hint = container.querySelector('#staff-follow-salon-hint');
+      // 2. Segmented Tabs Switcher: [ ⏰ Shift Hours | ☕ Daily Breaks ]
+      const tabBtnShifts = container.querySelector('#tab-btn-shifts');
+      const tabBtnBreaks = container.querySelector('#tab-btn-breaks');
+      const tabContentShifts = container.querySelector('#tab-content-shifts');
+      const tabContentBreaks = container.querySelector('#tab-content-breaks');
 
-          if (badge) {
-            badge.textContent = isFollow ? 'SYNCED WITH SALON' : 'CUSTOM SCHEDULE';
-            badge.style.background = isFollow ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)';
-            badge.style.color = isFollow ? '#34d399' : '#fbbf24';
-            badge.style.borderColor = isFollow ? 'rgba(16, 185, 129, 0.3)' : 'rgba(245, 158, 11, 0.3)';
-          }
+      if (tabBtnShifts && tabBtnBreaks) {
+        tabBtnShifts.onclick = (e) => {
+          e.preventDefault();
+          if (this.currentStaffHoursState) this.currentStaffHoursState.activeSubTab = 'shifts';
+          tabBtnShifts.classList.add('active');
+          tabBtnBreaks.classList.remove('active');
+          if (tabContentShifts) tabContentShifts.style.display = 'block';
+          if (tabContentBreaks) tabContentBreaks.style.display = 'none';
+        };
 
-          if (hint) {
-            hint.textContent = isFollow
-              ? 'Stylist strictly inherits salon operating hours (09:00 - 19:00) and salon open days. Uncheck to configure custom shift times, personal week offs, and individual breaks.'
-              : 'Custom stylist schedule active. Stylist has individual working days, custom shift hours, and daily breaks.';
-          }
-
-          container.querySelectorAll('.stylist-routine-day-card').forEach((card) => {
-            const day = card.getAttribute('data-day');
-            const salonWh = (this.salonWorkingHours || []).find((h) => h.dayOfWeek === day);
-            const isSalonClosed = salonWh ? Boolean(salonWh.isClosed) : false;
-            const dayBtn = card.querySelector('.btn-toggle-stylist-day');
-            const startInp = card.querySelector('.st-hours-start');
-            const endInp = card.querySelector('.st-hours-end');
-            const addBreakBtn = card.querySelector('.btn-add-stylist-break');
-            const breakInputs = card.querySelectorAll('.st-break-row input, .st-break-row button');
-            const timeWrap = card.querySelector('.routine-time-pickers');
-            const breaksSection = card.querySelector('.st-day-breaks-section');
-
-            if (isFollow) {
-              if (dayBtn) {
-                dayBtn.disabled = true;
-                dayBtn.style.cursor = 'not-allowed';
-              }
-              if (isSalonClosed) {
-                card.classList.add('is-off');
-                if (dayBtn) {
-                  dayBtn.textContent = '💤 Weekly Off';
-                  dayBtn.style.color = '#f87171';
-                  dayBtn.style.border = '1px solid rgba(239, 68, 68, 0.35)';
-                  dayBtn.style.background = 'rgba(239, 68, 68, 0.1)';
-                }
-              } else {
-                card.classList.remove('is-off');
-                if (dayBtn) {
-                  dayBtn.textContent = '✓ Working';
-                  dayBtn.style.color = '#34d399';
-                  dayBtn.style.border = '1px solid rgba(52, 211, 153, 0.35)';
-                  dayBtn.style.background = 'rgba(52, 211, 153, 0.1)';
-                }
-              }
-
-              if (startInp) {
-                startInp.disabled = true;
-                startInp.value = salonWh?.startTime || '09:00';
-              }
-              if (endInp) {
-                endInp.disabled = true;
-                endInp.value = salonWh?.endTime || '19:00';
-              }
-              if (addBreakBtn) {
-                addBreakBtn.disabled = true;
-                addBreakBtn.setAttribute('title', 'Switch to Custom Schedule to add personal breaks');
-              }
-              breakInputs.forEach((el) => {
-                el.disabled = true;
-                if (el.tagName === 'BUTTON') el.style.cursor = 'not-allowed';
-              });
-
-              if (timeWrap) {
-                timeWrap.style.opacity = isSalonClosed ? '0.4' : '1';
-                timeWrap.style.pointerEvents = 'none';
-              }
-              if (breaksSection) {
-                breaksSection.style.display = isSalonClosed ? 'none' : 'block';
-              }
-            } else {
-              if (dayBtn) {
-                dayBtn.disabled = false;
-                dayBtn.style.cursor = 'pointer';
-              }
-              const isOff = card.classList.contains('is-off');
-              if (startInp) startInp.disabled = false;
-              if (endInp) endInp.disabled = false;
-              if (addBreakBtn) {
-                addBreakBtn.disabled = false;
-                addBreakBtn.removeAttribute('title');
-              }
-              breakInputs.forEach((el) => {
-                el.disabled = false;
-                if (el.tagName === 'BUTTON') el.style.cursor = 'pointer';
-              });
-
-              if (timeWrap) {
-                timeWrap.style.opacity = isOff ? '0.4' : '1';
-                timeWrap.style.pointerEvents = isOff ? 'none' : 'auto';
-              }
-              if (breaksSection) {
-                breaksSection.style.display = isOff ? 'none' : 'block';
-              }
-            }
-          });
+        tabBtnBreaks.onclick = (e) => {
+          e.preventDefault();
+          if (this.currentStaffHoursState) this.currentStaffHoursState.activeSubTab = 'breaks';
+          tabBtnBreaks.classList.add('active');
+          tabBtnShifts.classList.remove('active');
+          if (tabContentShifts) tabContentShifts.style.display = 'none';
+          if (tabContentBreaks) tabContentBreaks.style.display = 'block';
         };
       }
 
-      // Toggle Day Working Status Button
-      container.querySelectorAll('.btn-toggle-stylist-day').forEach((btn) => {
-        btn.onclick = (e) => {
+      // 3. Bulk Shift Live Auto-Apply across active roster days
+      const bulkStartInp = container.querySelector('#master-bulk-start');
+      const bulkEndInp = container.querySelector('#master-bulk-end');
+      const bulkStartPrev = container.querySelector('#master-bulk-start-preview');
+      const bulkEndPrev = container.querySelector('#master-bulk-end-preview');
+
+      const handleBulkShiftLiveChange = () => {
+        const sVal = bulkStartInp ? bulkStartInp.value : '10:00';
+        const eVal = bulkEndInp ? bulkEndInp.value : '19:00';
+
+        if (bulkStartPrev) bulkStartPrev.textContent = formatTime12h(sVal);
+        if (bulkEndPrev) bulkEndPrev.textContent = formatTime12h(eVal);
+
+        if (!sVal || !eVal || sVal >= eVal) return;
+
+        const daysArr = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+        daysArr.forEach((dKey) => {
+          if (this.currentStaffHoursState?.days[dKey] && this.currentStaffHoursState.days[dKey].isWorking) {
+            this.currentStaffHoursState.days[dKey].startTime = sVal;
+            this.currentStaffHoursState.days[dKey].endTime = eVal;
+          }
+        });
+
+        if (this.currentStaffHoursState) {
+          this.currentStaffHoursState.masterShift = { startTime: sVal, endTime: eVal };
+        }
+        this.syncRoutineBreaksToDays();
+        const rowsContainer = document.getElementById('stylist-roster-rows-container');
+        if (rowsContainer) {
+          rowsContainer.innerHTML = this.renderStaffRosterRowsHtml();
+          this.attachStaffRosterListeners();
+        }
+        this.autoSaveStaffSchedule(st.id);
+      };
+
+      bulkStartInp?.addEventListener('input', handleBulkShiftLiveChange);
+      bulkEndInp?.addEventListener('input', handleBulkShiftLiveChange);
+
+      // 4. Add Routine Break Button (Opens bottom sheet)
+      const btnAddBreak = container.querySelector('#btn-add-routine-break');
+      if (btnAddBreak) {
+        btnAddBreak.onclick = (e) => {
           e.preventDefault();
-          e.stopPropagation();
-          if (btn.disabled) return;
-          const day = btn.getAttribute('data-day');
-          const card = container.querySelector(`.stylist-routine-day-card[data-day="${day}"]`);
-          if (!card) return;
-          const isCurrentlyOff = card.classList.contains('is-off');
-          const timeWrap = card.querySelector('.routine-time-pickers');
-          const breaksSection = card.querySelector('.st-day-breaks-section');
-
-          if (isCurrentlyOff) {
-            card.classList.remove('is-off');
-            btn.textContent = '✓ Working';
-            btn.style.color = '#34d399';
-            btn.style.border = '1px solid rgba(52, 211, 153, 0.35)';
-            btn.style.background = 'rgba(52, 211, 153, 0.1)';
-            if (timeWrap) {
-              timeWrap.style.opacity = '1';
-              timeWrap.style.pointerEvents = 'auto';
-            }
-            if (breaksSection) {
-              breaksSection.style.display = 'block';
-            }
-          } else {
-            card.classList.add('is-off');
-            btn.textContent = '💤 Weekly Off';
-            btn.style.color = '#f87171';
-            btn.style.border = '1px solid rgba(239, 68, 68, 0.35)';
-            btn.style.background = 'rgba(239, 68, 68, 0.1)';
-            if (timeWrap) {
-              timeWrap.style.opacity = '0.4';
-              timeWrap.style.pointerEvents = 'none';
-            }
-            if (breaksSection) {
-              breaksSection.style.display = 'none';
-            }
-          }
-        };
-      });
-
-      // Add Break Buttons
-      container.querySelectorAll('.btn-add-stylist-break').forEach((addBtn) => {
-        addBtn.onclick = (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          if (addBtn.disabled) return;
-          const day = addBtn.getAttribute('data-day');
-          const card = container.querySelector(`.stylist-routine-day-card[data-day="${day}"]`);
-          if (!card) return;
-          const bContainer = card.querySelector('.st-breaks-container');
-          if (!bContainer) return;
-
-          const emptyMsg = bContainer.querySelector('.empty-breaks-msg');
-          if (emptyMsg) emptyMsg.remove();
-
-          const newRow = document.createElement('div');
-          newRow.className = 'st-break-row';
-          newRow.setAttribute('data-day', day);
-          newRow.style.cssText = 'display: flex; align-items: center; gap: 8px; background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 6px; padding: 5px 8px; flex-wrap: wrap; margin-bottom: 6px;';
-          newRow.innerHTML = `
-            <input type="text" class="form-control st-break-title" data-day="${day}" value="Lunch Break" placeholder="Break Title e.g. Lunch" style="height: 28px; font-size: 0.72rem; flex: 1; min-width: 110px; padding: 2px 6px;" />
-            <div style="display: flex; align-items: center; gap: 4px;">
-              <input type="time" class="form-control st-break-start" data-day="${day}" value="13:00" style="height: 28px; font-size: 0.72rem; width: 95px; padding: 2px 4px;" />
-              <span style="font-size: 0.68rem; color: #64748b;">to</span>
-              <input type="time" class="form-control st-break-end" data-day="${day}" value="14:00" style="height: 28px; font-size: 0.72rem; width: 95px; padding: 2px 4px;" />
-            </div>
-            <button type="button" class="btn-del-stylist-break" data-day="${day}" title="Remove Break" style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.25); color: #f87171; border-radius: 4px; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
-              ✕
-            </button>
-          `;
-
-          newRow.querySelector('.btn-del-stylist-break').onclick = (delE) => {
-            delE.preventDefault();
-            delE.stopPropagation();
-            newRow.remove();
-            updateDayBreakUI(day);
-          };
-
-          bContainer.appendChild(newRow);
-          updateDayBreakUI(day);
-        };
-      });
-
-      // Existing Break Delete Buttons
-      container.querySelectorAll('.btn-del-stylist-break').forEach((delBtn) => {
-        delBtn.onclick = (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          if (delBtn.disabled) return;
-          const day = delBtn.getAttribute('data-day');
-          const row = delBtn.closest('.st-break-row');
-          if (row) {
-            row.remove();
-            updateDayBreakUI(day);
-          }
-        };
-      });
-
-      // Save Staff Hours Button
-      const saveHoursBtn = container.querySelector('#btn-save-staff-hours') || document.getElementById('btn-save-staff-hours');
-      if (saveHoursBtn) {
-        saveHoursBtn.onclick = async (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          const chkFollow = container.querySelector('#chk-staff-follow-salon');
-          const followsSalon = Boolean(chkFollow ? chkFollow.checked : st.followsSalonSchedule !== false);
-
-          if (followsSalon) {
-            try {
-              this.showToast(`Syncing schedule with salon for ${st.name}...`, 'info');
-              await ApiClient.updateStaffWorkingHours(st.id, [], true);
-              this.showToast(`Schedule synced with salon for ${st.name}!`, 'success');
-              await this.loadData(true);
-              this.render();
-            } catch (err) {
-              alert(err.message || 'Failed to sync schedule with salon.');
-            }
-            return;
-          }
-
-          // Custom Schedule: Validate and serialize
-          const daysArr = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
-          const hoursPayload = [];
-
-          for (const day of daysArr) {
-            const card = container.querySelector(`.stylist-routine-day-card[data-day="${day}"]`);
-            const isOff = card ? card.classList.contains('is-off') : false;
-            const start = card?.querySelector('.st-hours-start')?.value || '09:00';
-            const end = card?.querySelector('.st-hours-end')?.value || '19:00';
-
-            const breakRows = card ? Array.from(card.querySelectorAll('.st-break-row')) : [];
-            const breaks = breakRows.map((bRow) => ({
-              title: bRow.querySelector('.st-break-title')?.value?.trim() || 'Break',
-              startTime: bRow.querySelector('.st-break-start')?.value || '13:00',
-              endTime: bRow.querySelector('.st-break-end')?.value || '14:00',
-            })).filter((b) => b.startTime && b.endTime);
-
-            if (!isOff) {
-              if (start >= end) {
-                alert(`${day}: Shift start (${start}) must be earlier than shift end (${end}).`);
-                return;
-              }
-              for (const b of breaks) {
-                if (b.startTime >= b.endTime) {
-                  alert(`${day}: Break start (${b.startTime}) must be earlier than break end (${b.endTime}).`);
-                  return;
-                }
-                if (b.startTime < start || b.endTime > end) {
-                  alert(`${day}: Break (${b.startTime}-${b.endTime}) must fall strictly within working hours (${start}-${end}).`);
-                  return;
-                }
-              }
-            }
-
-            hoursPayload.push({
-              dayOfWeek: day,
-              isWorking: !isOff,
-              startTime: start,
-              endTime: end,
-              breaks,
-              hasBreakOverride: breaks.length > 0,
-            });
-          }
-
-          try {
-            this.showToast(`Saving custom schedule for ${st.name}...`, 'info');
-            await ApiClient.updateStaffWorkingHours(st.id, hoursPayload, false);
-            this.showToast(`Custom schedule and breaks saved for ${st.name}!`, 'success');
-            await this.loadData(true);
-            this.render();
-          } catch (err) {
-            alert(err.message || 'Failed to save working hours.');
-          }
+          this.openRoutineBreakBottomSheet(-1);
         };
       }
     } else if (subtab === 'services') {
