@@ -4,6 +4,7 @@ import { SoundManager } from './sound.js';
 import { Icons } from './icons.js';
 import { LeaveManagementUI } from './leave-management.js';
 import { LocationPicker } from './location-picker.js';
+import { StaffManager } from './modules/staff/staff-manager.js';
 import {
   SERVICE_DURATION_OPTIONS,
   renderServiceDurationOptions,
@@ -173,6 +174,7 @@ export class SalonDashboard {
     this.staffSearchQuery = '';
     this.staffStatusFilter = 'ALL';
     this.activeStaffSubtab = 'leaves';
+    this.staffManager = new StaffManager(this);
   }
 
   showToast(msg, type = 'info') {
@@ -1790,7 +1792,7 @@ export class SalonDashboard {
   renderStaffTab() {
     try {
       if (this.selectedStaffId) {
-        return this.renderStaffDetailView(this.selectedStaffId);
+        return this.staffManager.render();
       }
       return this.renderStaffListView();
     } catch (err) {
@@ -2002,100 +2004,6 @@ export class SalonDashboard {
     }).join('')}
           </div>
         `}
-      </div>
-    `;
-  }
-
-  renderStaffDetailView(staffId) {
-    const st = (this.staffList || []).find((s) => s.id === staffId);
-    if (!st) {
-      this.selectedStaffId = null;
-      return this.renderStaffListView();
-    }
-
-    const statusDotClass = st.statusDotClass || (st.status === 'ACTIVE' ? 'status-available' : 'status-inactive');
-    const statusBadgeClass = st.statusBadgeClass || (st.status === 'ACTIVE' ? 'badge-available' : 'badge-inactive');
-    const statusText = st.statusLabel || (st.status === 'ACTIVE' ? 'Available' : 'Inactive');
-    const statusReason = st.statusReason || statusText;
-
-    const initials = st.name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2);
-    const avatarHtml = st.profileImageUrl
-      ? `<img src="${st.profileImageUrl}" class="stylist-appbar-avatar-img" alt="${st.name}" />`
-      : `<div class="stylist-appbar-avatar-initials">${initials}</div>`;
-
-    this.activeStaffSubtab = this.activeStaffSubtab || 'leaves';
-
-    return `
-      <div class="stylist-detail-shell">
-        <!-- Top Navigation Bar: Back link on left + Active Toggle on right -->
-        <div class="stylist-detail-nav">
-          <button type="button" class="stylist-back-link-btn" id="btn-back-to-staff-list" aria-label="Back to Stylists">
-            <span class="back-chevron">‹</span>
-            <span>Back to Stylists</span>
-          </button>
-
-          <!-- Modern Active / Inactive Toggle Switch Button -->
-          <button type="button" class="btn-detail-toggle stylist-toggle-switch ${st.status === 'ACTIVE' ? 'is-active' : 'is-inactive'}" data-id="${st.id}" title="${st.status === 'ACTIVE' ? 'Staff is Active (Click to Deactivate)' : 'Staff is Inactive (Click to Activate)'}" aria-label="Toggle Active Status">
-            <span class="toggle-track">
-              <span class="toggle-thumb"></span>
-            </span>
-            <span class="toggle-label">${st.status === 'ACTIVE' ? 'Active' : 'Inactive'}</span>
-          </button>
-        </div>
-
-        <!-- Sleek Unified Stylist Identity Card with Edit Button on Right -->
-        <div class="stylist-detail-card">
-          <!-- Left: Identity Block -->
-          <div class="stylist-card-identity">
-            <div class="stylist-card-avatar-wrap">
-              ${avatarHtml}
-              <span class="stylist-status-dot ${statusDotClass}"></span>
-            </div>
-            <div class="stylist-card-info">
-              <div class="stylist-card-name-row">
-                <h2 class="stylist-card-name">${st.name}</h2>
-              </div>
-              <div class="stylist-card-meta-row">
-                <span class="stylist-meta-role">✂️ ${st.role || 'Stylist'}</span>
-                ${st.phone ? `
-                <span class="meta-dot">•</span>
-                <a href="tel:${st.phone}" class="stylist-meta-phone" title="Call ${st.name}">
-                  📞 ${st.phone}
-                </a>` : ''}
-              </div>
-            </div>
-          </div>
-
-          <!-- Right: Edit Profile Button inside Card -->
-          <button type="button" class="btn-icon-action btn-detail-edit" data-id="${st.id}" data-name="${st.name}" data-phone="${st.phone || ''}" data-email="${st.email || ''}" data-img="${st.profileImageUrl || ''}" title="Edit Profile" aria-label="Edit Profile">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-            </svg>
-          </button>
-        </div>
-
-        <!-- Modern 3-Segment Tab Control (100% Width on Mobile) -->
-        <div class="stylist-segmented-nav">
-          <button type="button" class="stylist-tab-segment ${this.activeStaffSubtab === 'leaves' ? 'active' : ''}" data-staff-subtab="leaves">
-            <span>📅 Leaves</span>
-          </button>
-          <button type="button" class="stylist-tab-segment ${this.activeStaffSubtab === 'hours' ? 'active' : ''}" data-staff-subtab="hours">
-            <span>⏰ Schedule</span>
-          </button>
-          <button type="button" class="stylist-tab-segment ${this.activeStaffSubtab === 'services' ? 'active' : ''}" data-staff-subtab="services">
-            <span>✂️ Services (${(st.services || []).length})</span>
-          </button>
-        </div>
-
-        <!-- Subtab Body Workspace -->
-        <div class="stylist-detail-subtab-body">
-          ${this.activeStaffSubtab === 'hours'
-        ? this.renderStaffHoursSubtab(st)
-        : this.activeStaffSubtab === 'services'
-          ? this.renderStaffServicesSubtab(st)
-          : this.renderStaffLeavesSubtab(st)}
-        </div>
       </div>
     `;
   }
@@ -2512,10 +2420,10 @@ export class SalonDashboard {
             </div>
             <div class="routine-break-days-matrix" title="Active on: ${activeDays.map((d) => d.slice(0, 3)).join(', ')}">
               ${daysLetters.map((letter, dayIdx) => {
-                const dayKey = daysKeys[dayIdx];
-                const isActive = activeDays.includes(dayKey);
-                return `<span class="break-matrix-day ${isActive ? 'active' : ''}">${letter}</span>`;
-              }).join('')}
+        const dayKey = daysKeys[dayIdx];
+        const isActive = activeDays.includes(dayKey);
+        return `<span class="break-matrix-day ${isActive ? 'active' : ''}">${letter}</span>`;
+      }).join('')}
             </div>
           </div>
         </div>
@@ -2687,7 +2595,7 @@ export class SalonDashboard {
     const breakData = isEditing ? this.currentStaffHoursState.routineBreaks[editIndex] : null;
 
     const daysArr = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
-    
+
     let currentTitle = breakData ? (breakData.title || 'Lunch Break') : (this.currentStaffHoursState.routineBreaks?.length === 0 ? 'Lunch Break' : 'Evening Tea Break');
     let currentStart = breakData ? (breakData.startTime || '13:00') : (this.currentStaffHoursState.routineBreaks?.length === 0 ? '13:00' : '16:30');
     let currentEnd = breakData ? (breakData.endTime || '14:00') : (this.currentStaffHoursState.routineBreaks?.length === 0 ? '14:00' : '17:00');
@@ -2762,14 +2670,14 @@ export class SalonDashboard {
               </div>
               <div class="sheet-days-chips-grid">
                 ${daysArr.map((dKey) => {
-                  const dShort = dKey.slice(0, 3);
-                  const isSelected = selectedDays.includes(dKey);
-                  return `
+      const dShort = dKey.slice(0, 3);
+      const isSelected = selectedDays.includes(dKey);
+      return `
                     <button type="button" class="sheet-day-pill ${isSelected ? 'active' : ''}" data-day="${dKey}">
                       ${dShort}
                     </button>
                   `;
-                }).join('')}
+    }).join('')}
               </div>
             </div>
           </div>
@@ -3059,9 +2967,9 @@ export class SalonDashboard {
 
               <!-- Routine Breaks Indicator -->
               ${(() => {
-                const routineBreaks = (this.currentStaffHoursState?.routineBreaks || []).filter((rb) => Array.isArray(rb.days) && rb.days.includes(dayKey));
-                if (routineBreaks.length > 0) {
-                  return `
+        const routineBreaks = (this.currentStaffHoursState?.routineBreaks || []).filter((rb) => Array.isArray(rb.days) && rb.days.includes(dayKey));
+        if (routineBreaks.length > 0) {
+          return `
                     <div style="font-size: 0.72rem; color: #c4b5fd; background: rgba(139, 61, 255, 0.08); border: 1px solid rgba(139, 61, 255, 0.2); border-radius: 8px; padding: 8px 12px; margin-top: 10px;">
                       <div style="font-weight: 700; margin-bottom: 4px;">☕ Routine Breaks for ${dayData.friendlyDay}:</div>
                       <div style="display: flex; flex-wrap: wrap; gap: 6px;">
@@ -3069,13 +2977,13 @@ export class SalonDashboard {
                       </div>
                     </div>
                   `;
-                }
-                return `
+        }
+        return `
                   <div style="font-size: 0.7rem; color: #94a3b8; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 8px; padding: 8px 12px; margin-top: 10px;">
                     ☕ No routine breaks assigned for ${dayData.friendlyDay}. (Configure in Daily Breaks tab)
                   </div>
                 `;
-              })()}
+      })()}
             </div>
 
             <!-- Quick Option: Copy to All 7 Days -->
@@ -3172,67 +3080,6 @@ export class SalonDashboard {
       this.autoSaveStaffSchedule(this.currentStaffHoursState?.staffId);
       this.showToast(`${dayData.friendlyDay} shift updated (auto-saved)`, 'success');
     });
-  }
-
-  renderStaffServicesSubtab(st) {
-    const categories = this.categoriesList || [];
-    const allServices = this.servicesList || [];
-    const assignedIds = new Set((st.services || []).map((s) => s.serviceId || s.id));
-
-    return `
-      <div class="stylist-services-container">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 8px;">
-          <div>
-            <h4 style="font-size: 0.95rem; font-weight: 800; color: #fff; margin: 0;">✂️ Qualified Services</h4>
-            <p style="font-size: 0.72rem; color: #94a3b8; margin: 2px 0 0 0;">Toggle the services that ${st.name} is qualified to perform.</p>
-          </div>
-          <button type="button" class="btn btn-primary btn-sm" id="btn-save-staff-services" data-staff-id="${st.id}" style="font-size: 0.74rem; font-weight: 700; height: 34px; padding: 0 16px;">
-            💾 Save Assigned Services
-          </button>
-        </div>
-
-        ${categories.length === 0 ? `
-          <div class="stylist-services-grid">
-            ${allServices.map((srv) => {
-      const isAssigned = assignedIds.has(srv.id);
-      return `
-                <div class="stylist-service-item ${isAssigned ? 'assigned' : ''}" data-service-id="${srv.id}">
-                  <div class="stylist-service-info">
-                    <span class="stylist-service-name">${srv.name}</span>
-                    <span class="stylist-service-meta">${srv.durationMins || 30} mins · ₹${srv.price || 0}</span>
-                  </div>
-                  <input type="checkbox" class="stylist-service-checkbox" data-service-id="${srv.id}" ${isAssigned ? 'checked' : ''} />
-                </div>
-              `;
-    }).join('')}
-          </div>
-        ` : categories.map((cat) => {
-      const catServices = allServices.filter((s) => (s.categoryId || s.category?.id) === cat.id);
-      if (catServices.length === 0) return '';
-      return `
-            <div class="stylist-service-category-card">
-              <div class="stylist-service-category-title">
-                <span>${cat.name} (${catServices.length})</span>
-              </div>
-              <div class="stylist-services-grid">
-                ${catServices.map((srv) => {
-        const isAssigned = assignedIds.has(srv.id);
-        return `
-                    <div class="stylist-service-item ${isAssigned ? 'assigned' : ''}" data-service-id="${srv.id}">
-                      <div class="stylist-service-info">
-                        <span class="stylist-service-name">${srv.name}</span>
-                        <span class="stylist-service-meta">${srv.durationMins || 30} mins · ₹${srv.price || 0}</span>
-                      </div>
-                      <input type="checkbox" class="stylist-service-checkbox" data-service-id="${srv.id}" ${isAssigned ? 'checked' : ''} />
-                    </div>
-                  `;
-      }).join('')}
-              </div>
-            </div>
-          `;
-    }).join('')}
-      </div>
-    `;
   }
 
   renderServicesTab() {
@@ -6897,28 +6744,6 @@ export class SalonDashboard {
     });
   }
 
-  switchStaffSubtab(subtab, st, root) {
-    this.activeStaffSubtab = subtab;
-    const container = root || this.container || document;
-    container.querySelectorAll('.stylist-tab-segment').forEach((btn) => {
-      btn.classList.toggle('active', btn.getAttribute('data-staff-subtab') === subtab);
-    });
-
-    const bodyEl = container.querySelector('.stylist-detail-subtab-body') || document.querySelector('.stylist-detail-subtab-body');
-    if (bodyEl) {
-      if (subtab === 'hours') {
-        bodyEl.innerHTML = this.renderStaffHoursSubtab(st);
-      } else if (subtab === 'services') {
-        bodyEl.innerHTML = this.renderStaffServicesSubtab(st);
-      } else {
-        bodyEl.innerHTML = this.renderStaffLeavesSubtab(st);
-      }
-      this.attachStaffSubtabSpecificListeners(container, st, subtab);
-    } else {
-      this.render();
-    }
-  }
-
   attachStaffSubtabSpecificListeners(root, st, subtab) {
     const container = root || this.container || document;
 
@@ -7035,46 +6860,6 @@ export class SalonDashboard {
           this.openRoutineBreakBottomSheet(-1);
         };
       }
-    } else if (subtab === 'services') {
-      // Toggle service card item on click
-      container.querySelectorAll('.stylist-service-item').forEach((item) => {
-        item.onclick = (e) => {
-          if (e.target.type === 'checkbox') return;
-          const chk = item.querySelector('.stylist-service-checkbox');
-          if (chk) {
-            chk.checked = !chk.checked;
-            item.classList.toggle('assigned', chk.checked);
-          }
-        };
-      });
-
-      container.querySelectorAll('.stylist-service-checkbox').forEach((chk) => {
-        chk.onchange = () => {
-          const item = chk.closest('.stylist-service-item');
-          if (item) item.classList.toggle('assigned', chk.checked);
-        };
-      });
-
-      // Save Services Button
-      const saveServicesBtn = container.querySelector('#btn-save-staff-services') || document.getElementById('btn-save-staff-services');
-      if (saveServicesBtn) {
-        saveServicesBtn.onclick = async (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          const checkedBoxes = Array.from(container.querySelectorAll('.stylist-service-checkbox:checked'));
-          const serviceIds = checkedBoxes.map((chk) => chk.getAttribute('data-service-id')).filter(Boolean);
-
-          try {
-            this.showToast(`Updating assigned services for ${st.name}...`, 'info');
-            await ApiClient.assignStaffServices(st.id, serviceIds);
-            this.showToast(`Services updated (${serviceIds.length} assigned)!`, 'success');
-            await this.loadData(true);
-            this.render();
-          } catch (err) {
-            alert(err.message || 'Failed to save assigned services.');
-          }
-        };
-      }
     }
   }
 
@@ -7082,142 +6867,10 @@ export class SalonDashboard {
     const root = tabContent || this.container || document;
 
     // =========================================================================
-    // SCENARIO A: STYLIST DETAIL VIEW IS OPEN
+    // SCENARIO A: STYLIST DETAIL VIEW IS OPEN (HUB & SPOKE WORKSPACE)
     // =========================================================================
     if (this.selectedStaffId) {
-      const st = (this.staffList || []).find((s) => String(s.id) === String(this.selectedStaffId));
-      if (!st) {
-        this.selectedStaffId = null;
-        this.render();
-        return;
-      }
-
-      // 1. Back to Stylists Button
-      const backBtn = root.querySelector('#btn-back-to-staff-list') || document.getElementById('btn-back-to-staff-list');
-      if (backBtn) {
-        backBtn.onclick = (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          this.selectedStaffId = null;
-          this.render();
-        };
-      }
-
-      // 2. Edit Stylist Info Button
-      root.querySelectorAll('.btn-detail-edit').forEach((btn) => {
-        btn.onclick = (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          this.showEditStaffModal({
-            id: st.id,
-            name: st.name,
-            phone: st.phone,
-            email: st.email,
-            profileImageUrl: st.profileImageUrl,
-          });
-        };
-      });
-
-      // 3. Toggle Stylist Status (Deactivate / Activate)
-      root.querySelectorAll('.btn-detail-toggle').forEach((btn) => {
-        btn.onclick = async (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          const targetId = btn.getAttribute('data-id') || st.id;
-          await this.handleToggleStaff(targetId);
-        };
-      });
-
-      // 4. Subtab Switcher Buttons (Leaves / Hours / Services)
-      root.querySelectorAll('.stylist-tab-segment, .stylist-segment-btn, .stylist-tab-btn').forEach((btn) => {
-        btn.onclick = (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          const subtab = btn.getAttribute('data-staff-subtab');
-          if (subtab) {
-            this.switchStaffSubtab(subtab, st, root);
-          }
-        };
-      });
-
-      // 5. Infallible Event Delegation on root for any dynamic or nested clicks
-      root.onclick = (e) => {
-        const segBtn = e.target.closest('.stylist-tab-segment, [data-staff-subtab]');
-        if (segBtn) {
-          e.preventDefault();
-          const subtab = segBtn.getAttribute('data-staff-subtab');
-          if (subtab && subtab !== this.activeStaffSubtab) {
-            this.switchStaffSubtab(subtab, st, root);
-          }
-          return;
-        }
-
-        const historyBtn = e.target.closest('#btn-view-leave-history, #btn-panel-leave-history, #btn-sheet-view-history, .btn-view-leave-history');
-        if (historyBtn) {
-          e.preventDefault();
-          e.stopPropagation();
-          const sId = historyBtn.getAttribute('data-staff-id') || st.id;
-          const sName = historyBtn.getAttribute('data-staff-name') || st.name;
-          this.leaveUI.showLeaveHistoryModal(sId, sName);
-          return;
-        }
-
-        const applyBtn = e.target.closest('#btn-apply-staff-leave, .btn-action-apply-leave, #btn-quick-add-staff-leave');
-        if (applyBtn) {
-          e.preventDefault();
-          e.stopPropagation();
-          const sId = applyBtn.getAttribute('data-staff-id') || st.id;
-          const sName = applyBtn.getAttribute('data-staff-name') || st.name;
-          this.leaveUI.showCreateLeaveModal(sId, sName, this.selectedCalDate || this.getLocalDateString());
-          return;
-        }
-
-        const backBtn = e.target.closest('#btn-back-to-staff-list');
-        if (backBtn) {
-          e.preventDefault();
-          this.selectedStaffId = null;
-          this.render();
-          return;
-        }
-
-        const editBtn = e.target.closest('.btn-detail-edit');
-        if (editBtn) {
-          e.preventDefault();
-          this.showEditStaffModal({
-            id: st.id,
-            name: st.name,
-            phone: st.phone,
-            email: st.email,
-            profileImageUrl: st.profileImageUrl,
-          });
-          return;
-        }
-
-        const toggleBtn = e.target.closest('.btn-detail-toggle');
-        if (toggleBtn) {
-          e.preventDefault();
-          e.stopPropagation();
-          const targetId = toggleBtn.getAttribute('data-id') || st.id;
-          this.handleToggleStaff(targetId);
-          return;
-        }
-
-        const cancelLeaveBtn = e.target.closest('.btn-cancel-leave');
-        if (cancelLeaveBtn) {
-          e.preventDefault();
-          e.stopPropagation();
-          const absenceId = cancelLeaveBtn.getAttribute('data-absence-id');
-          const sId = cancelLeaveBtn.getAttribute('data-staff-id') || st.id;
-          const sName = cancelLeaveBtn.getAttribute('data-staff-name') || st.name;
-          if (sId && absenceId) {
-            this.cancelSpecialistLeave(sId, absenceId, sName);
-          }
-          return;
-        }
-      };
-
-      // 6. Attach specific listeners for the active subtab
-      this.attachStaffSubtabSpecificListeners(root, st, this.activeStaffSubtab || 'leaves');
+      this.staffManager.attachListeners(root);
       return;
     }
 
@@ -7231,13 +6884,12 @@ export class SalonDashboard {
       this.showAddStaffModal();
     });
 
-    // 2. Tap Stylist Card to open Detail Workspace
+    // 2. Tap Stylist Card to open Executive Profile Hub
     root.querySelectorAll('.stylist-card[data-staff-id]').forEach((card) => {
       card.addEventListener('click', () => {
         const sId = card.getAttribute('data-staff-id');
         if (sId) {
-          this.selectedStaffId = sId;
-          this.activeStaffSubtab = 'leaves';
+          this.staffManager.setStaff(sId, 'overview');
           this.render();
         }
       });

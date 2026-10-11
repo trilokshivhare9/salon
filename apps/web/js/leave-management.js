@@ -974,51 +974,55 @@ export class LeaveManagementUI {
             <div class="ld-header-left">
               <div class="ld-avatar">${staffName ? staffName.charAt(0).toUpperCase() : 'S'}</div>
               <div class="ld-title-group">
-                <h3>${staffName} · Leave Details</h3>
-                <div class="ld-title-sub">${dateDisplay} (${durationText})</div>
+                <div class="ld-title-row">
+                  <h3>${staffName}</h3>
+                  <span class="lhc-status-badge ${statusClass}">
+                    <span class="lhc-status-dot"></span>
+                    <span>${statusTitle}</span>
+                  </span>
+                </div>
+                <div class="ld-title-sub">${dateDisplay} · <span class="ld-span-pill">${durationText}</span></div>
               </div>
             </div>
-            <div style="display: flex; align-items: center; gap: 10px;">
-              <span class="lhc-status-badge ${statusClass}">
-                <span class="lhc-status-dot"></span>
-                <span>${statusTitle}</span>
-              </span>
-              <button class="ld-close-btn" id="btn-close-detail-modal" title="Close dialog">&times;</button>
-            </div>
+            <button class="ld-close-btn" id="btn-close-detail-modal" title="Close dialog">&times;</button>
           </div>
 
-          <!-- 4-Card Overview Matrix -->
+          <!-- Compact 2x2 Metadata Grid -->
           <div class="ld-matrix-grid">
-            <div class="ld-matrix-card">
-              <div class="ld-matrix-card-header">
-                <span>📅</span> <span>Leave Period</span>
+            <div class="ld-matrix-item">
+              <div class="ld-matrix-label">
+                <span class="ld-matrix-icon">📅</span>
+                <span>Date Period</span>
               </div>
-              <div class="ld-matrix-val">${formatDateFriendly(sDate)}${isMultiDay ? ` → ${formatDateFriendly(eDate)}` : ''}</div>
-              <div class="ld-matrix-sub">${durationText} · ${isMultiDay ? 'Multi-day span' : formatDateWithWeekday(sDate)}</div>
+              <div class="ld-matrix-val" title="${formatDateFriendly(sDate)}${isMultiDay ? ` → ${formatDateFriendly(eDate)}` : ''}">
+                ${formatDateFriendly(sDate)}${isMultiDay ? ` → ${formatDateFriendly(eDate)}` : ''}
+              </div>
             </div>
 
-            <div class="ld-matrix-card">
-              <div class="ld-matrix-card-header">
-                <span>${portionInfo.icon}</span> <span>Shift & Timing</span>
+            <div class="ld-matrix-item">
+              <div class="ld-matrix-label">
+                <span class="ld-matrix-icon">${portionInfo.icon}</span>
+                <span>Shift Timing</span>
               </div>
               <div class="ld-matrix-val">${portionInfo.label}</div>
-              <div class="ld-matrix-sub">${portionInfo.fullLabel} (${portionInfo.shiftText})</div>
             </div>
 
-            <div class="ld-matrix-card">
-              <div class="ld-matrix-card-header">
-                <span>${typeInfo.icon}</span> <span>Leave Category</span>
+            <div class="ld-matrix-item">
+              <div class="ld-matrix-label">
+                <span class="ld-matrix-icon">${typeInfo.icon}</span>
+                <span>Leave Category</span>
               </div>
-              <div class="ld-matrix-val" style="color: ${typeInfo.color};">${typeInfo.label}</div>
-              <div class="ld-matrix-sub">Type: ${absence.leaveType ? absence.leaveType.replace('_', ' ') : 'General'}</div>
+              <div class="ld-matrix-val" style="color: ${typeInfo.color || '#fff'};">
+                ${typeInfo.label}
+              </div>
             </div>
 
-            <div class="ld-matrix-card">
-              <div class="ld-matrix-card-header">
-                <span>🕒</span> <span>Application Audit</span>
+            <div class="ld-matrix-item">
+              <div class="ld-matrix-label">
+                <span class="ld-matrix-icon">🕒</span>
+                <span>Applied On</span>
               </div>
               <div class="ld-matrix-val">${appliedFormatted}</div>
-              <div class="ld-matrix-sub">Recorded via Salon Admin Portal</div>
             </div>
           </div>
 
@@ -1026,7 +1030,7 @@ export class LeaveManagementUI {
           ${(absence.notes || absence.reason) ? `
             <div class="ld-notes-card">
               <div class="ld-notes-label">
-                <span>💬</span> <span>Reason & Justification</span>
+                <span>💬</span> <span>Reason:</span>
               </div>
               <div class="ld-notes-text">
                 ${absence.notes || absence.reason}
@@ -1034,49 +1038,46 @@ export class LeaveManagementUI {
             </div>
           ` : ''}
 
-          <!-- Client Booking Impact Section -->
+          <!-- Client Booking Impact Section (Compact) -->
           <div class="ld-impact-section">
             <div class="ld-impact-header">
               <h4>Client Booking Impact</h4>
               ${affectedCount > 0 ? `
-                <span style="font-size: 0.75rem; color: var(--text-secondary);">${affectedCount} client appointment${affectedCount > 1 ? 's' : ''} overlapped</span>
+                <span class="ld-impact-counter">${affectedCount} client appointment${affectedCount > 1 ? 's' : ''} overlapped</span>
               ` : ''}
             </div>
 
             ${affectedCount === 0 ? `
               <div class="ld-clean-banner">
-                <div class="ld-clean-icon">✨</div>
-                <div>
-                  <div class="ld-clean-title">Clean Schedule — Zero Customer Disruption</div>
-                  <div class="ld-clean-desc">
-                    No client appointments were booked with ${staffName} during this leave window. The salon calendar was cleanly blocked with zero customer friction.
-                  </div>
+                <span class="ld-clean-icon">✨</span>
+                <div class="ld-clean-body">
+                  <span class="ld-clean-title">Zero Client Disruption</span>
+                  <span class="ld-clean-sep">·</span>
+                  <span class="ld-clean-desc">No existing bookings were impacted during this window.</span>
                 </div>
               </div>
             ` : `
               <!-- KPI Summary Counters -->
-              <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 12px;">
-                <div style="background: rgba(255,255,255,0.04); padding: 10px 12px; border-radius: 10px; text-align: center; border: 1px solid rgba(255,255,255,0.08);">
-                  <div style="font-size: 1.25rem; font-weight: 700; color: #fff;">${affectedCount}</div>
-                  <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase;">Total Affected</div>
+              <div class="ld-kpi-row">
+                <div class="ld-kpi-cell">
+                  <div class="ld-kpi-val">${affectedCount}</div>
+                  <div class="ld-kpi-lbl">Total Affected</div>
                 </div>
-                <div style="background: rgba(52, 211, 153, 0.08); padding: 10px 12px; border-radius: 10px; text-align: center; border: 1px solid rgba(52, 211, 153, 0.25);">
-                  <div style="font-size: 1.25rem; font-weight: 700; color: #34d399;">${reassignedCount}</div>
-                  <div style="font-size: 0.7rem; color: #34d399; text-transform: uppercase;">Auto-Reassigned</div>
+                <div class="ld-kpi-cell is-reassigned">
+                  <div class="ld-kpi-val">${reassignedCount}</div>
+                  <div class="ld-kpi-lbl">Auto-Reassigned</div>
                 </div>
-                <div style="background: ${unresolvedCount > 0 ? 'rgba(251, 113, 133, 0.12)' : 'rgba(255,255,255,0.04)'}; padding: 10px 12px; border-radius: 10px; text-align: center; border: 1px solid ${unresolvedCount > 0 ? 'rgba(251, 113, 133, 0.3)' : 'rgba(255,255,255,0.08)'};">
-                  <div style="font-size: 1.25rem; font-weight: 700; color: ${unresolvedCount > 0 ? '#fb7185' : '#fff'};">${unresolvedCount}</div>
-                  <div style="font-size: 0.7rem; color: ${unresolvedCount > 0 ? '#fb7185' : 'var(--text-muted)'}; text-transform: uppercase;">Action Needed</div>
+                <div class="ld-kpi-cell ${unresolvedCount > 0 ? 'is-action' : ''}">
+                  <div class="ld-kpi-val">${unresolvedCount}</div>
+                  <div class="ld-kpi-lbl">Action Needed</div>
                 </div>
               </div>
 
               <!-- Reassignment List -->
               ${reassignments.length === 0 ? `
-                <div style="font-size: 0.8rem; color: var(--text-muted); padding: 12px; background: rgba(0,0,0,0.2); border-radius: 10px; text-align: center;">
-                  No individual appointment reassignment logs found.
-                </div>
+                <div class="ld-empty-reassign">No individual appointment logs found.</div>
               ` : `
-                <div style="max-height: 230px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;">
+                <div class="ld-reassign-list">
                   ${reassignments.map((r) => {
                     const appt = r.appointment || {};
                     const isAuto = r.outcome === 'AUTO_ASSIGNED' || r.outcome === 'CUSTOMER_ACCEPTED';
@@ -1089,14 +1090,14 @@ export class LeaveManagementUI {
                         <div class="ld-appt-client">
                           <div class="ld-appt-avatar">${customerName.charAt(0).toUpperCase()}</div>
                           <div class="ld-appt-info">
-                            <div class="ld-appt-name">${customerName} <span style="font-size: 0.72rem; color: var(--text-muted); font-weight: normal;">${customerPhone ? `(${customerPhone})` : ''}</span></div>
+                            <div class="ld-appt-name">${customerName} <span class="ld-appt-phone">${customerPhone ? `(${customerPhone})` : ''}</span></div>
                             <div class="ld-appt-sub">${serviceName} · Appt #${appt.appointmentNumber || r.appointmentId?.slice(0, 8)}</div>
                             <div class="ld-appt-time">🕒 Slot: ${apptTime}</div>
                           </div>
                         </div>
                         <div>
-                          <span class="badge" style="background: ${isAuto ? 'rgba(52, 211, 153, 0.15)' : 'rgba(251, 113, 133, 0.15)'}; color: ${isAuto ? '#34d399' : '#fb7185'}; border: 1px solid ${isAuto ? 'rgba(52,211,153,0.3)' : 'rgba(251,113,133,0.3)'}; font-size: 0.72rem; font-weight: 700; padding: 5px 10px; border-radius: 999px;">
-                            ${isAuto ? '✓ Reassigned to Peer' : '⚠️ Action Needed'}
+                          <span class="ld-appt-badge ${isAuto ? 'is-auto' : 'is-action'}">
+                            ${isAuto ? '✓ Reassigned' : '⚠️ Action Needed'}
                           </span>
                         </div>
                       </div>
@@ -1109,19 +1110,21 @@ export class LeaveManagementUI {
 
           <!-- Modal Footer Actions -->
           <div class="ld-footer">
-            <div style="font-size: 0.72rem; color: var(--text-muted); font-family: monospace;">
-              Record #${absence.id.slice(0, 12)}
+            <div class="ld-footer-ref">
+              Ref: #${absence.id.slice(0, 10)}
             </div>
-            <div style="display: flex; align-items: center; gap: 8px;">
+            <div class="ld-footer-actions">
               ${canCancel && staffId ? `
-                <button class="btn-leave-extend btn-detail-extend-action" id="btn-detail-extend">
-                  <span>📅</span> <span>Extend Date</span>
+                <button type="button" class="btn-ld-action btn-ld-extend" id="btn-detail-extend">
+                  <span class="btn-ld-icon">📅</span>
+                  <span>Extend Date</span>
                 </button>
-                <button class="btn-leave-cancel btn-detail-cancel-action" id="btn-detail-cancel">
-                  <span>✕</span> <span>Cancel Leave</span>
+                <button type="button" class="btn-ld-action btn-ld-cancel" id="btn-detail-cancel">
+                  <span class="btn-ld-icon">✕</span>
+                  <span>Cancel Leave</span>
                 </button>
               ` : ''}
-              <button class="btn btn-secondary btn-sm" id="btn-close-detail-done">Close</button>
+              <button type="button" class="btn-ld-action btn-ld-close" id="btn-close-detail-done">Close</button>
             </div>
           </div>
         </div>

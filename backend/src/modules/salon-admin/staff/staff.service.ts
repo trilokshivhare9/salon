@@ -231,36 +231,38 @@ export class StaffService {
   async assignServices(salonId: string, staffId: string, dto: AssignStaffServicesDto) {
     await this.getStaffById(salonId, staffId);
 
-    if (!dto.serviceIds || dto.serviceIds.length === 0) {
-      throw new BadRequestException('At least one service must be assigned.');
-    }
+    const serviceIds = dto.serviceIds || [];
 
-    // Verify all services belong to this salon and are ACTIVE
-    const matchingServices = await this.prisma.service.findMany({
-      where: {
-        id: { in: dto.serviceIds },
-        salonId,
-        status: ServiceStatus.ACTIVE,
-      },
-    });
+    if (serviceIds.length > 0) {
+      // Verify all services belong to this salon and are ACTIVE
+      const matchingServices = await this.prisma.service.findMany({
+        where: {
+          id: { in: serviceIds },
+          salonId,
+          status: ServiceStatus.ACTIVE,
+        },
+      });
 
-    if (matchingServices.length !== dto.serviceIds.length) {
-      throw new BadRequestException(
-        'One or more services do not exist, are inactive, or do not belong to this salon.',
-      );
+      if (matchingServices.length !== serviceIds.length) {
+        throw new BadRequestException(
+          'One or more services do not exist, are inactive, or do not belong to this salon.',
+        );
+      }
     }
 
     const res = await this.prisma.$transaction(async (tx) => {
-      // Clear previous and replace
+      // Clear previous assignments
       await tx.stylistService.deleteMany({ where: { stylistId: staffId } });
 
-      await tx.stylistService.createMany({
-        data: dto.serviceIds.map((serviceId) => ({
-          salonId,
-          stylistId: staffId,
-          serviceId,
-        })),
-      });
+      if (serviceIds.length > 0) {
+        await tx.stylistService.createMany({
+          data: serviceIds.map((serviceId) => ({
+            salonId,
+            stylistId: staffId,
+            serviceId,
+          })),
+        });
+      }
 
       return tx.stylist.findUnique({
         where: { id: staffId },

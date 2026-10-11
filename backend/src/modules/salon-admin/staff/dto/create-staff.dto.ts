@@ -63,7 +63,6 @@ export class UpdateStaffDto {
 export class AssignStaffServicesDto {
   @IsArray()
   @IsString({ each: true })
-  @IsNotEmpty({ message: 'serviceIds must not be empty' })
   serviceIds: string[];
 }
 
