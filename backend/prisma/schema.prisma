@@ -342,6 +342,8 @@ model Salon {
   stylistAbsences      StylistAbsence[]
   salonClosures        SalonClosure[]
   quickCode            SalonQuickCode?
+  salonBreaks          SalonBreak[]
+  stylistBreaks        StylistBreak[]
 
   @@index([createdByAdminId])
   @@index([slug])
@@ -429,6 +431,7 @@ model Stylist {
   workingHours         StylistWorkingHours[]
   appointments         Appointment[]
   absences             StylistAbsence[]
+  breaks               StylistBreak[]
 
   @@unique([salonId, id])
   @@index([salonId, status])
@@ -460,9 +463,6 @@ model SalonWorkingHours {
   isClosed       Boolean   @default(false) @map("is_closed")
   startTime      String    @map("start_time")       // "09:00"
   endTime        String    @map("end_time")         // "21:00"
-  breaks         Json?     @default("[]")
-  breakStartTime String?   @map("break_start_time") // "13:00" (legacy compatibility)
-  breakEndTime   String?   @map("break_end_time")   // "14:00" (legacy compatibility)
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
@@ -479,10 +479,6 @@ model StylistWorkingHours {
   isWorking        Boolean   @default(true) @map("is_working")
   startTime        String    @map("start_time")       // "10:00"
   endTime          String    @map("end_time")         // "18:00"
-  hasBreakOverride Boolean   @default(false) @map("has_break_override")
-  breaks           Json?     @default("[]")
-  breakStartTime   String?   @map("break_start_time") // "13:00" (legacy compatibility)
-  breakEndTime     String?   @map("break_end_time")   // "14:00" (legacy compatibility)
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
 
@@ -490,6 +486,46 @@ model StylistWorkingHours {
 
   @@unique([stylistId, dayOfWeek])
   @@map("stylist_working_hours")
+}
+
+model SalonBreak {
+  id           String         @id @default(uuid())
+  salonId      String         @map("salon_id")
+  dayOfWeek    DayOfWeek      @map("day_of_week")
+  title        String         @db.VarChar(100)
+  startTime    String         @map("start_time") @db.VarChar(5) // "13:00"
+  endTime      String         @map("end_time") @db.VarChar(5)   // "14:00"
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+
+  salon        Salon          @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  stylistBreaks StylistBreak[]
+
+  @@unique([salonId, dayOfWeek, startTime, endTime])
+  @@index([salonId, dayOfWeek])
+  @@map("salon_breaks")
+}
+
+model StylistBreak {
+  id           String         @id @default(uuid())
+  salonId      String         @map("salon_id")
+  stylistId    String         @map("stylist_id")
+  salonBreakId String?        @map("salon_break_id")
+  dayOfWeek    DayOfWeek      @map("day_of_week")
+  title        String         @db.VarChar(100)
+  startTime    String         @map("start_time") @db.VarChar(5) // "12:30"
+  endTime      String         @map("end_time") @db.VarChar(5)   // "13:30"
+  isCustomized Boolean        @default(false) @map("is_customized")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+
+  salon        Salon          @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  stylist      Stylist        @relation(fields: [stylistId], references: [id], onDelete: Cascade)
+  salonBreak   SalonBreak?    @relation(fields: [salonBreakId], references: [id], onDelete: SetNull)
+
+  @@index([salonId, stylistId, dayOfWeek])
+  @@index([salonBreakId])
+  @@map("stylist_breaks")
 }
 
 // -----------------------------------------------------------------------------

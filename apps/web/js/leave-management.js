@@ -150,119 +150,167 @@ export class LeaveManagementUI {
   }
 
   /**
-   * 1. CREATE / MARK LEAVE FORM MODAL
+   * 1. CREATE / MARK LEAVE FORM MODAL (COMPACT & EXECUTIVE)
    */
   showCreateLeaveModal(staffId, staffName, defaultDate = null) {
     const modalContainer = document.getElementById('modal-container');
     if (!modalContainer) return;
 
-    const initialDate = defaultDate || this.app.selectedDate || new Date().toISOString().split('T')[0];
+    const initialDate = defaultDate || this.app.selectedCalDate || this.app.selectedDate || new Date().toISOString().split('T')[0];
     const staffList = this.app.staffList || [];
+    const targetStaff = staffList.find((s) => s.id === staffId);
+    const initialStaffName = staffName || targetStaff?.name || 'Specialist';
+
+    const formatPresentationDate = (dateStr) => {
+      if (!dateStr) return 'Select date';
+      const parts = dateStr.split('-');
+      if (parts.length !== 3) return dateStr;
+      const y = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10) - 1;
+      const d = parseInt(parts[2], 10);
+      const dt = new Date(y, m, d);
+      if (isNaN(dt.getTime())) return dateStr;
+      const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      return `${days[dt.getDay()]}, ${d} ${months[dt.getMonth()]} ${y}`;
+    };
 
     modalContainer.innerHTML = `
       <div class="modal-backdrop show">
-        <div class="modal-content" style="max-width: 580px; max-height: 90vh; overflow-y: auto; padding: 24px;">
-          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
-            <div>
-              <h3 style="font-size: 1.2rem; font-weight: 800; color: #fff; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
-                <span>🗓️ Record Specialist Leave</span>
-              </h3>
-              <p style="color: var(--text-secondary); font-size: 0.82rem; margin: 0;">Schedule leave or mark absence for a specialist.</p>
+        <div class="apply-leave-dialog">
+          <!-- Compact Header -->
+          <div class="ald-header">
+            <div class="ald-header-left">
+              <div class="ald-icon-badge">🗓️</div>
+              <div class="ald-title-wrap">
+                <h3 class="ald-title">Record Specialist Leave</h3>
+                ${staffId ? `<span class="ald-staff-chip">${initialStaffName}</span>` : ''}
+              </div>
             </div>
-            <button class="close-btn" id="btn-close-leave-modal" style="background: rgba(255,255,255,0.06); border: 1px solid var(--border-subtle); border-radius: 50%; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-secondary); font-size: 1.1rem;">&times;</button>
+            <button class="ald-close-btn" id="btn-close-leave-modal" title="Close modal">&times;</button>
           </div>
 
           <form id="leave-management-form">
-            <!-- Stylist Selection -->
-            <div class="form-group" style="margin-bottom: 14px;">
-              <label style="font-weight: 600; font-size: 0.82rem; color: #e2e8f0; display: block; margin-bottom: 4px;">Specialist *</label>
-              <select class="form-control" id="leave-staff-id" ${staffId ? 'disabled' : 'required'}>
-                ${staffList.map((st) => `
-                  <option value="${st.id}" ${st.id === staffId ? 'selected' : ''}>
-                    ${st.name || 'Specialist'} (${st.phone || 'No phone'})
-                  </option>
-                `).join('')}
-              </select>
-            </div>
-
-            <!-- Date Range -->
-            <div class="leave-form-row">
-              <div class="form-group" style="margin: 0;">
-                <label style="font-weight: 600; font-size: 0.82rem; color: #e2e8f0; display: block; margin-bottom: 4px;">Start Date *</label>
-                <input type="date" class="form-control" id="leave-start-date" value="${initialDate}" required />
-              </div>
-              <div class="form-group" style="margin: 0;">
-                <label style="font-weight: 600; font-size: 0.82rem; color: #e2e8f0; display: block; margin-bottom: 4px;">End Date *</label>
-                <input type="date" class="form-control" id="leave-end-date" value="${initialDate}" required />
-              </div>
-            </div>
-
-            <!-- Leave Type & Portion -->
-            <div class="leave-form-row">
-              <div class="form-group" style="margin: 0;">
-                <label style="font-weight: 600; font-size: 0.82rem; color: #e2e8f0; display: block; margin-bottom: 4px;">Leave Type *</label>
-                <select class="form-control" id="leave-type" required>
-                  <option value="SICK_LEAVE">🤒 Sick Leave</option>
-                  <option value="CASUAL_LEAVE">🌴 Casual Leave</option>
-                  <option value="EMERGENCY_LEAVE">🚨 Emergency Leave</option>
-                  <option value="UNPAID_LEAVE">📄 Unpaid Leave</option>
-                  <option value="OTHER">📝 Other</option>
+            <!-- Specialist Select (Only if not pre-set) -->
+            ${staffId ? `
+              <input type="hidden" id="leave-staff-id" value="${staffId}" />
+            ` : `
+              <div class="ald-row-1">
+                <label class="ald-label">Specialist *</label>
+                <select class="ald-input" id="leave-staff-id" required>
+                  <option value="" disabled selected>-- Select Specialist --</option>
+                  ${staffList.map((st) => `<option value="${st.id}">${st.name} (${st.phone || 'No phone'})</option>`).join('')}
                 </select>
               </div>
-              <div class="form-group" style="margin: 0;">
-                <label style="font-weight: 600; font-size: 0.82rem; color: #e2e8f0; display: block; margin-bottom: 4px;">Leave Portion *</label>
-                <select class="form-control" id="leave-portion" required style="text-overflow: ellipsis;">
-                  <option value="FULL_DAY">Full Day (Entire Shift)</option>
-                  <option value="FIRST_HALF">First Half (Morning)</option>
-                  <option value="SECOND_HALF">Second Half (Afternoon)</option>
-                  <option value="CUSTOM_HOURS">Custom Hours</option>
-                </select>
-              </div>
-            </div>
+            `}
 
-            <!-- Custom Hours Input (Conditional) -->
-            <div id="leave-custom-hours-group" style="display: none; background: rgba(139, 61, 255,0.08); border: 1px solid rgba(139, 61, 255,0.2); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 14px;">
-              <div style="font-size: 0.8rem; font-weight: 600; color: #A855F7; margin-bottom: 8px;">⏰ Custom Hours Window:</div>
-              <div class="leave-form-row" style="margin-bottom: 0;">
-                <div class="form-group" style="margin: 0;">
-                  <label style="font-size: 0.78rem;">Start Time</label>
-                  <input type="time" class="form-control" id="leave-custom-start-time" value="09:00" />
+            <!-- Row 1: Start Date & End Date -->
+            <div class="ald-row-2">
+              <div class="ald-col">
+                <label class="ald-label" for="leave-start-date">Start Date *</label>
+                <div class="ald-date-box" id="leave-start-date-box" tabindex="0">
+                  <div class="ald-date-display">
+                    <span class="ald-date-icon">🗓️</span>
+                    <span class="ald-date-value" id="leave-start-date-text">${formatPresentationDate(initialDate)}</span>
+                  </div>
+                  <span class="ald-date-arrow">▾</span>
+                  <input type="date" class="ald-date-native" id="leave-start-date" value="${initialDate}" required />
                 </div>
-                <div class="form-group" style="margin: 0;">
-                  <label style="font-size: 0.78rem;">End Time</label>
-                  <input type="time" class="form-control" id="leave-custom-end-time" value="13:00" />
+              </div>
+
+              <div class="ald-col">
+                <div class="ald-label-row">
+                  <label class="ald-label" for="leave-end-date">End Date *</label>
+                  <span class="ald-pill-badge" id="leave-duration-badge">✨ 1 Day</span>
+                </div>
+                <div class="ald-date-box" id="leave-end-date-box" tabindex="0">
+                  <div class="ald-date-display">
+                    <span class="ald-date-icon">🗓️</span>
+                    <span class="ald-date-value" id="leave-end-date-text">${formatPresentationDate(initialDate)}</span>
+                  </div>
+                  <span class="ald-date-arrow">▾</span>
+                  <input type="date" class="ald-date-native" id="leave-end-date" value="${initialDate}" required />
                 </div>
               </div>
             </div>
 
-            <!-- Reason & Notes -->
-            <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px;">
-              <div class="form-group" style="margin: 0;">
-                <label style="font-size: 0.82rem; color: var(--text-secondary); display: block; margin-bottom: 4px;">Reason (Optional)</label>
-                <input type="text" class="form-control" id="leave-reason" placeholder="e.g. Medical checkup" />
+            <!-- Row 2: Leave Type & Shift Coverage -->
+            <div class="ald-row-2">
+              <!-- Leave Type Custom Dropdown -->
+              <div class="ald-col">
+                <label class="ald-label">Leave Type *</label>
+                <input type="hidden" id="leave-type" value="SICK_LEAVE" />
+                <div class="cselect-wrap" id="cselect-leave-type">
+                  <div class="cselect-trigger" tabindex="0">
+                    <span class="cselect-label">🤒 Sick Leave</span>
+                    <span class="cselect-arrow">▼</span>
+                  </div>
+                  <div class="cselect-menu">
+                    <div class="cselect-option is-selected" data-value="SICK_LEAVE">🤒 Sick Leave</div>
+                    <div class="cselect-option" data-value="CASUAL_LEAVE">🌴 Casual Leave</div>
+                    <div class="cselect-option" data-value="EMERGENCY_LEAVE">🚨 Emergency Leave</div>
+                    <div class="cselect-option" data-value="UNPAID_LEAVE">📄 Unpaid Leave</div>
+                    <div class="cselect-option" data-value="OTHER">📝 Other</div>
+                  </div>
+                </div>
               </div>
-              <div class="form-group" style="margin: 0;">
-                <label style="font-size: 0.82rem; color: var(--text-secondary); display: block; margin-bottom: 4px;">Internal Notes (Optional)</label>
-                <input type="text" class="form-control" id="leave-notes" placeholder="e.g. Informed manager in advance" />
+
+              <!-- Shift Coverage Custom Dropdown -->
+              <div class="ald-col">
+                <label class="ald-label">Shift Coverage *</label>
+                <input type="hidden" id="leave-portion" value="FULL_DAY" />
+                <div class="cselect-wrap" id="cselect-leave-portion">
+                  <div class="cselect-trigger" tabindex="0">
+                    <span class="cselect-label">☀️ Full Day</span>
+                    <span class="cselect-arrow">▼</span>
+                  </div>
+                  <div class="cselect-menu">
+                    <div class="cselect-option is-selected" data-value="FULL_DAY">☀️ Full Day</div>
+                    <div class="cselect-option" data-value="FIRST_HALF">🌅 First Half (Morning)</div>
+                    <div class="cselect-option" data-value="SECOND_HALF">🌇 Second Half (Afternoon)</div>
+                    <div class="cselect-option" data-value="CUSTOM_HOURS">⏱️ Custom Hours</div>
+                  </div>
+                </div>
               </div>
             </div>
 
-            <!-- Live Impact Preview Box -->
-            <div id="leave-impact-preview-box" style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 16px;">
-              <div style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text-secondary);">
-                <div class="spinner-small" style="display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.2); border-top-color: #A855F7; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
-                <span>Fetching live impact preview from server...</span>
+            <!-- Row 3: Custom Hours Window (Conditional) -->
+            <div id="leave-custom-hours-group" class="ald-custom-hours" style="display: none;">
+              <div style="font-size: 0.72rem; font-weight: 600; color: #c084fc; display: flex; align-items: center; gap: 5px;">
+                <span>⏱️ Window:</span>
+                <span id="leave-custom-hours-calc" style="background: rgba(168,85,247,0.2); padding: 1px 5px; border-radius: 4px; font-size: 0.65rem;">4.0 hrs</span>
+              </div>
+              <div class="ald-custom-hours-inputs">
+                <input type="time" id="leave-custom-start-time" value="09:00" />
+                <span style="font-size: 0.7rem; color: #94a3b8;">to</span>
+                <input type="time" id="leave-custom-end-time" value="13:00" />
               </div>
             </div>
 
-            <!-- Operational Warning Banner -->
-            <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: var(--radius-sm); padding: 10px 14px; margin-bottom: 16px; font-size: 0.78rem; color: #fca5a5; line-height: 1.4;">
-              ⚠️ <strong>Auto-Reassignment:</strong> Affected bookings will be reassigned to available qualified staff. Customers will receive interactive WhatsApp notifications.
+            <!-- Row 4: Reason (Full Width) -->
+            <div class="ald-row-1">
+              <label class="ald-label">Reason (Optional)</label>
+              <input type="text" class="ald-input" id="leave-reason" placeholder="e.g. Medical checkup, personal leave" />
             </div>
 
-            <div style="display: flex; gap: 10px; justify-content: flex-end; align-items: center; border-top: 1px solid var(--border-subtle); padding-top: 14px;">
-              <button type="button" class="btn btn-secondary btn-sm" id="btn-cancel-leave-modal" style="padding: 8px 16px;">Cancel</button>
-              <button type="submit" class="btn btn-danger btn-sm" id="btn-submit-leave" style="gap: 6px; padding: 8px 20px; font-weight: 700;">
+            <!-- Row 5: Internal Notes (Full Width) -->
+            <div class="ald-row-1">
+              <label class="ald-label">Internal Notes (Optional)</label>
+              <input type="text" class="ald-input" id="leave-notes" placeholder="e.g. Informed manager in advance" />
+            </div>
+
+            <!-- Row 6: Unified Compact Impact & Operational Banner -->
+            <div id="leave-impact-preview-box" class="ald-compact-notice is-loading">
+              <div class="ald-notice-main">
+                <div class="spinner-small" style="width: 12px; height: 12px; border: 2px solid rgba(255,255,255,0.2); border-top-color: #a855f7; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+                <span>Checking booking conflicts with server...</span>
+              </div>
+            </div>
+
+            <!-- Row 7: Footer Actions -->
+            <div class="ald-footer">
+              <button type="button" class="ald-btn-cancel" id="btn-cancel-leave-modal">Cancel</button>
+              <button type="submit" class="ald-btn-submit" id="btn-submit-leave">
                 <span>🚫 Confirm & Process Leave</span>
               </button>
             </div>
@@ -277,36 +325,224 @@ export class LeaveManagementUI {
 
     const startDateEl = document.getElementById('leave-start-date');
     const endDateEl = document.getElementById('leave-end-date');
-    const portionEl = document.getElementById('leave-portion');
+    const leaveTypeInput = document.getElementById('leave-type');
+    const portionInput = document.getElementById('leave-portion');
     const customHoursGroup = document.getElementById('leave-custom-hours-group');
     const customStartEl = document.getElementById('leave-custom-start-time');
     const customEndEl = document.getElementById('leave-custom-end-time');
     const staffSelectEl = document.getElementById('leave-staff-id');
+    const durationBadge = document.getElementById('leave-duration-badge');
 
-    // Auto-sync endDate = startDate if endDate < startDate
+    // Helper: Update Duration Badge
+    const updateDurationBadge = () => {
+      if (!durationBadge || !startDateEl || !endDateEl) return;
+      const s = startDateEl.value;
+      const e = endDateEl.value;
+      if (!s || !e) {
+        durationBadge.textContent = '✨ 1 Day';
+        return;
+      }
+      const dur = calculateDurationDays(s, e);
+      durationBadge.textContent = `✨ ${dur}`;
+    };
+
+    // Helper: Calculate Custom Hours Window
+    const updateCustomHoursCalc = () => {
+      const calcEl = document.getElementById('leave-custom-hours-calc');
+      if (!calcEl || !customStartEl || !customEndEl) return;
+      const s = customStartEl.value || '09:00';
+      const e = customEndEl.value || '13:00';
+      const [sh, sm] = s.split(':').map(Number);
+      const [eh, em] = e.split(':').map(Number);
+      const startMin = sh * 60 + sm;
+      const endMin = eh * 60 + em;
+      if (endMin <= startMin) {
+        calcEl.textContent = '⚠️ Invalid';
+        calcEl.style.background = 'rgba(239, 68, 68, 0.25)';
+        calcEl.style.color = '#fca5a5';
+      } else {
+        const diffHours = ((endMin - startMin) / 60).toFixed(1);
+        calcEl.textContent = `${diffHours.endsWith('.0') ? parseInt(diffHours, 10) : diffHours} hrs`;
+        calcEl.style.background = 'rgba(168, 85, 247, 0.2)';
+        calcEl.style.color = '#d8b4fe';
+      }
+    };
+
+    // Quick Date Presets calculation
+    const getPresetDates = (preset) => {
+      const now = new Date();
+      const pad = (n) => String(n).padStart(2, '0');
+      const formatYMD = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+      if (preset === 'today') {
+        const dStr = formatYMD(now);
+        return { start: dStr, end: dStr };
+      }
+      if (preset === 'tomorrow') {
+        const tm = new Date(now);
+        tm.setDate(tm.getDate() + 1);
+        const dStr = formatYMD(tm);
+        return { start: dStr, end: dStr };
+      }
+      if (preset === '3days') {
+        const s = formatYMD(now);
+        const e = new Date(now);
+        e.setDate(e.getDate() + 2);
+        return { start: s, end: formatYMD(e) };
+      }
+      if (preset === 'this_week') {
+        const day = now.getDay();
+        const distToSun = day === 0 ? 0 : 7 - day;
+        const sun = new Date(now);
+        sun.setDate(sun.getDate() + distToSun);
+        return { start: formatYMD(now), end: formatYMD(sun) };
+      }
+      const todayStr = formatYMD(now);
+      return { start: todayStr, end: todayStr };
+    };
+
+    // Quick Preset link click
+    modalContainer.querySelectorAll('.ald-quick-link').forEach((link) => {
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        const presetKey = e.currentTarget.getAttribute('data-preset');
+        const { start, end } = getPresetDates(presetKey);
+        startDateEl.value = start;
+        endDateEl.value = end;
+        updateDateDisplays();
+        updateDurationBadge();
+        debouncedPreview();
+      });
+    });
+
+    const startDateTextEl = document.getElementById('leave-start-date-text');
+    const endDateTextEl = document.getElementById('leave-end-date-text');
+
+    const updateDateDisplays = () => {
+      if (startDateTextEl && startDateEl) {
+        startDateTextEl.textContent = formatPresentationDate(startDateEl.value);
+      }
+      if (endDateTextEl && endDateEl) {
+        endDateTextEl.textContent = formatPresentationDate(endDateEl.value);
+      }
+    };
+
+    // Date change listeners
     startDateEl.addEventListener('change', () => {
       if (!endDateEl.value || endDateEl.value < startDateEl.value) {
         endDateEl.value = startDateEl.value;
       }
-      triggerPreview();
+      updateDateDisplays();
+      updateDurationBadge();
+      debouncedPreview();
     });
+    startDateEl.addEventListener('input', () => {
+      updateDateDisplays();
+    });
+
     endDateEl.addEventListener('change', () => {
       if (endDateEl.value < startDateEl.value) {
         startDateEl.value = endDateEl.value;
       }
-      triggerPreview();
+      updateDateDisplays();
+      updateDurationBadge();
+      debouncedPreview();
+    });
+    endDateEl.addEventListener('input', () => {
+      updateDateDisplays();
     });
 
-    portionEl.addEventListener('change', () => {
-      const isCustom = portionEl.value === 'CUSTOM_HOURS';
-      customHoursGroup.style.display = isCustom ? 'block' : 'none';
-      triggerPreview();
+    // Box click helper to open picker smoothly
+    const startBox = document.getElementById('leave-start-date-box');
+    const endBox = document.getElementById('leave-end-date-box');
+    startBox?.addEventListener('click', (e) => {
+      if (e.target !== startDateEl) {
+        try { startDateEl.showPicker(); } catch (_) { startDateEl.focus(); }
+      }
+    });
+    endBox?.addEventListener('click', (e) => {
+      if (e.target !== endDateEl) {
+        try { endDateEl.showPicker(); } catch (_) { endDateEl.focus(); }
+      }
     });
 
-    customStartEl.addEventListener('change', triggerPreview);
-    customEndEl.addEventListener('change', triggerPreview);
+    // Setup Custom Selects
+    const initCustomSelect = (wrapId, hiddenInputId, onSelect) => {
+      const wrap = modalContainer.querySelector(`#${wrapId}`);
+      const input = modalContainer.querySelector(`#${hiddenInputId}`);
+      if (!wrap || !input) return;
+
+      const trigger = wrap.querySelector('.cselect-trigger');
+      const menu = wrap.querySelector('.cselect-menu');
+      const label = wrap.querySelector('.cselect-label');
+
+      trigger.onclick = (e) => {
+        e.stopPropagation();
+        const wasOpen = menu.classList.contains('is-open');
+        modalContainer.querySelectorAll('.cselect-menu.is-open').forEach((m) => m.classList.remove('is-open'));
+        modalContainer.querySelectorAll('.cselect-trigger.is-active').forEach((t) => t.classList.remove('is-active'));
+        if (!wasOpen) {
+          menu.classList.add('is-open');
+          trigger.classList.add('is-active');
+        }
+      };
+
+      menu.querySelectorAll('.cselect-option').forEach((opt) => {
+        opt.onclick = (e) => {
+          e.stopPropagation();
+          const val = opt.getAttribute('data-value');
+          const primaryText = opt.querySelector('span:first-child')?.textContent || opt.textContent;
+          input.value = val;
+          label.textContent = primaryText;
+          menu.querySelectorAll('.cselect-option').forEach((o) => o.classList.remove('is-selected'));
+          opt.classList.add('is-selected');
+          menu.classList.remove('is-open');
+          trigger.classList.remove('is-active');
+          if (typeof onSelect === 'function') onSelect(val);
+        };
+      });
+    };
+
+    // Close custom dropdowns on modal backdrop click
+    modalContainer.addEventListener('click', () => {
+      modalContainer.querySelectorAll('.cselect-menu.is-open').forEach((m) => m.classList.remove('is-open'));
+      modalContainer.querySelectorAll('.cselect-trigger.is-active').forEach((t) => t.classList.remove('is-active'));
+    });
+
+    // Initialize Leave Type dropdown
+    initCustomSelect('cselect-leave-type', 'leave-type', () => {});
+
+    // Initialize Shift Coverage dropdown
+    initCustomSelect('cselect-leave-portion', 'leave-portion', (val) => {
+      const isCustom = val === 'CUSTOM_HOURS';
+      if (customHoursGroup) {
+        customHoursGroup.style.display = isCustom ? 'flex' : 'none';
+      }
+      if (isCustom) updateCustomHoursCalc();
+      debouncedPreview();
+    });
+
+    // Custom Hours listeners
+    customStartEl.addEventListener('input', () => {
+      updateCustomHoursCalc();
+      debouncedPreview();
+    });
+    customEndEl.addEventListener('input', () => {
+      updateCustomHoursCalc();
+      debouncedPreview();
+    });
+
     if (!staffId && staffSelectEl) {
-      staffSelectEl.addEventListener('change', triggerPreview);
+      staffSelectEl.addEventListener('change', debouncedPreview);
+    }
+
+    // Debounced Live Impact Preview
+    let previewTimer = null;
+    function debouncedPreview() {
+      if (previewTimer) clearTimeout(previewTimer);
+      previewTimer = setTimeout(() => {
+        triggerPreview();
+      }, 200);
     }
 
     // Live Impact Preview Function
@@ -317,14 +553,15 @@ export class LeaveManagementUI {
 
       const sDate = startDateEl.value;
       const eDate = endDateEl.value;
-      const portion = portionEl.value;
+      const portion = portionInput.value || 'FULL_DAY';
       const cStart = portion === 'CUSTOM_HOURS' ? customStartEl.value : undefined;
       const cEnd = portion === 'CUSTOM_HOURS' ? customEndEl.value : undefined;
 
+      previewBox.className = 'ald-compact-notice is-loading';
       previewBox.innerHTML = `
-        <div style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text-secondary);">
-          <div class="spinner-small" style="display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.2); border-top-color: #A855F7; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
-          <span>Calculating impact for ${formatDateFriendly(sDate)} ${sDate !== eDate ? `→ ${formatDateFriendly(eDate)}` : ''}...</span>
+        <div class="ald-notice-main">
+          <div class="spinner-small" style="width: 12px; height: 12px; border: 2px solid rgba(255,255,255,0.2); border-top-color: #a855f7; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+          <span>Checking booking conflicts for ${formatDateFriendly(sDate)}${sDate !== eDate ? ` → ${formatDateFriendly(eDate)}` : ''}...</span>
         </div>
       `;
 
@@ -341,59 +578,40 @@ export class LeaveManagementUI {
         const unresolvable = preview.unresolvableCount || 0;
 
         if (total === 0) {
+          previewBox.className = 'ald-compact-notice is-clean';
           previewBox.innerHTML = `
-            <div style="display: flex; align-items: center; gap: 8px; color: #34d399; font-size: 0.82rem;">
-              <span style="font-size: 1.1rem;">✅</span>
-              <span>No booking conflicts found for this date/period.</span>
+            <div class="ald-notice-main">
+              <span>✅</span>
+              <span>No booking conflicts for this period.</span>
             </div>
+            <div class="ald-notice-sub">Calendar availability will be blocked. Reassignments and WhatsApp notices trigger if shifts overlap.</div>
           `;
         } else {
+          previewBox.className = 'ald-compact-notice is-conflict';
           previewBox.innerHTML = `
-            <div>
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                <div style="font-weight: 700; font-size: 0.85rem; color: #fb7185;">
-                  ⚠️ Impact: ${total} Booking${total > 1 ? 's' : ''} Affected
-                </div>
-                <div style="display: flex; gap: 6px;">
-                  <span class="badge" style="background: rgba(52, 211, 153, 0.15); color: #34d399; font-size: 0.65rem;">
-                    ${reassignable} Auto-Reassignable
-                  </span>
-                  ${unresolvable > 0 ? `
-                    <span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #f87171; font-size: 0.65rem;">
-                      ${unresolvable} No Replacement
-                    </span>
-                  ` : ''}
-                </div>
-              </div>
-              <div style="max-height: 140px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; font-size: 0.78rem;">
-                ${(preview.details || []).map((d) => `
-                  <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: rgba(255,255,255,0.04); border-radius: 6px;">
-                    <div>
-                      <span style="font-weight: 600; color: #fff;">#${d.appointmentNumber || ''}</span>
-                      <span style="color: var(--text-secondary);"> (${d.serviceName || 'Service'}) - ${d.customerName || 'Client'}</span>
-                    </div>
-                    <span style="font-weight: 600; color: ${d.willReassign ? '#34d399' : '#fb7185'};">
-                      ${d.willReassign ? `→ ${d.potentialReplacement?.name || 'Available Staff'}` : '⚠️ No Replacement'}
-                    </span>
-                  </div>
-                `).join('')}
-              </div>
+            <div class="ald-notice-main">
+              <span>⚠️</span>
+              <span>${total} booking${total > 1 ? 's' : ''} affected (${reassignable} auto-reassigned${unresolvable > 0 ? `, ${unresolvable} need action` : ''})</span>
             </div>
+            <div class="ald-notice-sub">Affected bookings will be reassigned to available qualified staff on shift.</div>
           `;
         }
       } catch (err) {
         if (previewBox) {
+          previewBox.className = 'ald-compact-notice is-conflict';
           const rawMsg = Array.isArray(err.message) ? err.message.join(', ') : (err.message || 'Unable to fetch preview');
           previewBox.innerHTML = `
-            <div style="font-size: 0.8rem; color: #fca5a5; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.25); padding: 8px 12px; border-radius: var(--radius-sm);">
-              ⚠️ <strong>Impact Preview:</strong> ${rawMsg}
+            <div class="ald-notice-main">
+              <span>⚠️</span>
+              <span>Impact Preview: ${rawMsg}</span>
             </div>
           `;
         }
       }
     }
 
-    // Run initial preview
+    // Initialize Duration Badge and first preview
+    updateDurationBadge();
     triggerPreview();
 
     // Submit handler
@@ -402,7 +620,13 @@ export class LeaveManagementUI {
       const targetStaffId = staffId || staffSelectEl?.value;
       const sDate = startDateEl.value;
       const eDate = endDateEl.value;
-      const portion = portionEl.value;
+      const portion = portionInput.value || 'FULL_DAY';
+      const leaveTypeVal = leaveTypeInput.value || 'SICK_LEAVE';
+
+      if (!targetStaffId) {
+        this.toast('Please select a specialist', 'error');
+        return;
+      }
 
       if (sDate > eDate) {
         this.toast('Start date cannot be after end date', 'error');
@@ -423,17 +647,20 @@ export class LeaveManagementUI {
       const btnSubmit = document.getElementById('btn-submit-leave');
       if (btnSubmit) {
         btnSubmit.disabled = true;
-        btnSubmit.innerHTML = '<span>⏳ Processing Leave...</span>';
+        btnSubmit.innerHTML = `
+          <div class="spinner-small" style="display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+          <span>Processing...</span>
+        `;
       }
 
       try {
         const payload = {
           startDate: sDate,
           endDate: eDate,
-          leaveType: document.getElementById('leave-type').value,
+          leaveType: leaveTypeVal,
           leavePortion: portion,
-          reason: document.getElementById('leave-reason').value || undefined,
-          notes: document.getElementById('leave-notes').value || undefined,
+          reason: document.getElementById('leave-reason')?.value || undefined,
+          notes: document.getElementById('leave-notes')?.value || undefined,
         };
 
         if (portion === 'CUSTOM_HOURS') {
@@ -441,16 +668,27 @@ export class LeaveManagementUI {
           payload.customEndTime = customEndEl.value;
         }
 
-        const targetStaff = staffList.find((s) => s.id === targetStaffId);
-        const stName = targetStaff ? targetStaff.name : (staffName || 'Specialist');
+        const foundStaff = staffList.find((s) => s.id === targetStaffId);
+        const stName = foundStaff ? foundStaff.name : (staffName || 'Specialist');
 
         const result = await ApiClient.markStaffAbsent(targetStaffId, payload);
         closeModal();
 
+        // Immediate in-memory synchronization
+        const foundSt = (this.app?.staffList || []).find((s) => s.id === targetStaffId);
+        if (foundSt && result?.absence) {
+          foundSt.absences = Array.isArray(foundSt.absences) ? foundSt.absences : [];
+          foundSt.absences = foundSt.absences.filter((a) => a.id !== result.absence.id);
+          foundSt.absences.unshift(result.absence);
+          foundSt.operationalStatus = 'ON_LEAVE';
+          foundSt.operationalStatusLabel = 'On Leave';
+          foundSt.operationalStatusReason = result.absence.reason || 'Approved leave';
+        }
+
         // Show result summary view
         this.showLeaveResultModal(stName, result);
 
-        // Refresh dashboard state
+        // Refresh dashboard and staff workspaces
         if (typeof this.app.loadData === 'function') {
           await this.app.loadData(true);
         } else if (typeof this.app.loadStaff === 'function') {
@@ -470,7 +708,7 @@ export class LeaveManagementUI {
   }
 
   /**
-   * LEAVE RESULT SUMMARY MODAL
+   * LEAVE RESULT SUMMARY MODAL (MATCHING LUXURY PALETTE)
    */
   showLeaveResultModal(staffName, result) {
     const modalContainer = document.getElementById('modal-container');
@@ -482,56 +720,64 @@ export class LeaveManagementUI {
 
     modalContainer.innerHTML = `
       <div class="modal-backdrop show">
-        <div class="modal-content" style="max-width: 540px;">
-          <div class="modal-header">
-            <h3 style="display: flex; align-items: center; gap: 8px;">
-              <span>${statusInfo.icon}</span>
-              <span>Leave Recorded — Operational Summary</span>
-            </h3>
-            <button class="close-btn" id="btn-close-result-modal">&times;</button>
+        <div class="apply-leave-dialog" style="max-width: 540px;">
+          <!-- Header -->
+          <div class="ald-header">
+            <div class="ald-header-left">
+              <div class="ald-icon-badge" style="background: linear-gradient(135deg, rgba(52, 211, 153, 0.25) 0%, rgba(16, 185, 129, 0.15) 100%); border-color: rgba(52, 211, 153, 0.4);">
+                <span>${statusInfo.icon}</span>
+              </div>
+              <div class="ald-title-wrap">
+                <h3 class="ald-title">Leave Recorded & Confirmed</h3>
+                <p class="ald-subtitle">Operational summary & automated dispatch outcomes</p>
+              </div>
+            </div>
+            <button class="ald-close-btn" id="btn-close-result-modal">&times;</button>
           </div>
-          <div style="margin-bottom: 14px;">
-            <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 8px;">
-              Leave configured for <strong>${staffName}</strong> from <strong>${formatDateFriendly(absence.startDate || absence.absenceDate)}</strong> to <strong>${formatDateFriendly(absence.endDate || absence.absenceDate)}</strong>.
+
+          <div style="margin-bottom: 16px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px 14px;">
+            <p style="color: #cbd5e1; font-size: 0.86rem; margin: 0 0 8px 0; line-height: 1.4;">
+              Leave recorded for <strong>${staffName}</strong> from <strong>${formatDateFriendly(absence.startDate || absence.absenceDate)}</strong> to <strong>${formatDateFriendly(absence.endDate || absence.absenceDate)}</strong>.
             </p>
             <div style="display: flex; align-items: center; gap: 8px;">
-              <span style="font-size: 0.78rem; color: var(--text-muted);">Leave Status:</span>
-              <span class="badge" style="background: ${statusInfo.bg}; color: ${statusInfo.color}; border: 1px solid ${statusInfo.border}; font-weight: 700; font-size: 0.75rem;">
+              <span style="font-size: 0.76rem; color: #94a3b8;">Calendar Status:</span>
+              <span class="badge" style="background: ${statusInfo.bg}; color: ${statusInfo.color}; border: 1px solid ${statusInfo.border}; font-weight: 700; font-size: 0.74rem;">
                 ${statusInfo.title}
               </span>
             </div>
           </div>
 
+          <!-- Impact Metrics Grid -->
           <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 18px;">
-            <div style="background: rgba(255,255,255,0.05); padding: 12px; border-radius: var(--radius-sm); text-align: center;">
-              <div style="font-size: 1.3rem; font-weight: 700; color: #fff;">${summary.total || 0}</div>
-              <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase;">Affected</div>
+            <div style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); padding: 12px; border-radius: 12px; text-align: center;">
+              <div style="font-size: 1.35rem; font-weight: 800; color: #fff;">${summary.total || 0}</div>
+              <div style="font-size: 0.72rem; color: #94a3b8; text-transform: uppercase; font-weight: 600; margin-top: 2px;">Overlapped</div>
             </div>
-            <div style="background: rgba(52, 211, 153, 0.1); border: 1px solid rgba(52, 211, 153, 0.2); padding: 12px; border-radius: var(--radius-sm); text-align: center;">
-              <div style="font-size: 1.3rem; font-weight: 700; color: #34d399;">${summary.reassigned || 0}</div>
-              <div style="font-size: 0.72rem; color: #34d399; text-transform: uppercase;">Reassigned</div>
+            <div style="background: rgba(52, 211, 153, 0.1); border: 1px solid rgba(52, 211, 153, 0.25); padding: 12px; border-radius: 12px; text-align: center;">
+              <div style="font-size: 1.35rem; font-weight: 800; color: #34d399;">${summary.reassigned || 0}</div>
+              <div style="font-size: 0.72rem; color: #34d399; text-transform: uppercase; font-weight: 600; margin-top: 2px;">Auto-Reassigned</div>
             </div>
-            <div style="background: rgba(251, 113, 133, 0.1); border: 1px solid rgba(251, 113, 133, 0.2); padding: 12px; border-radius: var(--radius-sm); text-align: center;">
-              <div style="font-size: 1.3rem; font-weight: 700; color: #fb7185;">${summary.unresolvable || 0}</div>
-              <div style="font-size: 0.72rem; color: #fb7185; text-transform: uppercase;">Unresolved</div>
+            <div style="background: rgba(251, 113, 133, 0.1); border: 1px solid rgba(251, 113, 133, 0.25); padding: 12px; border-radius: 12px; text-align: center;">
+              <div style="font-size: 1.35rem; font-weight: 800; color: #fb7185;">${summary.unresolvable || 0}</div>
+              <div style="font-size: 0.72rem; color: #fb7185; text-transform: uppercase; font-weight: 600; margin-top: 2px;">Action Needed</div>
             </div>
           </div>
 
           ${(summary.details && summary.details.length > 0) ? `
             <div style="margin-bottom: 18px;">
-              <div style="font-size: 0.8rem; font-weight: 600; color: #fff; margin-bottom: 8px;">Reassignment Details:</div>
-              <div style="max-height: 180px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; font-size: 0.8rem;">
+              <div style="font-size: 0.8rem; font-weight: 700; color: #fff; margin-bottom: 8px;">Reassignment Dispatch Log:</div>
+              <div style="max-height: 160px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;">
                 ${summary.details.map((d) => `
-                  <div style="padding: 8px 12px; background: rgba(0,0,0,0.25); border-radius: 6px; display: flex; justify-content: space-between; align-items: center;">
+                  <div style="padding: 8px 12px; background: rgba(0,0,0,0.3); border-radius: 8px; display: flex; justify-content: space-between; align-items: center;">
                     <div>
-                      <div style="font-weight: 600; color: #fff;">#${d.appointmentNumber || ''} • ${d.customerName || 'Client'}</div>
-                      <div style="font-size: 0.72rem; color: var(--text-secondary);">${d.customerPhone || 'Interactive WhatsApp notified'}</div>
+                      <div style="font-weight: 700; color: #fff; font-size: 0.82rem;">#${d.appointmentNumber || ''} • ${d.customerName || 'Client'}</div>
+                      <div style="font-size: 0.72rem; color: #94a3b8;">${d.customerPhone || 'Interactive WhatsApp notified'}</div>
                     </div>
                     <div>
                       ${d.outcome === 'AUTO_ASSIGNED' ? `
-                        <span class="badge" style="background: rgba(52, 211, 153, 0.15); color: #34d399; font-size: 0.7rem;">Auto-Reassigned</span>
+                        <span class="badge" style="background: rgba(52, 211, 153, 0.15); color: #34d399; font-size: 0.72rem; font-weight: 700;">✓ Auto-Reassigned</span>
                       ` : `
-                        <span class="badge" style="background: rgba(251, 113, 133, 0.15); color: #fb7185; font-size: 0.7rem;">⚠️ No Replacement</span>
+                        <span class="badge" style="background: rgba(251, 113, 133, 0.15); color: #fb7185; font-size: 0.72rem; font-weight: 700;">⚠️ No Replacement</span>
                       `}
                     </div>
                   </div>
@@ -540,8 +786,8 @@ export class LeaveManagementUI {
             </div>
           ` : ''}
 
-          <div style="display: flex; justify-content: flex-end;">
-            <button class="btn btn-primary" id="btn-close-result-done">Done</button>
+          <div class="ald-footer">
+            <button class="ald-btn-submit" id="btn-close-result-done" style="background: linear-gradient(135deg, #9333ea 0%, #c026d3 100%); border-color: rgba(168, 85, 247, 0.4);">Done</button>
           </div>
         </div>
       </div>

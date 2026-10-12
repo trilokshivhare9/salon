@@ -13,11 +13,7 @@ export class StaffLeavesView {
     const headerHtml = WorkspaceHeader.render({
       backLabel: `Back to ${staff.name}`,
       backActionId: 'btn-back-to-profile',
-      breadcrumbs: [
-        { label: 'Staff', actionId: 'nav-staff-list' },
-        { label: staff.name, actionId: 'nav-staff-profile' },
-        { label: 'Leaves & Time Off', isCurrent: true },
-      ],
+      breadcrumbs: [],
       statusText: '<span class="status-autosave-dot">●</span> Live Calendar',
     });
 

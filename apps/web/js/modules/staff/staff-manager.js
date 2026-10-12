@@ -23,10 +23,22 @@ export class StaffManager {
     this.selectedStaffId = staffId;
     this.currentView = initialView;
     this.ctx.selectedStaffId = staffId;
+    try {
+      if (staffId) {
+        sessionStorage.setItem('active_staff_workspace', JSON.stringify({ staffId, view: initialView }));
+      } else {
+        sessionStorage.removeItem('active_staff_workspace');
+      }
+    } catch (_) {}
   }
 
   navigateTo(viewName) {
     this.currentView = viewName;
+    try {
+      if (this.selectedStaffId) {
+        sessionStorage.setItem('active_staff_workspace', JSON.stringify({ staffId: this.selectedStaffId, view: viewName }));
+      }
+    } catch (_) {}
     this.ctx.render();
   }
 

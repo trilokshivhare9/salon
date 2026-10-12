@@ -260,6 +260,9 @@ export class AvailabilityService {
           workingHours: {
             where: { dayOfWeek },
           },
+          breaks: {
+            where: { dayOfWeek },
+          },
         },
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       }),

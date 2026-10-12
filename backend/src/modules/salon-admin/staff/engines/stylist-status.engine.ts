@@ -40,6 +40,7 @@ export interface ResolveStylistStatusParams {
     status: StylistStatus | string;
     followsSalonSchedule?: boolean;
     workingHours?: any[];
+    breaks?: any[];
   };
   salonWorkingHours?: any[];
   salonClosures?: any[];
@@ -174,6 +175,7 @@ export class StylistStatusEngine {
           services: { include: { service: true } },
           workingHours: { orderBy: { dayOfWeek: 'asc' } },
           absences: { where: { status: 'ACTIVE' } },
+          breaks: true,
         },
         orderBy: { createdAt: 'asc' },
       });
@@ -421,12 +423,15 @@ export class StylistStatusEngine {
       }
     }
 
-    // Prioritize stylist breaks if custom breaks exist and override is flagged or salon has no breaks
-    if (customWh) {
-      const customBreaks = this.extractBreaks(customWh);
-      if (customBreaks.length > 0 && (customWh.hasBreakOverride || breaksList.length === 0 || !stylist.followsSalonSchedule)) {
-        breaksList = customBreaks;
-      }
+    // Use first-class StylistBreak rows
+    if (stylist.breaks && Array.isArray(stylist.breaks) && stylist.breaks.length > 0) {
+      breaksList = (stylist.breaks as any[])
+        .filter((b) => b.dayOfWeek === dayOfWeek)
+        .map((b) => ({
+          start: this.parseTimeToMinutes(b.startTime),
+          end: this.parseTimeToMinutes(b.endTime),
+          name: b.title,
+        }));
     }
 
     if (isStylistWeeklyOff) {

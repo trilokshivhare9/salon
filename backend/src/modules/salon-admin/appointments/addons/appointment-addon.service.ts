@@ -57,7 +57,7 @@ export class AppointmentAddonService {
     // Check salon closing time and break window boundaries
     const salon = await this.prisma.salon.findUnique({
       where: { id: salonId },
-      include: { workingHours: true },
+      include: { workingHours: true, salonBreaks: true },
     });
     const tz = salon?.timezone || 'Asia/Kolkata';
     const apptDt = DateTime.fromJSDate(appointment.startAt).setZone(tz);
@@ -82,26 +82,27 @@ export class AppointmentAddonService {
           extraService,
         };
       }
+    }
 
-      if (workingHours.breakStartTime && workingHours.breakEndTime) {
-        const [bStartH, bStartM] = workingHours.breakStartTime.split(':').map(Number);
-        const [bEndH, bEndM] = workingHours.breakEndTime.split(':').map(Number);
-        const breakStartAt = apptDt.set({ hour: bStartH, minute: bStartM, second: 0, millisecond: 0 }).toJSDate();
-        const breakEndAt = apptDt.set({ hour: bEndH, minute: bEndM, second: 0, millisecond: 0 }).toJSDate();
+    const activeBreaks = (salon?.salonBreaks || []).filter((b) => b.dayOfWeek === dayOfWeek);
+    for (const b of activeBreaks) {
+      const [bStartH, bStartM] = b.startTime.split(':').map(Number);
+      const [bEndH, bEndM] = b.endTime.split(':').map(Number);
+      const breakStartAt = apptDt.set({ hour: bStartH, minute: bStartM, second: 0, millisecond: 0 }).toJSDate();
+      const breakEndAt = apptDt.set({ hour: bEndH, minute: bEndM, second: 0, millisecond: 0 }).toJSDate();
 
-        if (newEndAt > breakStartAt && appointment.endAt < breakEndAt) {
-          return {
-            success: false,
-            conflict: true,
-            conflictBooking: {
-              stylist: appointment.stylist,
-              staff: appointment.stylist,
-              stylistId: appointment.stylistId,
-              name: 'Salon Break Time',
-            },
-            extraService,
-          };
-        }
+      if (newEndAt > breakStartAt && appointment.endAt < breakEndAt) {
+        return {
+          success: false,
+          conflict: true,
+          conflictBooking: {
+            stylist: appointment.stylist,
+            staff: appointment.stylist,
+            stylistId: appointment.stylistId,
+            name: b.title || 'Salon Break Time',
+          },
+          extraService,
+        };
       }
     }
 

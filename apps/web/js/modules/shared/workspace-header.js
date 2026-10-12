@@ -41,9 +41,11 @@ export class WorkspaceHeader {
             <span class="back-chevron">‹</span>
             <span class="back-text">${backLabel}</span>
           </button>
+          ${breadcrumbsHtml ? `
           <nav class="workspace-breadcrumbs" aria-label="Breadcrumb navigation">
             ${breadcrumbsHtml}
           </nav>
+          ` : ''}
         </div>
         <div class="workspace-header-right">
           ${statusText ? `<span class="workspace-live-status">${statusText}</span>` : ''}

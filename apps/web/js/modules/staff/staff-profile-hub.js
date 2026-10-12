@@ -5,72 +5,226 @@
  */
 export class StaffProfileHub {
   /**
-   * Formats 24h time to 12h or abbreviated hours
+   * Formats 24h time string (e.g. "19:00", "09:30") into readable 12h format (e.g. "7:00 PM", "9:30 AM")
    */
-  static formatTimeHours(timeStr) {
+  /**
+   * Formats 24h time string (e.g. "19:00", "09:30") into readable 12h format (e.g. "7:00 PM", "9:30 AM")
+   */
+  static formatTime12h(timeStr, omitZeroMins = false) {
     if (!timeStr) return '';
     const parts = timeStr.split(':');
-    return parts[0] || timeStr;
+    let hour = parseInt(parts[0], 10);
+    const mins = parts[1] || '00';
+    if (isNaN(hour)) return timeStr;
+
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+    hour = hour % 12;
+    if (hour === 0) hour = 12;
+
+    if (omitZeroMins && (mins === '00' || !mins)) {
+      return `${hour} ${ampm}`;
+    }
+    return `${hour}:${mins} ${ampm}`;
   }
 
   /**
-   * Computes day-wise 7-day schedule breakdown
+   * Formats a shift range cleanly for compact metric cards (e.g. "11 AM – 7 PM", "11:30 AM – 7 PM")
+   */
+  static formatShiftRangeDisplay(startTime, endTime) {
+    if (!startTime || !endTime) return 'Weekly Off';
+    const sFormatted = this.formatTime12h(startTime, true);
+    const eFormatted = this.formatTime12h(endTime, true);
+    return `${sFormatted} – ${eFormatted}`;
+  }
+
+  /**
+   * Computes day-wise 7-day schedule breakdown, today's shift, and active working days count.
+   * Accurately parses PostgreSQL workingHours arrays, salon master schedule, and active absences.
    */
   static computeScheduleSummary(ctx, staff) {
-    const hours = staff.workingHours || ctx?.currentStaffHoursState?.days || {};
-    const dayKeys = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+    const daysArr = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
     const dayLetters = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
-    const todayIdx = new Date().getDay(); // 0 is Sunday, 1 is Monday...
-    const currentDayKey = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][todayIdx];
+    // Local Day Index (0 is Sunday, 1 is Monday...)
+    const todayIdx = new Date().getDay();
+    const currentDayName = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'][todayIdx];
+
+    const followsSalon = staff?.followsSalonSchedule === true;
+
+    const staffWhList = Array.isArray(staff?.workingHours) ? staff.workingHours : [];
+    const salonWhList = Array.isArray(ctx?.salonWorkingHours)
+      ? ctx.salonWorkingHours
+      : (Array.isArray(ctx?.salonProfile?.workingHours) ? ctx.salonProfile.workingHours : []);
+
+    const salonProfile = ctx?.salonProfile || {};
+    const defaultSalonStart = salonProfile.defaultStartTime || null;
+    const defaultSalonEnd = salonProfile.defaultEndTime || null;
 
     let workingDaysCount = 0;
-    let todayShiftText = 'Off Today';
-    let isWorkingToday = false;
+    let totalWeeklyHours = 0;
+    let isScheduledToday = false;
+    let todayStart = null;
+    let todayEnd = null;
+    let todayHoursNum = 0;
+    let firstWorkingDay = null;
 
-    const dayPills = dayKeys.map((key, idx) => {
-      const d = hours[key] || {};
-      const isOpen = d.isOpen ?? d.isWorking ?? true;
-      const isToday = key === currentDayKey;
+    // Detect approved absence active today
+    const todayStr = new Date().toISOString().split('T')[0];
+    const rawAbsences = Array.isArray(staff?.absences) ? staff.absences : (Array.isArray(ctx?.staffLeaves) ? ctx.staffLeaves : []);
+    const todayAbsence = rawAbsences.find((a) => {
+      const st = (a.status || '').toUpperCase();
+      if (st !== 'ACTIVE' && st !== 'APPROVED') return false;
+      const stylistMatch = !a.stylistId || String(a.stylistId) === String(staff.id) || !a.staffId || String(a.staffId) === String(staff.id);
+      if (!stylistMatch) return false;
+      const sDate = a.startDate instanceof Date ? a.startDate.toISOString().split('T')[0] : (a.startDate || a.absenceDate || '').split('T')[0];
+      const eDate = a.endDate instanceof Date ? a.endDate.toISOString().split('T')[0] : (a.endDate || a.absenceDate || '').split('T')[0];
+      return sDate <= todayStr && eDate >= todayStr;
+    });
 
-      const openTime = d.openTime || d.start || '10:00';
-      const closeTime = d.closeTime || d.end || '19:00';
+    const isOnLeaveToday = Boolean(todayAbsence) || staff?.operationalStatus === 'ON_LEAVE';
+    const isSalonClosedToday = staff?.operationalStatus === 'SALON_OFF';
 
-      let hoursShort = 'Off';
-      if (isOpen) {
-        workingDaysCount++;
-        const startH = this.formatTimeHours(openTime);
-        const endH = this.formatTimeHours(closeTime);
-        hoursShort = `${startH}-${endH}`;
+    const dayPills = daysArr.map((dayName, idx) => {
+      // Find staff custom schedule entry
+      const customWh = staffWhList.find((h) => h.dayOfWeek === dayName);
+      // Find salon master schedule entry
+      const salonWh = salonWhList.find((h) => h.dayOfWeek === dayName);
+
+      const salonStart = salonWh?.startTime || defaultSalonStart;
+      const salonEnd = salonWh?.endTime || defaultSalonEnd;
+      const isSalonClosed = salonWh ? Boolean(salonWh.isClosed) : false;
+
+      let isWorking = false;
+      let startTime = null;
+      let endTime = null;
+
+      if (customWh && staff.followsSalonSchedule !== true) {
+        isWorking = customWh.isWorking !== undefined ? Boolean(customWh.isWorking) : !customWh.isOff;
+        startTime = customWh.startTime || salonStart;
+        endTime = customWh.endTime || salonEnd;
+      } else if (salonWh) {
+        isWorking = !isSalonClosed;
+        startTime = salonStart;
+        endTime = salonEnd;
+      } else if (customWh) {
+        isWorking = customWh.isWorking !== undefined ? Boolean(customWh.isWorking) : !customWh.isOff;
+        startTime = customWh.startTime || defaultSalonStart;
+        endTime = customWh.endTime || defaultSalonEnd;
       }
 
-      if (isToday) {
-        if (isOpen) {
-          isWorkingToday = true;
-          todayShiftText = `${openTime} - ${closeTime}`;
+      const isToday = dayName === currentDayName;
+      let hoursBadge = 'Off';
+      let hoursNum = 0;
+
+      if (isWorking && startTime && endTime) {
+        workingDaysCount++;
+        const sParts = startTime.split(':').map(Number);
+        const eParts = endTime.split(':').map(Number);
+        const diffMins = (eParts[0] * 60 + (eParts[1] || 0)) - (sParts[0] * 60 + (sParts[1] || 0));
+        hoursNum = Math.max(1, Math.round(diffMins / 60));
+        totalWeeklyHours += hoursNum;
+        hoursBadge = `${hoursNum}h`;
+
+        if (!firstWorkingDay) {
+          firstWorkingDay = { startTime, endTime, hoursNum };
+        }
+
+        if (isToday) {
+          isScheduledToday = true;
+          todayStart = startTime;
+          todayEnd = endTime;
+          todayHoursNum = hoursNum;
         }
       }
 
+      let shiftDetails = (isWorking && startTime && endTime)
+        ? `${this.formatTime12h(startTime)} – ${this.formatTime12h(endTime)} (${hoursNum}h Shift)`
+        : 'Scheduled Off';
+
+      if (isToday && isOnLeaveToday) {
+        shiftDetails = `On Leave (${todayAbsence?.reason || 'Approved Absence'})`;
+      }
+
       return {
-        key,
+        key: dayName.toLowerCase(),
+        dayName,
         letter: dayLetters[idx],
-        hoursText: hoursShort,
-        isOpen,
+        hoursBadge,
+        hoursNum,
+        shiftDetails,
+        isOpen: isWorking,
         isToday,
+        startTime,
+        endTime,
       };
     });
 
-    if (workingDaysCount === 0) {
-      // Default fallback if working hours not yet configured
-      workingDaysCount = 6;
-      todayShiftText = '10:00 - 19:00';
-      isWorkingToday = true;
+    // Effective working today status (scheduled AND not on leave AND salon not closed)
+    const isWorkingToday = isScheduledToday && !isOnLeaveToday && !isSalonClosedToday;
+
+    // Determine Today's Shift Text and Contextual Subtitle
+    let todayShiftText = 'Off Today';
+    let shiftSubtitle = 'Scheduled Off Day';
+
+    if (isOnLeaveToday) {
+      todayShiftText = 'On Leave';
+      shiftSubtitle = todayAbsence?.reason || staff?.operationalStatusReason || 'Approved Absence';
+    } else if (isSalonClosedToday) {
+      todayShiftText = 'Salon Closed';
+      shiftSubtitle = 'Store Holiday';
+    } else if (isScheduledToday && todayStart && todayEnd) {
+      todayShiftText = this.formatShiftRangeDisplay(todayStart, todayEnd);
+      shiftSubtitle = `${todayHoursNum}h Shift · ${workingDaysCount} Days Active`;
+    } else {
+      todayShiftText = 'Weekly Off';
+      shiftSubtitle = workingDaysCount > 0 ? `Weekly Off · ${workingDaysCount} Days Active` : 'No Shifts Scheduled';
     }
+
+    // Determine Dedicated Shift Banner Data
+    let bannerHoursText = 'No Active Shifts';
+    if (isOnLeaveToday) {
+      bannerHoursText = 'On Approved Leave';
+    } else if (isWorkingToday && todayStart && todayEnd) {
+      bannerHoursText = `${this.formatTime12h(todayStart)} – ${this.formatTime12h(todayEnd)}`;
+    } else if (firstWorkingDay) {
+      bannerHoursText = `${this.formatTime12h(firstWorkingDay.startTime)} – ${this.formatTime12h(firstWorkingDay.endTime)}`;
+    }
+
+    let bannerScopeBadge = 'Flexible Schedule';
+    if (isOnLeaveToday) {
+      bannerScopeBadge = 'On Leave Today';
+    } else if (workingDaysCount === 7) {
+      bannerScopeBadge = 'Mon – Sun';
+    } else if (workingDaysCount === 6 && !dayPills[6].isOpen) {
+      bannerScopeBadge = 'Mon – Sat';
+    } else if (workingDaysCount === 5 && !dayPills[5].isOpen && !dayPills[6].isOpen) {
+      bannerScopeBadge = 'Mon – Fri';
+    } else if (workingDaysCount > 0) {
+      bannerScopeBadge = `${workingDaysCount} Days Active`;
+    } else {
+      bannerScopeBadge = 'Off Duty';
+    }
+
+    const bannerMetaSub = isOnLeaveToday
+      ? `Leave active · ${workingDaysCount} active days / ${totalWeeklyHours} hrs weekly roster`
+      : (workingDaysCount > 0
+          ? `${workingDaysCount} active working days · ${totalWeeklyHours} hrs/week`
+          : 'No working days configured');
 
     return {
       workingDaysCount,
+      totalWeeklyHours,
       todayShiftText,
+      isScheduledToday,
       isWorkingToday,
+      isOnLeaveToday,
+      isSalonClosedToday,
+      todayAbsence,
+      shiftSubtitle,
+      bannerHoursText,
+      bannerScopeBadge,
+      bannerMetaSub,
+      followsSalon,
       dayPills,
     };
   }
@@ -89,13 +243,7 @@ export class StaffProfileHub {
         .filter(Boolean)
     );
 
-    let assignedServices = allServices.filter((s) => assignedIds.has(s.id));
-    if (assignedServices.length === 0 && allServices.length > 0 && (!staff.services || staff.services.length === 0)) {
-      // Seamlessly populate 6 default active services for senior stylist overview
-      assignedServices = allServices.slice(0, Math.min(6, allServices.length));
-      assignedServices.forEach((s) => assignedIds.add(s.id));
-      staff.services = assignedServices.map((s) => ({ serviceId: s.id, id: s.id }));
-    }
+    const assignedServices = allServices.filter((s) => assignedIds.has(s.id));
     const totalAssigned = assignedServices.length;
 
     // Category breakdown
@@ -154,9 +302,13 @@ export class StaffProfileHub {
       );
     }
 
-    const categoryNamesSummary = categoryPills.map((c) => c.name).join(', ') || 'Haircuts, Beard Styling, Color, Spa';
+    const categoryNamesSummary = totalAssigned > 0
+      ? (categoryPills.map((c) => c.name).join(', ') || 'Assigned Services')
+      : 'No services assigned';
 
-    const primaryCategoryName = categoryPills[0]?.name ? `${categoryPills[0].name} & Styling` : 'Hair & Styling';
+    const primaryCategoryName = totalAssigned > 0
+      ? (categoryPills[0]?.name ? `${categoryPills[0].name} & Styling` : 'Active Stylist')
+      : 'General Staff';
 
     return {
       totalAssigned,
@@ -170,46 +322,101 @@ export class StaffProfileHub {
    * Computes leave status, last leave, and active duty status
    */
   static computeLeaveSummary(ctx, staff, schedule) {
-    const leaves = ctx?.staffLeaves || [];
-    const staffLeaves = leaves.filter((l) => String(l.staffId) === String(staff.id));
-    const pendingRequests = staffLeaves.filter((l) => l.status === 'PENDING').length;
-
     const todayStr = new Date().toISOString().split('T')[0];
-    const todayLeave = staffLeaves.find(
-      (l) => l.status === 'APPROVED' && l.startDate <= todayStr && l.endDate >= todayStr
-    );
+    const rawAbsences = Array.isArray(staff?.absences) ? staff.absences : (Array.isArray(ctx?.staffLeaves) ? ctx.staffLeaves : []);
+    const staffLeaves = rawAbsences.filter((l) => {
+      const match = !l.stylistId || String(l.stylistId) === String(staff.id) || !l.staffId || String(l.staffId) === String(staff.id);
+      return match;
+    });
+
+    const pendingRequests = staffLeaves.filter((l) => (l.status || '').toUpperCase() === 'PENDING').length;
+
+    const todayLeave = schedule?.todayAbsence || staffLeaves.find((l) => {
+      const st = (l.status || '').toUpperCase();
+      if (st !== 'ACTIVE' && st !== 'APPROVED') return false;
+      const sDate = l.startDate instanceof Date ? l.startDate.toISOString().split('T')[0] : (l.startDate || l.absenceDate || '').split('T')[0];
+      const eDate = l.endDate instanceof Date ? l.endDate.toISOString().split('T')[0] : (l.endDate || l.absenceDate || '').split('T')[0];
+      return sDate <= todayStr && eDate >= todayStr;
+    });
 
     let dutyStatus = 'On Duty';
     let dutyClass = 'val-duty-on';
-    let dutySub = 'No Leave Active';
+    let dutyDotClass = 'dot-green';
+    let dutySub = 'Active in Salon';
+    let dutySubClass = 'sub-green';
 
-    if (todayLeave) {
+    if (schedule?.isOnLeaveToday || todayLeave || staff?.operationalStatus === 'ON_LEAVE') {
       dutyStatus = 'On Leave';
+      dutyClass = 'val-duty-leave';
+      dutyDotClass = 'dot-rose';
+      dutySub = todayLeave?.reason || staff?.operationalStatusReason || 'Approved Absence';
+      dutySubClass = 'sub-rose';
+    } else if (schedule?.isSalonClosedToday || staff?.operationalStatus === 'SALON_OFF') {
+      dutyStatus = 'Salon Closed';
       dutyClass = 'val-duty-off';
-      dutySub = todayLeave.reason || 'Approved Absence';
-    } else if (!schedule.isWorkingToday) {
+      dutyDotClass = 'dot-amber';
+      dutySub = 'Store Holiday';
+      dutySubClass = '';
+    } else if (staff?.status === 'INACTIVE' || staff?.operationalStatus === 'INACTIVE') {
+      dutyStatus = 'Inactive';
+      dutyClass = 'val-duty-off';
+      dutyDotClass = 'dot-gray';
+      dutySub = 'Account Deactivated';
+      dutySubClass = '';
+    } else if (staff?.operationalStatus === 'ON_BREAK') {
+      dutyStatus = 'On Break';
+      dutyClass = 'val-duty-on';
+      dutyDotClass = 'dot-amber';
+      dutySub = staff?.operationalStatusReason || 'Routine Break';
+      dutySubClass = '';
+    } else if (!schedule?.isScheduledToday) {
       dutyStatus = 'Weekly Off';
       dutyClass = 'val-duty-off';
+      dutyDotClass = 'dot-gray';
       dutySub = 'Scheduled Off Day';
+      dutySubClass = '';
     }
 
-    // Last or upcoming leave detail
-    let leaveSubtitle = 'Last: 14 Aug (Full Day - Personal)';
+    // Dynamic, truthful leave history subtitle
+    let leaveSubtitle = 'No leaves recorded';
     if (staffLeaves.length > 0) {
-      const lastLeave = staffLeaves[0];
-      const startFormatted = lastLeave.startDate
-        ? new Date(lastLeave.startDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+      const sortedLeaves = [...staffLeaves].sort((a, b) => {
+        const da = a.startDate || a.absenceDate || '';
+        const db = b.startDate || b.absenceDate || '';
+        return db.localeCompare(da);
+      });
+      const latest = sortedLeaves[0];
+      const startFormatted = latest.startDate
+        ? new Date(latest.startDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
         : 'Recently';
-      leaveSubtitle = `Last: ${startFormatted} (${lastLeave.type || 'Full Day'} - ${lastLeave.reason || 'Personal'})`;
+      const portionLabel = latest.leavePortion === 'FIRST_HALF'
+        ? '1st Half'
+        : (latest.leavePortion === 'SECOND_HALF'
+            ? '2nd Half'
+            : (latest.leavePortion === 'CUSTOM_HOURS' ? 'Custom' : 'Full Day'));
+      const reasonLabel = latest.reason || latest.leaveType || 'Personal';
+      const isCurrent = (schedule?.isOnLeaveToday || todayLeave) && (latest.id === todayLeave?.id);
+      leaveSubtitle = `${isCurrent ? 'Active' : 'Last'}: ${startFormatted} (${portionLabel} - ${reasonLabel})`;
     }
+
+    const pillBadgeClass = (schedule?.isOnLeaveToday || todayLeave)
+      ? 'badge-leave'
+      : (pendingRequests > 0 ? 'badge-amber' : 'badge-green');
+    const pillBadgeText = (schedule?.isOnLeaveToday || todayLeave)
+      ? 'On Leave Today'
+      : (pendingRequests > 0 ? `${pendingRequests} Pending` : 'Clear Roster');
 
     return {
       pendingRequests,
       hasPending: pendingRequests > 0,
       dutyStatus,
       dutyClass,
+      dutyDotClass,
       dutySub,
+      dutySubClass,
       leaveSubtitle,
+      pillBadgeClass,
+      pillBadgeText,
     };
   }
 
@@ -319,11 +526,11 @@ export class StaffProfileHub {
           <!-- Card 1: Today's Shift -->
           <div class="metric-stat-card">
             <div class="metric-header">
-              <span class="dot-cyan">●</span>
+              <span class="${schedule.isOnLeaveToday ? 'dot-rose' : (schedule.isSalonClosedToday ? 'dot-amber' : (schedule.isScheduledToday ? 'dot-cyan' : 'dot-gray'))}">●</span>
               <span>Today's Shift</span>
             </div>
-            <div class="metric-value">${schedule.todayShiftText}</div>
-            <div class="metric-sub sub-cyan">Weekly Roster</div>
+            <div class="metric-value ${schedule.isOnLeaveToday ? 'val-duty-leave' : ''}">${schedule.todayShiftText}</div>
+            <div class="metric-sub ${schedule.isOnLeaveToday ? 'sub-rose' : 'sub-cyan'}">${schedule.shiftSubtitle}</div>
           </div>
 
           <!-- Card 2: Specialties -->
@@ -339,11 +546,11 @@ export class StaffProfileHub {
           <!-- Card 3: Status -->
           <div class="metric-stat-card">
             <div class="metric-header">
-              <span class="dot-green">●</span>
+              <span class="${leaves.dutyDotClass}">●</span>
               <span>Status</span>
             </div>
             <div class="metric-value ${leaves.dutyClass}">${leaves.dutyStatus}</div>
-            <div class="metric-sub">${leaves.dutySub}</div>
+            <div class="metric-sub ${leaves.dutySubClass}">${leaves.dutySub}</div>
           </div>
         </div>
 
@@ -360,7 +567,7 @@ export class StaffProfileHub {
               <div class="feature-title-col">
                 <div class="feature-title-row">
                   <span class="feature-title-text">Weekly Schedule & Hours</span>
-                  <span class="feature-pill-badge badge-cyan">Day-Wise</span>
+                  <span class="feature-pill-badge badge-cyan">${schedule.followsSalon ? 'Salon Master' : 'Custom Shift'}</span>
                 </div>
                 <div class="feature-subtitle">
                   <strong class="sub-cyan">Today: ${schedule.todayShiftText}</strong> • ${schedule.workingDaysCount} Days
@@ -372,28 +579,18 @@ export class StaffProfileHub {
             </div>
           </div>
 
-          <div class="day-roster-grid">
+          <!-- 7-Day Day Chips Strip -->
+          <div class="schedule-day-strip">
             ${schedule.dayPills
               .map(
                 (p) => `
-              <div class="day-roster-cell ${p.isToday ? 'is-today' : ''} ${!p.isOpen ? 'is-off' : ''}">
-                <span class="day-letter">${p.letter}</span>
-                <span class="day-hours">${p.hoursText}</span>
+              <div class="day-chip-cell ${p.isToday ? 'is-today' : ''} ${p.isOpen ? 'is-working' : 'is-off'} ${p.isToday && schedule.isOnLeaveToday ? 'is-leave-today' : ''}" title="${p.dayName}: ${p.shiftDetails}">
+                <span class="day-chip-letter">${p.letter}</span>
+                <span class="day-chip-badge ${p.isToday && schedule.isOnLeaveToday ? 'badge-leave' : (p.isOpen ? 'badge-work' : 'badge-off')}">${p.isToday && schedule.isOnLeaveToday ? 'Leave' : (p.isOpen ? p.hoursBadge : 'Off')}</span>
               </div>
             `
               )
               .join('')}
-          </div>
-
-          <div class="feature-footer-row">
-            <div class="feature-footer-left">
-              <span class="dot-cyan">●</span>
-              <span>Daily roster</span>
-            </div>
-            <button type="button" class="feature-footer-link link-cyan" id="btn-edit-roster-link">
-              <span>Edit roster</span>
-              <span>→</span>
-            </button>
           </div>
         </div>
 
@@ -458,8 +655,8 @@ export class StaffProfileHub {
               <div class="feature-title-col">
                 <div class="feature-title-row">
                   <span class="feature-title-text">Leaves & Time Off</span>
-                  <span class="feature-pill-badge ${leaves.hasPending ? 'badge-amber' : 'badge-green'}">
-                    ${leaves.hasPending ? `${leaves.pendingRequests} Pending` : 'No Upcoming'}
+                  <span class="feature-pill-badge ${leaves.pillBadgeClass}">
+                    ${leaves.pillBadgeText}
                   </span>
                 </div>
                 <div class="feature-subtitle">${leaves.leaveSubtitle}</div>

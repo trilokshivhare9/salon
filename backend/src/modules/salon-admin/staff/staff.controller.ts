@@ -18,6 +18,7 @@ import {
   AssignStaffServicesDto,
   UpdateStaffWorkingHoursDto,
   CreateStaffBreakDto,
+  UpdateStaffBreakDto,
 } from './dto/create-staff.dto';
 import {
   ApplyLeaveDto,
@@ -120,6 +121,27 @@ export class StaffController {
     @Body() dto: CreateStaffBreakDto,
   ) {
     return this.staffService.createStaffBreak(salonId, staffId, dto);
+  }
+
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
+  @Put(':id/breaks/:breakId')
+  async updateStaffBreak(
+    @CurrentSalonId() salonId: string,
+    @Param('id') staffId: string,
+    @Param('breakId') breakId: string,
+    @Body() dto: UpdateStaffBreakDto,
+  ) {
+    return this.staffService.updateStaffBreak(salonId, staffId, breakId, dto);
+  }
+
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
+  @Post(':id/breaks/:breakId/reset')
+  async resetStaffBreak(
+    @CurrentSalonId() salonId: string,
+    @Param('id') staffId: string,
+    @Param('breakId') breakId: string,
+  ) {
+    return this.staffService.resetStaffBreak(salonId, staffId, breakId);
   }
 
   @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)

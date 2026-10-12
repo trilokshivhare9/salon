@@ -99,23 +99,11 @@ export class StaffDayWorkingHourDto {
   @IsNotEmpty()
   endTime: string; // "18:00"
 
-  @IsBoolean()
-  @IsOptional()
-  hasBreakOverride?: boolean;
-
   @IsArray()
   @IsOptional()
   @ValidateNested({ each: true })
   @Type(() => StaffBreakItemDto)
   breaks?: StaffBreakItemDto[];
-
-  @IsString()
-  @IsOptional()
-  breakStartTime?: string; // "13:00"
-
-  @IsString()
-  @IsOptional()
-  breakEndTime?: string; // "14:00"
 }
 
 export class UpdateStaffWorkingHoursDto {
@@ -149,3 +137,18 @@ export class CreateStaffBreakDto {
   @IsOptional()
   autoReschedule?: boolean;
 }
+
+export class UpdateStaffBreakDto {
+  @IsString()
+  @IsOptional()
+  startTime?: string;
+
+  @IsString()
+  @IsOptional()
+  endTime?: string;
+
+  @IsString()
+  @IsOptional()
+  title?: string;
+}
+

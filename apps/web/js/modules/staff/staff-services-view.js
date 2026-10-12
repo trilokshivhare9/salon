@@ -10,16 +10,19 @@
  * - Compact horizontal round pill chips (border-radius: 999px) for services
  * - Debounced background auto-save via ApiClient without full page reloads
  */
+import { ApiClient } from '../../api.js';
+
 export class StaffServicesView {
   static render(ctx, staff) {
     const allServices = ctx.servicesList || [];
     const categories = ctx.categoriesList || [];
     const assignedIds = new Set(
-      (staff.services || []).map((s) => (typeof s === 'string' ? s : s.serviceId || s.id))
+      (staff.services || [])
+        .map((s) => (typeof s === 'string' ? s : s.serviceId || s.id || s.service?.id))
+        .filter(Boolean)
     );
     const totalServices = allServices.length;
     const totalAssigned = allServices.filter((s) => assignedIds.has(s.id)).length;
-    const allAssigned = totalServices > 0 && totalAssigned === totalServices;
 
     return `
       <div class="staff-workspace-shell staff-services-workspace">
@@ -31,25 +34,20 @@ export class StaffServicesView {
           </button>
 
           <div class="services-nav-right">
-            <span class="services-live-autosave" title="All changes auto-save automatically">
-              <span class="status-autosave-dot">●</span>
-              <span>Auto-saved</span>
-            </span>
-
             <div class="workspace-tally-pill" id="services-tally-pill">
               ${totalAssigned}/${totalServices} Assigned
             </div>
           </div>
         </div>
 
-        <!-- 2. Search Bar + Filter Button + Select All Toolbar -->
+        <!-- 2. Search Bar + Filter Button Toolbar -->
         <div class="services-search-filter-toolbar">
           <div class="services-search-box">
             <span class="search-icon">🔍</span>
             <input type="text" 
                    id="input-services-search" 
                    class="services-search-input" 
-                   placeholder="Search services (e.g. Massage, Shave)..." 
+                   placeholder="Search services..." 
                    autocomplete="off" />
             <button type="button" id="btn-clear-services-search" class="btn-clear-search" style="display:none;" title="Clear search">✕</button>
           </div>
@@ -60,13 +58,6 @@ export class StaffServicesView {
             </svg>
             <span>Filter</span>
             <span class="filter-active-dot" id="filter-active-dot" style="display:none;"></span>
-          </button>
-
-          <button type="button" 
-                  class="btn-services-toggle-all ${allAssigned ? 'is-all-selected' : ''}" 
-                  id="btn-services-toggle-all"
-                  title="${allAssigned ? 'Deselect all services' : 'Select all services'}">
-            ${allAssigned ? 'Deselect All' : 'Select All'}
           </button>
         </div>
 
@@ -197,8 +188,6 @@ export class StaffServicesView {
   }
 
   static attachListeners(container, ctx, staff) {
-    let autoSaveTimeout = null;
-
     // Filter & Search State
     const filterState = {
       search: '',
@@ -238,7 +227,14 @@ export class StaffServicesView {
     if (closeFilterBtn) closeFilterBtn.onclick = closeDrawer;
     if (filterBackdrop) filterBackdrop.onclick = closeDrawer;
 
-    // Recalculate and update tallies dynamically
+    // 0. Authoritative in-memory State: Single Source of Truth
+    const assignedServiceIds = new Set(
+      (staff.services || [])
+        .map((s) => (typeof s === 'string' ? s : s.serviceId || s.id || s.service?.id))
+        .filter(Boolean)
+    );
+
+    // Recalculate and update tallies dynamically from the authoritative Set
     const updateCountsAndTally = () => {
       let totalAssigned = 0;
       let totalServices = 0;
@@ -250,7 +246,8 @@ export class StaffServicesView {
 
         pills.forEach((pill) => {
           totalServices++;
-          if (pill.classList.contains('is-assigned')) {
+          const sId = pill.getAttribute('data-service-id');
+          if (assignedServiceIds.has(sId)) {
             catAssigned++;
             totalAssigned++;
           }
@@ -262,13 +259,6 @@ export class StaffServicesView {
 
       const tallyPill = container.querySelector('#services-tally-pill');
       if (tallyPill) tallyPill.textContent = `${totalAssigned}/${totalServices} Assigned`;
-
-      const toggleAllBtn = container.querySelector('#btn-services-toggle-all');
-      if (toggleAllBtn) {
-        const isAll = totalServices > 0 && totalAssigned === totalServices;
-        toggleAllBtn.textContent = isAll ? 'Deselect All' : 'Select All';
-        toggleAllBtn.classList.toggle('is-all-selected', isAll);
-      }
     };
 
     // Apply Search and Filters in Real-time
@@ -302,7 +292,8 @@ export class StaffServicesView {
 
         pillsList.forEach((pill) => {
           const srvName = pill.getAttribute('data-service-name') || '';
-          const isAssigned = pill.classList.contains('is-assigned');
+          const sId = pill.getAttribute('data-service-id');
+          const isAssigned = assignedServiceIds.has(sId);
 
           // Search match
           const matchesSearch = !q || srvName.includes(q);
@@ -425,41 +416,93 @@ export class StaffServicesView {
       };
     }
 
-    // Auto-save via ApiClient without page reload
-    const performAutoSave = async () => {
-      const selectedServiceIds = Array.from(
-        container.querySelectorAll('.stylist-service-pill.is-assigned')
-      ).map((pill) => pill.getAttribute('data-service-id')).filter(Boolean);
+    // Mutex & Sequential Queue for Immediate, Race-Free Server Persistence
+    let isSaving = false;
+    let pendingSave = false;
+
+    const executeSave = async () => {
+      if (isSaving) {
+        pendingSave = true;
+        return;
+      }
+
+      isSaving = true;
+      pendingSave = false;
+
+      // Extract current snapshot of assigned IDs
+      const payloadServiceIds = Array.from(assignedServiceIds);
 
       try {
-        if (ctx.ApiClient?.assignStaffServices) {
-          await ctx.ApiClient.assignStaffServices(staff.id, selectedServiceIds);
+        const updated = await ApiClient.assignStaffServices(staff.id, payloadServiceIds);
+        
+        // Only update local staff data if user hasn't made newer clicks while request was in-flight
+        if (!pendingSave) {
+          const savedServices = (updated && Array.isArray(updated.services))
+            ? updated.services
+            : payloadServiceIds.map((id) => ({ id, serviceId: id }));
+
+          staff.services = savedServices;
+
+          if (ctx && Array.isArray(ctx.staffList)) {
+            const idx = ctx.staffList.findIndex((s) => String(s.id) === String(staff.id));
+            if (idx !== -1) {
+              ctx.staffList[idx] = {
+                ...ctx.staffList[idx],
+                ...(updated || {}),
+                services: savedServices,
+              };
+            }
+          }
         }
-        staff.services = selectedServiceIds.map((id) => ({ id }));
       } catch (err) {
-        console.error('[StaffServicesView] Auto-save error:', err);
-        if (ctx.showToast) {
-          ctx.showToast(err.message || 'Failed to auto-save services', 'error');
+        console.error('[StaffServicesView] Save error:', err);
+        if (ctx && typeof ctx.showToast === 'function') {
+          ctx.showToast(err.message || 'Failed to auto-save services to database', 'error');
+        }
+      } finally {
+        isSaving = false;
+        // If user made changes while request was in-flight, immediately save the latest snapshot!
+        if (pendingSave) {
+          executeSave();
         }
       }
     };
 
-    // Toggle a single pill
+    // Toggle a single pill with immediate optimistic update and leading-edge save
     const togglePill = (pill) => {
-      const chk = pill.querySelector('.stylist-service-checkbox');
-      if (!chk) return;
+      const serviceId = pill.getAttribute('data-service-id');
+      if (!serviceId) return;
 
-      const nextChecked = !chk.checked;
-      chk.checked = nextChecked;
-      pill.classList.toggle('is-assigned', nextChecked);
-      pill.setAttribute('data-is-assigned', nextChecked ? 'true' : 'false');
+      const isAssigned = assignedServiceIds.has(serviceId);
+      const nextAssigned = !isAssigned;
+
+      if (nextAssigned) {
+        assignedServiceIds.add(serviceId);
+      } else {
+        assignedServiceIds.delete(serviceId);
+      }
+
+      // Optimistically sync in-memory staff object immediately
+      const latestServices = Array.from(assignedServiceIds).map((id) => ({ id, serviceId: id }));
+      staff.services = latestServices;
+      if (ctx && Array.isArray(ctx.staffList)) {
+        const idx = ctx.staffList.findIndex((s) => String(s.id) === String(staff.id));
+        if (idx !== -1) {
+          ctx.staffList[idx].services = latestServices;
+        }
+      }
+
+      pill.classList.toggle('is-assigned', nextAssigned);
+      pill.setAttribute('data-is-assigned', nextAssigned ? 'true' : 'false');
+
+      const chk = pill.querySelector('.stylist-service-checkbox');
+      if (chk) chk.checked = nextAssigned;
 
       const visual = pill.querySelector('.custom-chk-visual');
-      if (visual) visual.textContent = nextChecked ? '✓' : '';
+      if (visual) visual.textContent = nextAssigned ? '✓' : '';
 
       updateCountsAndTally();
-      clearTimeout(autoSaveTimeout);
-      autoSaveTimeout = setTimeout(() => performAutoSave(), 200);
+      executeSave();
     };
 
     // 1. Pill Click and Keyboard (Enter/Space) handlers
@@ -476,34 +519,20 @@ export class StaffServicesView {
       };
     });
 
-    // 2. Single "Select All" / "Deselect All" Toggle Button
-    const toggleAllBtn = container.querySelector('#btn-services-toggle-all');
-    if (toggleAllBtn) {
-      toggleAllBtn.onclick = (e) => {
-        e.preventDefault();
-        const allPills = Array.from(container.querySelectorAll('.stylist-service-pill'));
-        const totalServices = allPills.length;
-        const assignedCount = allPills.filter((p) => p.classList.contains('is-assigned')).length;
-        const shouldSelectAll = assignedCount < totalServices;
+    // 2. Ensure any pending save is flushed on back navigation or browser reload/unload
+    const flushSave = () => {
+      if (pendingSave || isSaving) {
+        const finalIds = Array.from(assignedServiceIds);
+        ApiClient.assignStaffServices(staff.id, finalIds).catch(() => {});
+      }
+    };
 
-        allPills.forEach((pill) => {
-          const chk = pill.querySelector('.stylist-service-checkbox');
-          if (chk) {
-            chk.checked = shouldSelectAll;
-          }
-          pill.classList.toggle('is-assigned', shouldSelectAll);
-          pill.setAttribute('data-is-assigned', shouldSelectAll ? 'true' : 'false');
-          const visual = pill.querySelector('.custom-chk-visual');
-          if (visual) visual.textContent = shouldSelectAll ? '✓' : '';
-        });
-
-        toggleAllBtn.textContent = shouldSelectAll ? 'Deselect All' : 'Select All';
-        toggleAllBtn.classList.toggle('is-all-selected', shouldSelectAll);
-
-        updateCountsAndTally();
-        clearTimeout(autoSaveTimeout);
-        performAutoSave();
-      };
+    const backBtn = container.querySelector('#btn-back-to-profile');
+    if (backBtn) {
+      backBtn.addEventListener('click', flushSave);
     }
+    window.addEventListener('beforeunload', flushSave);
+    window.addEventListener('pagehide', flushSave);
+
   }
 }

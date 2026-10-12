@@ -184,27 +184,18 @@ export class AvailabilityEngineService {
     }
 
     // Stage 2: Discrete Break Projection
-    // 1. Salon-level facility breaks form the immutable outer foundation.
-    // 2. Stylist custom breaks (if present) are projected alongside facility breaks without mutating either record.
-    const unmergedBreaks: MinuteInterval[] = [...salonBreaks];
-    const hasPersonalBreaks =
-      stylistWorkingHours &&
-      (stylistWorkingHours.hasBreakOverride === true ||
-        (Array.isArray(stylistWorkingHours.breaks) && stylistWorkingHours.breaks.length > 0) ||
-        (stylistWorkingHours.breakStartTime && stylistWorkingHours.breakEndTime));
+    // Reads directly from StylistBreak first-class entity
+    let rawBreaksToUse: MinuteInterval[] = [];
 
-    if (hasPersonalBreaks) {
-      const stylistPersonalBreaks = this.extractBreaks(
-        stylistWorkingHours.breaks,
-        stylistWorkingHours.breakStartTime,
-        stylistWorkingHours.breakEndTime,
-      );
-      unmergedBreaks.push(...stylistPersonalBreaks);
+    if (stylist?.breaks && Array.isArray(stylist.breaks) && stylist.breaks.length > 0) {
+      rawBreaksToUse = this.extractBreaks(stylist.breaks);
+    } else if (followsSalon) {
+      rawBreaksToUse = salonBreaks;
     }
 
     // Stage 3: Clamp breaks to effective shift window and merge overlapping intervals
     const clampedBreaks: MinuteInterval[] = [];
-    for (const b of unmergedBreaks) {
+    for (const b of rawBreaksToUse) {
       const cStart = Math.max(effectiveOpen, b.start);
       const cEnd = Math.min(effectiveClose, b.end);
       if (cStart < cEnd) {

@@ -54,14 +54,6 @@ export class DayWorkingHourDto {
   @ValidateNested({ each: true })
   @Type(() => BreakItemDto)
   breaks?: BreakItemDto[];
-
-  @IsString()
-  @IsOptional()
-  breakStartTime?: string; // "13:00"
-
-  @IsString()
-  @IsOptional()
-  breakEndTime?: string; // "14:00"
 }
 
 export class UpdateWorkingHoursDto {
@@ -74,3 +66,36 @@ export class UpdateWorkingHoursDto {
   @IsOptional()
   autoReschedule?: boolean;
 }
+
+export class CreateSalonBreakDto {
+  @IsEnum(DayOfWeek)
+  @IsNotEmpty()
+  dayOfWeek: DayOfWeek;
+
+  @IsString()
+  @IsNotEmpty()
+  title: string;
+
+  @IsString()
+  @IsNotEmpty()
+  startTime: string; // "13:00"
+
+  @IsString()
+  @IsNotEmpty()
+  endTime: string;   // "14:00"
+}
+
+export class UpdateSalonBreakDto {
+  @IsString()
+  @IsOptional()
+  title?: string;
+
+  @IsString()
+  @IsOptional()
+  startTime?: string;
+
+  @IsString()
+  @IsOptional()
+  endTime?: string;
+}
+

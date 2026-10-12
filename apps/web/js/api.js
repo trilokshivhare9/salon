@@ -641,6 +641,7 @@ export class ApiClient {
     const res = await this.request(`/staff/${staffId}/services`, {
       method: 'PUT',
       body: JSON.stringify({ serviceIds }),
+      keepalive: true,
     });
     this.invalidateCache('/staff');
     this.invalidateCache('/services');
@@ -692,6 +693,25 @@ export class ApiClient {
     this.invalidateCache('/staff');
     const res = await this.request(`/staff/${staffId}/breaks/${breakId}`, {
       method: 'DELETE',
+    });
+    this.invalidateCache('/staff');
+    return res;
+  }
+
+  static async updateStaffBreak(staffId, breakId, payload) {
+    this.invalidateCache('/staff');
+    const res = await this.request(`/staff/${staffId}/breaks/${breakId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+    this.invalidateCache('/staff');
+    return res;
+  }
+
+  static async resetStaffBreak(staffId, breakId) {
+    this.invalidateCache('/staff');
+    const res = await this.request(`/staff/${staffId}/breaks/${breakId}/reset`, {
+      method: 'POST',
     });
     this.invalidateCache('/staff');
     return res;
@@ -926,6 +946,46 @@ export class ApiClient {
     this.invalidateCache('/booking');
     this.invalidateCache('/staff');
     this.invalidateCache('/reports');
+    return res;
+  }
+
+  static async getSalonBreaks(bypassCache = true) {
+    const url = bypassCache ? `/salons/breaks?_t=${Date.now()}` : '/salons/breaks';
+    return this.request(url, {}, bypassCache ? 0 : 60000);
+  }
+
+  static async createSalonBreak(payload) {
+    this.invalidateCache('/salons');
+    this.invalidateCache('/staff');
+    const res = await this.request('/salons/breaks', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    this.invalidateCache('/salons');
+    this.invalidateCache('/staff');
+    return res;
+  }
+
+  static async updateSalonBreak(breakId, payload) {
+    this.invalidateCache('/salons');
+    this.invalidateCache('/staff');
+    const res = await this.request(`/salons/breaks/${breakId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+    this.invalidateCache('/salons');
+    this.invalidateCache('/staff');
+    return res;
+  }
+
+  static async deleteSalonBreak(breakId) {
+    this.invalidateCache('/salons');
+    this.invalidateCache('/staff');
+    const res = await this.request(`/salons/breaks/${breakId}`, {
+      method: 'DELETE',
+    });
+    this.invalidateCache('/salons');
+    this.invalidateCache('/staff');
     return res;
   }
 

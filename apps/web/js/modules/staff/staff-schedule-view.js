@@ -11,12 +11,8 @@ export class StaffScheduleView {
     const headerHtml = WorkspaceHeader.render({
       backLabel: `Back to ${staff.name}`,
       backActionId: 'btn-back-to-profile',
-      breadcrumbs: [
-        { label: 'Staff', actionId: 'nav-staff-list' },
-        { label: staff.name, actionId: 'nav-staff-profile' },
-        { label: 'Working Schedule & Shifts', isCurrent: true },
-      ],
-      statusText: '<span class="status-autosave-dot">●</span> Auto-saved',
+      breadcrumbs: [],
+      statusText: '<span id="stylist-schedule-autosave-status"><span class="autosave-dot"></span><span class="autosave-text">Auto-saved</span></span>',
     });
 
     const scheduleContentHtml = ctx.renderStaffHoursSubtab(staff);
