@@ -26,7 +26,7 @@ export class StaffBreaksService {
     private prisma: PrismaService,
     @Inject(forwardRef(() => AppointmentsService))
     private appointmentsService: AppointmentsService,
-  ) {}
+  ) { }
 
   /**
    * Retrieves all breaks for a stylist (both inherited salon breaks and custom stylist breaks).

@@ -8,7 +8,6 @@ export * from './dto';
 
 // Engines
 import { LeaveIntervalEngine } from './engines/leave-interval.engine';
-import { LeaveReassignmentEngine } from './engines/leave-reassignment.engine';
 import { LeaveEdgeCaseEngine } from './engines/leave-edge-case.engine';
 
 // Services
@@ -30,7 +29,6 @@ import { StaffLeaveFacade } from './staff-leave.facade';
   ],
   providers: [
     LeaveIntervalEngine,
-    LeaveReassignmentEngine,
     LeaveEdgeCaseEngine,
     ApplyLeaveService,
     CancelLeaveService,
@@ -42,7 +40,6 @@ import { StaffLeaveFacade } from './staff-leave.facade';
   ],
   exports: [
     LeaveIntervalEngine,
-    LeaveReassignmentEngine,
     LeaveEdgeCaseEngine,
     ApplyLeaveService,
     CancelLeaveService,

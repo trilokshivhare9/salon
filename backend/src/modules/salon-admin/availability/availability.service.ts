@@ -8,6 +8,7 @@ import { DateTime } from 'luxon';
 import { DayOfWeek, AppointmentStatus } from '@prisma/client';
 import { AvailabilityEngineService, MinuteInterval } from './availability-engine.service';
 import { TimeUtility } from '../../../common/utils/time.utility';
+import { BOOKING_POLICY } from '../../../common/constants/booking-policy.constants';
 import { SlotSqueezePolicy } from './policies/slot-squeeze.policy';
 import { StylistStatusEngine, StylistOperationalStatus } from '../staff/engines/stylist-status.engine';
 
@@ -185,7 +186,8 @@ export class AvailabilityService {
     }
 
     // Maximum advance days check
-    const maxDateAllowed = todayInSalonZone.plus({ days: salon.maxAdvanceDays });
+    const maxDays = salon.maxAdvanceDays || BOOKING_POLICY.MAX_ADVANCE_BOOKING_DAYS;
+    const maxDateAllowed = todayInSalonZone.plus({ days: maxDays });
     if (requestedDate > maxDateAllowed) {
       return {
         date: dateStr,
@@ -193,7 +195,7 @@ export class AvailabilityService {
         serviceDurationMinutes: 0,
         availableSlots: [],
         status: 'MAX_ADVANCE_EXCEEDED',
-        statusReason: `Bookings can only be made up to ${salon.maxAdvanceDays} days in advance.`,
+        statusReason: `Bookings can only be made up to ${maxDays} days in advance.`,
       };
     }
 
@@ -608,7 +610,7 @@ export class AvailabilityService {
     salonId: string,
     serviceIdOrIds: string | string[],
     staffId?: string | null,
-    limit: number = 2,
+    limit: number = BOOKING_POLICY.MAX_ADVANCE_BOOKING_DAYS,
     excludeApptId?: string,
   ): Promise<{ dateStr: string; displayLabel: string }[]> {
     const salon = await this.prisma.salon.findUnique({
@@ -616,12 +618,12 @@ export class AvailabilityService {
       select: { timezone: true, maxAdvanceDays: true },
     });
     const timezone = salon?.timezone || TimeUtility.DEFAULT_TIMEZONE;
-    const maxAdvance = salon?.maxAdvanceDays || 30;
+    const maxAdvance = salon?.maxAdvanceDays || BOOKING_POLICY.MAX_ADVANCE_BOOKING_DAYS;
 
     const results: { dateStr: string; displayLabel: string }[] = [];
     const now = TimeUtility.now(timezone);
     const startDt = now.startOf('day');
-    const scanDays = Math.min(14, maxAdvance);
+    const scanDays = Math.min(maxAdvance, BOOKING_POLICY.MAX_ADVANCE_BOOKING_DAYS);
 
     // Parallel Batched Scanning: Scan candidate days in concurrent waves of 3 days
     // Drops latency from 13.85 seconds (sequential waterfall) down to ~1.0 second

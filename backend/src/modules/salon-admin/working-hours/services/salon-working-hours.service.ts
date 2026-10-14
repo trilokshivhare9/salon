@@ -185,11 +185,41 @@ export class SalonWorkingHoursService {
         propagationResult,
       });
 
+      // 4. Resolve conflicts for any closed or shortened days seamlessly
+      let totalAffected = 0;
+      let totalRescheduled = 0;
+
+      for (const item of dto.hours) {
+        const isClosed =
+          item.isClosed !== undefined
+            ? item.isClosed
+            : item.isOpen !== undefined
+            ? !item.isOpen
+            : false;
+
+        const res = await this.appointmentsService.resolveScheduleConflicts({
+          salonId,
+          scope: 'SALON',
+          dayOfWeek: item.dayOfWeek,
+          shiftHours: { startTime: item.startTime, endTime: item.endTime },
+          isClosedOrOff: isClosed,
+          reason: isClosed ? `Salon closed on ${item.dayOfWeek}` : `Salon facility hours updated on ${item.dayOfWeek}`,
+        });
+        totalAffected += res.totalAffected;
+        totalRescheduled += res.rescheduledCount;
+      }
+
+      const statusMsg = totalAffected > 0
+        ? `Salon facility hours updated. ${totalAffected} active booking(s) automatically sent reschedule request via WhatsApp.`
+        : 'Salon facility operating hours updated successfully.';
+
       return {
         success: true,
-        message: 'Salon facility operating hours updated successfully.',
+        message: statusMsg,
         hours: updatedHoursList,
         propagationResult,
+        affectedBookingsCount: totalAffected,
+        rescheduledCount: totalRescheduled,
       };
     });
   }

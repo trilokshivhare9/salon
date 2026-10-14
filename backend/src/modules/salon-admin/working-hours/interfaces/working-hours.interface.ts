@@ -51,13 +51,4 @@ export interface IWorkingHoursPropagationResult {
   updatedStylistsCount: number;
   updatedDaysCount: number;
   enforcedClosedDaysCount: number;
-  conflicts: Array<{
-    stylistId: string;
-    stylistName: string;
-    appointmentId: string;
-    appointmentNumber: string;
-    startAt: Date;
-    endAt: Date;
-    reason: string;
-  }>;
 }

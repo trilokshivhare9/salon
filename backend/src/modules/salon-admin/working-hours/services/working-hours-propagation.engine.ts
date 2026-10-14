@@ -72,7 +72,6 @@ export class WorkingHoursPropagationEngine {
       updatedStylistsCount: 0,
       updatedDaysCount: 0,
       enforcedClosedDaysCount: 0,
-      conflicts: [],
     };
 
     const stylists = await tx.stylist.findMany({
@@ -90,12 +89,12 @@ export class WorkingHoursPropagationEngine {
     for (const sh of updatedSalonHours) {
       if (sh.isClosed) {
         // FACILITY BOUNDARY: Salon is closed -> Stylists CANNOT work.
-        // Force is_working = false for all stylists on this dayOfWeek
+        // Sync uncustomized staff members to isWorking = false without altering isCustomized
         const closedUpdate = await tx.stylistWorkingHours.updateMany({
           where: {
             salonId,
             dayOfWeek: sh.dayOfWeek,
-            isWorking: true,
+            isCustomized: false,
           },
           data: {
             isWorking: false,
@@ -107,8 +106,21 @@ export class WorkingHoursPropagationEngine {
           result.enforcedClosedDaysCount += closedUpdate.count;
           stylistIds.forEach((id: string) => affectedStylistIds.add(id));
         }
+
+        // Ensure salonWorkingHoursId is linked for customized records without mutating their custom blueprint
+        await tx.stylistWorkingHours.updateMany({
+          where: {
+            salonId,
+            dayOfWeek: sh.dayOfWeek,
+            isCustomized: true,
+          },
+          data: {
+            salonWorkingHoursId: sh.id,
+          },
+        });
       } else {
-        // Salon is OPEN -> Sync uncustomized staff members
+        // Salon is OPEN -> Sync uncustomized staff members (isCustomized === false)
+        // Automatically restore uncustomized stylists to isWorking = true with salon hours!
         const syncUpdate = await tx.stylistWorkingHours.updateMany({
           where: {
             salonId,
@@ -137,6 +149,31 @@ export class WorkingHoursPropagationEngine {
           },
           data: {
             salonWorkingHoursId: sh.id,
+          },
+        });
+
+        // Enforce Facility Boundary: clamp any customized shifts extending outside salon hours
+        await tx.stylistWorkingHours.updateMany({
+          where: {
+            salonId,
+            dayOfWeek: sh.dayOfWeek,
+            isCustomized: true,
+            endTime: { gt: sh.endTime },
+          },
+          data: {
+            endTime: sh.endTime,
+          },
+        });
+
+        await tx.stylistWorkingHours.updateMany({
+          where: {
+            salonId,
+            dayOfWeek: sh.dayOfWeek,
+            isCustomized: true,
+            startTime: { lt: sh.startTime },
+          },
+          data: {
+            startTime: sh.startTime,
           },
         });
       }
@@ -174,82 +211,5 @@ export class WorkingHoursPropagationEngine {
 
     return { salonIsClosed, salonHours: salonHour };
   }
-
-  /**
-   * Detects if reducing or closing a stylist's shift conflicts with existing booked appointments.
-   */
-  async detectStaffShiftConflicts(
-    tx: any,
-    salonId: string,
-    stylistId: string,
-    dayOfWeek: DayOfWeek,
-    isWorking: boolean,
-    newStartTime?: string,
-    newEndTime?: string,
-  ): Promise<any[]> {
-    const salon = await tx.salon.findUnique({
-      where: { id: salonId },
-      select: { timezone: true },
-    });
-    const tz = salon?.timezone || TimeUtility.DEFAULT_TIMEZONE;
-
-    const now = new Date();
-    const futureAppointments = await tx.appointment.findMany({
-      where: {
-        salonId,
-        stylistId,
-        startAt: { gte: now },
-        status: {
-          in: [
-            AppointmentStatus.BOOKED,
-            AppointmentStatus.CONFIRMED,
-            AppointmentStatus.ON_THE_WAY,
-            AppointmentStatus.CHECKED_IN,
-            AppointmentStatus.SEATED_IN_CHAIR,
-          ],
-        },
-      },
-      select: {
-        id: true,
-        appointmentNumber: true,
-        startAt: true,
-        endAt: true,
-      },
-    });
-
-    const conflicts: any[] = [];
-
-    for (const appt of futureAppointments) {
-      const apptDayOfWeek = DateTime.fromJSDate(appt.startAt, { zone: tz })
-        .toFormat('cccc')
-        .toUpperCase() as DayOfWeek;
-
-      if (apptDayOfWeek !== dayOfWeek) continue;
-
-      if (!isWorking) {
-        conflicts.push({
-          appointmentId: appt.id,
-          appointmentNumber: appt.appointmentNumber,
-          startAt: appt.startAt,
-          endAt: appt.endAt,
-          reason: `Stylist is marked OFF on ${dayOfWeek}, but has active appointment #${appt.appointmentNumber}.`,
-        });
-      } else if (newStartTime && newEndTime) {
-        const apptStartStr = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('HH:mm');
-        const apptEndStr = DateTime.fromJSDate(appt.endAt, { zone: tz }).toFormat('HH:mm');
-
-        if (apptStartStr < newStartTime || apptEndStr > newEndTime) {
-          conflicts.push({
-            appointmentId: appt.id,
-            appointmentNumber: appt.appointmentNumber,
-            startAt: appt.startAt,
-            endAt: appt.endAt,
-            reason: `Appointment #${appt.appointmentNumber} (${apptStartStr}-${apptEndStr}) falls outside new shift hours (${newStartTime}-${newEndTime}).`,
-          });
-        }
-      }
-    }
-
-    return conflicts;
-  }
 }
+

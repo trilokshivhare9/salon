@@ -190,33 +190,6 @@ enum LeavePortion {
   CUSTOM_HOURS
 }
 
-enum LeaveProcessingStatus {
-  PENDING
-  PROCESSING
-  COMPLETED
-  FAILED
-}
-
-enum ReassignmentOutcome {
-  PENDING
-  AUTO_ASSIGNED
-  CUSTOMER_ACCEPTED
-  CUSTOMER_DECLINED
-  CUSTOMER_RESCHEDULED
-  CUSTOMER_CANCELLED
-  NO_REPLACEMENT
-  ADMIN_RESOLVED
-  EXPIRED
-}
-
-enum CustomerResponse {
-  ACCEPTED
-  DECLINED
-  RESCHEDULED
-  CANCELLED
-  NO_RESPONSE
-}
-
 // -----------------------------------------------------------------------------
 // 1. ADMINS (Super Admin & Salon Owners)
 // -----------------------------------------------------------------------------
@@ -318,7 +291,7 @@ model Salon {
   defaultEndTime       String      @default("21:00") @map("default_end_time")
 
   // Booking settings
-  maxAdvanceDays       Int         @default(30) @map("max_advance_days")
+  maxAdvanceDays       Int         @default(3) @map("max_advance_days")
   cancelWindowHours    Int         @default(2) @map("cancel_window_hours")
   allowSpecificStylist Boolean     @default(true) @map("allow_specific_stylist")
 
@@ -618,6 +591,7 @@ model Appointment {
   proposedStartAt     DateTime?         @map("proposed_start_at") @db.Timestamptz
   proposedEndAt       DateTime?         @map("proposed_end_at") @db.Timestamptz
   proposedByAdminId   String?           @map("proposed_by_admin_id")
+  proposedStylistId   String?           @map("proposed_stylist_id")
 
   reminder2hSentAt    DateTime?         @map("reminder_2h_sent_at") @db.Timestamptz
   reminder10mSentAt   DateTime?         @map("reminder_10m_sent_at") @db.Timestamptz
@@ -634,7 +608,6 @@ model Appointment {
   services            AppointmentService[]
   createdByAdmin      Admin?            @relation("AdminCreatedAppointments", fields: [createdByAdminId], references: [id], onDelete: SetNull)
   notifications       Notification[]
-  reassignments       BookingReassignment[]
 
   @@unique([salonId, id])
   @@index([salonId, appointmentDate])
@@ -879,13 +852,8 @@ model StylistAbsence {
   reason                String?
   notes                 String?
   status                AbsenceStatus         @default(ACTIVE)
-  processingStatus      LeaveProcessingStatus @default(COMPLETED) @map("processing_status")
 
   createdByAdminId      String?               @map("created_by_admin_id")
-
-  affectedBookingsCount Int                   @default(0) @map("affected_bookings_count")
-  reassignedCount       Int                   @default(0) @map("reassigned_count")
-  unresolvableCount     Int                   @default(0) @map("unresolvable_count")
 
   createdAt             DateTime              @default(now()) @map("created_at")
   updatedAt             DateTime              @updatedAt @map("updated_at")
@@ -893,45 +861,10 @@ model StylistAbsence {
   salon                 Salon                 @relation(fields: [salonId], references: [id], onDelete: Cascade)
   stylist               Stylist               @relation(fields: [stylistId], references: [id], onDelete: Cascade)
   createdByAdmin        Admin?                @relation("AdminCreatedAbsences", fields: [createdByAdminId], references: [id], onDelete: SetNull)
-  reassignments         BookingReassignment[]
 
   @@index([salonId, startDate, endDate])
   @@index([stylistId, startDate, endDate])
   @@map("stylist_absences")
-}
-
-model BookingReassignment {
-  id                    String              @id @default(uuid())
-  salonId               String              @map("salon_id")
-  appointmentId         String              @map("appointment_id")
-  absenceId             String              @map("absence_id")
-
-  originalStylistId     String              @map("original_stylist_id")
-  newStylistId          String?             @map("new_stylist_id")
-
-  originalStartAt       DateTime            @map("original_start_at") @db.Timestamptz
-  originalEndAt         DateTime            @map("original_end_at") @db.Timestamptz
-  newStartAt            DateTime?           @map("new_start_at") @db.Timestamptz
-  newEndAt              DateTime?           @map("new_end_at") @db.Timestamptz
-
-  outcome               ReassignmentOutcome @default(PENDING)
-  customerResponse      CustomerResponse?   @map("customer_response")
-
-  processedAt           DateTime?           @map("processed_at") @db.Timestamptz
-  customerRespondedAt   DateTime?           @map("customer_responded_at") @db.Timestamptz
-  notificationSentAt    DateTime?           @map("notification_sent_at") @db.Timestamptz
-  notificationFailed    Boolean             @default(false) @map("notification_failed")
-
-  createdAt             DateTime            @default(now()) @map("created_at")
-  updatedAt             DateTime            @updatedAt @map("updated_at")
-
-  absence               StylistAbsence      @relation(fields: [absenceId], references: [id], onDelete: Cascade)
-  appointment           Appointment         @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
-
-  @@unique([appointmentId, absenceId])
-  @@index([salonId, absenceId])
-  @@index([appointmentId])
-  @@map("booking_reassignments")
 }
 
 // -----------------------------------------------------------------------------
@@ -957,8 +890,6 @@ model SalonClosure {
 
   reason                String?
   notes                 String?
-  affectedBookingsCount Int              @default(0) @map("affected_bookings_count")
-  cancelledCount        Int              @default(0) @map("cancelled_count")
 
   createdByAdminId      String?          @map("created_by_admin_id")
 
@@ -971,4 +902,5 @@ model SalonClosure {
   @@index([salonId, startDate, endDate])
   @@map("salon_closures")
 }
+
 

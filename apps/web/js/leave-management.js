@@ -299,11 +299,14 @@ export class LeaveManagementUI {
               <input type="text" class="ald-input" id="leave-notes" placeholder="e.g. Informed manager in advance" />
             </div>
 
-            <!-- Row 6: Unified Compact Impact & Operational Banner -->
-            <div id="leave-impact-preview-box" class="ald-compact-notice is-loading">
-              <div class="ald-notice-main">
-                <div class="spinner-small" style="width: 12px; height: 12px; border: 2px solid rgba(255,255,255,0.2); border-top-color: #a855f7; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
-                <span>Checking booking conflicts with server...</span>
+            <!-- Row 6: Unified Operational Banner -->
+            <div class="ald-compact-notice is-clean" style="border: 1px solid rgba(168, 85, 247, 0.25); background: rgba(168, 85, 247, 0.05); padding: 12px 14px; border-radius: 10px; margin-bottom: 16px;">
+              <div class="ald-notice-main" style="display: flex; align-items: flex-start; gap: 10px;">
+                <span style="font-size: 1.1rem; line-height: 1;">⚡</span>
+                <div>
+                  <div style="font-weight: 700; color: #fff; font-size: 0.84rem; margin-bottom: 2px;">Automated Booking Protection</div>
+                  <div style="font-size: 0.78rem; color: #94a3b8; line-height: 1.35;">Staff roster will be blocked immediately. Any overlapping client bookings will automatically receive an interactive WhatsApp reschedule proposal for the next available slot.</div>
+                </div>
               </div>
             </div>
 
@@ -529,90 +532,10 @@ export class LeaveManagementUI {
     });
     customEndEl.addEventListener('input', () => {
       updateCustomHoursCalc();
-      debouncedPreview();
     });
 
-    if (!staffId && staffSelectEl) {
-      staffSelectEl.addEventListener('change', debouncedPreview);
-    }
-
-    // Debounced Live Impact Preview
-    let previewTimer = null;
-    function debouncedPreview() {
-      if (previewTimer) clearTimeout(previewTimer);
-      previewTimer = setTimeout(() => {
-        triggerPreview();
-      }, 200);
-    }
-
-    // Live Impact Preview Function
-    async function triggerPreview() {
-      const targetStaffId = staffId || staffSelectEl?.value;
-      const previewBox = document.getElementById('leave-impact-preview-box');
-      if (!targetStaffId || !previewBox) return;
-
-      const sDate = startDateEl.value;
-      const eDate = endDateEl.value;
-      const portion = portionInput.value || 'FULL_DAY';
-      const cStart = portion === 'CUSTOM_HOURS' ? customStartEl.value : undefined;
-      const cEnd = portion === 'CUSTOM_HOURS' ? customEndEl.value : undefined;
-
-      previewBox.className = 'ald-compact-notice is-loading';
-      previewBox.innerHTML = `
-        <div class="ald-notice-main">
-          <div class="spinner-small" style="width: 12px; height: 12px; border: 2px solid rgba(255,255,255,0.2); border-top-color: #a855f7; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
-          <span>Checking booking conflicts for ${formatDateFriendly(sDate)}${sDate !== eDate ? ` → ${formatDateFriendly(eDate)}` : ''}...</span>
-        </div>
-      `;
-
-      try {
-        const queryParams = { startDate: sDate, endDate: eDate, leavePortion: portion };
-        if (cStart) queryParams.customStartTime = cStart;
-        if (cEnd) queryParams.customEndTime = cEnd;
-
-        const preview = await ApiClient.previewStaffAbsence(targetStaffId, queryParams);
-
-        if (!previewBox) return;
-        const total = preview.affectedBookingsCount || 0;
-        const reassignable = preview.canAutoReassignCount || 0;
-        const unresolvable = preview.unresolvableCount || 0;
-
-        if (total === 0) {
-          previewBox.className = 'ald-compact-notice is-clean';
-          previewBox.innerHTML = `
-            <div class="ald-notice-main">
-              <span>✅</span>
-              <span>No booking conflicts for this period.</span>
-            </div>
-            <div class="ald-notice-sub">Calendar availability will be blocked. Reassignments and WhatsApp notices trigger if shifts overlap.</div>
-          `;
-        } else {
-          previewBox.className = 'ald-compact-notice is-conflict';
-          previewBox.innerHTML = `
-            <div class="ald-notice-main">
-              <span>⚠️</span>
-              <span>${total} booking${total > 1 ? 's' : ''} affected (${reassignable} auto-reassigned${unresolvable > 0 ? `, ${unresolvable} need action` : ''})</span>
-            </div>
-            <div class="ald-notice-sub">Affected bookings will be reassigned to available qualified staff on shift.</div>
-          `;
-        }
-      } catch (err) {
-        if (previewBox) {
-          previewBox.className = 'ald-compact-notice is-conflict';
-          const rawMsg = Array.isArray(err.message) ? err.message.join(', ') : (err.message || 'Unable to fetch preview');
-          previewBox.innerHTML = `
-            <div class="ald-notice-main">
-              <span>⚠️</span>
-              <span>Impact Preview: ${rawMsg}</span>
-            </div>
-          `;
-        }
-      }
-    }
-
-    // Initialize Duration Badge and first preview
+    // Initialize Duration Badge
     updateDurationBadge();
-    triggerPreview();
 
     // Submit handler
     document.getElementById('leave-management-form')?.addEventListener('submit', async (e) => {
@@ -714,7 +637,8 @@ export class LeaveManagementUI {
     const modalContainer = document.getElementById('modal-container');
     if (!modalContainer) return;
 
-    const summary = result?.reassignmentSummary || { total: 0, reassigned: 0, unresolvable: 0, details: [] };
+    const rescheduledBookings = result?.rescheduledBookings || result?.details || [];
+    const count = rescheduledBookings.length;
     const absence = result?.absence || result || {};
     const statusInfo = getUnifiedLeaveStatus(absence);
 
@@ -729,7 +653,7 @@ export class LeaveManagementUI {
               </div>
               <div class="ald-title-wrap">
                 <h3 class="ald-title">Leave Recorded & Confirmed</h3>
-                <p class="ald-subtitle">Operational summary & automated dispatch outcomes</p>
+                <p class="ald-subtitle">Staff leave confirmed</p>
               </div>
             </div>
             <button class="ald-close-btn" id="btn-close-result-modal">&times;</button>
@@ -747,44 +671,34 @@ export class LeaveManagementUI {
             </div>
           </div>
 
-          <!-- Impact Metrics Grid -->
-          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 18px;">
-            <div style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); padding: 12px; border-radius: 12px; text-align: center;">
-              <div style="font-size: 1.35rem; font-weight: 800; color: #fff;">${summary.total || 0}</div>
-              <div style="font-size: 0.72rem; color: #94a3b8; text-transform: uppercase; font-weight: 600; margin-top: 2px;">Overlapped</div>
+          <!-- Reschedule Indicator -->
+          ${count > 0 ? `
+            <div style="background: rgba(52, 211, 153, 0.1); border: 1px solid rgba(52, 211, 153, 0.25); padding: 12px; border-radius: 12px; text-align: center; margin-bottom: 18px;">
+              <div style="font-size: 1.35rem; font-weight: 800; color: #34d399;">${count}</div>
+              <div style="font-size: 0.72rem; color: #34d399; text-transform: uppercase; font-weight: 600; margin-top: 2px;">Bookings Sent for Reschedule via WhatsApp</div>
             </div>
-            <div style="background: rgba(52, 211, 153, 0.1); border: 1px solid rgba(52, 211, 153, 0.25); padding: 12px; border-radius: 12px; text-align: center;">
-              <div style="font-size: 1.35rem; font-weight: 800; color: #34d399;">${summary.reassigned || 0}</div>
-              <div style="font-size: 0.72rem; color: #34d399; text-transform: uppercase; font-weight: 600; margin-top: 2px;">Auto-Reassigned</div>
-            </div>
-            <div style="background: rgba(251, 113, 133, 0.1); border: 1px solid rgba(251, 113, 133, 0.25); padding: 12px; border-radius: 12px; text-align: center;">
-              <div style="font-size: 1.35rem; font-weight: 800; color: #fb7185;">${summary.unresolvable || 0}</div>
-              <div style="font-size: 0.72rem; color: #fb7185; text-transform: uppercase; font-weight: 600; margin-top: 2px;">Action Needed</div>
-            </div>
-          </div>
 
-          ${(summary.details && summary.details.length > 0) ? `
             <div style="margin-bottom: 18px;">
-              <div style="font-size: 0.8rem; font-weight: 700; color: #fff; margin-bottom: 8px;">Reassignment Dispatch Log:</div>
+              <div style="font-size: 0.8rem; font-weight: 700; color: #fff; margin-bottom: 8px;">Rescheduled Appointments:</div>
               <div style="max-height: 160px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;">
-                ${summary.details.map((d) => `
+                ${rescheduledBookings.map((d) => `
                   <div style="padding: 8px 12px; background: rgba(0,0,0,0.3); border-radius: 8px; display: flex; justify-content: space-between; align-items: center;">
                     <div>
                       <div style="font-weight: 700; color: #fff; font-size: 0.82rem;">#${d.appointmentNumber || ''} • ${d.customerName || 'Client'}</div>
                       <div style="font-size: 0.72rem; color: #94a3b8;">${d.customerPhone || 'Interactive WhatsApp notified'}</div>
                     </div>
                     <div>
-                      ${d.outcome === 'AUTO_ASSIGNED' ? `
-                        <span class="badge" style="background: rgba(52, 211, 153, 0.15); color: #34d399; font-size: 0.72rem; font-weight: 700;">✓ Auto-Reassigned</span>
-                      ` : `
-                        <span class="badge" style="background: rgba(251, 113, 133, 0.15); color: #fb7185; font-size: 0.72rem; font-weight: 700;">⚠️ No Replacement</span>
-                      `}
+                      <span class="badge" style="background: rgba(52, 211, 153, 0.15); color: #34d399; font-size: 0.72rem; font-weight: 700;">✓ WhatsApp Proposed</span>
                     </div>
                   </div>
                 `).join('')}
               </div>
             </div>
-          ` : ''}
+          ` : `
+            <div style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); padding: 12px; border-radius: 12px; text-align: center; margin-bottom: 18px;">
+              <div style="font-size: 0.86rem; color: #94a3b8;">✅ No existing bookings were impacted.</div>
+            </div>
+          `}
 
           <div class="ald-footer">
             <button class="ald-btn-submit" id="btn-close-result-done" style="background: linear-gradient(135deg, #9333ea 0%, #c026d3 100%); border-color: rgba(168, 85, 247, 0.4);">Done</button>
@@ -880,31 +794,10 @@ export class LeaveManagementUI {
             const portionInfo = getPortionDetails(ab.leavePortion, ab.customStartTime, ab.customEndTime);
             const appliedFormatted = formatAppliedTimestamp(ab.createdAt);
 
-            const affectedCount = ab.affectedBookingsCount || 0;
-            const reassignedCount = ab.reassignedCount || 0;
-            const unresolvedCount = ab.unresolvableCount || 0;
-
-            let impactClass = 'lhc-impact-clean';
-            let impactIcon = '✓';
-            let impactMainText = `Clean Schedule — 0 client bookings affected`;
-            let impactTag = '(Roster blocked)';
-
-            if (affectedCount === 0) {
-              impactClass = 'lhc-impact-clean';
-              impactIcon = '✓';
-              impactMainText = `Clean Schedule — 0 client bookings affected`;
-              impactTag = '(Roster blocked)';
-            } else if (unresolvedCount > 0) {
-              impactClass = 'lhc-impact-conflict';
-              impactIcon = '⚠️';
-              impactMainText = `Schedule Conflict — ${affectedCount} booking${affectedCount > 1 ? 's' : ''} affected`;
-              impactTag = `(${unresolvedCount} need action)`;
-            } else {
-              impactClass = 'lhc-impact-reassigned';
-              impactIcon = '🔄';
-              impactMainText = `${affectedCount} booking${affectedCount > 1 ? 's' : ''} auto-reassigned`;
-              impactTag = '(Protected)';
-            }
+            const impactClass = 'lhc-impact-clean';
+            const impactIcon = '✓';
+            const impactMainText = `Staff Roster Blocked`;
+            const impactTag = '(Protected)';
 
             const noteOrReason = ab.notes || ab.reason;
 
@@ -1115,7 +1008,7 @@ export class LeaveManagementUI {
         const preview = await ApiClient.previewStaffAbsence(staffId, queryParams);
         if (!previewBox) return;
 
-        const total = preview.affectedBookingsCount || 0;
+        const total = preview.conflicts ? preview.conflicts.length : (preview.affectedBookingsCount || 0);
         previewBox.innerHTML = `
           <div style="font-size: 0.82rem; color: #fff;">
             <div>Incremental Dates: <strong>${formatDateFriendly(defaultNewEnd)}</strong> ${defaultNewEnd !== newEndDateVal ? `→ <strong>${formatDateFriendly(newEndDateVal)}</strong>` : ''}</div>
@@ -1207,11 +1100,6 @@ export class LeaveManagementUI {
     const portionInfo = getPortionDetails(absence.leavePortion, absence.customStartTime, absence.customEndTime);
     const appliedFormatted = formatAppliedTimestamp(absence.createdAt);
 
-    const reassignments = absence.reassignments || [];
-    const affectedCount = absence.affectedBookingsCount || 0;
-    const reassignedCount = absence.reassignedCount || 0;
-    const unresolvedCount = absence.unresolvableCount || 0;
-
     modalContainer.innerHTML = `
       <div class="modal-backdrop show">
         <div class="leave-detail-dialog">
@@ -1286,72 +1174,14 @@ export class LeaveManagementUI {
 
           <!-- Client Booking Impact Section (Compact) -->
           <div class="ld-impact-section">
-            <div class="ld-impact-header">
-              <h4>Client Booking Impact</h4>
-              ${affectedCount > 0 ? `
-                <span class="ld-impact-counter">${affectedCount} client appointment${affectedCount > 1 ? 's' : ''} overlapped</span>
-              ` : ''}
+            <div class="ld-clean-banner">
+              <span class="ld-clean-icon">✨</span>
+              <div class="ld-clean-body">
+                <span class="ld-clean-title">Automated Booking Protection Active</span>
+                <span class="ld-clean-sep">·</span>
+                <span class="ld-clean-desc">Staff roster blocked. Overlapping bookings are automatically offered reschedule proposals via WhatsApp.</span>
+              </div>
             </div>
-
-            ${affectedCount === 0 ? `
-              <div class="ld-clean-banner">
-                <span class="ld-clean-icon">✨</span>
-                <div class="ld-clean-body">
-                  <span class="ld-clean-title">Zero Client Disruption</span>
-                  <span class="ld-clean-sep">·</span>
-                  <span class="ld-clean-desc">No existing bookings were impacted during this window.</span>
-                </div>
-              </div>
-            ` : `
-              <!-- KPI Summary Counters -->
-              <div class="ld-kpi-row">
-                <div class="ld-kpi-cell">
-                  <div class="ld-kpi-val">${affectedCount}</div>
-                  <div class="ld-kpi-lbl">Total Affected</div>
-                </div>
-                <div class="ld-kpi-cell is-reassigned">
-                  <div class="ld-kpi-val">${reassignedCount}</div>
-                  <div class="ld-kpi-lbl">Auto-Reassigned</div>
-                </div>
-                <div class="ld-kpi-cell ${unresolvedCount > 0 ? 'is-action' : ''}">
-                  <div class="ld-kpi-val">${unresolvedCount}</div>
-                  <div class="ld-kpi-lbl">Action Needed</div>
-                </div>
-              </div>
-
-              <!-- Reassignment List -->
-              ${reassignments.length === 0 ? `
-                <div class="ld-empty-reassign">No individual appointment logs found.</div>
-              ` : `
-                <div class="ld-reassign-list">
-                  ${reassignments.map((r) => {
-                    const appt = r.appointment || {};
-                    const isAuto = r.outcome === 'AUTO_ASSIGNED' || r.outcome === 'CUSTOMER_ACCEPTED';
-                    const serviceName = appt.service?.name || appt.serviceNameSnapshot || 'Hair Service';
-                    const customerName = appt.salonUser?.user?.name || appt.customer?.name || 'Valued Client';
-                    const customerPhone = appt.salonUser?.user?.phone || appt.customer?.phone || '';
-                    const apptTime = appt.startAt ? new Date(appt.startAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }) : 'Scheduled Time';
-                    return `
-                      <div class="ld-appt-card">
-                        <div class="ld-appt-client">
-                          <div class="ld-appt-avatar">${customerName.charAt(0).toUpperCase()}</div>
-                          <div class="ld-appt-info">
-                            <div class="ld-appt-name">${customerName} <span class="ld-appt-phone">${customerPhone ? `(${customerPhone})` : ''}</span></div>
-                            <div class="ld-appt-sub">${serviceName} · Appt #${appt.appointmentNumber || r.appointmentId?.slice(0, 8)}</div>
-                            <div class="ld-appt-time">🕒 Slot: ${apptTime}</div>
-                          </div>
-                        </div>
-                        <div>
-                          <span class="ld-appt-badge ${isAuto ? 'is-auto' : 'is-action'}">
-                            ${isAuto ? '✓ Reassigned' : '⚠️ Action Needed'}
-                          </span>
-                        </div>
-                      </div>
-                    `;
-                  }).join('')}
-                </div>
-              `}
-            `}
           </div>
 
           <!-- Modal Footer Actions -->

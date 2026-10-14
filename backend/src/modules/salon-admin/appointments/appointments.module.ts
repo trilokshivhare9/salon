@@ -11,6 +11,8 @@ import { AppointmentsController } from './appointments.controller';
 import { AvailabilityModule } from '../availability/availability.module';
 import { WhatsAppModule } from '../../channels/whatsapp/whatsapp.module';
 
+import { ScheduleConflictResolutionEngine } from './conflicts/schedule-conflict-resolution.engine';
+
 @Module({
   imports: [AvailabilityModule, forwardRef(() => WhatsAppModule)],
   controllers: [AppointmentsController],
@@ -23,6 +25,7 @@ import { WhatsAppModule } from '../../channels/whatsapp/whatsapp.module';
     AppointmentEventsService,
     CancellationService,
     RescheduleService,
+    ScheduleConflictResolutionEngine,
   ],
   exports: [
     AppointmentsService,
@@ -33,6 +36,7 @@ import { WhatsAppModule } from '../../channels/whatsapp/whatsapp.module';
     AppointmentEventsService,
     CancellationService,
     RescheduleService,
+    ScheduleConflictResolutionEngine,
   ],
 })
 export class AppointmentsModule { }

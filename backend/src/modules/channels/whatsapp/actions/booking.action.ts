@@ -8,6 +8,7 @@ import { WhatsAppSessionService } from '../services/whatsapp-session.service';
 import { WhatsAppService } from '../whatsapp.service';
 import { ConversationState, AppointmentStatus, BookingSource, ServiceGender } from '@prisma/client';
 import { TimeUtility } from '../../../../common/utils/time.utility';
+import { BOOKING_POLICY } from '../../../../common/constants/booking-policy.constants';
 import { ActionContext, ActionResult } from './shared/action-context';
 import { ActionUtils } from './shared/action-utils';
 import { QuickBookingAction } from './quick-booking.action';
@@ -329,7 +330,7 @@ export class BookingAction {
   }
 
   private async handleStaffSelected(ctx: ActionContext): Promise<ActionResult> {
-    const { input, cleanNumber, phoneNumberId, salonId, conversation } = ctx;
+    const { input, cleanNumber, phoneNumberId, salonId, salon, conversation } = ctx;
     const staffId = input.replace('staff_', '');
     const selectedStaffId = staffId === 'any' ? null : staffId;
 
@@ -337,18 +338,19 @@ export class BookingAction {
       selectedStaffId,
     });
 
+    const horizon = salon.maxAdvanceDays || BOOKING_POLICY.MAX_ADVANCE_BOOKING_DAYS;
     const openDates = await this.availabilityService.findAvailableDates(
       salonId,
       conversation.selectedServiceId!,
       selectedStaffId,
-      2,
+      horizon,
     );
 
     if (openDates.length === 0) {
       const isSpecificStaff = !!selectedStaffId;
       const reply = isSpecificStaff
-        ? `⚠️ No available slots found in the next 7 days for the selected specialist. Would you like to check with Any Specialist or choose another service?`
-        : `⚠️ All slots in the next 7 days are fully booked for this service. Please choose another service or contact the salon directly.`;
+        ? `⚠️ No available slots found in the next ${horizon} days for the selected specialist. Would you like to check with Any Specialist or choose another service?`
+        : `⚠️ All slots in the next ${horizon} days are fully booked for this service. Please choose another service or contact the salon directly.`;
 
       const buttons = isSpecificStaff
         ? [

@@ -86,45 +86,18 @@ export class AppointmentStatusService {
       );
     }
 
-    const nowMs = Date.now();
-    const apptStartMs = new Date(appointment.startAt).getTime();
-    const minutesRemaining = (apptStartMs - nowMs) / (1000 * 60);
-
-    // Process Penalty Strike Calculation (< 90 minutes remaining & client fault / unresponsive)
-    let isPenaltyApplied = false;
-    let remainingPenalties = 2;
-    let newCount = 0;
-
-    const isClientFault =
-      dto.reasonCategory === 'CLIENT_UNRESPONSIVE' ||
-      dto.reasonCategory === 'CLIENT_MISTAKE' ||
-      !adminId;
-
-    if (
-      isTargetCancelled &&
-      isClientFault &&
-      dto.reasonCategory !== 'SALON_EMERGENCY' &&
-      appointment.source !== BookingSource.QUICK_BOOK &&
-      minutesRemaining < 90 &&
-      appointment.salonUserId
-    ) {
-      const salonUser = await this.prisma.salonUser.findUnique({
-        where: { id: appointment.salonUserId },
-      });
-      const currentCount = salonUser?.yearlyNoShowCount || 0;
-      newCount = currentCount + 1;
-      remainingPenalties = Math.max(0, 3 - newCount);
-      const isBlocked = newCount >= 3;
-
-      await this.prisma.salonUser.update({
-        where: { id: appointment.salonUserId },
-        data: {
-          yearlyNoShowCount: newCount,
-          lastNoShowDate: new Date(),
-          isBookingBlocked: isBlocked,
-        },
-      });
-      isPenaltyApplied = true;
+    // Centralized Cancellation Delegation
+    if (dto.status === AppointmentStatus.CANCELLED) {
+      if (this.cancellationService) {
+        const result = await this.cancellationService.cancelBooking(salonId, appointmentId, {
+          source: adminId ? 'ADMIN_DASHBOARD' : 'CUSTOMER_WHATSAPP',
+          fault: dto.reasonCategory === 'SALON_EMERGENCY' ? 'SALON' : 'CLIENT',
+          reason: dto.reason || 'Status updated to CANCELLED',
+          reasonCategory: dto.reasonCategory || (adminId ? 'SALON_ADMIN_CANCELLED' : 'CLIENT_MISTAKE'),
+          adminId,
+        });
+        return result.appointment;
+      }
     }
 
     const updated = await this.prisma.appointment.update({
@@ -224,43 +197,7 @@ export class AppointmentStatusService {
             this.logger.error(`Failed to send WhatsApp quick booking declined notification: ${err?.message || err}`);
           });
         }
-      } else if (isTargetCancelled) {
-        if (dto.reasonCategory === 'SALON_EMERGENCY') {
-          // Salon Emergency Apology (NO Penalty)
-          const apologyMsg = `🙏 *SALON NOTICE: APPOINTMENT CANCELED*\n\nHi *${userName}*, we sincerely apologize! Your appointment for *${timeStr}* at *${salon.name}* was canceled due to a salon emergency.\n\n✨ *No penalty has been applied* to your account. We welcome you to rebook at your convenience!`;
-          await this.whatsappService.sendMetaMessage(
-            userPhone,
-            {
-              bodyText: apologyMsg,
-              interactiveType: 'button',
-              buttons: [{ id: 'btn_book', title: '📅 Book New Visit' }],
-            },
-            phoneNumberId,
-            salonId,
-          ).catch((err) => {
-            this.logger.error(`Failed to send WhatsApp salon emergency cancellation notification: ${err?.message || err}`);
-          });
-        } else if (isPenaltyApplied) {
-          // Penalty Strike Notice
-          let message = '';
-          if (remainingPenalties > 0) {
-            message = `⚠️ *LATE CANCELLATION / NO-SHOW PENALTY RECORDED*\n\nHi *${userName}*, your appointment for *${timeStr}* at *${salon.name}* was canceled with less than 2 hours remaining.\n\n⚠️ *Penalty Strike Recorded:* You have *1 penalty strike* recorded. You have *${remainingPenalties} penalty strike(s) remaining* this year before automatic slot booking is locked.`;
-          } else {
-            message = `⚠️ *ACCOUNT BOOKING LOCKED*\n\nHi *${userName}*, you have accumulated *3 penalty strikes* this year for missed or late-canceled appointments. Automatic slot booking is now locked for your account.\n\n📞 *Please contact the Salon Owner* directly to request access unblock.`;
-          }
-          await this.whatsappService.sendMetaMessage(
-            userPhone,
-            {
-              bodyText: message,
-              interactiveType: 'button',
-              buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
-            },
-            phoneNumberId,
-            salonId,
-          ).catch((err) => {
-            this.logger.error(`Failed to send WhatsApp penalty strike notification: ${err?.message || err}`);
-          });
-        }
+
       } else if (dto.status === AppointmentStatus.CHECKED_IN) {
         const welcomeMsg = `👋 *WELCOME TO ${salon.name.toUpperCase()}!*\n\nHi *${userName}*, you are checked in! Your stylist *${updated.stylist?.name || 'Stylist'}* will call you to the chair shortly.`;
         await this.whatsappService.sendMetaMessage(
@@ -308,12 +245,7 @@ export class AppointmentStatusService {
       }
     }
 
-    // Trigger Smart Move-Up Broadcast (ONLY if appointment startAt is in the FUTURE: apptStartMs > Date.now())
-    if (isTargetCancelled && apptStartMs > Date.now()) {
-      await this.cancellationService.triggerSmartMoveUpBroadcast(formatted).catch((err) => {
-        this.logger.warn(`Move-up broadcast trigger warning: ${err.message}`);
-      });
-    }
+
 
     return formatted;
   }
@@ -344,6 +276,7 @@ export class AppointmentStatusService {
     newStartAt: Date,
     newEndAt: Date,
     adminId?: string,
+    proposedStylistId?: string,
   ) {
     const appointment = await this.getAppointment(salonId, appointmentId);
     const salon = await this.prisma.salon.findUnique({
@@ -358,6 +291,7 @@ export class AppointmentStatusService {
         status: AppointmentStatus.PENDING_RESCHEDULE,
         proposedStartAt: newStartAt,
         proposedEndAt: newEndAt,
+        proposedStylistId: proposedStylistId || null,
         proposedByAdminId: adminId,
       },
       include: appointmentInclude,
@@ -371,13 +305,22 @@ export class AppointmentStatusService {
     const timeStr = TimeUtility.formatTime12h(newStartAt, tz);
     const userPhone = appointment.salonUser?.user?.phone;
 
+    let stylistDisplayName = appointment.stylist?.name || 'Stylist';
+    if (proposedStylistId && proposedStylistId !== appointment.stylistId) {
+      const peer = await this.prisma.stylist.findUnique({
+        where: { id: proposedStylistId },
+        select: { name: true },
+      });
+      if (peer?.name) stylistDisplayName = peer.name;
+    }
+
     if (userPhone && salon.whatsappAccount?.phoneNumberId && this.whatsappService) {
       const proposalPayload = this.templates!.buildRescheduleProposalPrompt({
         salonName: salon.name,
         customerName: appointment.salonUser?.user?.name || 'Customer',
         dateFriendly: dateStr,
         timeFriendly: timeStr,
-        stylistName: appointment.stylist?.name || 'Stylist',
+        stylistName: stylistDisplayName,
         appointmentId: appointment.id,
       });
 

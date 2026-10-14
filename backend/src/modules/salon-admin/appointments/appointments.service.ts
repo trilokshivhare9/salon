@@ -24,6 +24,11 @@ import {
   CancelBookingContext,
   CancelBookingResult,
 } from './dto/create-appointment.dto';
+import {
+  ScheduleConflictResolutionEngine,
+  ScheduleConflictQuery,
+  ConflictResolutionResult,
+} from './conflicts/schedule-conflict-resolution.engine';
 import { AppointmentStatus, BookingSource, ClientEtaStatus } from '@prisma/client';
 import { Observable } from 'rxjs';
 import {
@@ -60,6 +65,8 @@ export class AppointmentsService {
     @Optional() private remindersService?: RemindersService,
     @Inject(forwardRef(() => WhatsAppService))
     @Optional() private whatsappService?: WhatsAppService,
+    @Inject(forwardRef(() => ScheduleConflictResolutionEngine))
+    @Optional() private conflictEngine?: ScheduleConflictResolutionEngine,
   ) {
     this.ensureInitializedServices();
 
@@ -281,8 +288,9 @@ export class AppointmentsService {
     newStartAt: Date,
     newEndAt: Date,
     adminId?: string,
+    proposedStylistId?: string,
   ) {
-    return this.getStatusService().proposeAdminReschedule(salonId, appointmentId, newStartAt, newEndAt, adminId);
+    return this.getStatusService().proposeAdminReschedule(salonId, appointmentId, newStartAt, newEndAt, adminId, proposedStylistId);
   }
 
   async addServiceToAppointment(salonId: string, appointmentId: string, serviceId: string) {
@@ -345,6 +353,18 @@ export class AppointmentsService {
   emitSalonEvent(salonId: string, type: SalonRealtimeEvent['type'], data: any) {
     this.ensureInitializedServices();
     this.eventsService!.emitSalonEvent(salonId, type, data);
+  }
+
+  async resolveScheduleConflicts(query: ScheduleConflictQuery): Promise<ConflictResolutionResult> {
+    if (!this.conflictEngine) {
+      this.conflictEngine = new ScheduleConflictResolutionEngine(
+        this.prisma,
+        this.availabilityService!,
+        this.getStatusService(),
+        this.getCancellationService(),
+      );
+    }
+    return this.conflictEngine.resolveScheduleConflicts(query);
   }
 
   formatAppointment(appt: any) {

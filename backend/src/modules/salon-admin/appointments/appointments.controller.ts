@@ -155,6 +155,7 @@ export class AppointmentsController {
     @Param('id') appointmentId: string,
     @Body('newStartAt') newStartAt: string,
     @Body('newEndAt') newEndAt: string,
+    @Body('proposedStylistId') proposedStylistId?: string,
   ) {
     return this.appointmentsService.proposeAdminReschedule(
       salonId,
@@ -162,6 +163,7 @@ export class AppointmentsController {
       new Date(newStartAt),
       new Date(newEndAt),
       user.id,
+      proposedStylistId,
     );
   }
 }

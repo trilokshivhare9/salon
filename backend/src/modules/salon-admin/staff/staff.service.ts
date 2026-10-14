@@ -26,7 +26,7 @@ export class StaffService {
     private prisma: PrismaService,
     private appointmentsService: AppointmentsService,
     private statusEngine: StylistStatusEngine,
-  ) {}
+  ) { }
 
   private hashToSignedInt32(input: string): number {
     return crypto.createHash('sha256').update(input).digest().readInt32BE(0);

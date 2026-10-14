@@ -4,7 +4,7 @@ import { WhatsAppService } from '../../../channels/whatsapp/whatsapp.service';
 import { WhatsAppTemplateService } from '../../../channels/whatsapp/services/whatsapp-template.service';
 import { AppointmentsService } from '../appointments.service';
 import { DateTime } from 'luxon';
-import { AppointmentStatus, ClientEtaStatus, ReassignmentOutcome, AbsenceStatus, CancelledBy } from '@prisma/client';
+import { AppointmentStatus, ClientEtaStatus, AbsenceStatus, CancelledBy } from '@prisma/client';
 import { TimeUtility } from '../../../../common/utils/time.utility';
 import { resolveSalonDirectionsUrl } from '../../../../common/utils/location.utility';
 
@@ -96,12 +96,6 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
               startAt: {
                 gte: stage1Min,
                 lte: stage1Max,
-              },
-              reassignments: {
-                none: {
-                  outcome: ReassignmentOutcome.NO_REPLACEMENT,
-                  absence: { status: AbsenceStatus.ACTIVE },
-                },
               },
             },
             include: {
@@ -249,12 +243,6 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
                 gte: stage2Min,
                 lte: stage2Max,
               },
-              reassignments: {
-                none: {
-                  outcome: ReassignmentOutcome.NO_REPLACEMENT,
-                  absence: { status: AbsenceStatus.ACTIVE },
-                },
-              },
             },
             include: {
               salonUser: {
@@ -296,61 +284,6 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
                 data: { reminder10mSentAt: new Date() },
               });
               stage2Count++;
-            }
-          }
-
-          // -----------------------------------------------------------------------
-          // STAGE 2.5: Auto-Cancel After 10-Minute Response Window
-          // If the 15-min reminder was sent (reminder10mSentAt is set) and the
-          // customer has NOT responded (status still CONFIRMED, not ON_THE_WAY
-          // or CHECKED_IN), and we are within 5 minutes of start time → auto-cancel.
-          // This gives exactly 10 minutes to respond (reminder at T-15, cancel at T-5).
-          // -----------------------------------------------------------------------
-          const cutoff5m = now.plus({ minutes: 5 }).toJSDate();
-          const ghost15mAppointments = (await this.prisma.appointment.findMany({
-            where: {
-              salonId: salon.id,
-              status: AppointmentStatus.CONFIRMED,
-              reminder10mSentAt: { not: null },
-              startAt: {
-                gte: todayStart,
-                lte: cutoff5m,
-              },
-            },
-            include: {
-              salonUser: {
-                include: {
-                  user: true,
-                },
-              },
-              stylist: true,
-              service: true,
-              reassignments: {
-                where: {
-                  outcome: ReassignmentOutcome.NO_REPLACEMENT,
-                  absence: { status: AbsenceStatus.ACTIVE },
-                },
-              },
-            },
-          })) || [];
-
-          for (const appt of ghost15mAppointments) {
-            const hasUnresolvedAbsence = (appt.reassignments && appt.reassignments.length > 0);
-
-            try {
-              await this.appointmentsService.cancelBooking(salon.id, appt.id, {
-                source: hasUnresolvedAbsence ? 'SYSTEM_STORE_CLOSURE' : 'SYSTEM_AUTO_NOSHOW',
-                fault: hasUnresolvedAbsence ? 'SALON' : 'CLIENT',
-                reasonCategory: hasUnresolvedAbsence ? 'SALON_EMERGENCY' : 'CLIENT_UNRESPONSIVE',
-                reason: hasUnresolvedAbsence
-                  ? 'Auto-cancelled: specialist absent and no replacement available'
-                  : 'GHOSTED_15M_ALERT',
-              });
-              stage2CutoffCount++;
-            } catch (cancelErr: any) {
-              this.logger.error(
-                `[Reminders Worker] Failed to cancel expired appt #${appt.appointmentNumber}: ${cancelErr.message}`,
-              );
             }
           }
 

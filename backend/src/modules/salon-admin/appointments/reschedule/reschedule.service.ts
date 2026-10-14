@@ -167,6 +167,12 @@ export class RescheduleService {
       (slot) => slot.startTime === dto.newStartTime,
     );
 
+    if (availability.status === 'MAX_ADVANCE_EXCEEDED') {
+      throw new BadRequestException(
+        availability.statusReason || `Appointments can only be rescheduled up to ${salon.maxAdvanceDays || 3} days in advance.`,
+      );
+    }
+
     if (!matchingSlot) {
       throw new ConflictException('Requested new slot is not available.');
     }
@@ -407,6 +413,7 @@ export class RescheduleService {
                 status: AppointmentStatus.PENDING_RESCHEDULE,
                 proposedStartAt: startDt.toJSDate(),
                 proposedEndAt: endDt.toJSDate(),
+                proposedStylistId: targetStylistId !== appointment.stylistId ? targetStylistId : null,
                 proposedByAdminId: adminId,
                 notes: `${appointment.notes || ''} [Reschedule proposed by salon admin to ${newDateStr} at ${dto.newStartTime}]`.trim(),
               },
@@ -449,7 +456,14 @@ export class RescheduleService {
         if (userPhone && salon?.whatsappAccount?.phoneNumberId && this.whatsappService) {
           const dateFriendly = TimeUtility.formatDateFriendly(startDt.toJSDate(), timezone);
           const timeFriendly = TimeUtility.formatTime12h(startDt.toJSDate(), timezone);
-          const stylistName = updated.stylist?.name || 'Stylist';
+          let stylistName = updated.stylist?.name || 'Stylist';
+          if (targetStylistId && targetStylistId !== appointment.stylistId) {
+            const peer = await this.prisma.stylist.findUnique({
+              where: { id: targetStylistId },
+              select: { name: true },
+            });
+            if (peer?.name) stylistName = peer.name;
+          }
 
           const proposalPayload = this.templates!.buildRescheduleProposalPrompt({
             salonName: salon.name,

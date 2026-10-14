@@ -177,10 +177,11 @@ export class BookingWizard {
   }
 
   renderStep3DateTime() {
-    // Generate next 10 dates
+    // Generate dates based on centralized booking policy (default: 3 days)
+    const maxDays = this.salon?.maxAdvanceDays || 3;
     const dates = [];
     const today = new Date();
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < maxDays; i++) {
       const d = new Date();
       d.setDate(today.getDate() + i);
       const isoStr = d.toISOString().split('T')[0];

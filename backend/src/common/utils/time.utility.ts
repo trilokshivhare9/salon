@@ -1,5 +1,6 @@
 import { DateTime } from 'luxon';
 import { DayOfWeek } from '@prisma/client';
+import { BOOKING_POLICY } from '../constants/booking-policy.constants';
 
 /**
  * Universal Salon Time & Date Utility
@@ -7,6 +8,8 @@ import { DayOfWeek } from '@prisma/client';
  */
 export class TimeUtility {
   public static readonly DEFAULT_TIMEZONE = 'Asia/Kolkata';
+  public static readonly DEFAULT_MAX_ADVANCE_DAYS = BOOKING_POLICY.MAX_ADVANCE_BOOKING_DAYS;
+
 
   /**
    * Returns current Luxon DateTime in the given timezone (defaults to Asia/Kolkata).

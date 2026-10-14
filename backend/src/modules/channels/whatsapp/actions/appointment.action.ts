@@ -11,6 +11,7 @@ import { WhatsAppService } from '../whatsapp.service';
 import { ConversationState, AppointmentStatus, CancelledBy } from '@prisma/client';
 import { DateTime } from 'luxon';
 import { TimeUtility } from '../../../../common/utils/time.utility';
+import { BOOKING_POLICY } from '../../../../common/constants/booking-policy.constants';
 import { ActionContext, ActionResult } from './shared/action-context';
 import { ActionUtils } from './shared/action-utils';
 import { SlotWindowType } from '../services/time-slot-window.engine';
@@ -33,7 +34,7 @@ export class AppointmentAction {
     private readonly rescheduleService: RescheduleService,
     @Inject(forwardRef(() => WhatsAppService))
     @Optional() private readonly whatsAppService?: WhatsAppService,
-  ) {}
+  ) { }
 
   private async sendMessage(
     toPhone: string,
@@ -56,40 +57,15 @@ export class AppointmentAction {
 
     // If customer has only an unaccepted pending request, cancel directly with ZERO penalty / strikes
     if (!activeAppointment && pendingAppointment) {
-      if (this.cancellationService && typeof this.cancellationService.cancelBooking === 'function') {
-        await this.cancellationService.cancelBooking(salonId, pendingAppointment.id, {
-          source: 'CUSTOMER_WHATSAPP',
-          fault: 'CLIENT',
-          noPenalty: true,
-          reason: 'CANCELLED_BY_CLIENT_BEFORE_ACCEPTANCE',
-          cancelledBy: CancelledBy.USER,
-          skipWhatsAppNotify: true,
-          skipMoveUp: true,
-        });
-      } else if (this.appointmentsService && typeof this.appointmentsService.cancelBooking === 'function') {
-        await this.appointmentsService.cancelBooking(salonId, pendingAppointment.id, {
-          source: 'CUSTOMER_WHATSAPP',
-          fault: 'CLIENT',
-          noPenalty: true,
-          reason: 'CANCELLED_BY_CLIENT_BEFORE_ACCEPTANCE',
-          cancelledBy: CancelledBy.USER,
-          skipWhatsAppNotify: true,
-          skipMoveUp: true,
-        });
-      } else {
-        await this.prisma.appointment.update({
-          where: { id: pendingAppointment.id },
-          data: {
-            status: AppointmentStatus.CANCELLED,
-            cancellationReason: 'CANCELLED_BY_CLIENT_BEFORE_ACCEPTANCE',
-            cancelledAt: new Date(),
-            cancelledBy: CancelledBy.USER,
-            penaltyApplied: false,
-          },
-        });
-        this.appointmentsService?.emitSalonEvent(salonId, 'STATUS_UPDATED', pendingAppointment);
-        this.appointmentsService?.emitSalonEvent(salonId, 'BOOKING_CANCELLED', pendingAppointment);
-      }
+      await this.cancellationService.cancelBooking(salonId, pendingAppointment.id, {
+        source: 'CUSTOMER_WHATSAPP',
+        fault: 'CLIENT',
+        noPenalty: true,
+        reason: 'CANCELLED_BY_CLIENT_BEFORE_ACCEPTANCE',
+        cancelledBy: CancelledBy.USER,
+        skipWhatsAppNotify: true,
+        skipMoveUp: true,
+      });
       await this.session.updateConversationState(
         conversation.id,
         ConversationState.START,
@@ -205,16 +181,17 @@ export class AppointmentAction {
         return { replyMessage: payload.bodyText, state: conversation.state };
       }
 
+      const horizon = salon.maxAdvanceDays || BOOKING_POLICY.MAX_ADVANCE_BOOKING_DAYS;
       const openDates = await this.availabilityService.findAvailableDates(
         salonId,
         apptToReschedule.serviceId,
         apptToReschedule.stylistId,
-        2,
+        horizon,
         apptToReschedule.id,
       );
 
       if (openDates.length === 0) {
-        const reply = `⚠️ No available slots found in the next 7 days to reschedule. Please contact the salon directly at *${salon.phone || 'our desk'}*.`;
+        const reply = `⚠️ No available slots found in the next ${horizon} days to reschedule. Please contact the salon directly at *${salon.phone || 'our desk'}*.`;
         await this.sendMessage(
           cleanNumber,
           {
@@ -471,6 +448,7 @@ export class AppointmentAction {
 
       const newStart = appt.proposedStartAt;
       const newEnd = appt.proposedEndAt;
+      const newStylistId = (appt as any).proposedStylistId || appt.stylistId;
 
       await this.prisma.appointment.update({
         where: { id: apptId },
@@ -478,18 +456,29 @@ export class AppointmentAction {
           startAt: newStart,
           endAt: newEnd,
           appointmentDate: TimeUtility.toDbDate(newStart),
+          stylistId: newStylistId,
           status: AppointmentStatus.CONFIRMED,
           proposedStartAt: null,
           proposedEndAt: null,
+          proposedStylistId: null,
           proposedByAdminId: null,
           notes: `${appt.notes || ''} [Rescheduled by salon admin and accepted by customer.]`.trim(),
         },
       });
 
+      let finalStylistName = appt.stylist?.name || 'Stylist';
+      if ((appt as any).proposedStylistId && (appt as any).proposedStylistId !== appt.stylistId) {
+        const peer = await this.prisma.stylist.findUnique({
+          where: { id: (appt as any).proposedStylistId },
+          select: { name: true },
+        });
+        if (peer?.name) finalStylistName = peer.name;
+      }
+
       const newTimeStr = TimeUtility.formatTime12h(newStart, tz);
       const replyPayload = this.templates.buildRescheduleAcceptedReply({
         salonName: salon.name,
-        stylistName: appt.stylist?.name || 'Stylist',
+        stylistName: finalStylistName,
         newTimeStr,
       });
 
@@ -512,47 +501,14 @@ export class AppointmentAction {
         return { replyMessage: staleReply.bodyText, state: ConversationState.START };
       }
 
-      let updated: any = null;
-      if (this.cancellationService && typeof this.cancellationService.cancelBooking === 'function') {
-        const res = await this.cancellationService.cancelBooking(salonId, apptId, {
-          source: 'CUSTOMER_WHATSAPP',
-          fault: 'CLIENT',
-          noPenalty: true,
-          reason: 'DECLINED_SALON_RESCHEDULE',
-          cancelledBy: CancelledBy.USER,
-          skipWhatsAppNotify: true,
-        });
-        updated = res.appointment;
-      } else if (this.appointmentsService && typeof this.appointmentsService.cancelBooking === 'function') {
-        const res = await this.appointmentsService.cancelBooking(salonId, apptId, {
-          source: 'CUSTOMER_WHATSAPP',
-          fault: 'CLIENT',
-          noPenalty: true,
-          reason: 'DECLINED_SALON_RESCHEDULE',
-          cancelledBy: CancelledBy.USER,
-          skipWhatsAppNotify: true,
-        });
-        updated = res.appointment;
-      } else {
-        updated = await this.prisma.appointment.update({
-          where: { id: apptId },
-          data: {
-            status: AppointmentStatus.CANCELLED,
-            cancellationReason: 'DECLINED_SALON_RESCHEDULE',
-            cancelledAt: new Date(),
-            cancelledBy: CancelledBy.USER,
-            penaltyApplied: false,
-            proposedStartAt: null,
-            proposedEndAt: null,
-            proposedByAdminId: null,
-            notes: `${appt.notes || ''} [Salon reschedule declined by customer. Cancelled without penalty.]`.trim(),
-          },
-          include: { service: true, stylist: true, salonUser: { include: { user: true } } },
-        });
-        this.appointmentsService?.emitSalonEvent(salonId, 'STATUS_UPDATED', updated);
-        this.appointmentsService?.emitSalonEvent(salonId, 'APPOINTMENT_UPDATED', updated);
-        this.appointmentsService?.emitSalonEvent(salonId, 'BOOKING_CANCELLED', updated);
-      }
+      const res = await this.cancellationService.cancelBooking(salonId, apptId, {
+        source: 'CUSTOMER_WHATSAPP',
+        fault: 'CLIENT',
+        noPenalty: true,
+        reason: 'DECLINED_SALON_RESCHEDULE',
+        cancelledBy: CancelledBy.USER,
+        skipWhatsAppNotify: true,
+      });
 
       const replyPayload = this.templates.buildRescheduleDeclinedReply();
       await this.sendMessage(cleanNumber, replyPayload, phoneNumberId, salonId);

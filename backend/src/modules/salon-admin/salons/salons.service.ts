@@ -309,11 +309,11 @@ export class SalonsService {
           const eTime = item.endTime || closeTime;
           const breaksToSave = (Array.isArray(item.breaks) && !isClosed)
             ? item.breaks.map((b: any) => ({
-                id: b.id || crypto.randomUUID(),
-                startTime: b.startTime,
-                endTime: b.endTime,
-                title: b.title || 'Lunch Break',
-              }))
+              id: b.id || crypto.randomUUID(),
+              startTime: b.startTime,
+              endTime: b.endTime,
+              title: b.title || 'Lunch Break',
+            }))
             : [];
 
           await tx.salonWorkingHours.create({
@@ -598,8 +598,7 @@ Here are your salon owner login credentials:
     await this.prisma.$transaction(async (tx) => {
       // 1. Delete notifications for this salon
       await tx.notification.deleteMany({ where: { salonId } });
-      // 2. Delete booking reassignments, appointment services & appointments
-      await tx.bookingReassignment.deleteMany({ where: { salonId } });
+      // 2. Delete appointment services & appointments
       await tx.appointmentService.deleteMany({ where: { salonId } });
       await tx.appointment.deleteMany({ where: { salonId } });
       // 3. Delete conversations
@@ -1221,6 +1220,22 @@ Here are your salon owner login credentials:
       }
     }
 
+    // Resolve active conflicting appointments (propose next available slot via WhatsApp, fallback to 0-penalty cancel)
+    const resolution = await this.appointmentsService.resolveScheduleConflicts({
+      salonId,
+      scope: 'SALON',
+      dateRange: {
+        startDate: TimeUtility.toDbDate(dto.startDate),
+        endDate: TimeUtility.toDbDate(dto.endDate),
+        isPartialDay: dto.isPartialDay || false,
+        startTime: dto.startTime || null,
+        endTime: dto.endTime || null,
+      },
+      isClosedOrOff: true,
+      reason: dto.reason || 'Salon Store Closure',
+      adminId: adminId || undefined,
+    });
+
     // Save SalonClosure record
     const closure = await this.prisma.salonClosure.create({
       data: {
@@ -1233,28 +1248,9 @@ Here are your salon owner login credentials:
         endTime: dto.endTime || null,
         reason: dto.reason || 'Salon Store Closure',
         notes: dto.notes || null,
-        affectedBookingsCount: targetAppts.length,
-        cancelledCount: futureApptsToCancel.length,
         createdByAdminId: adminId || null,
       },
     });
-
-    // Batch cancel future active appointments with SALON_EMERGENCY (0 penalty to customer!)
-    for (const appt of futureApptsToCancel) {
-        if (typeof this.appointmentsService.cancelBooking === 'function') {
-          await this.appointmentsService.cancelBooking(salonId, appt.id, {
-            source: 'SYSTEM_STORE_CLOSURE',
-            fault: 'SALON',
-            reason: `Store Closure: ${dto.reason || 'Salon Emergency Closure'}`,
-          });
-        } else if (typeof this.appointmentsService.updateStatus === 'function') {
-          await this.appointmentsService.updateStatus(salonId, appt.id, {
-            status: AppointmentStatus.CANCELLED,
-            reason: `Store Closure: ${dto.reason || 'Salon Emergency Closure'}`,
-            reasonCategory: 'SALON_EMERGENCY',
-          } as any);
-        }
-    }
 
     // Emit Realtime Event to Dashboard
     this.appointmentsService.emitSalonEvent(salonId, 'STATUS_UPDATED', {

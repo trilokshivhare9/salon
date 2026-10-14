@@ -121,30 +121,15 @@ export class QuickBookingAction {
     });
 
     if (pendingRequest) {
-      if (this.appointmentsService && typeof this.appointmentsService.cancelBooking === 'function') {
-        await this.appointmentsService.cancelBooking(salonId, pendingRequest.id, {
-          source: 'CUSTOMER_WHATSAPP',
-          fault: 'CLIENT',
-          noPenalty: true,
-          reason: 'CANCELLED_BY_CLIENT_BEFORE_ACCEPTANCE',
-          cancelledBy: CancelledBy.USER,
-          skipWhatsAppNotify: true,
-          skipMoveUp: true,
-        });
-      } else {
-        await this.prisma.appointment.update({
-          where: { id: pendingRequest.id },
-          data: {
-            status: AppointmentStatus.CANCELLED,
-            cancellationReason: 'CANCELLED_BY_CLIENT_BEFORE_ACCEPTANCE',
-            cancelledAt: new Date(),
-            cancelledBy: CancelledBy.USER,
-            penaltyApplied: false,
-          },
-        });
-        this.appointmentsService?.emitSalonEvent(salonId, 'STATUS_UPDATED', pendingRequest);
-        this.appointmentsService?.emitSalonEvent(salonId, 'BOOKING_CANCELLED', pendingRequest);
-      }
+      await this.appointmentsService.cancelBooking(salonId, pendingRequest.id, {
+        source: 'CUSTOMER_WHATSAPP',
+        fault: 'CLIENT',
+        noPenalty: true,
+        reason: 'CANCELLED_BY_CLIENT_BEFORE_ACCEPTANCE',
+        cancelledBy: CancelledBy.USER,
+        skipWhatsAppNotify: true,
+        skipMoveUp: true,
+      });
     }
 
     await this.session.updateConversationState(

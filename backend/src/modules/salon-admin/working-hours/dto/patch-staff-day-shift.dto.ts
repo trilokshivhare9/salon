@@ -15,6 +15,11 @@ export class PatchStaffDayShiftDto {
   })
   startTime?: string;
 
+  @ApiPropertyOptional({ example: false, description: 'Mark whether this day schedule is customized from salon hours' })
+  @IsBoolean()
+  @IsOptional()
+  isCustomized?: boolean;
+
   @ApiPropertyOptional({ example: '18:00', description: 'Shift end time (HH:mm format, 24-hour)' })
   @IsString()
   @IsOptional()

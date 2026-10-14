@@ -219,7 +219,6 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
       completed: 0,
       cancelled: 0,
       rejected: 0,
-      noShow: 0,
       pendingAcceptance: 0,
       pendingReschedule: 0,
     };

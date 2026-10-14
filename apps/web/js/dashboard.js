@@ -1291,7 +1291,7 @@ export class SalonDashboard {
         }
         if (status === 'PENDING_RESCHEDULE') return { tier: 6, isUpcoming: true, isOverdue: false };
         if (status === 'COMPLETED') return { tier: 7, isUpcoming: false, isOverdue: false };
-        if (status === 'CANCELLED' || status === 'NO_SHOW' || status === 'REJECTED') {
+        if (status === 'CANCELLED' || status === 'REJECTED') {
           return { tier: 8, isUpcoming: false, isOverdue: false };
         }
         return { tier: 9, isUpcoming: false, isOverdue: false };
@@ -1332,7 +1332,7 @@ export class SalonDashboard {
       } else if (this.queueFilter === 'COMPLETED') {
         filteredAppointments = sortedAppointments.filter((a) => a.status === 'COMPLETED');
       } else if (this.queueFilter === 'CANCELLED') {
-        filteredAppointments = sortedAppointments.filter((a) => ['CANCELLED', 'NO_SHOW', 'REJECTED'].includes(a.status));
+        filteredAppointments = sortedAppointments.filter((a) => ['CANCELLED', 'REJECTED'].includes(a.status));
       }
 
       const waitingCount =
@@ -1570,7 +1570,7 @@ export class SalonDashboard {
         const initials = getInitials(customerName);
         const avatarCls = getAvatarColor(customerName);
         const isDone = appt.status === 'COMPLETED';
-        const isCancelled = ['CANCELLED', 'NO_SHOW', 'REJECTED'].includes(appt.status);
+        const isCancelled = ['CANCELLED', 'REJECTED'].includes(appt.status);
         const statusKey = (appt.status || 'CONFIRMED').toLowerCase();
         const queueItemEval = evaluateQueueItem(appt);
         const isOverdue = queueItemEval.isOverdue;
@@ -1850,7 +1850,6 @@ export class SalonDashboard {
       case 'COMPLETED': return '#10b981';
       case 'CANCELLED': return '#f43f5e';
       case 'REJECTED': return '#f43f5e';
-      case 'NO_SHOW': return '#64748b';
       default: return '#8B3DFF';
     }
   }
@@ -2118,6 +2117,10 @@ export class SalonDashboard {
       const salonStart = salonWh?.startTime || salonMinStart || defaultSalonStart;
       const salonEnd = salonWh?.endTime || salonMaxEnd || defaultSalonEnd;
 
+      // Explicit isCustomized check per day:
+      // True only if specifically customized for this stylist
+      const isCustomized = Boolean(customWh?.isCustomized);
+
       let isWorking = true;
       let startTime = salonStart;
       let endTime = salonEnd;
@@ -2133,45 +2136,38 @@ export class SalonDashboard {
           endTime: b.endTime,
           isCustomized: b.isCustomized === true,
         }));
-        if (customWh && st.followsSalonSchedule !== true) {
-          isWorking = customWh.isWorking !== undefined ? Boolean(customWh.isWorking) : !customWh.isOff;
-          startTime = customWh.startTime || salonStart;
-          endTime = customWh.endTime || salonEnd;
-        } else if (salonWh) {
-          isWorking = !isSalonClosed;
-          startTime = salonStart;
-          endTime = salonEnd;
-        }
-      } else if (customWh && st.followsSalonSchedule !== true) {
+      } else if (customWh && Array.isArray(customWh.breaks)) {
+        breaks = customWh.breaks.map((b) => ({
+          id: b.id,
+          salonBreakId: b.salonBreakId || null,
+          title: (b.title || 'Break').trim(),
+          startTime: b.startTime,
+          endTime: b.endTime,
+          isCustomized: b.isCustomized === true,
+        }));
+      } else if (customWh && customWh.breakStartTime && customWh.breakEndTime) {
+        breaks = [{ id: null, salonBreakId: null, title: 'Lunch Break', startTime: customWh.breakStartTime, endTime: customWh.breakEndTime, isCustomized: true }];
+      } else if (salonWh && Array.isArray(salonWh.breaks)) {
+        breaks = salonWh.breaks.map((b) => ({
+          id: b.id,
+          salonBreakId: b.id,
+          title: (b.title || 'Break').trim(),
+          startTime: b.startTime,
+          endTime: b.endTime,
+          isCustomized: false,
+        }));
+      }
+
+      // Schedule evaluation:
+      if (isCustomized) {
         isWorking = customWh.isWorking !== undefined ? Boolean(customWh.isWorking) : !customWh.isOff;
         startTime = customWh.startTime || salonStart;
         endTime = customWh.endTime || salonEnd;
-        if (Array.isArray(customWh.breaks)) {
-          breaks = customWh.breaks.map((b) => ({
-            id: b.id,
-            salonBreakId: b.salonBreakId || null,
-            title: (b.title || 'Break').trim(),
-            startTime: b.startTime,
-            endTime: b.endTime,
-            isCustomized: b.isCustomized === true,
-          }));
-        } else if (customWh.breakStartTime && customWh.breakEndTime) {
-          breaks = [{ id: null, salonBreakId: null, title: 'Lunch Break', startTime: customWh.breakStartTime, endTime: customWh.breakEndTime, isCustomized: true }];
-        }
-      } else if (salonWh) {
+      } else {
+        // Uncustomized day: directly mirrors salon facility operating status!
         isWorking = !isSalonClosed;
         startTime = salonStart;
         endTime = salonEnd;
-        if (Array.isArray(salonWh.breaks)) {
-          breaks = salonWh.breaks.map((b) => ({
-            id: b.id,
-            salonBreakId: b.id,
-            title: (b.title || 'Break').trim(),
-            startTime: b.startTime,
-            endTime: b.endTime,
-            isCustomized: false,
-          }));
-        }
       }
 
       // Facility Boundary Check: If salon status is closed for this day, stylist cannot work
@@ -2188,6 +2184,7 @@ export class SalonDashboard {
         friendlyDay: day.charAt(0) + day.slice(1).toLowerCase(),
         dayShort: day.slice(0, 3),
         isWorking: isSalonClosed ? false : isWorking,
+        isCustomized,
         isSalonClosed,
         startTime,
         endTime,
@@ -2218,6 +2215,10 @@ export class SalonDashboard {
         detectedMasterEnd = e;
       }
     }
+
+    // Hard Facility Boundary clamp: Stylist master shift cannot exceed salon facility hours
+    if (salonMinStart && detectedMasterStart < salonMinStart) detectedMasterStart = salonMinStart;
+    if (salonMaxEnd && detectedMasterEnd > salonMaxEnd) detectedMasterEnd = salonMaxEnd;
 
     // Group breaks into Routine Breaks with isCustomized tracking
     let detectedRoutineBreaks = [];
@@ -2346,7 +2347,7 @@ export class SalonDashboard {
                   <div class="bulk-time-group">
                     <span class="bulk-time-label">Shift Start</span>
                     <div class="bulk-time-inp-wrap">
-                      <input type="time" class="form-control bulk-time-inp" id="master-bulk-start" value="${masterStart}" />
+                      <input type="time" class="form-control bulk-time-inp" id="master-bulk-start" value="${masterStart}" min="${salonMinStart}" max="${salonMaxEnd}" />
                       <span class="bulk-time-preview" id="master-bulk-start-preview">${formatTime12h(masterStart)}</span>
                     </div>
                   </div>
@@ -2354,7 +2355,7 @@ export class SalonDashboard {
                   <div class="bulk-time-group">
                     <span class="bulk-time-label">Shift End</span>
                     <div class="bulk-time-inp-wrap">
-                      <input type="time" class="form-control bulk-time-inp" id="master-bulk-end" value="${masterEnd}" />
+                      <input type="time" class="form-control bulk-time-inp" id="master-bulk-end" value="${masterEnd}" min="${salonMinStart}" max="${salonMaxEnd}" />
                       <span class="bulk-time-preview" id="master-bulk-end-preview">${formatTime12h(masterEnd)}</span>
                     </div>
                   </div>
@@ -2371,6 +2372,21 @@ export class SalonDashboard {
                 </div>
                 <span class="stylist-roster-count" id="roster-active-days-count">${activeWorkingDaysCount} of 7 Active Days</span>
               </div>
+
+              <!-- Dedicated Quick-Sync Banner Directly Above Monday -->
+              <div class="roster-sync-banner" id="roster-sync-banner-row" role="button" tabindex="0">
+                <div class="roster-sync-banner-left">
+                  <span class="roster-sync-banner-icon">🏬</span>
+                  <div class="roster-sync-banner-info">
+                    <span class="roster-sync-banner-title">Sync with Salon Hours</span>
+                    <span class="roster-sync-banner-sub">Store: ${formatTime12h(salonMinStart)} – ${formatTime12h(salonMaxEnd)}</span>
+                  </div>
+                </div>
+                <button type="button" class="btn-banner-reset-sync" id="btn-open-sync-all-salon-sheet" title="Reset all days to match salon hours">
+                  <span>Reset ↺</span>
+                </button>
+              </div>
+
               <div id="stylist-roster-rows-container">
                 ${this.renderStaffRosterRowsHtml()}
               </div>
@@ -2446,15 +2462,22 @@ export class SalonDashboard {
           if (!effEnd || b.endTime > effEnd) effEnd = b.endTime;
         });
 
+        const salonStart = d?.salonStart || this.salonProfile?.defaultStartTime;
+        const salonEnd = d?.salonEnd || this.salonProfile?.defaultEndTime;
+        const isIdenticalToSalon = !isSalonClosed && isWorking && effStart === salonStart && effEnd === salonEnd;
+        const effectiveIsCustomized = isIdenticalToSalon ? false : (d ? Boolean(d.isCustomized) : false);
+
         if (d) {
           d.startTime = effStart;
           d.endTime = effEnd;
+          d.isCustomized = effectiveIsCustomized;
         }
 
         if (isWorking && effStart < effEnd) {
           hoursPayload.push({
             dayOfWeek: day,
             isWorking,
+            isCustomized: effectiveIsCustomized,
             startTime: effStart,
             endTime: effEnd,
             breaks,
@@ -2466,6 +2489,7 @@ export class SalonDashboard {
           hoursPayload.push({
             dayOfWeek: day,
             isWorking: false,
+            isCustomized,
             startTime: effStart,
             endTime: effEnd,
             breaks,
@@ -2477,17 +2501,22 @@ export class SalonDashboard {
       }
 
       try {
-        const updated = await ApiClient.updateStaffWorkingHours(staffId, hoursPayload, false);
+        const anyCustom = hoursPayload.some((h) => h.isCustomized);
+        const followsSalon = !anyCustom;
+        const updated = await ApiClient.updateStaffWorkingHours(staffId, hoursPayload, followsSalon);
         const st = (this.staffList || []).find((s) => s.id === staffId);
         if (st) {
           st.workingHours = updated && Array.isArray(updated) && updated.length > 0 ? updated : hoursPayload;
-          st.followsSalonSchedule = false;
+          st.followsSalonSchedule = followsSalon;
         }
         if (this.currentStaffHoursState && this.currentStaffHoursState.staffId === staffId) {
-          this.currentStaffHoursState.followsSalon = false;
+          this.currentStaffHoursState.followsSalon = followsSalon;
         }
         if (statusBadge) {
           statusBadge.innerHTML = `<span class="autosave-dot"></span><span class="autosave-text">✓ Auto-saved</span>`;
+        }
+        if (updated?.affectedBookingsCount > 0) {
+          this.showToast?.(updated.message || `${updated.affectedBookingsCount} booking(s) automatically sent reschedule request via WhatsApp.`, 'info');
         }
         ApiClient.getSalonWorkingHours(true).then((freshWh) => {
           if (Array.isArray(freshWh) && freshWh.length > 0) {
@@ -2564,11 +2593,13 @@ export class SalonDashboard {
       const d = this.currentStaffHoursState.days[day];
       if (!d) return '';
       const isSalonClosed = Boolean(d.isSalonClosed);
+      const isCustomized = Boolean(d.isCustomized);
       const isWorking = !isSalonClosed && Boolean(d.isWorking);
 
       let statusText = 'Weekly Off';
       let statusStyle = '';
       let statusIcon = Icons.clock ? Icons.clock({ size: 12, color: '#64748b' }) : '';
+      let chipHtml = '';
 
       if (isSalonClosed) {
         statusText = 'Salon Closed';
@@ -2577,6 +2608,11 @@ export class SalonDashboard {
       } else if (isWorking) {
         statusText = `${formatTime12h(d.startTime)} – ${formatTime12h(d.endTime)}`;
         statusIcon = Icons.clock ? Icons.clock({ size: 12, color: '#a78bfa' }) : '';
+        if (isCustomized) {
+          chipHtml = `<span class="stylist-custom-chip btn-revert-custom-sheet" data-day="${day}" title="Customized shift · Click to revert to salon hours">Custom ↺</span>`;
+        }
+      } else if (isCustomized) {
+        chipHtml = `<span class="stylist-custom-chip personal-off btn-revert-custom-sheet" data-day="${day}" title="Personal weekly off · Click to revert to salon hours">Personal Off ↺</span>`;
       }
 
       const badgeStyle = isSalonClosed
@@ -2588,19 +2624,17 @@ export class SalonDashboard {
         : '';
 
       return `
-        <div class="stylist-roster-row ${!isWorking ? 'is-off' : ''}" data-day="${day}" title="${isSalonClosed ? `Salon is closed on ${d.friendlyDay}` : `Tap to customize ${d.friendlyDay} hours`}">
+        <div class="stylist-roster-row ${!isWorking ? 'is-off' : ''} ${isSalonClosed ? 'salon-closed' : ''}" data-day="${day}" title="${isSalonClosed ? `Salon is closed on ${d.friendlyDay}` : `Tap to customize ${d.friendlyDay} hours`}">
           <div class="stylist-roster-left">
             <span class="stylist-day-badge ${isWorking ? 'working' : 'off'}" style="${badgeStyle}">${d.dayShort}</span>
             <div class="stylist-roster-timing-wrap">
-              <span class="stylist-roster-clock-icon ${!isWorking ? 'is-off' : ''}">
-                ${statusIcon}
-              </span>
               <span class="stylist-roster-time ${!isWorking ? 'is-off' : ''}" style="${statusStyle}">
                 ${statusText}
               </span>
             </div>
           </div>
           <div class="stylist-roster-right">
+            ${chipHtml}
             <label class="roster-day-switch" style="${switchWrapStyle}" title="${isSalonClosed ? `Cannot enable: Salon is closed on ${d.friendlyDay}` : `Turn ${d.friendlyDay} ${isWorking ? 'Off' : 'On'}`}">
               <input type="checkbox" class="roster-switch-input" data-day="${day}" ${isWorking && !isSalonClosed ? 'checked' : ''} ${isSalonClosed ? 'disabled' : ''} />
               <span class="roster-switch-slider"></span>
@@ -2773,6 +2807,19 @@ export class SalonDashboard {
     const rowsContainer = document.getElementById('stylist-roster-rows-container');
     if (!rowsContainer) return;
 
+    // Attach Quick-Sync Banner and Reset Button
+    const bannerSync = document.getElementById('roster-sync-banner-row');
+    const btnSyncAll = document.getElementById('btn-open-sync-all-salon-sheet');
+    [bannerSync, btnSyncAll].forEach((el) => {
+      if (el) {
+        el.onclick = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this.openResetAllToSalonHoursBottomSheet();
+        };
+      }
+    });
+
     // 1. Instant Working/Off Toggle Switch (1-click, auto-saves)
     rowsContainer.querySelectorAll('.roster-switch-input').forEach((toggle) => {
       toggle.onclick = (e) => {
@@ -2797,9 +2844,18 @@ export class SalonDashboard {
         dayData.isWorking = isWorking;
 
         if (isWorking && (!this.currentStaffHoursState.days[day].startTime || !this.currentStaffHoursState.days[day].endTime)) {
-          this.currentStaffHoursState.days[day].startTime = this.currentStaffHoursState.masterShift?.startTime || '10:00';
-          this.currentStaffHoursState.days[day].endTime = this.currentStaffHoursState.masterShift?.endTime || '19:00';
+          this.currentStaffHoursState.days[day].startTime = dayData.salonStart || this.currentStaffHoursState.masterShift?.startTime || '09:00';
+          this.currentStaffHoursState.days[day].endTime = dayData.salonEnd || this.currentStaffHoursState.masterShift?.endTime || '19:00';
         }
+
+        const swhStart = dayData.salonStart || this.salonProfile?.defaultStartTime || '09:00';
+        const swhEnd = dayData.salonEnd || this.salonProfile?.defaultEndTime || '19:00';
+        const isSalonClosed = Boolean(dayData.isSalonClosed);
+        const curStart = this.currentStaffHoursState.days[day].startTime;
+        const curEnd = this.currentStaffHoursState.days[day].endTime;
+
+        const isIdenticalToSalon = !isSalonClosed && isWorking && curStart === swhStart && curEnd === swhEnd;
+        dayData.isCustomized = !isIdenticalToSalon;
 
         this.syncRoutineBreaksToDays();
         this.updateStaffHoursTableUI();
@@ -2807,10 +2863,19 @@ export class SalonDashboard {
       };
     });
 
-    // 2. Click row to open customize modal (ignores clicks on the switch toggle)
+    // 1.5 Click Custom Chip to open Revert Bottom Sheet
+    rowsContainer.querySelectorAll('.btn-revert-custom-sheet').forEach((chip) => {
+      chip.onclick = (e) => {
+        e.stopPropagation();
+        const day = chip.getAttribute('data-day');
+        this.openRevertCustomShiftBottomSheet(day);
+      };
+    });
+
+    // 2. Click row to open customize modal (ignores clicks on the switch toggle or revert chip)
     rowsContainer.querySelectorAll('.stylist-roster-row').forEach((row) => {
       row.onclick = (e) => {
-        if (e.target.closest('.roster-day-switch')) return;
+        if (e.target.closest('.roster-day-switch') || e.target.closest('.btn-revert-custom-sheet')) return;
         const day = row.getAttribute('data-day');
         this.openStaffDayRosterModal(day);
       };
@@ -3545,8 +3610,8 @@ export class SalonDashboard {
             <div style="display: flex; align-items: center; gap: 10px;">
               <span class="wh-modal-day-badge" style="${isSalonClosed ? 'background: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.4); color: #f87171;' : ''}">${dayData.dayShort}</span>
               <div>
-                <h3 style="margin: 0; font-size: 1.05rem; font-weight: 800; color: #fff;">${dayData.friendlyDay} Shift</h3>
-                <p style="margin: 2px 0 0 0; font-size: 0.72rem; color: #94a3b8;">Set working hours for ${this.currentStaffHoursState.staffName}</p>
+                <h3 style="margin: 0; font-size: 0.92rem; font-weight: 700; color: #fff;">${dayData.friendlyDay} Shift</h3>
+                <p style="margin: 2px 0 0 0; font-size: 0.68rem; color: #94a3b8;">Set working hours for ${this.currentStaffHoursState.staffName}</p>
               </div>
             </div>
             <button class="close-btn" id="btn-close-roster-modal">&times;</button>
@@ -3587,18 +3652,21 @@ export class SalonDashboard {
               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
                 <div class="form-group" style="margin: 0;">
                   <label style="font-size: 0.7rem; color: #94a3b8; margin-bottom: 4px; display: block;">Start Time</label>
-                  <input type="time" class="form-control bulk-time-inp" id="modal-roster-start" value="${dayData.startTime}" />
+                  <input type="time" class="form-control bulk-time-inp" id="modal-roster-start" value="${dayData.startTime}" min="${dayData.salonStart}" max="${dayData.salonEnd}" />
                   <div id="modal-roster-start-preview" style="font-size: 0.7rem; color: #a5b4fc; margin-top: 3px; text-align: center; font-weight: 600;">
                     ${formatTime12h(dayData.startTime)}
                   </div>
                 </div>
                 <div class="form-group" style="margin: 0;">
                   <label style="font-size: 0.7rem; color: #94a3b8; margin-bottom: 4px; display: block;">End Time</label>
-                  <input type="time" class="form-control bulk-time-inp" id="modal-roster-end" value="${dayData.endTime}" />
+                  <input type="time" class="form-control bulk-time-inp" id="modal-roster-end" value="${dayData.endTime}" min="${dayData.salonStart}" max="${dayData.salonEnd}" />
                   <div id="modal-roster-end-preview" style="font-size: 0.7rem; color: #a5b4fc; margin-top: 3px; text-align: center; font-weight: 600;">
                     ${formatTime12h(dayData.endTime)}
                   </div>
                 </div>
+              </div>
+              <div style="font-size: 0.68rem; color: #a78bfa; margin-top: 6px; text-align: center;">
+                🏢 Allowed store operating window: <strong>${formatTime12h(dayData.salonStart)} – ${formatTime12h(dayData.salonEnd)}</strong>
               </div>
 
               <!-- Routine Breaks Indicator -->
@@ -3621,20 +3689,19 @@ export class SalonDashboard {
                 `;
       })()}
             </div>
-
-            <!-- Quick Option: Copy to All 7 Days -->
-            <div style="background: rgba(139, 61, 255, 0.07); border: 1px dashed rgba(139, 61, 255, 0.3); border-radius: 8px; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-              <span style="font-size: 0.72rem; color: #c4b5fd;">Copy this shift across the week?</span>
-              <button type="button" class="btn btn-secondary btn-sm" id="modal-btn-copy-shift-all" style="font-size: 0.68rem; height: 26px; padding: 0 10px; white-space: nowrap; font-weight: 700;">
-                ⚡ Copy to All 7 Days
-              </button>
-            </div>
           </div>
 
-          <div class="modal-footer" style="border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 12px; display: flex; justify-content: space-between;">
-            <button type="button" class="btn btn-secondary" id="modal-btn-roster-cancel" style="font-size: 0.78rem;">Cancel</button>
-            <button type="button" class="btn btn-primary" id="modal-btn-roster-save" style="font-size: 0.78rem; font-weight: 700; padding: 0 18px;">
-              ✓ Update Shift
+          <div class="modal-footer" style="border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 12px; display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <button type="button" class="btn btn-secondary" id="modal-btn-roster-cancel" style="height: 36px; padding: 0 16px; font-size: 0.78rem; font-weight: 500; border-radius: 8px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); color: #94a3b8; cursor: pointer; transition: all 0.15s ease;">Cancel</button>
+              ${dayData.isCustomized ? `
+                <button type="button" class="btn btn-secondary btn-sm" id="modal-btn-roster-reset-salon" style="height: 36px; padding: 0 12px; font-size: 0.72rem; font-weight: 600; border-radius: 8px; background: rgba(139, 92, 246, 0.12); border: 1px solid rgba(139, 92, 246, 0.28); color: #c4b5fd; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; transition: all 0.15s ease;" title="Reset to standard salon facility hours">
+                  ↺ Reset to Salon Hours
+                </button>
+              ` : ''}
+            </div>
+            <button type="button" class="btn btn-primary" id="modal-btn-roster-save" style="height: 36px; padding: 0 20px; font-size: 0.78rem; font-weight: 600; border-radius: 8px; background: linear-gradient(135deg, #7c3aed, #6366f1); border: none; color: #ffffff; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 2px 10px rgba(124, 58, 237, 0.3); transition: all 0.15s ease;">
+              <span>Update Shift</span>
             </button>
           </div>
         </div>
@@ -3678,36 +3745,6 @@ export class SalonDashboard {
       if (endPrev) endPrev.textContent = formatTime12h(endInp.value);
     });
 
-    modalContainer.querySelector('#modal-btn-copy-shift-all')?.addEventListener('click', (e) => {
-      e.preventDefault();
-      const sVal = startInp?.value || dayData.startTime || '';
-      const eVal = endInp?.value || dayData.endTime || '';
-      if (isWorking && (!sVal || !eVal || sVal >= eVal)) {
-        alert(`Shift start (${formatTime12h(sVal)}) must be earlier than shift end (${formatTime12h(eVal)}).`);
-        return;
-      }
-      const daysArr = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
-      daysArr.forEach((dKey) => {
-        const targetDay = this.currentStaffHoursState.days[dKey];
-        if (targetDay) {
-          if (targetDay.isSalonClosed) {
-            targetDay.isWorking = false; // Never enable shifts on closed salon days
-          } else {
-            targetDay.isWorking = isWorking;
-            targetDay.startTime = sVal;
-            targetDay.endTime = eVal;
-          }
-        }
-      });
-      if (isWorking) {
-        this.currentStaffHoursState.masterShift = { startTime: sVal, endTime: eVal };
-      }
-      closeModal();
-      this.updateStaffHoursTableUI();
-      this.autoSaveStaffSchedule(this.currentStaffHoursState?.staffId, true);
-      this.showToast(`Applied ${dayData.friendlyDay} shift across active days (auto-saved)`, 'success');
-    });
-
     modalContainer.querySelector('#modal-btn-roster-save')?.addEventListener('click', (e) => {
       e.preventDefault();
       const sVal = startInp?.value || dayData.startTime || '';
@@ -3721,15 +3758,299 @@ export class SalonDashboard {
           alert(`Shift start (${formatTime12h(sVal)}) must be earlier than shift end (${formatTime12h(eVal)}).`);
           return;
         }
+        const swhStart = dayData.salonStart || this.salonProfile?.defaultStartTime || '09:00';
+        const swhEnd = dayData.salonEnd || this.salonProfile?.defaultEndTime || '19:00';
+        if (sVal < swhStart || eVal > swhEnd) {
+          alert(`Facility Boundary Error: Shift (${formatTime12h(sVal)} – ${formatTime12h(eVal)}) cannot extend outside salon facility operating hours (${formatTime12h(swhStart)} – ${formatTime12h(swhEnd)}). Stylists must work under salon hours.`);
+          return;
+        }
       }
-      this.currentStaffHoursState.days[dayKey].isWorking = isSalonClosed ? false : isWorking;
+
+      const swhStart = dayData.salonStart || this.salonProfile?.defaultStartTime || '09:00';
+      const swhEnd = dayData.salonEnd || this.salonProfile?.defaultEndTime || '19:00';
+      const finalIsWorking = isSalonClosed ? false : isWorking;
+      const isIdenticalToSalon = !isSalonClosed && finalIsWorking && sVal === swhStart && eVal === swhEnd;
+
+      this.currentStaffHoursState.days[dayKey].isWorking = finalIsWorking;
       this.currentStaffHoursState.days[dayKey].startTime = sVal;
       this.currentStaffHoursState.days[dayKey].endTime = eVal;
+      this.currentStaffHoursState.days[dayKey].isCustomized = !isIdenticalToSalon;
 
       closeModal();
       this.updateStaffHoursTableUI();
       this.autoSaveStaffSchedule(this.currentStaffHoursState?.staffId, true);
       this.showToast(`${dayData.friendlyDay} shift updated (auto-saved)`, 'success');
+    });
+
+    modalContainer.querySelector('#modal-btn-roster-reset-salon')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      const swh = dayData.salonStart || this.salonProfile?.defaultStartTime || '09:00';
+      const ewh = dayData.salonEnd || this.salonProfile?.defaultEndTime || '21:00';
+      this.currentStaffHoursState.days[dayKey].startTime = swh;
+      this.currentStaffHoursState.days[dayKey].endTime = ewh;
+      this.currentStaffHoursState.days[dayKey].isWorking = !isSalonClosed;
+      this.currentStaffHoursState.days[dayKey].isCustomized = false;
+
+      closeModal();
+      this.updateStaffHoursTableUI();
+      this.autoSaveStaffSchedule(this.currentStaffHoursState?.staffId, true);
+      this.showToast(`Reset ${dayData.friendlyDay} to salon standard hours (auto-saved)`, 'success');
+    });
+  }
+
+  openRevertCustomShiftBottomSheet(dayKey) {
+    if (!this.currentStaffHoursState?.days) return;
+    const dayData = this.currentStaffHoursState.days[dayKey];
+    if (!dayData) return;
+
+    const modalContainer = document.getElementById('modal-container') || document.body;
+    const staffName = this.currentStaffHoursState.staffName || 'Specialist';
+    const isSalonClosed = Boolean(dayData.isSalonClosed);
+    const swhStart = dayData.salonStart || this.salonProfile?.defaultStartTime || '09:00';
+    const swhEnd = dayData.salonEnd || this.salonProfile?.defaultEndTime || '19:00';
+
+    modalContainer.innerHTML = `
+      <div class="modal-backdrop show" id="revert-custom-sheet-backdrop" style="background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(6px); z-index: 1050; display: flex; align-items: flex-end; justify-content: center;">
+        <div class="bottom-sheet-content" style="background: #0f131f; border-top: 1px solid rgba(255, 255, 255, 0.1); border-radius: 18px 18px 0 0; width: 100%; max-width: 420px; padding: 14px 18px 18px 18px; box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.7); animation: slideUp 0.22s cubic-bezier(0.16, 1, 0.3, 1);">
+          <div style="width: 32px; height: 3px; background: rgba(255, 255, 255, 0.2); border-radius: 999px; margin: 0 auto 12px auto;"></div>
+          
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); padding-bottom: 10px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="background: rgba(139, 92, 246, 0.14); color: #c4b5fd; border: 1px solid rgba(139, 92, 246, 0.28); border-radius: 5px; width: 32px; height: 20px; font-weight: 800; font-size: 0.62rem; display: inline-flex; align-items: center; justify-content: center; text-transform: uppercase; letter-spacing: 0.4px;">${dayData.dayShort}</span>
+              <div>
+                <h3 style="margin: 0; font-size: 0.86rem; font-weight: 700; color: #f8fafc; letter-spacing: -0.15px;">Custom Schedule Active</h3>
+                <p style="margin: 1px 0 0 0; font-size: 0.68rem; color: #94a3b8;">${dayData.friendlyDay} schedule for ${staffName}</p>
+              </div>
+            </div>
+            <button type="button" class="close-btn" id="btn-close-revert-sheet" style="background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.08); width: 24px; height: 24px; border-radius: 50%; font-size: 13px; color: #94a3b8; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1; transition: all 0.15s ease;">&times;</button>
+          </div>
+
+          <!-- Unified Modern Comparison Card -->
+          <div style="background: rgba(255, 255, 255, 0.025); border: 1px solid rgba(255, 255, 255, 0.07); border-radius: 10px; overflow: hidden; margin-bottom: 10px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 9px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.05);">
+              <div style="display: flex; align-items: center; gap: 7px;">
+                <span style="font-size: 0.68rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.3px;">Current Shift</span>
+                <span class="stylist-custom-chip" style="font-size: 0.5rem; padding: 1px 5px;">CUSTOM</span>
+              </div>
+              <span style="font-size: 0.8rem; font-weight: 600; color: #f8fafc; font-feature-settings: 'tnum';">
+                ${!dayData.isWorking ? '<span style="color: #94a3b8; font-style: italic; font-weight: 500;">Personal Weekly Off</span>' : `${formatTime12h(dayData.startTime)} – ${formatTime12h(dayData.endTime)}`}
+              </span>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 9px 12px; background: rgba(139, 92, 246, 0.025);">
+              <div style="display: flex; align-items: center; gap: 7px;">
+                <span style="font-size: 0.68rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.3px;">Salon Hours</span>
+                <span style="font-size: 0.5rem; font-weight: 700; color: #a78bfa; background: rgba(139, 92, 246, 0.12); border: 1px solid rgba(139, 92, 246, 0.25); border-radius: 4px; padding: 1px 5px; text-transform: uppercase; letter-spacing: 0.3px;">Store</span>
+              </div>
+              <span style="font-size: 0.8rem; font-weight: 600; color: ${isSalonClosed ? '#f87171' : '#38bdf8'}; font-feature-settings: 'tnum';">
+                ${isSalonClosed ? '🔒 Salon Closed' : `${formatTime12h(swhStart)} – ${formatTime12h(swhEnd)}`}
+              </span>
+            </div>
+          </div>
+
+          <p style="margin: 0 0 12px 0; font-size: 0.7rem; color: #64748b; line-height: 1.4;">
+            Reverts <strong>${dayData.friendlyDay}</strong> back to standard salon facility operating hours.
+          </p>
+
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <button type="button" class="btn btn-primary" id="btn-confirm-revert-salon" style="width: 100%; height: 36px; font-weight: 600; font-size: 0.78rem; background: linear-gradient(135deg, #7c3aed, #6366f1); border: none; border-radius: 8px; color: #ffffff; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 2px 10px rgba(124, 58, 237, 0.3); white-space: nowrap; transition: all 0.15s ease;">
+              <span style="font-size: 0.86rem; line-height: 1;">↺</span>
+              <span>Revert to Salon Hours</span>
+            </button>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 1px;">
+              <button type="button" class="btn btn-secondary" id="btn-edit-from-sheet" style="font-size: 0.72rem; font-weight: 500; height: 32px; border-radius: 7px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); color: #cbd5e1; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; transition: all 0.15s ease;">
+                <span>✏️</span>
+                <span>Edit Hours</span>
+              </button>
+              <button type="button" class="btn btn-secondary" id="btn-cancel-revert-sheet" style="font-size: 0.72rem; font-weight: 500; height: 32px; border-radius: 7px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); color: #94a3b8; cursor: pointer; transition: all 0.15s ease;">
+                Keep Custom
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const closeSheet = () => (modalContainer.innerHTML = '');
+    modalContainer.querySelector('#btn-close-revert-sheet')?.addEventListener('click', closeSheet);
+    modalContainer.querySelector('#btn-cancel-revert-sheet')?.addEventListener('click', closeSheet);
+    modalContainer.querySelector('#revert-custom-sheet-backdrop')?.addEventListener('click', (e) => {
+      if (e.target.id === 'revert-custom-sheet-backdrop') closeSheet();
+    });
+
+    modalContainer.querySelector('#btn-edit-from-sheet')?.addEventListener('click', () => {
+      closeSheet();
+      this.openStaffDayRosterModal(dayKey);
+    });
+
+    modalContainer.querySelector('#btn-confirm-revert-salon')?.addEventListener('click', () => {
+      this.currentStaffHoursState.days[dayKey].startTime = swhStart;
+      this.currentStaffHoursState.days[dayKey].endTime = swhEnd;
+      this.currentStaffHoursState.days[dayKey].isWorking = !isSalonClosed;
+      this.currentStaffHoursState.days[dayKey].isCustomized = false;
+
+      closeSheet();
+      this.updateStaffHoursTableUI();
+      this.autoSaveStaffSchedule(this.currentStaffHoursState?.staffId, true);
+      this.showToast(`${dayData.friendlyDay} restored to original salon hours (${formatTime12h(swhStart)} – ${formatTime12h(swhEnd)})`, 'success');
+    });
+  }
+
+  openResetAllToSalonHoursBottomSheet() {
+    if (!this.currentStaffHoursState?.days) return;
+    const modalContainer = document.getElementById('modal-container') || document.body;
+    const staffId = this.currentStaffHoursState.staffId;
+    const staffName = this.currentStaffHoursState.staffName || 'Specialist';
+
+    const daysArr = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+    const customizedDays = daysArr.filter((d) => this.currentStaffHoursState.days[d]?.isCustomized);
+    const customCount = customizedDays.length;
+
+    const activeSalonDays = (this.salonWorkingHours || []).filter((h) => !h.isClosed);
+    const salonStart = activeSalonDays.length > 0 ? activeSalonDays[0].startTime : (this.salonProfile?.defaultStartTime || '09:00');
+    const salonEnd = activeSalonDays.length > 0 ? activeSalonDays[0].endTime : (this.salonProfile?.defaultEndTime || '19:00');
+    const closedSalonDays = (this.salonWorkingHours || []).filter((h) => h.isClosed);
+
+    modalContainer.innerHTML = `
+      <div class="modal-backdrop show" id="reset-all-salon-sheet-backdrop" style="background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(6px); z-index: 1050; display: flex; align-items: flex-end; justify-content: center;">
+        <div class="bottom-sheet-content" style="background: #0f131f; border-top: 1px solid rgba(255, 255, 255, 0.1); border-radius: 18px 18px 0 0; width: 100%; max-width: 440px; padding: 14px 18px 18px 18px; box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.7); animation: slideUp 0.22s cubic-bezier(0.16, 1, 0.3, 1);">
+          <div style="width: 32px; height: 3px; background: rgba(255, 255, 255, 0.2); border-radius: 999px; margin: 0 auto 12px auto;"></div>
+
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); padding-bottom: 10px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="background: rgba(139, 92, 246, 0.14); color: #c4b5fd; border: 1px solid rgba(139, 92, 246, 0.28); border-radius: 6px; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.95rem;">🔄</span>
+              <div>
+                <h3 style="margin: 0; font-size: 0.86rem; font-weight: 700; color: #f8fafc; letter-spacing: -0.15px;">Reset Schedule to Salon Hours</h3>
+                <p style="margin: 1px 0 0 0; font-size: 0.68rem; color: #94a3b8;">Sync all 7 weekly shifts for ${staffName}</p>
+              </div>
+            </div>
+            <button class="close-btn" id="btn-close-reset-all-sheet" style="background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.08); width: 24px; height: 24px; border-radius: 50%; font-size: 13px; color: #94a3b8; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1; transition: all 0.15s ease;">&times;</button>
+          </div>
+
+          <!-- Comparison Surface: Store Hours & Custom Days Breakdown -->
+          <div style="background: rgba(255, 255, 255, 0.025); border: 1px solid rgba(255, 255, 255, 0.07); border-radius: 10px; overflow: hidden; margin-bottom: 10px;">
+            <!-- Store Hours Benchmark Row -->
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 9px 12px; background: rgba(139, 92, 246, 0.04); border-bottom: 1px solid rgba(255, 255, 255, 0.06);">
+              <div style="display: flex; align-items: center; gap: 7px;">
+                <span style="font-size: 0.68rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.3px;">Store Operating Hours</span>
+                <span style="font-size: 0.5rem; font-weight: 700; color: #a78bfa; background: rgba(139, 92, 246, 0.14); border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 4px; padding: 1px 5px; text-transform: uppercase; letter-spacing: 0.3px;">STORE</span>
+              </div>
+              <span style="font-size: 0.8rem; font-weight: 600; color: #38bdf8; font-feature-settings: 'tnum'; white-space: nowrap;">
+                ${formatTime12h(salonStart)} – ${formatTime12h(salonEnd)}
+              </span>
+            </div>
+
+            <!-- Customized Shifts Breakdown Header -->
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 7px 12px; background: rgba(255, 255, 255, 0.02); border-bottom: 1px solid rgba(255, 255, 255, 0.04);">
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <span style="font-size: 0.64rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.3px;">Customized Shifts</span>
+                <span class="stylist-custom-chip" style="font-size: 0.5rem; padding: 1px 5px;">${customCount > 0 ? `${customCount} CUSTOM` : '0 CUSTOM'}</span>
+              </div>
+              <span style="font-size: 0.64rem; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px;">Will Reset To Store</span>
+            </div>
+
+            <!-- Customized Days List -->
+            <div style="max-height: 140px; overflow-y: auto;">
+              ${customCount === 0 ? `
+                <div style="padding: 10px 12px; font-size: 0.74rem; color: #34d399; font-weight: 600; text-align: center;">
+                  ✓ All 7 days already match store hours
+                </div>
+              ` : customizedDays.map((dKey) => {
+                const dayData = this.currentStaffHoursState.days[dKey];
+                const salonDay = (this.salonWorkingHours || []).find((h) => h.dayOfWeek === dKey);
+                const isClosed = salonDay ? Boolean(salonDay.isClosed) : false;
+                const sStart = salonDay?.startTime || this.salonProfile?.defaultStartTime || '09:00';
+                const sEnd = salonDay?.endTime || this.salonProfile?.defaultEndTime || '19:00';
+
+                const customTime = !dayData.isWorking 
+                  ? '<span style="color: #fca5a5; font-style: italic; font-weight: 500;">Personal Off</span>' 
+                  : `${formatTime12h(dayData.startTime)} – ${formatTime12h(dayData.endTime)}`;
+
+                const storeTime = isClosed
+                  ? '<span style="color: #f87171; font-weight: 600;">🔒 Store Closed</span>'
+                  : `${formatTime12h(sStart)} – ${formatTime12h(sEnd)}`;
+
+                return `
+                  <div style="display: flex; align-items: center; justify-content: space-between; padding: 7px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.035); background: rgba(0, 0, 0, 0.12);">
+                    <div style="display: flex; align-items: center; gap: 7px; min-width: 0;">
+                      <span style="background: rgba(139, 92, 246, 0.14); color: #c4b5fd; border: 1px solid rgba(139, 92, 246, 0.28); border-radius: 4px; padding: 1px 5px; font-weight: 800; font-size: 0.6rem; text-transform: uppercase; flex-shrink: 0;">${dayData.dayShort || dKey.slice(0, 3)}</span>
+                      <span style="font-size: 0.74rem; font-weight: 600; color: #fbbf24; font-feature-settings: 'tnum'; white-space: nowrap;">${customTime}</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0; margin-left: 8px;">
+                      <span style="font-size: 0.68rem; color: #64748b;">➔</span>
+                      <span style="font-size: 0.74rem; font-weight: 600; color: #38bdf8; font-feature-settings: 'tnum'; white-space: nowrap;">${storeTime}</span>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+
+            ${closedSalonDays.length > 0 ? `
+              <div style="padding: 5px 12px; background: rgba(239, 68, 68, 0.06); border-top: 1px solid rgba(255, 255, 255, 0.04); font-size: 0.66rem; color: #fca5a5;">
+                Closed Days: ${closedSalonDays.map((c) => c.dayOfWeek.slice(0, 3)).join(', ')}
+              </div>
+            ` : ''}
+          </div>
+
+          <p style="margin: 0 0 12px 0; font-size: 0.7rem; color: #64748b; line-height: 1.4;">
+            Resets all 7 days for <strong>${staffName}</strong> to match the salon facility hours. All custom day overrides will be cleared.
+          </p>
+
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <button type="button" class="btn btn-primary" id="btn-confirm-reset-all-salon" style="width: 100%; height: 36px; font-weight: 600; font-size: 0.78rem; background: linear-gradient(135deg, #7c3aed, #6366f1); border: none; border-radius: 8px; color: #ffffff; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 2px 10px rgba(124, 58, 237, 0.3); white-space: nowrap; transition: all 0.15s ease;">
+              <span style="font-size: 0.86rem; line-height: 1;">↺</span>
+              <span>Reset All to Salon Hours</span>
+            </button>
+            <button type="button" class="btn btn-secondary" id="btn-cancel-reset-all-sheet" style="font-size: 0.72rem; font-weight: 500; height: 32px; border-radius: 7px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); color: #94a3b8; cursor: pointer; transition: all 0.15s ease;">
+              Keep Current Schedule
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const closeSheet = () => (modalContainer.innerHTML = '');
+    modalContainer.querySelector('#btn-close-reset-all-sheet')?.addEventListener('click', closeSheet);
+    modalContainer.querySelector('#btn-cancel-reset-all-sheet')?.addEventListener('click', closeSheet);
+    modalContainer.querySelector('#reset-all-salon-sheet-backdrop')?.addEventListener('click', (e) => {
+      if (e.target.id === 'reset-all-salon-sheet-backdrop') closeSheet();
+    });
+
+    modalContainer.querySelector('#btn-confirm-reset-all-salon')?.addEventListener('click', () => {
+      daysArr.forEach((dKey) => {
+        const salonDay = (this.salonWorkingHours || []).find((h) => h.dayOfWeek === dKey);
+        const isClosed = salonDay ? Boolean(salonDay.isClosed) : false;
+        const sStart = salonDay?.startTime || this.salonProfile?.defaultStartTime || '09:00';
+        const sEnd = salonDay?.endTime || this.salonProfile?.defaultEndTime || '19:00';
+
+        if (this.currentStaffHoursState?.days[dKey]) {
+          this.currentStaffHoursState.days[dKey].isWorking = !isClosed;
+          this.currentStaffHoursState.days[dKey].isSalonClosed = isClosed;
+          this.currentStaffHoursState.days[dKey].startTime = sStart;
+          this.currentStaffHoursState.days[dKey].endTime = sEnd;
+          this.currentStaffHoursState.days[dKey].isCustomized = false;
+        }
+      });
+
+      if (this.currentStaffHoursState) {
+        this.currentStaffHoursState.masterShift = { startTime: salonStart, endTime: salonEnd };
+        this.currentStaffHoursState.followsSalon = true;
+      }
+
+      const bulkS = document.getElementById('master-bulk-start');
+      const bulkE = document.getElementById('master-bulk-end');
+      const bulkSPrev = document.getElementById('master-bulk-start-preview');
+      const bulkEPrev = document.getElementById('master-bulk-end-preview');
+      if (bulkS) bulkS.value = salonStart;
+      if (bulkE) bulkE.value = salonEnd;
+      if (bulkSPrev) bulkSPrev.textContent = formatTime12h(salonStart);
+      if (bulkEPrev) bulkEPrev.textContent = formatTime12h(salonEnd);
+
+      closeSheet();
+      this.updateStaffHoursTableUI();
+      this.autoSaveStaffSchedule(staffId, true);
+      this.showToast(`✨ All days for ${staffName} reset to match salon facility operating hours!`, 'success');
     });
   }
 
@@ -4196,6 +4517,9 @@ export class SalonDashboard {
 
         if (statusBadge) {
           statusBadge.innerHTML = `<span class="autosave-dot"></span><span class="autosave-text">Auto-saved</span>`;
+        }
+        if (updated?.affectedBookingsCount > 0) {
+          this.showToast?.(updated.message || `${updated.affectedBookingsCount} booking(s) automatically sent reschedule request via WhatsApp.`, 'info');
         }
       } catch (err) {
         console.error('Failed to auto-save salon schedule:', err);
@@ -6117,7 +6441,7 @@ export class SalonDashboard {
 
     const dayNames = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
     let monthHolidayCount = 0;
-    let monthWeeklyOffCount = 0;
+    let monthFestivalCount = 0;
     let monthLeaveCount = 0;
 
     const cells = [];
@@ -6138,13 +6462,6 @@ export class SalonDashboard {
       const dateKey = `${year}-${mStr}-${dStr}`;
       const isToday = dateKey === todayISO;
       const isPast = dateKey < todayISO;
-
-      // Weekday name and recurring weekly off (Centralized)
-      const dayOfWeekIdx = new Date(year, month, d).getDay();
-      const dayOfWeekName = dayNames[dayOfWeekIdx];
-
-      const isWeeklyOff = this.isDayWeeklyOff(dayOfWeekName, mode, staff);
-      if (isWeeklyOff) monthWeeklyOffCount++;
 
       // Salon closure
       const closure = (this.closuresList || []).find((c) => {
@@ -6186,6 +6503,7 @@ export class SalonDashboard {
 
       // Festival info
       const festival = INDIAN_FESTIVALS_DATASET.find((f) => f.date === dateKey);
+      if (festival) monthFestivalCount++;
 
       cells.push({
         dayNum: d,
@@ -6193,7 +6511,6 @@ export class SalonDashboard {
         dateKey,
         isToday,
         isPast,
-        isWeeklyOff,
         closure,
         leaves,
         stylistLeave,
@@ -6217,7 +6534,7 @@ export class SalonDashboard {
     const isStaffMode = mode === 'STAFF';
     const panelTitle = isStaffMode ? `📅 Leaves & Off-Days: ${staffName}` : 'Holidays & Days Off';
     const panelSubtitle = isStaffMode
-      ? `Manage leave schedule, weekly offs & salon holidays for ${staffName}`
+      ? `Manage approved leaves, closures & salon holidays for ${staffName}`
       : 'Festivals, planned off-days & specialist leaves';
     const topActionBtnHtml = isStaffMode
       ? `<button type="button" class="btn btn-primary btn-sm btn-schedule-top" id="btn-apply-staff-leave" data-staff-id="${staffId}" data-staff-name="${staffName.replace(/"/g, '&quot;')}">
@@ -6227,28 +6544,19 @@ export class SalonDashboard {
            ➕ Schedule Day Off
          </button>`;
 
-    const activeTab = this.activeOverviewTab || (isStaffMode ? 'LEAVES' : 'HOLIDAYS');
-    const pill1Label = isStaffMode ? 'Stylist Leaves' : 'Holidays';
-    const pill1Count = isStaffMode ? monthLeaveCount : monthHolidayCount;
-    const pill1Icon = isStaffMode ? '🏖️' : '🌴';
-    const pill1Key = isStaffMode ? 'LEAVES' : 'HOLIDAYS';
-    const pill1Color = isStaffMode ? '#34d399' : '#fbbf24';
-
-    const pill3Label = isStaffMode ? 'Salon Closed' : 'Staff Leaves';
-    const pill3Count = isStaffMode ? monthHolidayCount : monthLeaveCount;
-    const pill3Icon = isStaffMode ? '🌴' : '👤';
-    const pill3Key = isStaffMode ? 'HOLIDAYS' : 'LEAVES';
-    const pill3Color = isStaffMode ? '#fbbf24' : '#34d399';
+    let activeTab = this.activeOverviewTab;
+    if (activeTab === 'WEEKLY_OFFS') activeTab = 'HOLIDAYS';
+    if (!activeTab) activeTab = isStaffMode ? 'LEAVES' : 'HOLIDAYS';
 
     if (isStaffMode) {
       const monthFestivalList = cells
         .filter((c) => !c.isPadding && c.festival)
         .map((c) => c.festival.name);
       const uniqueFestivals = [...new Set(monthFestivalList)];
-      const monthFestivalCount = uniqueFestivals.length;
+      const monthFestivalCountStaff = uniqueFestivals.length;
       const subtitleParts = [];
-      if (monthFestivalCount > 0) {
-        subtitleParts.push(`${monthFestivalCount} festival${monthFestivalCount > 1 ? 's' : ''}`);
+      if (monthFestivalCountStaff > 0) {
+        subtitleParts.push(`${monthFestivalCountStaff} festival${monthFestivalCountStaff > 1 ? 's' : ''}`);
       }
       if (monthHolidayCount > 0) {
         subtitleParts.push(`${monthHolidayCount} holiday${monthHolidayCount > 1 ? 's' : ''}`);
@@ -6299,10 +6607,6 @@ export class SalonDashboard {
                   <span class="legend-dot dot-leave"></span>
                   <span>Leave</span>
                 </div>
-                <div class="dot-legend-item" title="Scheduled Week Off">
-                  <span class="legend-dot dot-off"></span>
-                  <span>Week Off</span>
-                </div>
                 <div class="dot-legend-item" title="Salon Closed / Holiday">
                   <span class="legend-dot dot-closed"></span>
                   <span>Closed</span>
@@ -6343,16 +6647,12 @@ export class SalonDashboard {
 
         let microIconHtml = '';
 
-        // Apply solid highlight classes & micro icons based on priority
         if (c.stylistLeave) {
           classes.push('is-leave-day');
           microIconHtml = `<span class="cal-cell-micro-icon icon-leave">📅</span>`;
         } else if (c.closure) {
           classes.push(c.closure.closureType === 'EMERGENCY_CLOSURE' ? 'is-emergency' : 'is-closed');
           microIconHtml = `<span class="cal-cell-micro-icon icon-closed">🔒</span>`;
-        } else if (c.isWeeklyOff) {
-          classes.push('is-weekly-off');
-          microIconHtml = `<span class="cal-cell-off-badge">OFF</span>`;
         } else if (c.festival) {
           classes.push('is-festival');
           microIconHtml = `<span class="cal-cell-micro-icon icon-festival">✨</span>`;
@@ -6363,7 +6663,6 @@ export class SalonDashboard {
         const tooltipParts = [];
         if (c.stylistLeave) tooltipParts.push(`🏖️ My Leave: ${(c.stylistLeave.leaveType || 'Leave').replace('_', ' ')}`);
         if (c.closure) tooltipParts.push(`🌴 Salon Closed: ${c.closure.reason || 'Planned Closure'}`);
-        if (c.isWeeklyOff) tooltipParts.push('💤 Regular Week Off');
         if (c.festival) tooltipParts.push(`🪔 ${c.festival.name}`);
         if (tooltipParts.length === 0) tooltipParts.push(c.isPast ? 'Past date' : 'Available');
         const cellTooltip = `${c.dateKey} · ${tooltipParts.join(' · ')}`;
@@ -6406,40 +6705,37 @@ export class SalonDashboard {
           <!-- Zero-Penalty Booking Protection Micro-Strip -->
           <div class="zero-penalty-micro-strip">
             <div class="zero-penalty-text">
-              <span>🛡️ Zero-Penalty Active</span>
-              <span class="zero-penalty-sub">· Slots blocked, 0 strikes to clients</span>
+              <span>🛡️ Zero-Penalty Protection Active</span>
+              <span class="zero-penalty-sub">· Appointment slots safely blocked with 0 penalties</span>
             </div>
-            <span class="zero-penalty-pill">${closures.length} Scheduled</span>
+            <span class="zero-penalty-pill">${closures.length} Scheduled Closures</span>
           </div>
 
           <!-- Top Interactive Month Overview Bar -->
           <div class="cal-top-overview-bar">
-            <div class="cal-overview-pill ${activeTab === 'HOLIDAYS' ? 'active' : ''}" data-overview-tab="HOLIDAYS" role="button" tabindex="0" title="Tap to view Holidays">
+            <div class="cal-overview-pill ${activeTab === 'HOLIDAYS' ? 'active' : ''}" data-overview-tab="HOLIDAYS" role="button" tabindex="0" title="View Scheduled Holidays & Closures">
               <span class="cal-overview-num" style="color: #fbbf24;">${monthHolidayCount}</span>
               <span class="cal-overview-label">
                 <span class="cal-pill-icon">🌴</span>
-                <span class="cal-label-desktop">Holidays</span>
+                <span class="cal-label-desktop">Salon Holidays</span>
                 <span class="cal-label-mobile">Holidays</span>
               </span>
-              <span class="cal-pill-arrow">▾</span>
             </div>
-            <div class="cal-overview-pill ${activeTab === 'WEEKLY_OFFS' ? 'active' : ''}" data-overview-tab="WEEKLY_OFFS" role="button" tabindex="0" title="Tap to configure weekly off routine">
-              <span class="cal-overview-num" style="color: #cbd5e1;">${monthWeeklyOffCount}</span>
-              <span class="cal-overview-label">
-                <span class="cal-pill-icon">💤</span>
-                <span class="cal-label-desktop">Weekly Offs</span>
-                <span class="cal-label-mobile">Week Offs</span>
-              </span>
-              <span class="cal-pill-arrow">▾</span>
-            </div>
-            <div class="cal-overview-pill ${activeTab === 'LEAVES' ? 'active' : ''}" data-overview-tab="LEAVES" role="button" tabindex="0" title="Tap to view Staff Leaves">
+            <div class="cal-overview-pill ${activeTab === 'LEAVES' ? 'active' : ''}" data-overview-tab="LEAVES" role="button" tabindex="0" title="View Staff Leaves">
               <span class="cal-overview-num" style="color: #34d399;">${monthLeaveCount}</span>
               <span class="cal-overview-label">
                 <span class="cal-pill-icon">👤</span>
                 <span class="cal-label-desktop">Staff Leaves</span>
                 <span class="cal-label-mobile">Leaves</span>
               </span>
-              <span class="cal-pill-arrow">▾</span>
+            </div>
+            <div class="cal-overview-pill ${activeTab === 'FESTIVALS' ? 'active' : ''}" data-overview-tab="FESTIVALS" role="button" tabindex="0" title="View Gazetted Festivals">
+              <span class="cal-overview-num" style="color: #c084fc;">${monthFestivalCount}</span>
+              <span class="cal-overview-label">
+                <span class="cal-pill-icon">✨</span>
+                <span class="cal-label-desktop">Festivals</span>
+                <span class="cal-label-mobile">Festivals</span>
+              </span>
             </div>
           </div>
 
@@ -6447,32 +6743,39 @@ export class SalonDashboard {
           <div class="holiday-cal-layout">
             <div class="holiday-cal-main">
               <div class="holiday-cal-grid-wrapper">
-                <div class="holiday-cal-integrated-nav">
-                  <button type="button" class="cal-nav-btn" id="btn-cal-prev" aria-label="Previous Month">‹</button>
-                  <div class="holiday-cal-title-wrap">
-                    <span class="holiday-cal-month-title">${currentMonthTitle}</span>
-                    <div class="holiday-cal-legend-inline">
-                      <div class="cal-legend-chip chip-closed">
-                        <span class="legend-chip-badge">${Icons.lock({ size: 10, color: '#ffffff' })}</span>
-                        <span class="legend-chip-label">Holiday</span>
-                      </div>
-                      <div class="cal-legend-chip chip-off">
-                        <span class="legend-chip-badge">${Icons.coffee({ size: 10, color: '#ffffff' })}</span>
-                        <span class="legend-chip-label">Off</span>
-                      </div>
-                      <div class="cal-legend-chip chip-leave">
-                        <span class="legend-chip-badge">${Icons.user({ size: 10, color: '#ffffff' })}</span>
-                        <span class="legend-chip-label">Staff</span>
-                      </div>
-                      <div class="cal-legend-chip chip-festival">
-                        <span class="legend-chip-badge">${Icons.sparkles({ size: 10, color: '#ffffff' })}</span>
-                        <span class="legend-chip-label">Festival</span>
-                      </div>
+                <div class="holiday-cal-header-card">
+                  <!-- Row 1: Month Nav -->
+                  <div class="cal-nav-header-row">
+                    <div class="cal-nav-month-group">
+                      <button type="button" class="cal-nav-btn" id="btn-cal-prev" aria-label="Previous Month">‹</button>
+                      <h4 class="holiday-cal-month-title">${currentMonthTitle}</h4>
+                      <button type="button" class="cal-nav-btn" id="btn-cal-next" aria-label="Next Month">›</button>
+                    </div>
+                    <div class="cal-nav-actions-group">
+                      <button type="button" class="cal-nav-today-btn" id="btn-cal-today">Today</button>
                     </div>
                   </div>
-                  <button type="button" class="cal-nav-btn" id="btn-cal-next" aria-label="Next Month">›</button>
-                  <button type="button" class="cal-nav-today-btn" id="btn-cal-today">Today</button>
+                  <!-- Row 2: Legend Indicators -->
+                  <div class="cal-legend-strip">
+                    <div class="cal-legend-chip chip-closed" title="Salon Planned Holiday / Closure">
+                      <span class="legend-chip-dot dot-closed"></span>
+                      <span class="legend-chip-label">Holiday</span>
+                    </div>
+                    <div class="cal-legend-chip chip-leave" title="Approved Specialist Leave">
+                      <span class="legend-chip-dot dot-leave"></span>
+                      <span class="legend-chip-label">Staff Leave</span>
+                    </div>
+                    <div class="cal-legend-chip chip-festival" title="Gazetted Festival / Observance">
+                      <span class="legend-chip-dot dot-festival"></span>
+                      <span class="legend-chip-label">Festival</span>
+                    </div>
+                    <div class="cal-legend-chip chip-today" title="Current Date">
+                      <span class="legend-chip-dot dot-today"></span>
+                      <span class="legend-chip-label">Today</span>
+                    </div>
+                  </div>
                 </div>
+
                 <div class="holiday-cal-weekdays">
                   <div class="holiday-cal-weekday-label">Mon</div>
                   <div class="holiday-cal-weekday-label">Tue</div>
@@ -6499,15 +6802,12 @@ export class SalonDashboard {
       if (c.dateKey === this.selectedCalDate) classes.push('is-selected');
 
       if (c.closure) classes.push(c.closure.closureType === 'EMERGENCY_CLOSURE' ? 'is-emergency' : 'is-closed');
-      else if (c.isWeeklyOff) classes.push('is-weekly-off');
       else if (c.festival) classes.push('is-festival');
       else if (c.leaves.length > 0) classes.push('is-leave-day');
 
       let microIconHtml = '';
       if (c.closure) {
         microIconHtml = `<span class="cal-cell-micro-icon icon-closed">🔒</span>`;
-      } else if (c.isWeeklyOff) {
-        microIconHtml = `<span class="cal-cell-off-badge">OFF</span>`;
       } else if (c.festival) {
         microIconHtml = `<span class="cal-cell-micro-icon icon-festival">✨</span>`;
       } else if (c.leaves.length > 0) {
@@ -6537,7 +6837,7 @@ export class SalonDashboard {
                       <span class="cal-inspector-title-icon">${Icons.calendar({ size: 15, color: '#A855F7' })}</span>
                       <span id="cal-inspector-date-label">Selected Date</span>
                     </div>
-                    <span class="cal-inspector-badge badge-open" id="cal-inspector-status-badge">OPEN</span>
+                    <span class="cal-inspector-badge badge-open" id="cal-inspector-status-badge">AVAILABLE</span>
                   </div>
                   <div class="cal-inspector-body" id="cal-inspector-body">
                     Tap any date above to inspect festival closures or specialist leaves.
@@ -6550,7 +6850,7 @@ export class SalonDashboard {
                 </div>
 
                 <button type="button" class="btn btn-secondary btn-sm cal-open-sheet-btn-mobile" id="btn-open-holiday-sheet" style="margin-top: 10px; width: 100%; height: 38px; border-radius: 9px; font-weight: 700; font-size: 0.78rem; display: flex; align-items: center; justify-content: center; gap: 8px; background: rgba(139, 61, 255, 0.12); border: 1px solid rgba(139, 61, 255, 0.35); color: #c7d2fe; cursor: pointer;">
-                  <span>📋 Manage Routine, Offs & Leaves</span>
+                  <span>📋 Manage Holidays, Leaves & Festivals</span>
                   <span style="font-size: 0.75rem;">▴</span>
                 </button>
               </div>
@@ -6571,77 +6871,67 @@ export class SalonDashboard {
     const mStr = String(month + 1).padStart(2, '0');
     const todayISO = this.getLocalDateString();
     const isStaffMode = mode === 'STAFF';
-    const activeTab = this.activeOverviewTab || (isStaffMode ? 'LEAVES' : 'HOLIDAYS');
+    let activeTab = this.activeOverviewTab;
+    if (activeTab === 'WEEKLY_OFFS') activeTab = 'HOLIDAYS';
+    if (!activeTab) activeTab = isStaffMode ? 'LEAVES' : 'HOLIDAYS';
     const staff = staffId ? (this.staffList || []).find((s) => s.id === staffId) : null;
 
-    // 1. Weekly Offs Management Panel (1-Tap 7-Day Configurator)
-    if (activeTab === 'WEEKLY_OFFS') {
-      const dayDefs = [
-        { key: 'MONDAY', label: 'Mon' },
-        { key: 'TUESDAY', label: 'Tue' },
-        { key: 'WEDNESDAY', label: 'Wed' },
-        { key: 'THURSDAY', label: 'Thu' },
-        { key: 'FRIDAY', label: 'Fri' },
-        { key: 'SATURDAY', label: 'Sat' },
-        { key: 'SUNDAY', label: 'Sun' },
-      ];
-
-      const whList = isStaffMode && staff?.workingHours && staff.workingHours.length > 0
-        ? staff.workingHours
-        : (this.salonWorkingHours || []);
-
-      const closedDayLabels = [];
-      const totalDays = new Date(year, month + 1, 0).getDate();
-      let totalWeeklyOffsInMonth = 0;
-
-      dayDefs.forEach((d) => {
-        const isClosed = this.isDayWeeklyOff(d.key, isStaffMode ? 'STAFF' : 'SALON', staff);
-        if (isClosed) {
-          closedDayLabels.push(d.label);
-          for (let day = 1; day <= totalDays; day++) {
-            const dayIdx = (new Date(year, month, day).getDay() + 6) % 7;
-            if (dayDefs[dayIdx].key === d.key) totalWeeklyOffsInMonth++;
-          }
-        }
+    // 1. Festivals Management Panel
+    if (activeTab === 'FESTIVALS') {
+      const todayObj = new Date(todayISO);
+      const futureObj = new Date(todayObj.getTime() + 60 * 24 * 60 * 60 * 1000);
+      const upcomingFestivals = INDIAN_FESTIVALS_DATASET.filter((f) => {
+        const fDate = new Date(f.date);
+        return fDate >= todayObj && fDate <= futureObj;
       });
 
       return `
         <div class="cal-side-card">
           <div class="cal-management-header">
             <div class="cal-management-title">
-              <span>💤 ${isStaffMode ? `${staffName}'s Routine` : 'Weekly Off Routine'}</span>
-              <span class="cal-management-pill-count">${totalWeeklyOffsInMonth} Days in ${currentMonthName}</span>
+              <span>✨ Gazetted Festivals & Events</span>
+              <span class="cal-management-pill-count">${upcomingFestivals.length} Upcoming</span>
             </div>
-            <span style="font-size: 0.65rem; color: #a5b4fc; font-weight: 700;">1-TAP TOGGLE</span>
+            <span style="font-size: 0.65rem; color: #c084fc; font-weight: 700;">AUTO-DETECT</span>
           </div>
 
-          <p style="font-size: 0.73rem; color: #cbd5e1; margin: 0 0 8px 0; line-height: 1.4;">
-            Tap any weekday to toggle whether ${isStaffMode ? staffName : 'your salon'} is off every week:
+          <p style="font-size: 0.72rem; color: #94a3b8; margin: 0 0 10px 0;">
+            1-tap declare holidays on recognized festivals to block bookings with zero penalties:
           </p>
 
-          <!-- 7-Day Mon-Sun Toggle Chips -->
-          <div class="weekly-routine-day-chips">
-            ${dayDefs.map((d) => {
-        const isClosed = this.isDayWeeklyOff(d.key, isStaffMode ? 'STAFF' : 'SALON', staff);
+          <div class="festivals-list-container">
+            ${upcomingFestivals.length === 0 ? `
+              <div style="font-size: 0.74rem; color: #94a3b8; text-align: center; padding: 16px 0;">
+                No major gazetted festivals in next 60 days.
+              </div>
+            ` : upcomingFestivals.map((fest) => {
+        const isClosed = (this.closuresList || []).some((c) => {
+          const s = String(c.startDate).split('T')[0];
+          const e = String(c.endDate).split('T')[0];
+          return fest.date >= s && fest.date <= e;
+        });
+        const dateFormatted = new Date(fest.date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', weekday: 'short' });
+
         return `
-                <div class="routine-day-chip ${isClosed ? 'is-off' : 'is-open'}" data-day="${d.key}" data-mode="${mode}" data-staff-id="${staffId || ''}" role="button" tabindex="0" title="Click to toggle ${d.key}">
-                  <span class="routine-day-name">${d.label}</span>
-                  <span class="routine-day-status">${isClosed ? '💤 OFF' : '✓ OPEN'}</span>
+                <div class="festival-item-row">
+                  <div class="festival-item-info">
+                    <span class="festival-item-name">${fest.icon || '✨'} ${fest.name}</span>
+                    <span class="festival-item-date">${dateFormatted} · ${fest.type}</span>
+                  </div>
+                  <div>
+                    ${isClosed ? `
+                      <span class="btn-declare-festival is-already-closed">✓ Closed</span>
+                    ` : (!isStaffMode ? `
+                      <button type="button" class="btn-declare-festival btn-quick-declare-festival" data-date="${fest.date}" data-name="${fest.name.replace(/"/g, '&quot;')}">
+                        + Close Salon
+                      </button>
+                    ` : `
+                      <span style="font-size: 0.68rem; color: #a855f7;">Festival</span>
+                    `)}
+                  </div>
                 </div>
               `;
       }).join('')}
-          </div>
-
-          <!-- Routine summary banner -->
-          <div class="routine-summary-banner">
-            <span>🛡️</span>
-            <div>
-              ${closedDayLabels.length === 0 ? `
-                <strong>Open 7 Days a Week:</strong> No regular weekly offs configured.
-              ` : `
-                <strong>Weekly Offs:</strong> Closed every <strong>${closedDayLabels.join(', ')}</strong>. Client appointment slots are blocked with 0 penalties.
-              `}
-            </div>
           </div>
         </div>
       `;
@@ -6990,7 +7280,7 @@ export class SalonDashboard {
         this.attachProfileSubtabListeners();
       }
       if (document.getElementById('holiday-bottom-sheet-modal')) {
-        this.openHolidayBottomSheet(this.activeOverviewTab || 'WEEKLY_OFFS', 'SALON');
+        this.openHolidayBottomSheet(this.activeOverviewTab || 'HOLIDAYS', 'SALON');
       }
     } catch (err) {
       alert(err.message || 'Failed to update weekly routine.');
@@ -7038,9 +7328,10 @@ export class SalonDashboard {
         return d.getMonth() === month && d.getFullYear() === year;
       }).length;
 
-      const offDaysCount = isStaffMode && staff?.workingHours
-        ? staff.workingHours.filter((h) => !h.isWorking || h.isClosed).length
-        : (this.salonWorkingHours || []).filter((h) => h.isClosed).length;
+      const monthFestivalsCount = INDIAN_FESTIVALS_DATASET.filter((f) => {
+        const d = new Date(f.date);
+        return d.getMonth() === month && d.getFullYear() === year;
+      }).length;
 
       const monthLeaveCount = (staff ? staff.absences || [] : this.staffAbsences || []).filter((a) => {
         if (a.status === 'CANCELLED') return false;
@@ -7050,14 +7341,15 @@ export class SalonDashboard {
 
       const titles = isStaffMode ? {
         LEAVES: `🏖️ ${staffName}'s Leaves`,
-        WEEKLY_OFFS: `💤 ${staffName}'s Routine`,
+        HOLIDAYS: `🌴 Salon Holidays & Closures`,
+        FESTIVALS: `✨ Gazetted Festivals & Events`,
       } : {
-        WEEKLY_OFFS: '💤 Weekly Offs & Routine',
+        HOLIDAYS: '🌴 Scheduled Closures & Holidays',
         LEAVES: '👤 Specialist Leaves',
-        HOLIDAYS: '🌴 Scheduled Closures & Festivals',
+        FESTIVALS: '✨ Gazetted Festivals & Observances',
       };
 
-      const title = titles[this.activeOverviewTab] || (isStaffMode ? `🏖️ ${staffName}'s Leaves` : '📅 Schedule & Routine');
+      const title = titles[this.activeOverviewTab] || (isStaffMode ? `🏖️ ${staffName}'s Leaves` : '📅 Holidays & Leaves');
 
       let modalEl = document.getElementById('holiday-bottom-sheet-modal');
       if (!modalEl) {
@@ -7094,11 +7386,11 @@ export class SalonDashboard {
               <button type="button" class="sheet-tab-btn ${this.activeOverviewTab === 'HOLIDAYS' ? 'active' : ''}" data-sheet-tab="HOLIDAYS">
                 🌴 Holidays (${monthHolidays})
               </button>
-              <button type="button" class="sheet-tab-btn ${this.activeOverviewTab === 'WEEKLY_OFFS' ? 'active' : ''}" data-sheet-tab="WEEKLY_OFFS">
-                💤 Weekly Offs (${offDaysCount})
-              </button>
               <button type="button" class="sheet-tab-btn ${this.activeOverviewTab === 'LEAVES' ? 'active' : ''}" data-sheet-tab="LEAVES">
                 👤 Leaves (${monthLeaveCount})
+              </button>
+              <button type="button" class="sheet-tab-btn ${this.activeOverviewTab === 'FESTIVALS' ? 'active' : ''}" data-sheet-tab="FESTIVALS">
+                ✨ Festivals (${monthFestivalsCount})
               </button>
             `}
           </div>
@@ -7297,9 +7589,6 @@ export class SalonDashboard {
         } else if (existingClosure) {
           badgeEl.className = 'cal-inspector-badge badge-closed';
           badgeEl.textContent = existingClosure.closureType === 'EMERGENCY_CLOSURE' ? 'EMERGENCY OFF' : 'SALON CLOSED';
-        } else if (isWeeklyOff) {
-          badgeEl.className = 'cal-inspector-badge badge-weekly-off';
-          badgeEl.textContent = 'WEEKLY OFF';
         } else if (festivalInfo) {
           badgeEl.className = 'cal-inspector-badge badge-festival';
           badgeEl.textContent = 'FESTIVAL';
@@ -7310,9 +7599,12 @@ export class SalonDashboard {
       } else if (existingClosure) {
         badgeEl.className = 'cal-inspector-badge badge-closed';
         badgeEl.textContent = existingClosure.closureType === 'EMERGENCY_CLOSURE' ? 'EMERGENCY OFF' : 'SALON HOLIDAY';
-      } else if (isWeeklyOff) {
-        badgeEl.className = 'cal-inspector-badge badge-weekly-off';
-        badgeEl.textContent = 'WEEKLY OFF';
+      } else if (festivalInfo) {
+        badgeEl.className = 'cal-inspector-badge badge-festival';
+        badgeEl.textContent = 'FESTIVAL';
+      } else if (activeAbsences.length > 0) {
+        badgeEl.className = 'cal-inspector-badge badge-leave';
+        badgeEl.textContent = `${activeAbsences.length} ON LEAVE`;
       } else {
         badgeEl.className = 'cal-inspector-badge badge-open';
         badgeEl.textContent = 'AVAILABLE';
@@ -7330,13 +7622,10 @@ export class SalonDashboard {
         if (existingClosure) {
           itemsHtml += `<div class="inspector-item closure"><span class="inspector-item-badge badge-closed">${Icons.lock({ size: 14, color: '#ffffff' })}</span> <div><strong>Salon Closed: ${existingClosure.reason || 'Salon Holiday'}</strong> <span class="inspector-sub">(${existingClosure.closureType === 'EMERGENCY_CLOSURE' ? 'Emergency Closure' : 'Planned Salon Holiday'})</span></div></div>`;
         }
-        if (isWeeklyOff) {
-          itemsHtml += `<div class="inspector-item weekly-off"><span class="inspector-item-badge badge-off">${Icons.coffee({ size: 14, color: '#ffffff' })}</span> <div><strong>Regular Week Off</strong> <span class="inspector-sub">${sName}'s scheduled weekly off day</span></div></div>`;
-        }
         if (festivalInfo) {
           itemsHtml += `<div class="inspector-item festival"><span class="inspector-item-badge badge-festival">${Icons.sparkles({ size: 14, color: '#ffffff' })}</span> <div><strong>${festivalInfo.name}</strong> <span class="inspector-sub">(${festivalInfo.type || 'Festival'})</span></div></div>`;
         }
-        if (!stylistLeave && !existingClosure && !isWeeklyOff && !festivalInfo) {
+        if (!stylistLeave && !existingClosure && !festivalInfo) {
           if (isPast) {
             itemsHtml = `<div class="inspector-item past"><span class="inspector-item-badge badge-past">${Icons.clock({ size: 14, color: '#ffffff' })}</span> <div><strong>Regular Working Day (Passed)</strong></div></div>`;
           } else {
@@ -7344,21 +7633,18 @@ export class SalonDashboard {
           }
         }
       } else {
-        if (festivalInfo) {
-          itemsHtml += `<div class="inspector-item festival"><span class="inspector-item-badge badge-festival">${Icons.sparkles({ size: 14, color: '#ffffff' })}</span> <div><strong>${festivalInfo.name}</strong> <span class="inspector-sub">(${festivalInfo.type || 'Festival'})</span></div></div>`;
-        }
         if (existingClosure) {
           itemsHtml += `<div class="inspector-item closure"><span class="inspector-item-badge badge-closed">${Icons.lock({ size: 14, color: '#ffffff' })}</span> <div><strong>${existingClosure.reason || 'Salon Closed'}</strong> <span class="inspector-sub">(${existingClosure.closureType === 'EMERGENCY_CLOSURE' ? 'Emergency Closure' : 'Planned Holiday'})</span></div></div>`;
         }
-        if (isWeeklyOff && !existingClosure) {
-          itemsHtml += `<div class="inspector-item weekly-off"><span class="inspector-item-badge badge-off">${Icons.coffee({ size: 14, color: '#ffffff' })}</span> <div><strong>Regular Weekly Off</strong> <span class="inspector-sub">Salon off on ${dayOfWeekName}</span></div></div>`;
+        if (festivalInfo) {
+          itemsHtml += `<div class="inspector-item festival"><span class="inspector-item-badge badge-festival">${Icons.sparkles({ size: 14, color: '#ffffff' })}</span> <div><strong>${festivalInfo.name}</strong> <span class="inspector-sub">(${festivalInfo.type || 'Festival'})</span></div></div>`;
         }
         if (activeAbsences.length > 0) {
           activeAbsences.forEach((ab) => {
             itemsHtml += `<div class="inspector-item leave"><span class="inspector-item-badge badge-leave">${Icons.user({ size: 14, color: '#ffffff' })}</span> <div><strong>${ab.staffName}</strong> <span class="inspector-sub">(${ab.leaveType ? ab.leaveType.replace('_', ' ') : 'Leave'}${ab.leavePortion && ab.leavePortion !== 'FULL_DAY' ? ' · ' + ab.leavePortion.replace('_', ' ') : ''})</span></div></div>`;
           });
         }
-        if (!festivalInfo && !existingClosure && !isWeeklyOff && activeAbsences.length === 0) {
+        if (!festivalInfo && !existingClosure && activeAbsences.length === 0) {
           if (isPast) {
             itemsHtml = `<div class="inspector-item past"><span class="inspector-item-badge badge-past">${Icons.clock({ size: 14, color: '#ffffff' })}</span> <div><strong>Regular Day (Passed)</strong> <span class="inspector-sub">Historical day</span></div></div>`;
           } else {
@@ -7398,17 +7684,13 @@ export class SalonDashboard {
         actionBtn.onclick = () => {
           this.showDateScheduleDrawer(dateStr, existingClosure, activeAbsences, festivalInfo);
         };
-      } else if (isWeeklyOff && !existingClosure) {
-        actionBtn.style.display = 'block';
-        actionBtn.style.background = 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)';
-        actionBtn.innerHTML = `⚙️ Manage Weekly Offs (${dayOfWeekName.charAt(0) + dayOfWeekName.slice(1).toLowerCase()})`;
-        actionBtn.onclick = () => {
-          this.openHolidayBottomSheet('WEEKLY_OFFS', 'SALON');
-        };
       } else {
         actionBtn.style.display = 'block';
         actionBtn.style.background = 'linear-gradient(135deg, #8B3DFF 0%, #9D5CFF 100%)';
-        actionBtn.innerHTML = `➕ Schedule Day Off on ${friendlyDate.split(',')[0]}`;
+        const actionLabel = festivalInfo
+          ? `🌴 Close Salon for ${festivalInfo.name}`
+          : `➕ Schedule Day Off on ${friendlyDate.split(',')[0]}`;
+        actionBtn.innerHTML = actionLabel;
         actionBtn.onclick = () => {
           this.showDateScheduleDrawer(dateStr, null, activeAbsences, festivalInfo);
         };
@@ -8436,7 +8718,7 @@ export class SalonDashboard {
     // Mobile Bottom-Sheet Opener button
     document.querySelectorAll('#btn-open-holiday-sheet, .cal-open-sheet-bar, .cal-open-sheet-btn-mobile').forEach((btn) => {
       btn.addEventListener('click', () => {
-        this.openHolidayBottomSheet(this.activeOverviewTab || (isStaffMode ? 'LEAVES' : 'WEEKLY_OFFS'), mode, staffId);
+        this.openHolidayBottomSheet(this.activeOverviewTab || (isStaffMode ? 'LEAVES' : 'HOLIDAYS'), mode, staffId);
       });
     });
 
@@ -8658,16 +8940,54 @@ export class SalonDashboard {
           return;
         }
 
+        const activeDays = (this.salonWorkingHours || []).filter((h) => !h.isClosed);
+        const salonMinS = activeDays.length > 0 ? activeDays.reduce((min, h) => (h.startTime && h.startTime < min ? h.startTime : min), activeDays[0].startTime) : '09:00';
+        const salonMaxE = activeDays.length > 0 ? activeDays.reduce((max, h) => (h.endTime && h.endTime > max ? h.endTime : max), activeDays[0].endTime) : '19:00';
+
+        let effectiveStart = sVal;
+        let effectiveEnd = eVal;
+
+        if (effectiveStart < salonMinS) {
+          effectiveStart = salonMinS;
+          if (bulkStartInp) bulkStartInp.value = salonMinS;
+          if (bulkStartPrev) bulkStartPrev.textContent = formatTime12h(salonMinS);
+          if (immediate) {
+            this.showToast?.(`Shift start cannot be earlier than store opening (${formatTime12h(salonMinS)}). Clamped to store opening.`, 'warning');
+          }
+        }
+
+        if (effectiveEnd > salonMaxE) {
+          effectiveEnd = salonMaxE;
+          if (bulkEndInp) bulkEndInp.value = salonMaxE;
+          if (bulkEndPrev) bulkEndPrev.textContent = formatTime12h(salonMaxE);
+          if (immediate) {
+            this.showToast?.(`Shift end cannot be later than store closing (${formatTime12h(salonMaxE)}). Clamped to store closing.`, 'warning');
+          }
+        }
+
+        if (effectiveStart >= effectiveEnd) {
+          if (immediate) {
+            this.showToast?.(`Shift start (${formatTime12h(effectiveStart)}) must be earlier than shift end (${formatTime12h(effectiveEnd)}).`, 'warning');
+          }
+          return;
+        }
+
         const daysArr = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
         daysArr.forEach((dKey) => {
-          if (this.currentStaffHoursState?.days[dKey] && this.currentStaffHoursState.days[dKey].isWorking) {
-            this.currentStaffHoursState.days[dKey].startTime = sVal;
-            this.currentStaffHoursState.days[dKey].endTime = eVal;
+          const dayData = this.currentStaffHoursState?.days[dKey];
+          if (dayData && dayData.isWorking) {
+            dayData.startTime = effectiveStart;
+            dayData.endTime = effectiveEnd;
+            const swhStart = dayData.salonStart || this.salonProfile?.defaultStartTime || '09:00';
+            const swhEnd = dayData.salonEnd || this.salonProfile?.defaultEndTime || '19:00';
+            const isSalonClosed = Boolean(dayData.isSalonClosed);
+            const isIdenticalToSalon = !isSalonClosed && effectiveStart === swhStart && effectiveEnd === swhEnd;
+            dayData.isCustomized = !isIdenticalToSalon;
           }
         });
 
         if (this.currentStaffHoursState) {
-          this.currentStaffHoursState.masterShift = { startTime: sVal, endTime: eVal };
+          this.currentStaffHoursState.masterShift = { startTime: effectiveStart, endTime: effectiveEnd };
         }
         const subEl = document.querySelector('.bulk-setter-sub');
         if (subEl) {
@@ -8702,6 +9022,19 @@ export class SalonDashboard {
           this.openRoutineBreakBottomSheet(-1);
         };
       }
+
+      // 5. Reset All to Salon Hours Banner / Button (Opens bottom sheet)
+      const bannerSync = container.querySelector('#roster-sync-banner-row');
+      const btnSyncAll = container.querySelector('#btn-open-sync-all-salon-sheet');
+      [bannerSync, btnSyncAll].forEach((el) => {
+        if (el) {
+          el.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.openResetAllToSalonHoursBottomSheet();
+          };
+        }
+      });
     }
   }
 
@@ -9495,6 +9828,9 @@ export class SalonDashboard {
   // =========================================================================
   showWalkInModal() {
     const modalContainer = document.getElementById('modal-container');
+    const todayIso = this.getLocalDateString();
+    const maxDays = this.salonProfile?.maxAdvanceDays || 3;
+    const maxDateIso = this.addDaysToDateString(todayIso, maxDays);
 
     modalContainer.innerHTML = `
       <div class="modal-backdrop show">
@@ -9537,7 +9873,7 @@ export class SalonDashboard {
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
               <div class="form-group">
                 <label>Date *</label>
-                <input type="date" class="form-control" id="walkin-date" value="${this.selectedDate}" required />
+                <input type="date" class="form-control" id="walkin-date" value="${this.selectedDate}" min="${todayIso}" max="${maxDateIso}" required />
               </div>
               <div class="form-group">
                 <label>Start Time (HH:mm) *</label>
@@ -9591,6 +9927,9 @@ export class SalonDashboard {
 
   showRescheduleModal(appointmentId, serviceId, staffId, clientName) {
     const modalContainer = document.getElementById('modal-container');
+    const todayIso = this.getLocalDateString();
+    const maxDays = this.salonProfile?.maxAdvanceDays || 3;
+    const maxDateIso = this.addDaysToDateString(todayIso, maxDays);
 
     modalContainer.innerHTML = `
       <div class="modal-backdrop show">
@@ -9604,7 +9943,7 @@ export class SalonDashboard {
           <form id="reschedule-form">
             <div class="form-group">
               <label>New Date *</label>
-              <input type="date" class="form-control" id="reschedule-date" value="${this.selectedDate}" required />
+              <input type="date" class="form-control" id="reschedule-date" value="${this.selectedDate}" min="${todayIso}" max="${maxDateIso}" required />
             </div>
 
             <div class="form-group">
@@ -12573,7 +12912,6 @@ export class SalonDashboard {
           CONFIRMED: 'rgba(139, 61, 255,0.2); color: #A855F7',
           COMPLETED: 'rgba(16,185,129,0.2); color: #34d399',
           CANCELLED: 'rgba(239,68,68,0.2); color: #f87171',
-          NO_SHOW: 'rgba(245,158,11,0.2); color: #fbbf24',
           IN_SERVICE: 'rgba(168,85,247,0.2); color: #c084fc',
           SEATED_IN_CHAIR: 'rgba(168,85,247,0.2); color: #c084fc',
         };

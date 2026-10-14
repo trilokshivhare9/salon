@@ -105,9 +105,15 @@ export class StaffProfileHub {
         isWorking = false;
       } else if (customWh) {
         // Concrete stylist schedule row
-        isWorking = customWh.isWorking !== undefined ? Boolean(customWh.isWorking) : !customWh.isOff;
-        startTime = customWh.startTime || salonStart;
-        endTime = customWh.endTime || salonEnd;
+        if (customWh.isCustomized === false) {
+          isWorking = !isSalonClosed;
+          startTime = salonStart;
+          endTime = salonEnd;
+        } else {
+          isWorking = customWh.isWorking !== undefined ? Boolean(customWh.isWorking) : !customWh.isOff;
+          startTime = customWh.startTime || salonStart;
+          endTime = customWh.endTime || salonEnd;
+        }
       } else if (salonWh) {
         isWorking = !isSalonClosed;
       }

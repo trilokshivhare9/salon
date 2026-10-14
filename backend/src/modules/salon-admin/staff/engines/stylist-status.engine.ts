@@ -449,8 +449,10 @@ export class StylistStatusEngine {
         .map((b) => ({
           start: this.parseTimeToMinutes(b.startTime),
           end: this.parseTimeToMinutes(b.endTime),
-          name: b.title,
+          name: b.title || b.name,
         }));
+    } else if (customWh && customWh.breaks && Array.isArray(customWh.breaks) && customWh.breaks.length > 0) {
+      breaksList = this.extractBreaks(customWh);
     }
 
     const activeBreak = breaksList.find((b) => evalMin >= b.start && evalMin < b.end);

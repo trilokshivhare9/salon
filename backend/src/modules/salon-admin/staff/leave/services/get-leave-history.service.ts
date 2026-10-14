@@ -56,27 +56,6 @@ export class GetLeaveHistoryService {
 
     const absences = await this.prisma.stylistAbsence.findMany({
       where: whereClause,
-      include: {
-        reassignments: {
-          include: {
-            appointment: {
-              select: {
-                id: true,
-                appointmentNumber: true,
-                serviceNameSnapshot: true,
-                startAt: true,
-                endAt: true,
-                status: true,
-                salonUser: {
-                  include: {
-                    user: { select: { name: true, phone: true } },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
       orderBy: { createdAt: 'desc' },
     });
 
