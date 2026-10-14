@@ -331,6 +331,7 @@ model Salon {
   serviceCategories    ServiceCategory[]
   services             Service[]
   workingHours         SalonWorkingHours[]
+  stylistWorkingHours  StylistWorkingHours[]
   salonUsers           SalonUser[]
   appointments         Appointment[]
   conversations        Conversation[]
@@ -467,24 +468,32 @@ model SalonWorkingHours {
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
   salon          Salon     @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  stylistHours   StylistWorkingHours[]
 
   @@unique([salonId, dayOfWeek])
   @@map("salon_working_hours")
 }
 
 model StylistWorkingHours {
-  id               String    @id @default(uuid())
-  stylistId        String    @map("stylist_id")
-  dayOfWeek        DayOfWeek @map("day_of_week")
-  isWorking        Boolean   @default(true) @map("is_working")
-  startTime        String    @map("start_time")       // "10:00"
-  endTime          String    @map("end_time")         // "18:00"
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
+  id                   String             @id @default(uuid())
+  salonId              String             @map("salon_id")
+  stylistId            String             @map("stylist_id")
+  salonWorkingHoursId  String?            @map("salon_working_hours_id")
+  dayOfWeek            DayOfWeek          @map("day_of_week")
+  isWorking            Boolean            @default(true) @map("is_working")
+  isCustomized         Boolean            @default(false) @map("is_customized")
+  startTime            String             @map("start_time")       // "10:00"
+  endTime              String             @map("end_time")         // "18:00"
+  createdAt            DateTime           @default(now()) @map("created_at")
+  updatedAt            DateTime           @updatedAt @map("updated_at")
 
-  stylist          Stylist   @relation(fields: [stylistId], references: [id], onDelete: Cascade)
+  salon                Salon              @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  stylist              Stylist            @relation(fields: [stylistId], references: [id], onDelete: Cascade)
+  salonWorkingHours    SalonWorkingHours? @relation(fields: [salonWorkingHoursId], references: [id], onDelete: SetNull)
 
   @@unique([stylistId, dayOfWeek])
+  @@index([salonId, stylistId, dayOfWeek])
+  @@index([salonWorkingHoursId])
   @@map("stylist_working_hours")
 }
 

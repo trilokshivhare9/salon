@@ -738,8 +738,30 @@ Here are your salon owner login credentials:
     return this.prisma.$transaction(async (tx) => {
       for (const item of dto.hours) {
         const isClosed = item.isClosed !== undefined ? item.isClosed : (item.isOpen !== undefined ? !item.isOpen : false);
-        const startTime = item.startTime || item.openTime || '09:00';
-        const endTime = item.endTime || item.closeTime || '21:00';
+        let startTime = item.startTime || item.openTime || '09:00';
+        let endTime = item.endTime || item.closeTime || '21:00';
+
+        let breaksToSave: any[] = [];
+        if (item.breaks && item.breaks.length > 0) {
+          for (const b of item.breaks) {
+            if (b.startTime >= b.endTime) {
+              throw new BadRequestException(`Break start time ${b.startTime} must be earlier than break end time ${b.endTime}.`);
+            }
+            // Seamless Operating Schedule Harmonization:
+            // If an admin schedules a facility break on a day, ensure the operating window accommodates the break
+            // so routine breaks are never dropped or rejected.
+            if (!isClosed) {
+              if (b.startTime < startTime) startTime = b.startTime;
+              if (b.endTime > endTime) endTime = b.endTime;
+            }
+            breaksToSave.push({
+              id: b.id || crypto.randomUUID(),
+              startTime: b.startTime,
+              endTime: b.endTime,
+              title: b.title || 'Lunch Break',
+            });
+          }
+        }
 
         if (startTime >= endTime) {
           throw new BadRequestException('Shift start time must be earlier than shift end time.');
@@ -751,24 +773,6 @@ Here are your salon owner login credentials:
         await tx.$executeRawUnsafe(
           `SELECT pg_advisory_xact_lock(${key1}, ${scheduleKey2})`,
         );
-
-        let breaksToSave: any[] = [];
-        if (item.breaks && item.breaks.length > 0) {
-          for (const b of item.breaks) {
-            if (b.startTime >= b.endTime) {
-              throw new BadRequestException(`Break start time ${b.startTime} must be earlier than break end time ${b.endTime}.`);
-            }
-            if (!isClosed && (b.startTime < startTime || b.endTime > endTime)) {
-              throw new BadRequestException(`Break ${b.startTime}-${b.endTime} must fall strictly within salon operating hours (${startTime}-${endTime}).`);
-            }
-            breaksToSave.push({
-              id: b.id || crypto.randomUUID(),
-              startTime: b.startTime,
-              endTime: b.endTime,
-              title: b.title || 'Lunch Break',
-            });
-          }
-        }
 
         // Check active future appointments across all stylists for salon-level facility collisions
         const now = new Date();

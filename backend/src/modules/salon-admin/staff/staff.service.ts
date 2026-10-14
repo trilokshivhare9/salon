@@ -163,11 +163,50 @@ export class StaffService {
         });
       }
 
+      // Clone Salon Facility Working Hours to new stylist (Hard Architecture Contract)
+      const salonHours = await tx.salonWorkingHours.findMany({
+        where: { salonId },
+      });
+      if (salonHours.length > 0) {
+        await tx.stylistWorkingHours.createMany({
+          data: salonHours.map((sh: any) => ({
+            salonId,
+            stylistId: stylist.id,
+            salonWorkingHoursId: sh.id,
+            dayOfWeek: sh.dayOfWeek,
+            isWorking: !sh.isClosed,
+            isCustomized: false,
+            startTime: sh.startTime,
+            endTime: sh.endTime,
+          })),
+        });
+      }
+
+      // Clone Salon Facility Routine Breaks to new stylist
+      const salonBreaks = await tx.salonBreak.findMany({
+        where: { salonId },
+      });
+      if (salonBreaks.length > 0) {
+        await tx.stylistBreak.createMany({
+          data: salonBreaks.map((sb: any) => ({
+            salonId,
+            stylistId: stylist.id,
+            salonBreakId: sb.id,
+            dayOfWeek: sb.dayOfWeek,
+            title: sb.title,
+            startTime: sb.startTime,
+            endTime: sb.endTime,
+            isCustomized: false,
+          })),
+        });
+      }
+
       return tx.stylist.findUnique({
         where: { id: stylist.id },
         include: {
           services: { include: { service: true } },
           workingHours: true,
+          breaks: true,
         },
       });
     });
@@ -466,6 +505,7 @@ export class StaffService {
             endTime: item.endTime,
           },
           create: {
+            salonId,
             stylistId: staffId,
             dayOfWeek: item.dayOfWeek,
             isWorking: item.isWorking,

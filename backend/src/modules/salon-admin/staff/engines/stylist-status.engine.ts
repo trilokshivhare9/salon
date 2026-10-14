@@ -322,26 +322,8 @@ export class StylistStatusEngine {
       };
     }
 
-    // 1c. Outside Salon Operating Hours
-    let salonOpenMin = 9 * 60;
-    let salonCloseMin = 21 * 60;
-    if (salonWh) {
-      if (salonWh.startTime) salonOpenMin = this.parseTimeToMinutes(salonWh.startTime);
-      if (salonWh.endTime) salonCloseMin = this.parseTimeToMinutes(salonWh.endTime);
-    }
-
-    if (evalMin < salonOpenMin || evalMin >= salonCloseMin) {
-      return {
-        status: StylistOperationalStatus.SALON_OFF,
-        label: 'Salon Off',
-        dotClass: 'status-salon-off',
-        badgeClass: 'badge-salon-off',
-        reason: 'Outside operating hours.',
-      };
-    }
-
     // =========================================================================
-    // LEVEL 2: INDIVIDUAL SPECIALIST LEVEL (Salon Facility is OPEN)
+    // LEVEL 2: INDIVIDUAL SPECIALIST LEVEL (Salon Facility is Scheduled OPEN)
     // =========================================================================
 
     // 2a. Account Lifecycle Guard: INACTIVE
@@ -365,14 +347,38 @@ export class StylistStatusEngine {
       return evalDateIso >= sDate && evalDateIso <= eDate;
     });
 
+    // 2c. Specialist Schedule (Weekly Off vs Shift Hours)
+    let salonOpenMin = 9 * 60;
+    let salonCloseMin = 21 * 60;
+    if (salonWh) {
+      if (salonWh.startTime) salonOpenMin = this.parseTimeToMinutes(salonWh.startTime);
+      if (salonWh.endTime) salonCloseMin = this.parseTimeToMinutes(salonWh.endTime);
+    }
+
+    const customWh = (stylist.workingHours || []).find((h) => h.dayOfWeek === dayOfWeek);
+    const isStylistWeeklyOff = customWh
+      ? (!customWh.isWorking || customWh.isClosed || customWh.isOff)
+      : false;
+
+    // Stylist scheduled off today -> Always Weekly Off (never Salon Off!)
+    if (isStylistWeeklyOff) {
+      return {
+        status: StylistOperationalStatus.WEEKLY_OFF,
+        label: 'Weekly Off',
+        dotClass: 'status-weekly-off',
+        badgeClass: 'badge-weekly-off',
+        reason: 'Weekly Off',
+      };
+    }
+
+    // If active leave on a working day
     if (activeAbsence) {
       const portion = activeAbsence.leavePortion || LeavePortion.FULL_DAY;
       let isLeaveNow = false;
 
       let stShiftStart = salonOpenMin;
       let stShiftEnd = salonCloseMin;
-      const customWh = (stylist.workingHours || []).find((h) => h.dayOfWeek === dayOfWeek);
-      if (customWh && (!stylist.followsSalonSchedule || !customWh.isWorking) && customWh.isWorking) {
+      if (customWh && customWh.isWorking) {
         if (customWh.startTime) stShiftStart = this.parseTimeToMinutes(customWh.startTime);
         if (customWh.endTime) stShiftEnd = this.parseTimeToMinutes(customWh.endTime);
       }
@@ -406,24 +412,37 @@ export class StylistStatusEngine {
       }
     }
 
-    // 2c. Specialist Schedule (Weekly Off vs Shift Hours)
-    let isStylistWeeklyOff = false;
-    let shiftStartMin = salonOpenMin;
-    let shiftEndMin = salonCloseMin;
-    let breaksList: Array<{ start: number; end: number; name?: string }> = salonWh ? this.extractBreaks(salonWh) : [];
-
-    const customWh = (stylist.workingHours || []).find((h) => h.dayOfWeek === dayOfWeek);
-
-    if (customWh && (!stylist.followsSalonSchedule || !customWh.isWorking)) {
-      if (!customWh.isWorking || customWh.isClosed || customWh.isOff) {
-        isStylistWeeklyOff = true;
-      } else {
-        if (customWh.startTime) shiftStartMin = Math.max(salonOpenMin, this.parseTimeToMinutes(customWh.startTime));
-        if (customWh.endTime) shiftEndMin = Math.min(salonCloseMin, this.parseTimeToMinutes(customWh.endTime));
-      }
+    // 2d. Outside Salon Facility Operating Hours (e.g. at night when facility is closed)
+    if (evalMin < salonOpenMin || evalMin >= salonCloseMin) {
+      return {
+        status: StylistOperationalStatus.SALON_OFF,
+        label: 'Salon Off',
+        dotClass: 'status-salon-off',
+        badgeClass: 'badge-salon-off',
+        reason: 'Outside operating hours.',
+      };
     }
 
-    // Use first-class StylistBreak rows
+    let shiftStartMin = salonOpenMin;
+    let shiftEndMin = salonCloseMin;
+    if (customWh && customWh.isWorking) {
+      if (customWh.startTime) shiftStartMin = Math.max(salonOpenMin, this.parseTimeToMinutes(customWh.startTime));
+      if (customWh.endTime) shiftEndMin = Math.min(salonCloseMin, this.parseTimeToMinutes(customWh.endTime));
+    }
+
+    // 2e. Outside Specialist Personal Shift (Shift not started or completed today)
+    if (evalMin < shiftStartMin || evalMin >= shiftEndMin) {
+      return {
+        status: StylistOperationalStatus.WEEKLY_OFF,
+        label: evalMin < shiftStartMin ? 'Off Duty' : 'Shift Ended',
+        dotClass: 'status-weekly-off',
+        badgeClass: 'badge-weekly-off',
+        reason: evalMin < shiftStartMin ? 'Shift starts later today.' : 'Shift completed for today.',
+      };
+    }
+
+    // 2f. Scheduled Break Window: ON_BREAK
+    let breaksList: Array<{ start: number; end: number; name?: string }> = salonWh ? this.extractBreaks(salonWh) : [];
     if (stylist.breaks && Array.isArray(stylist.breaks) && stylist.breaks.length > 0) {
       breaksList = (stylist.breaks as any[])
         .filter((b) => b.dayOfWeek === dayOfWeek)
@@ -434,28 +453,6 @@ export class StylistStatusEngine {
         }));
     }
 
-    if (isStylistWeeklyOff) {
-      return {
-        status: StylistOperationalStatus.WEEKLY_OFF,
-        label: 'Weekly Off',
-        dotClass: 'status-weekly-off',
-        badgeClass: 'badge-weekly-off',
-        reason: 'Weekly Off',
-      };
-    }
-
-    // 2d. Outside Specialist Personal Shift (Shift not started or ended)
-    if (evalMin < shiftStartMin || evalMin >= shiftEndMin) {
-      return {
-        status: StylistOperationalStatus.SALON_OFF,
-        label: 'Salon Off',
-        dotClass: 'status-salon-off',
-        badgeClass: 'badge-salon-off',
-        reason: evalMin < shiftStartMin ? 'Shift starts later today.' : 'Shift completed for today.',
-      };
-    }
-
-    // 2e. Scheduled Break Window: ON_BREAK
     const activeBreak = breaksList.find((b) => evalMin >= b.start && evalMin < b.end);
     if (activeBreak) {
       const breakLabel = activeBreak.name ? `${activeBreak.name}` : 'Break';

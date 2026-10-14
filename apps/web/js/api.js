@@ -660,15 +660,51 @@ export class ApiClient {
     return res;
   }
 
+  static async getStaffWorkingHours(staffId, bypassCache = true) {
+    const url = bypassCache ? `/staff/${staffId}/working-hours?_t=${Date.now()}` : `/staff/${staffId}/working-hours`;
+    return this.request(url, {}, bypassCache ? 0 : 60000);
+  }
+
   static async updateStaffWorkingHours(staffId, hours, followsSalonSchedule) {
     this.invalidateCache('/staff');
-    const payload = { hours };
+    const sanitizedHours = (hours || []).map((h) => {
+      const clean = {
+        dayOfWeek: h.dayOfWeek,
+        isWorking: h.isWorking !== undefined ? Boolean(h.isWorking) : true,
+      };
+      if (h.startTime) clean.startTime = h.startTime;
+      if (h.endTime) clean.endTime = h.endTime;
+      if (h.isCustomized !== undefined) clean.isCustomized = Boolean(h.isCustomized);
+      return clean;
+    });
+
+    const payload = { hours: sanitizedHours };
     if (followsSalonSchedule !== undefined) {
       payload.followsSalonSchedule = followsSalonSchedule;
     }
     const res = await this.request(`/staff/${staffId}/working-hours`, {
       method: 'PUT',
       body: JSON.stringify(payload),
+    });
+    this.invalidateCache('/staff');
+    return res;
+  }
+
+  static async patchStaffDayShift(staffId, dayOfWeek, shiftData) {
+    this.invalidateCache('/staff');
+    const res = await this.request(`/staff/${staffId}/working-hours/${dayOfWeek}`, {
+      method: 'PATCH',
+      body: JSON.stringify(shiftData),
+    });
+    this.invalidateCache('/staff');
+    return res;
+  }
+
+  static async resetStaffWorkingHours(staffId) {
+    this.invalidateCache('/staff');
+    const res = await this.request(`/staff/${staffId}/working-hours/reset`, {
+      method: 'POST',
+      body: JSON.stringify({}),
     });
     this.invalidateCache('/staff');
     return res;
@@ -712,6 +748,36 @@ export class ApiClient {
     this.invalidateCache('/staff');
     const res = await this.request(`/staff/${staffId}/breaks/${breakId}/reset`, {
       method: 'POST',
+    });
+    this.invalidateCache('/staff');
+    return res;
+  }
+
+  static async inheritSalonBreak(staffId, payload) {
+    this.invalidateCache('/staff');
+    const res = await this.request(`/staff/${staffId}/breaks/inherit`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    this.invalidateCache('/staff');
+    return res;
+  }
+
+  static async updateStaffRoutineBreak(staffId, payload) {
+    this.invalidateCache('/staff');
+    const res = await this.request(`/staff/${staffId}/breaks/routine`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+    this.invalidateCache('/staff');
+    return res;
+  }
+
+  static async deleteStaffRoutineBreak(staffId, payload) {
+    this.invalidateCache('/staff');
+    const res = await this.request(`/staff/${staffId}/breaks/routine`, {
+      method: 'DELETE',
+      body: JSON.stringify(payload),
     });
     this.invalidateCache('/staff');
     return res;
@@ -936,9 +1002,20 @@ export class ApiClient {
     this.invalidateCache('/booking');
     this.invalidateCache('/staff');
     this.invalidateCache('/reports');
+
+    const sanitizedHours = (hours || []).map((h) => {
+      const isClosed = h.isClosed !== undefined ? Boolean(h.isClosed) : (h.isOpen !== undefined ? !h.isOpen : false);
+      return {
+        dayOfWeek: h.dayOfWeek,
+        isClosed,
+        startTime: h.startTime || h.openTime || '09:00',
+        endTime: h.endTime || h.closeTime || '21:00',
+      };
+    });
+
     const res = await this.request('/salons/working-hours', {
       method: 'PUT',
-      body: JSON.stringify({ hours }),
+      body: JSON.stringify({ hours: sanitizedHours }),
     });
     this.invalidateCache('/salons/working-hours');
     this.invalidateCache('/salons/profile');
@@ -987,6 +1064,42 @@ export class ApiClient {
     this.invalidateCache('/salons');
     this.invalidateCache('/staff');
     return res;
+  }
+
+  static async updateSalonRoutineBreak(payload) {
+    this.invalidateCache('/salons');
+    this.invalidateCache('/staff');
+    const res = await this.request('/salons/breaks/routine', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+    this.invalidateCache('/salons');
+    this.invalidateCache('/staff');
+    return res;
+  }
+
+  static async deleteSalonRoutineBreak(payload) {
+    this.invalidateCache('/salons');
+    this.invalidateCache('/staff');
+    const res = await this.request('/salons/breaks/routine', {
+      method: 'DELETE',
+      body: JSON.stringify(payload),
+    });
+    this.invalidateCache('/salons');
+    this.invalidateCache('/staff');
+    return res;
+  }
+
+  static async createSalonFacilityBreak(payload) {
+    return this.createSalonBreak(payload);
+  }
+
+  static async updateSalonFacilityBreak(breakId, payload) {
+    return this.updateSalonBreak(breakId, payload);
+  }
+
+  static async deleteSalonFacilityBreak(breakId) {
+    return this.deleteSalonBreak(breakId);
   }
 
   static async updateSalonWorkingHoursForSalon(salonId, hours) {

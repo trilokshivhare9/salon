@@ -14,7 +14,6 @@ import {
 import { SalonsService } from './salons.service';
 import { CreateSalonPlatformDto } from './dto/create-salon-platform.dto';
 import { UpdateSalonDto } from './dto/update-salon.dto';
-import { UpdateWorkingHoursDto, CreateSalonBreakDto, UpdateSalonBreakDto } from './dto/working-hours.dto';
 import { CreateClosureDto } from './dto/create-closure.dto';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../../common/guards/roles.guard';
@@ -112,58 +111,6 @@ export class SalonsController {
     @Body() dto: UpdateSalonDto,
   ) {
     return this.salonsService.updateSalonProfile(salonId, dto);
-  }
-
-  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
-  @Get('working-hours')
-  async getWorkingHours(@CurrentSalonId() salonId: string) {
-    return this.salonsService.getWorkingHours(salonId);
-  }
-
-  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
-  @Put('working-hours')
-  async updateWorkingHours(
-    @CurrentSalonId() salonId: string,
-    @Body() dto: UpdateWorkingHoursDto,
-  ) {
-    return this.salonsService.updateWorkingHours(salonId, dto);
-  }
-
-  // -------------------------------------------------------------
-  // SALON MASTER BREAKS ENDPOINTS
-  // -------------------------------------------------------------
-  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
-  @Get('breaks')
-  async getSalonBreaks(@CurrentSalonId() salonId: string) {
-    return this.salonsService.getSalonBreaks(salonId);
-  }
-
-  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
-  @Post('breaks')
-  async createSalonBreak(
-    @CurrentSalonId() salonId: string,
-    @Body() dto: CreateSalonBreakDto,
-  ) {
-    return this.salonsService.createSalonBreak(salonId, dto);
-  }
-
-  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
-  @Put('breaks/:id')
-  async updateSalonBreak(
-    @CurrentSalonId() salonId: string,
-    @Param('id') breakId: string,
-    @Body() dto: UpdateSalonBreakDto,
-  ) {
-    return this.salonsService.updateSalonBreak(salonId, breakId, dto);
-  }
-
-  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
-  @Delete('breaks/:id')
-  async deleteSalonBreak(
-    @CurrentSalonId() salonId: string,
-    @Param('id') breakId: string,
-  ) {
-    return this.salonsService.deleteSalonBreak(salonId, breakId);
   }
 
   // -------------------------------------------------------------

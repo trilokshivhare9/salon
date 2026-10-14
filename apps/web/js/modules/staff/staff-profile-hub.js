@@ -82,34 +82,34 @@ export class StaffProfileHub {
     });
 
     const isOnLeaveToday = Boolean(todayAbsence) || staff?.operationalStatus === 'ON_LEAVE';
-    const isSalonClosedToday = staff?.operationalStatus === 'SALON_OFF';
+    // Truthful facility boundary check: is the salon facility closed today?
+    const currentSalonWhToday = salonWhList.find((h) => h.dayOfWeek === currentDayName);
+    const isSalonClosedToday = currentSalonWhToday ? Boolean(currentSalonWhToday.isClosed) : false;
 
     const dayPills = daysArr.map((dayName, idx) => {
-      // Find staff custom schedule entry
+      // Find staff schedule entry
       const customWh = staffWhList.find((h) => h.dayOfWeek === dayName);
       // Find salon master schedule entry
       const salonWh = salonWhList.find((h) => h.dayOfWeek === dayName);
 
-      const salonStart = salonWh?.startTime || defaultSalonStart;
-      const salonEnd = salonWh?.endTime || defaultSalonEnd;
+      const salonStart = salonWh?.startTime || defaultSalonStart || '09:00';
+      const salonEnd = salonWh?.endTime || defaultSalonEnd || '21:00';
       const isSalonClosed = salonWh ? Boolean(salonWh.isClosed) : false;
 
       let isWorking = false;
-      let startTime = null;
-      let endTime = null;
+      let startTime = salonStart;
+      let endTime = salonEnd;
 
-      if (customWh && staff.followsSalonSchedule !== true) {
+      if (isSalonClosed) {
+        // Hard Facility Boundary: when salon facility is closed, staff cannot work
+        isWorking = false;
+      } else if (customWh) {
+        // Concrete stylist schedule row
         isWorking = customWh.isWorking !== undefined ? Boolean(customWh.isWorking) : !customWh.isOff;
         startTime = customWh.startTime || salonStart;
         endTime = customWh.endTime || salonEnd;
       } else if (salonWh) {
         isWorking = !isSalonClosed;
-        startTime = salonStart;
-        endTime = salonEnd;
-      } else if (customWh) {
-        isWorking = customWh.isWorking !== undefined ? Boolean(customWh.isWorking) : !customWh.isOff;
-        startTime = customWh.startTime || defaultSalonStart;
-        endTime = customWh.endTime || defaultSalonEnd;
       }
 
       const isToday = dayName === currentDayName;
@@ -351,29 +351,35 @@ export class StaffProfileHub {
       dutyDotClass = 'dot-rose';
       dutySub = todayLeave?.reason || staff?.operationalStatusReason || 'Approved Absence';
       dutySubClass = 'sub-rose';
-    } else if (schedule?.isSalonClosedToday || staff?.operationalStatus === 'SALON_OFF') {
-      dutyStatus = 'Salon Closed';
-      dutyClass = 'val-duty-off';
-      dutyDotClass = 'dot-amber';
-      dutySub = 'Store Holiday';
-      dutySubClass = '';
     } else if (staff?.status === 'INACTIVE' || staff?.operationalStatus === 'INACTIVE') {
       dutyStatus = 'Inactive';
       dutyClass = 'val-duty-off';
       dutyDotClass = 'dot-gray';
       dutySub = 'Account Deactivated';
       dutySubClass = '';
+    } else if (schedule?.isSalonClosedToday) {
+      dutyStatus = 'Salon Closed';
+      dutyClass = 'val-duty-off';
+      dutyDotClass = 'dot-amber';
+      dutySub = 'Store Holiday';
+      dutySubClass = '';
+    } else if (!schedule?.isScheduledToday || staff?.operationalStatus === 'WEEKLY_OFF') {
+      dutyStatus = 'Weekly Off';
+      dutyClass = 'val-duty-off';
+      dutyDotClass = 'dot-gray';
+      dutySub = 'Scheduled Off Day';
+      dutySubClass = '';
+    } else if (staff?.operationalStatus === 'SALON_OFF') {
+      dutyStatus = 'Salon Closed';
+      dutyClass = 'val-duty-off';
+      dutyDotClass = 'dot-amber';
+      dutySub = staff?.operationalStatusReason || 'Facility Closed';
+      dutySubClass = '';
     } else if (staff?.operationalStatus === 'ON_BREAK') {
       dutyStatus = 'On Break';
       dutyClass = 'val-duty-on';
       dutyDotClass = 'dot-amber';
       dutySub = staff?.operationalStatusReason || 'Routine Break';
-      dutySubClass = '';
-    } else if (!schedule?.isScheduledToday) {
-      dutyStatus = 'Weekly Off';
-      dutyClass = 'val-duty-off';
-      dutyDotClass = 'dot-gray';
-      dutySub = 'Scheduled Off Day';
       dutySubClass = '';
     }
 
