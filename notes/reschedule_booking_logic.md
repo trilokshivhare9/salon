@@ -68,24 +68,26 @@ As soon as a reschedule is proposed:
 What happens if the customer never checks WhatsApp or ignores the message?
 
 #### A. How long does the system wait?
-* The system waits and keeps the proposed slot locked until **60 minutes before the proposed slot starts** (`T - 60 minutes`).
+* The customer has **1 hour from when the reschedule message was sent** to accept or decline (capped at 60 minutes before the proposed slot starts: $\min(\text{now} + 1\text{h},\;\; \text{proposedStartAt} - 60\text{m})$).
 * For example:  
-  * If the proposed slot is tomorrow at **3:00 PM**,  
-  * The cutoff deadline is tomorrow at **2:00 PM** (60 minutes before).
+  * If the proposed slot is tomorrow at **3:00 PM**, and the message was sent today at **11:00 AM**,  
+  * The response cutoff deadline is **12:00 PM today** (1 hour after message).
+  * If the proposed slot is today at **3:00 PM**, and the message was sent today at **1:00 PM**,  
+  * The cutoff deadline is **2:00 PM today** (1 hour after message, and 60 minutes before the slot).
 
-#### B. What happens at the 60-Minute Cutoff?
+#### B. What happens at the 1-Hour Cutoff?
 * A background system worker runs automatically every 60 seconds.
-* At exactly 60 minutes before the proposed time, if status is still `PENDING_RESCHEDULE`:
+* When the 1-hour response window expires, if status is still `PENDING_RESCHEDULE`:
   1. **The booking is automatically CANCELLED by the system.**
   2. **Zero Customer Penalty:** Recorded with 0 penalty strikes (`fault: SALON`).
-  3. **The proposed slot is immediately FREED UP:** This ensures the stylist's chair does not sit empty and the salon can give the slot to a walk-in client.
+  3. **The proposed slot is immediately FREED UP:** This ensures the stylist's chair does not sit empty and the salon can give the slot to another client or walk-in well in advance.
   4. **WhatsApp Notice Sent to Customer:**  
-     *"⚠️ Reschedule Offer Expired: Your proposed reschedule has expired because we did not receive a response before the cutoff. To ensure staff availability, the appointment was cancelled. No penalty was applied."*
+     *"⚠️ Reschedule Offer Expired: Your proposed reschedule has expired because we did not receive a response before the response cutoff. To ensure staff availability, the appointment was cancelled. No penalty was applied."*
 
 #### C. What if the customer taps [Accept] AFTER the cutoff?
 * If the customer opens WhatsApp later and tries to tap `Accept`:
 * The system detects the proposal has already expired and replies:  
-  *"⚠️ Offer No Longer Available: This reschedule proposal has expired as the response cutoff passed and the slot was released. Your booking was cancelled with zero penalty."*
+  *"⚠️ Offer No Longer Available: This reschedule proposal has expired as the response cutoff passed, and the slot was released. Your booking was cancelled with zero penalty."*
 
 ---
 
@@ -93,7 +95,7 @@ What happens if the customer never checks WhatsApp or ignores the message?
 
 | Customer Action | What Status Becomes | Does Customer Get Penalty? | What Happens to Proposed Slot? |
 | :--- | :--- | :---: | :--- |
-| **Taps [Accept]** | `CONFIRMED` | No | Becomes their permanent booking |
+| **Taps [Accept] within 1 hr** | `CONFIRMED` | No | Becomes their permanent booking |
 | **Taps [Decline]** | `CANCELLED` | No (0 strikes) | Freed immediately for other clients |
-| **Does Not Respond** | Auto-`CANCELLED` at T - 60m | No (0 strikes) | Freed at 60 mins before start time |
+| **Does Not Respond within 1 hr** | Auto-`CANCELLED` | No (0 strikes) | Freed immediately after 1 hr |
 | **Taps [Accept] late (after cutoff)** | Stays `CANCELLED` | No (0 strikes) | Slot already given away; bot informs client |

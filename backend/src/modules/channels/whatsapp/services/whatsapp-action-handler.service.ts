@@ -278,7 +278,8 @@ export class WhatsAppActionHandlerService {
     }
 
     if (input === WhatsAppButtonId.INFO) {
-      const infoMsg = this.templates.buildSalonInfoMessage(salon);
+      const hasActive = Boolean(activeAppointment);
+      const infoMsg = this.templates.buildSalonInfoMessage(salon, hasActive);
       await this.sendMessage(cleanNumber, infoMsg, phoneNumberId, salonId);
       return { replyMessage: infoMsg.bodyText, state: conversation.state };
     }

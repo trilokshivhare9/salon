@@ -41,11 +41,7 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
     const cached = this.salonTimezoneCache.get(salonId);
     if (cached) return cached;
 
-    const salon = await this.prisma.salon.findUnique({
-      where: { id: salonId },
-      select: { timezone: true },
-    });
-    const tz = salon?.timezone || 'Asia/Kolkata';
+    const tz = await TimeUtility.getSalonTimezone(this.prisma, salonId);
     this.salonTimezoneCache.set(salonId, tz);
     return tz;
   }

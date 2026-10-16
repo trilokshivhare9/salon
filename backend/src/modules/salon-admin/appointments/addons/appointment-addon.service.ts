@@ -3,6 +3,9 @@ import {
   Logger,
   BadRequestException,
   NotFoundException,
+  Inject,
+  forwardRef,
+  Optional,
 } from '@nestjs/common';
 import { PrismaService } from '../../../../database/prisma.service';
 import { AppointmentStatus } from '@prisma/client';
@@ -11,12 +14,18 @@ import {
   appointmentInclude,
   formatAppointment,
 } from '../utils/appointment-helpers';
+import { AppointmentModifierService } from '../modifier/appointment-modifier.service';
 
 @Injectable()
 export class AppointmentAddonService {
   private readonly logger = new Logger(AppointmentAddonService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    @Optional()
+    @Inject(forwardRef(() => AppointmentModifierService))
+    private modifierService?: AppointmentModifierService,
+  ) {}
 
   /**
    * Adds an add-on service to an active/in-service appointment, extending its duration.
@@ -160,6 +169,10 @@ export class AppointmentAddonService {
         include: appointmentInclude,
       });
     });
+
+    if (this.modifierService) {
+      await this.modifierService.syncAlarm(appointmentId);
+    }
 
     const formatted = formatAppointment(updatedAppointment);
     return {

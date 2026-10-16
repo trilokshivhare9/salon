@@ -36,6 +36,8 @@ import {
 } from '../utils/appointment-helpers';
 import { WhatsAppService } from '../../../channels/whatsapp/whatsapp.service';
 
+import { AppointmentModifierService } from '../modifier/appointment-modifier.service';
+
 @Injectable()
 export class AppointmentCreationService {
   private readonly logger = new Logger(AppointmentCreationService.name);
@@ -45,10 +47,12 @@ export class AppointmentCreationService {
     private availabilityService: AvailabilityService,
     private engine: AvailabilityEngineService,
     private eventsService: AppointmentEventsService,
+    @Inject(forwardRef(() => AppointmentModifierService))
+    private modifierService: AppointmentModifierService,
     @Optional()
     @Inject(forwardRef(() => WhatsAppService))
     private whatsappService?: WhatsAppService,
-  ) {}
+  ) { }
 
   /**
    * Helper: checks if appointment time window overlaps with stylist leave intervals
@@ -666,6 +670,9 @@ export class AppointmentCreationService {
       const formatted = formatAppointment(createdAppt);
       this.eventsService.emitSalonEvent(salonId, 'NEW_BOOKING', formatted);
 
+      // Synchronize initial Redis alarm & nextAction columns via AppointmentModifierService
+      await this.modifierService.syncAlarm(createdAppt.id);
+
       // Multi-channel Salon Owner & Desk Notification Dispatch
       this.dispatchSalonOwnerNewBookingNotification(
         salonId,
@@ -810,8 +817,8 @@ export class AppointmentCreationService {
                 interactiveType: isQuick ? 'button' : undefined,
                 buttons: isQuick
                   ? [
-                      { id: 'btn_owner_view_dashboard', title: '📋 Open Desk' },
-                    ]
+                    { id: 'btn_owner_view_dashboard', title: '📋 Open Desk' },
+                  ]
                   : undefined,
               },
               phoneNumberId,

@@ -5,6 +5,7 @@ export const VALID_STATUS_TRANSITIONS: Record<AppointmentStatus, AppointmentStat
   [AppointmentStatus.BOOKED]: [
     AppointmentStatus.BOOKED,
     AppointmentStatus.CONFIRMED,
+    AppointmentStatus.CHECKED_IN,
     AppointmentStatus.CANCELLED,
     AppointmentStatus.PENDING_RESCHEDULE,
   ],

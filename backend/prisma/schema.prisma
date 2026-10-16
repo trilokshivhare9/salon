@@ -598,6 +598,10 @@ model Appointment {
   lateFollowUpSentAt  DateTime?         @map("late_follow_up_sent_at") @db.Timestamptz
   clientEtaStatus     ClientEtaStatus?  @map("client_eta_status")
 
+  // Operational Scheduler Columns (For Redis-based Reminder Engine)
+  nextActionAt        DateTime?         @map("next_action_at") @db.Timestamptz
+  nextActionType      String?           @map("next_action_type")
+
   createdAt           DateTime          @default(now()) @map("created_at")
   updatedAt           DateTime          @updatedAt @map("updated_at")
 
@@ -615,6 +619,7 @@ model Appointment {
   @@index([stylistId, startAt, endAt])
   @@index([salonId, salonUserId, appointmentDate])
   @@index([salonId, status])
+  @@index([nextActionAt])
   @@map("appointments")
 }
 

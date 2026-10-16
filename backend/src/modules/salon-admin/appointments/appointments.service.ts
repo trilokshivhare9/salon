@@ -39,6 +39,8 @@ import {
   VALID_STATUS_TRANSITIONS,
 } from './utils/appointment-helpers';
 
+import { AppointmentModifierService } from './modifier/appointment-modifier.service';
+
 export { VALID_STATUS_TRANSITIONS };
 
 export interface InternalCreateAppointmentOptions {
@@ -60,6 +62,8 @@ export class AppointmentsService {
     @Optional() public rescheduleService?: RescheduleService,
     @Optional() private creationService?: AppointmentCreationService,
     @Optional() private statusService?: AppointmentStatusService,
+    @Inject(forwardRef(() => AppointmentModifierService))
+    @Optional() private modifierService?: AppointmentModifierService,
     @Optional() private addonService?: AppointmentAddonService,
     @Inject(forwardRef(() => RemindersService))
     @Optional() private remindersService?: RemindersService,
@@ -69,21 +73,6 @@ export class AppointmentsService {
     @Optional() private conflictEngine?: ScheduleConflictResolutionEngine,
   ) {
     this.ensureInitializedServices();
-
-    // Background interval: auto-decline expired PENDING_ACCEPTANCE requests every 60 seconds
-    setInterval(async () => {
-      try {
-        const salons = await this.prisma.salon.findMany({
-          where: { status: 'ACTIVE' },
-          select: { id: true },
-        });
-        for (const s of salons) {
-          await this.getStatusService().autoDeclineExpiredQuickBookings(s.id);
-        }
-      } catch (err: any) {
-        this.logger.error(`Error in quick booking auto-decline interval: ${err.message}`);
-      }
-    }, 60 * 1000);
   }
 
   private ensureInitializedServices() {
@@ -103,6 +92,7 @@ export class AppointmentsService {
         this.availabilityService!,
         this.engine!,
         this.eventsService!,
+        this.getModifierService(),
         this.whatsappService,
       );
     }
@@ -114,12 +104,24 @@ export class AppointmentsService {
       this.ensureInitializedServices();
       this.statusService = new AppointmentStatusService(
         this.prisma,
-        this.eventsService!,
+        this.getModifierService(),
         this.getCancellationService(),
         this.whatsappService,
       );
     }
     return this.statusService;
+  }
+
+  public getModifierService(): AppointmentModifierService {
+    if (!this.modifierService) {
+      this.ensureInitializedServices();
+      this.modifierService = new AppointmentModifierService(
+        this.prisma,
+        undefined,
+        this.eventsService,
+      );
+    }
+    return this.modifierService;
   }
 
   private getAddonService(): AppointmentAddonService {
@@ -135,6 +137,7 @@ export class AppointmentsService {
       this.cancellationService = new CancellationService(
         this.prisma,
         this.eventsService!,
+        this.getModifierService(),
         this.whatsappService,
       );
     }
@@ -149,6 +152,7 @@ export class AppointmentsService {
         this.availabilityService!,
         this.engine!,
         this.eventsService!,
+        this.getModifierService(),
         this.whatsappService,
       );
     }
@@ -171,7 +175,6 @@ export class AppointmentsService {
       userId?: string;
     },
   ) {
-    await this.getStatusService().autoDeclineExpiredQuickBookings(salonId);
     const whereClause: any = { salonId };
 
     if (filters.status) {

@@ -1,10 +1,12 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy, forwardRef, Inject } from '@nestjs/common';
 import { PrismaService } from '../../../../database/prisma.service';
+import { RedisService } from '../../../../database/redis.service';
 import { WhatsAppService } from '../../../channels/whatsapp/whatsapp.service';
 import { WhatsAppTemplateService } from '../../../channels/whatsapp/services/whatsapp-template.service';
 import { AppointmentsService } from '../appointments.service';
-import { DateTime } from 'luxon';
-import { AppointmentStatus, ClientEtaStatus, AbsenceStatus, CancelledBy } from '@prisma/client';
+import { AppointmentModifierService } from '../modifier/appointment-modifier.service';
+import { AppointmentStatus, CancelledBy } from '@prisma/client';
+import { AppointmentActionType } from '../../../../common/constants/booking-policy.constants';
 import { TimeUtility } from '../../../../common/utils/time.utility';
 import { resolveSalonDirectionsUrl } from '../../../../common/utils/location.utility';
 
@@ -16,6 +18,9 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly redisService: RedisService,
+    @Inject(forwardRef(() => AppointmentModifierService))
+    private readonly modifierService: AppointmentModifierService,
     @Inject(forwardRef(() => WhatsAppService))
     private readonly whatsAppService: WhatsAppService,
     @Inject(forwardRef(() => AppointmentsService))
@@ -24,7 +29,8 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
     private readonly whatsAppTemplateService: WhatsAppTemplateService,
   ) { }
 
-  onModuleInit() {
+  async onModuleInit() {
+    await this.hydrateRedisSchedule();
     this.startReminderJob();
   }
 
@@ -35,18 +41,70 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Boot-time Hydration: Loads all pending alarms from PostgreSQL into Redis ZSET.
+   * Ensures zero lost alarms even if the backend server or Redis restarted.
+   */
+  async hydrateRedisSchedule(): Promise<number> {
+    try {
+      const activeAppts = await this.prisma.appointment.findMany({
+        where: {
+          nextActionAt: { not: null },
+          status: {
+            in: [
+              AppointmentStatus.BOOKED,
+              AppointmentStatus.CONFIRMED,
+              AppointmentStatus.CHECKED_IN,
+              AppointmentStatus.SEATED_IN_CHAIR,
+              AppointmentStatus.ON_THE_WAY,
+              AppointmentStatus.PENDING_RESCHEDULE,
+              AppointmentStatus.PENDING_ACCEPTANCE,
+            ],
+          },
+        },
+        select: {
+          id: true,
+          nextActionAt: true,
+          nextActionType: true,
+        },
+      });
+
+      let count = 0;
+      for (const appt of activeAppts) {
+        if (appt.nextActionAt && appt.nextActionType) {
+          await this.redisService.setAlarm(
+            appt.id,
+            appt.nextActionType,
+            new Date(appt.nextActionAt).getTime(),
+          );
+          count++;
+        }
+      }
+
+      this.logger.log(`⚡ [Redis Hydration] Seeded ${count} active appointment alarms into Redis.`);
+      return count;
+    } catch (err: any) {
+      this.logger.error(`[Redis Hydration] Failed to hydrate Redis alarms: ${err.message}`, err.stack);
+      return 0;
+    }
+  }
+
   private startReminderJob() {
-    // Run every 60 seconds
+    // Run every 15 seconds against Redis Sorted Set
     this.timer = setInterval(async () => {
       try {
         await this.processReminders();
       } catch (err: any) {
-        this.logger.error(`Error in reminder cron tick: ${err.message}`, err.stack);
+        this.logger.error(`Error in reminder Redis tick: ${err.message}`, err.stack);
       }
-    }, 60000);
-    this.logger.log('⏰ Multi-Stage WhatsApp Reminder & Auto No-Show Worker started (60s tick).');
+    }, 15000);
+    this.logger.log('⏰ Redis-Powered Multi-Stage Reminder & Auto-Cutoff Worker started (15s tick).');
   }
 
+  /**
+   * Pops due alarms from Redis Sorted Set and executes them.
+   * If no alarms are due, exits immediately with ZERO database queries.
+   */
   async processReminders(): Promise<{
     stage1: number;
     stage1Cutoff: number;
@@ -63,10 +121,8 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
 
     this.isProcessing = true;
     try {
-      const salons = await this.prisma.salon.findMany({
-        where: { status: 'ACTIVE' },
-        include: { whatsappAccount: true },
-      });
+      const nowMs = Date.now();
+      const dueAlarms = await this.redisService.popDueAlarms(nowMs, 50);
 
       let stage1Count = 0;
       let stage1CutoffCount = 0;
@@ -74,235 +130,36 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
       let stage2CutoffCount = 0;
       let stage3ElapsedCount = 0;
 
-      for (const salon of salons) {
+      // Fast exit if no alarms are due: ZERO database queries!
+      if (!dueAlarms || dueAlarms.length === 0) {
+        return {
+          stage1: 0,
+          stage1Cutoff: 0,
+          stage2: 0,
+          stage2Cutoff: 0,
+          stage4: 0,
+          stage5: 0,
+          stage3Elapsed: 0,
+        };
+      }
+
+      for (const rawAlarm of dueAlarms) {
         try {
-          const tz = salon.timezone || 'Asia/Kolkata';
-          const now = DateTime.now().setZone(tz);
-          const phoneNumberId = salon.whatsappAccount?.phoneNumberId;
-          const todayStart = now.startOf('day').toJSDate();
+          const colonIdx = rawAlarm.indexOf(':');
+          if (colonIdx === -1) continue;
+          const appointmentId = rawAlarm.substring(0, colonIdx);
+          const actionType = rawAlarm.substring(colonIdx + 1);
 
-          // -----------------------------------------------------------------------
-          // STAGE 1: Advance 2-Hour Confirmation Reminder
-          // Lead time > 120m starts as BOOKED. Send reminder prompt.
-          // -----------------------------------------------------------------------
-          const stage1Min = now.plus({ minutes: 60 }).toJSDate();
-          const stage1Max = now.plus({ hours: 2, minutes: 15 }).toJSDate();
-
-          const stage1Appointments = (await this.prisma.appointment.findMany({
-            where: {
-              salonId: salon.id,
-              status: AppointmentStatus.BOOKED,
-              reminder2hSentAt: null,
-              startAt: {
-                gte: stage1Min,
-                lte: stage1Max,
-              },
-            },
-            include: {
-              salonUser: {
-                include: {
-                  user: true,
-                },
-              },
-              stylist: true,
-              service: true,
-            },
-          })) || [];
-
-          for (const appt of stage1Appointments) {
-            const user = appt.salonUser?.user;
-            if (!user?.phone) continue;
-            const timeStr = TimeUtility.formatTime12h(appt.startAt, tz);
-            const dateStr = TimeUtility.formatDateFriendly(appt.startAt, tz);
-
-            const displayName =
-              user.name && user.name !== 'WhatsApp Customer' && user.name !== 'Customer' && user.name !== 'Valued Client'
-                ? user.name
-                : 'there';
-
-            const directionsUrl = resolveSalonDirectionsUrl(salon);
-            const payload = this.whatsAppTemplateService.build2HourReminderPrompt(
-              salon.name,
-              displayName,
-              appt.serviceNameSnapshot || appt.service?.name || 'Service',
-              Number(appt.price) || 0,
-              appt.stylist?.name || 'Stylist',
-              dateStr,
-              timeStr,
-              salon.address || '',
-              directionsUrl,
-            );
-
-            const sent = await this.whatsAppService.sendMetaMessage(
-              user.phone,
-              payload,
-              phoneNumberId,
-              salon.id,
-            );
-
-            if (sent) {
-              await this.prisma.appointment.update({
-                where: { id: appt.id },
-                data: { reminder2hSentAt: new Date() },
-              });
-              stage1Count++;
-            }
-          }
-
-          // -----------------------------------------------------------------------
-          // STAGE 1.5: T - 60 Minutes Ghost Cutoff Auto-Cancellation
-          // If status is still BOOKED and startAt <= now + 60 mins:
-          // Customer never confirmed -> Auto-cancel with +1 penalty strike (lead time <= 60m < 90m)
-          // -----------------------------------------------------------------------
-          const cutoff60m = now.plus({ minutes: 60 }).toJSDate();
-          const unconfirmedGhostAppointments = (await this.prisma.appointment.findMany({
-            where: {
-              salonId: salon.id,
-              status: AppointmentStatus.BOOKED,
-              startAt: {
-                gte: todayStart,
-                lte: cutoff60m,
-              },
-            },
-            include: {
-              salonUser: { include: { user: true } },
-              stylist: true,
-              service: true,
-            },
-          })) || [];
-
-          for (const appt of unconfirmedGhostAppointments) {
-            try {
-              await this.appointmentsService.cancelBooking(salon.id, appt.id, {
-                source: 'SYSTEM_AUTO_CUTOFF',
-                fault: 'CLIENT',
-                reasonCategory: 'CLIENT_UNRESPONSIVE',
-                reason: 'GHOSTED_2H_REMINDER',
-              });
-              stage1CutoffCount++;
-            } catch (err: any) {
-              this.logger.error(
-                `[Reminders Worker] Failed to auto-cancel unconfirmed 60m appt #${appt.appointmentNumber}: ${err.message}`,
-              );
-            }
-          }
-
-          // -----------------------------------------------------------------------
-          // STAGE 1.8: T - 60 Minutes Unresponsive Reschedule Proposal Cutoff
-          // If status is PENDING_RESCHEDULE and proposedStartAt <= now + 60 mins:
-          // Customer never responded to salon proposal -> Auto-cancel with 0 penalty (salon fault)
-          // -----------------------------------------------------------------------
-          const rescheduleCutoff60m = now.plus({ minutes: 60 }).toJSDate();
-          const expiredRescheduleAppointments = (await this.prisma.appointment.findMany({
-            where: {
-              salonId: salon.id,
-              status: AppointmentStatus.PENDING_RESCHEDULE,
-              proposedStartAt: {
-                lte: rescheduleCutoff60m,
-              },
-            },
-            include: {
-              salonUser: { include: { user: true } },
-              stylist: true,
-              service: true,
-            },
-          })) || [];
-
-          for (const appt of expiredRescheduleAppointments) {
-            try {
-              await this.appointmentsService.cancelBooking(salon.id, appt.id, {
-                source: 'SYSTEM_AUTO_CUTOFF',
-                fault: 'SALON',
-                noPenalty: true,
-                reason: 'UNRESPONSIVE_RESCHEDULE_PROPOSAL_EXPIRED_60M',
-                cancelledBy: CancelledBy.SYSTEM,
-              });
-              stage1CutoffCount++;
-            } catch (err: any) {
-              this.logger.error(
-                `[Reminders Worker] Failed to auto-cancel expired proposal appt #${appt.appointmentNumber}: ${err.message}`,
-              );
-            }
-          }
-
-          // -----------------------------------------------------------------------
-          // STAGE 2: 15-Minute Arrival Reminder
-          // Sends a friendly reminder ~15 minutes before appointment.
-          // Only for CONFIRMED appointments that haven't been reminded yet.
-          // Tight 14-16 min window ensures it fires once per 60s tick.
-          // -----------------------------------------------------------------------
-          const stage2Min = now.plus({ minutes: 14 }).toJSDate();
-          const stage2Max = now.plus({ minutes: 16 }).toJSDate();
-
-          const stage2Appointments = (await this.prisma.appointment.findMany({
-            where: {
-              salonId: salon.id,
-              status: AppointmentStatus.CONFIRMED,
-              reminder10mSentAt: null,
-              startAt: {
-                gte: stage2Min,
-                lte: stage2Max,
-              },
-            },
-            include: {
-              salonUser: {
-                include: {
-                  user: true,
-                },
-              },
-              stylist: true,
-              service: true,
-            },
-          })) || [];
-
-          for (const appt of stage2Appointments) {
-            const user = appt.salonUser?.user;
-            if (!user?.phone) continue;
-            const timeStr = TimeUtility.formatTime12h(appt.startAt, tz);
-            const displayName =
-              user.name && user.name !== 'WhatsApp Customer' && user.name !== 'Customer' && user.name !== 'Valued Client'
-                ? user.name
-                : 'there';
-
-            const payload = this.whatsAppTemplateService.build15MinArrivalPrompt(
-              salon.name,
-              displayName,
-              appt.stylist?.name || 'Stylist',
-              timeStr,
-            );
-
-            const sent = await this.whatsAppService.sendMetaMessage(
-              user.phone,
-              payload,
-              phoneNumberId,
-              salon.id,
-            );
-
-            if (sent) {
-              await this.prisma.appointment.update({
-                where: { id: appt.id },
-                data: { reminder10mSentAt: new Date() },
-              });
-              stage2Count++;
-            }
-          }
-
-          // -----------------------------------------------------------------------
-          // STAGE 3: Auto-Complete Elapsed Appointments (When service time has ended)
-          // -----------------------------------------------------------------------
-          try {
-            const completedCount = await this.appointmentsService.autoCompleteElapsedAppointments(salon.id);
-            stage3ElapsedCount += completedCount;
-          } catch (autoCompleteErr: any) {
-            this.logger.error(
-              `[Reminders Worker] Failed to auto-complete elapsed appointments for salon "${salon.name}": ${autoCompleteErr.message}`,
-            );
-          }
-
-        } catch (salonErr: any) {
+          const outcome = await this.executeAlarm(appointmentId, actionType);
+          if (outcome === 'STAGE_1_REMINDER') stage1Count++;
+          else if (outcome === 'STAGE_1_CUTOFF') stage1CutoffCount++;
+          else if (outcome === 'STAGE_2_ARRIVAL') stage2Count++;
+          else if (outcome === 'STAGE_2_CUTOFF') stage2CutoffCount++;
+          else if (outcome === 'AUTO_COMPLETE') stage3ElapsedCount++;
+        } catch (alarmErr: any) {
           this.logger.error(
-            `[Reminders Worker] Error processing reminders for salon "${salon.name}" (${salon.id}):`,
-            salonErr?.stack || salonErr,
+            `[Reminders Worker] Error executing alarm ${rawAlarm}: ${alarmErr.message}`,
+            alarmErr.stack,
           );
         }
       }
@@ -318,6 +175,202 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
       };
     } finally {
       this.isProcessing = false;
+    }
+  }
+
+  /**
+   * Executes a specific due alarm popped from Redis.
+   */
+  async executeAlarm(appointmentId: string, actionType: string): Promise<string | null> {
+    const appointment = await this.prisma.appointment.findUnique({
+      where: { id: appointmentId },
+      include: {
+        salon: { include: { whatsappAccount: true } },
+        salonUser: { include: { user: true } },
+        stylist: true,
+        service: true,
+      },
+    });
+
+    if (!appointment || !appointment.salon) {
+      await this.redisService.clearAlarm(appointmentId);
+      return null;
+    }
+
+    const salon = appointment.salon;
+    const tz = salon.timezone || 'Asia/Kolkata';
+    const phoneNumberId = salon.whatsappAccount?.phoneNumberId;
+    const user = appointment.salonUser?.user;
+
+    switch (actionType) {
+      case AppointmentActionType.REMINDER_2H: {
+        // Stage 1: 2-Hour Confirmation Reminder
+        if (appointment.status !== AppointmentStatus.BOOKED || appointment.reminder2hSentAt) {
+          await this.modifierService.syncAlarm(appointmentId);
+          return null;
+        }
+
+        if (user?.phone && phoneNumberId) {
+          const timeStr = TimeUtility.formatTime12h(appointment.startAt, tz);
+          const dateStr = TimeUtility.formatDateFriendly(appointment.startAt, tz);
+          const displayName =
+            user.name && user.name !== 'WhatsApp Customer' && user.name !== 'Customer' && user.name !== 'Valued Client'
+              ? user.name
+              : 'there';
+
+          const directionsUrl = resolveSalonDirectionsUrl(salon);
+          const payload = this.whatsAppTemplateService.build2HourReminderPrompt(
+            salon.name,
+            displayName,
+            appointment.serviceNameSnapshot || appointment.service?.name || 'Service',
+            Number(appointment.price) || 0,
+            appointment.stylist?.name || 'Stylist',
+            dateStr,
+            timeStr,
+            salon.address || '',
+            directionsUrl,
+          );
+
+          await this.whatsAppService.sendMetaMessage(
+            user.phone,
+            payload,
+            phoneNumberId,
+            salon.id,
+          );
+        }
+
+        await this.modifierService.modifyStatus(salon.id, appointmentId, {
+          status: appointment.status,
+          reminder2hSentAt: new Date(),
+          skipTransitionValidation: true,
+          existingAppointment: appointment,
+        });
+        return 'STAGE_1_REMINDER';
+      }
+
+      case AppointmentActionType.CUTOFF_60M: {
+        // Stage 1.5: 60-Minute Ghost Cutoff, Reschedule Proposal Expiration, or Quick Booking Expiration
+        if (appointment.status === AppointmentStatus.PENDING_RESCHEDULE) {
+          await this.appointmentsService.cancelBooking(salon.id, appointment.id, {
+            source: 'SYSTEM_AUTO_CUTOFF',
+            fault: 'CLIENT',
+            reasonCategory: 'CLIENT_UNRESPONSIVE',
+            reason: 'UNRESPONSIVE_RESCHEDULE_PROPOSAL_EXPIRED',
+          });
+          return 'RESCHEDULE_PROPOSAL_EXPIRED';
+        }
+
+        if (appointment.status === AppointmentStatus.PENDING_ACCEPTANCE) {
+          await this.appointmentsService.cancelBooking(salon.id, appointment.id, {
+            source: 'SYSTEM_AUTO_EXPIRED',
+            fault: 'SYSTEM',
+            reason: 'Auto-declined: Appointment start time passed without salon check-in approval',
+            skipMoveUp: true,
+          });
+          return 'QUICK_BOOKING_EXPIRED';
+        }
+
+        if (appointment.status !== AppointmentStatus.BOOKED) {
+          await this.modifierService.syncAlarm(appointmentId);
+          return null;
+        }
+
+        await this.appointmentsService.cancelBooking(salon.id, appointment.id, {
+          source: 'SYSTEM_AUTO_CUTOFF',
+          fault: 'CLIENT',
+          reasonCategory: 'CLIENT_UNRESPONSIVE',
+          reason: 'GHOSTED_2H_REMINDER',
+        });
+        return 'STAGE_1_CUTOFF';
+      }
+
+      case AppointmentActionType.CUTOFF_10M: {
+        // Stage 4: 10-Minute Response Cutoff after 15m arrival alert
+        // If customer never responded with ETA (clientEtaStatus is null) and is still CONFIRMED:
+        if (appointment.status !== AppointmentStatus.CONFIRMED || appointment.clientEtaStatus) {
+          await this.modifierService.syncAlarm(appointmentId);
+          return null;
+        }
+
+        await this.appointmentsService.cancelBooking(salon.id, appointment.id, {
+          source: 'SYSTEM_AUTO_CUTOFF',
+          fault: 'CLIENT',
+          reasonCategory: 'CLIENT_UNRESPONSIVE',
+          reason: 'GHOSTED_15M_ALERT',
+        });
+        return 'STAGE_2_CUTOFF';
+      }
+
+      case AppointmentActionType.ARRIVAL_15M: {
+        // Stage 2: 15-Minute Arrival Reminder
+        if (appointment.status !== AppointmentStatus.CONFIRMED || appointment.reminder10mSentAt) {
+          await this.modifierService.syncAlarm(appointmentId);
+          return null;
+        }
+
+        if (user?.phone && phoneNumberId) {
+          const timeStr = TimeUtility.formatTime12h(appointment.startAt, tz);
+          const displayName =
+            user.name && user.name !== 'WhatsApp Customer' && user.name !== 'Customer' && user.name !== 'Valued Client'
+              ? user.name
+              : 'there';
+
+          const payload = this.whatsAppTemplateService.build15MinArrivalPrompt(
+            salon.name,
+            displayName,
+            appointment.stylist?.name || 'Stylist',
+            timeStr,
+          );
+
+          await this.whatsAppService.sendMetaMessage(
+            user.phone,
+            payload,
+            phoneNumberId,
+            salon.id,
+          );
+        }
+
+        await this.modifierService.modifyStatus(salon.id, appointmentId, {
+          status: appointment.status,
+          reminder10mSentAt: new Date(),
+          skipTransitionValidation: true,
+          existingAppointment: appointment,
+        });
+        return 'STAGE_2_ARRIVAL';
+      }
+
+      case AppointmentActionType.AUTO_COMPLETE: {
+        // Stage 3: Auto-Complete when service duration has ended
+        const activeStatuses: AppointmentStatus[] = [
+          AppointmentStatus.CONFIRMED,
+          AppointmentStatus.CHECKED_IN,
+          AppointmentStatus.SEATED_IN_CHAIR,
+          AppointmentStatus.ON_THE_WAY,
+        ];
+        if (activeStatuses.includes(appointment.status)) {
+          await this.modifierService.modifyStatus(salon.id, appointment.id, {
+            status: AppointmentStatus.COMPLETED,
+            reason: 'AUTO_COMPLETE_DURATION_ELAPSED',
+            skipTransitionValidation: true,
+            existingAppointment: appointment,
+          });
+          return 'AUTO_COMPLETE';
+        } else {
+          await this.modifierService.syncAlarm(appointmentId);
+          return null;
+        }
+      }
+
+      case AppointmentActionType.NONE: {
+        await this.redisService.clearAlarm(appointmentId);
+        return null;
+      }
+
+      default: {
+        this.logger.warn(`[Reminders Worker] Unknown alarm action type "${actionType}" for appointment ${appointmentId}`);
+        await this.modifierService.syncAlarm(appointmentId);
+        return null;
+      }
     }
   }
 
@@ -375,4 +428,3 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
     return { newCount, remainingPenalties };
   }
 }
-

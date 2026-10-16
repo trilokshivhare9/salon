@@ -24,6 +24,10 @@ export interface ScheduleConflictQuery {
     startTime?: string;
     endTime?: string;
   };
+  breakHours?: {
+    startTime?: string;
+    endTime?: string;
+  };
   isClosedOrOff: boolean;
   reason?: string;
   adminId?: string;
@@ -68,21 +72,10 @@ export class ScheduleConflictResolutionEngine {
   ) { }
 
   /**
-   * Helper: Get salon timezone safely
-   */
-  private async getSalonTimezone(salonId: string): Promise<string> {
-    const salon = await this.prisma.salon.findUnique({
-      where: { id: salonId },
-      select: { timezone: true },
-    });
-    return salon?.timezone || TimeUtility.DEFAULT_TIMEZONE;
-  }
-
-  /**
    * Method 1: Finds all active bookings that collide with the proposed schedule change.
    */
   async findConflictingAppointments(query: ScheduleConflictQuery): Promise<any[]> {
-    const tz = await this.getSalonTimezone(query.salonId);
+    const tz = await TimeUtility.getSalonTimezone(this.prisma, query.salonId);
     const now = new Date();
 
     const futureAppointments = await this.prisma.appointment.findMany({
@@ -129,7 +122,7 @@ export class ScheduleConflictResolutionEngine {
       const apptStartStr = apptStartDt.toFormat('HH:mm');
       const apptEndStr = apptEndDt.toFormat('HH:mm');
 
-      // Scenario A: Recurring Weekly Day change (e.g. Wednesday Off or shift reduced)
+      // Scenario A: Recurring Weekly Day change (e.g. Day Off, shift reduced, or break)
       if (query.dayOfWeek) {
         if (apptDayOfWeek !== query.dayOfWeek) continue;
 
@@ -138,6 +131,11 @@ export class ScheduleConflictResolutionEngine {
         } else if (query.shiftHours?.startTime && query.shiftHours?.endTime) {
           // If shift is shortened, check if appointment falls outside new shift boundary
           if (apptStartStr < query.shiftHours.startTime || apptEndStr > query.shiftHours.endTime) {
+            conflictingAppts.push(appt);
+          }
+        } else if (query.breakHours?.startTime && query.breakHours?.endTime) {
+          // If break is added/updated, check if appointment overlaps break interval [breakStart, breakEnd]
+          if (apptStartStr < query.breakHours.endTime && apptEndStr > query.breakHours.startTime) {
             conflictingAppts.push(appt);
           }
         }
@@ -171,7 +169,8 @@ export class ScheduleConflictResolutionEngine {
 
   /**
    * Method 2: Searches for the next best available slot for the customer.
-   * Checks from tomorrow forward up to maxDaysHorizon (default: BOOKING_POLICY.MAX_ADVANCE_BOOKING_DAYS).
+   * Checks from today forward up to maxDaysHorizon (default: BOOKING_POLICY.MAX_ADVANCE_BOOKING_DAYS).
+   * Enforces minimum 2-hour lead time from current time so customer has adequate notice.
    * Picks the slot closest to the customer's originally preferred time of day.
    */
   async findNextAvailableSlot(
@@ -180,7 +179,7 @@ export class ScheduleConflictResolutionEngine {
     preferredStylistId?: string,
     maxDaysHorizon: number = BOOKING_POLICY.MAX_ADVANCE_BOOKING_DAYS,
   ): Promise<ProposedSlotResult | null> {
-    const tz = await this.getSalonTimezone(salonId);
+    const tz = await TimeUtility.getSalonTimezone(this.prisma, salonId);
 
     // Extract service ID(s)
     let serviceIds: string[] = [];
@@ -204,12 +203,19 @@ export class ScheduleConflictResolutionEngine {
       }
     }
 
+    const nowInSalonZone = DateTime.now().setZone(tz);
+    // Minimum 2-hour lead time from NOW for reschedule offers
+    const minNoticeTime = nowInSalonZone.plus({ hours: 2 });
+
     const origStartDt = DateTime.fromJSDate(appointment.startAt, { zone: tz });
     const origTargetMinutes = origStartDt.hour * 60 + origStartDt.minute;
 
-    // Search forward from next day (dayOffset 1 to maxDaysHorizon)
-    for (let dayOffset = 1; dayOffset <= maxDaysHorizon; dayOffset++) {
-      const candidateDt = origStartDt.plus({ days: dayOffset });
+    // Search base date: if original start is in the past, anchor at today in salon timezone
+    const baseDt = origStartDt.startOf('day') < nowInSalonZone.startOf('day') ? nowInSalonZone : origStartDt;
+
+    // Search forward starting from Today (dayOffset 0 up to maxDaysHorizon - 1)
+    for (let dayOffset = 0; dayOffset < maxDaysHorizon; dayOffset++) {
+      const candidateDt = baseDt.plus({ days: dayOffset });
       const candidateDateStr = candidateDt.toISODate()!;
 
       try {
@@ -222,28 +228,36 @@ export class ScheduleConflictResolutionEngine {
         );
 
         if (availability && availability.availableSlots && availability.availableSlots.length > 0) {
-          // Select slot closest to original customer preferred time of day
-          let bestSlot = availability.availableSlots[0];
-          let minDiff = Infinity;
+          // Filter slots that have at least 2 hours remaining from NOW
+          const validSlots = availability.availableSlots.filter((slot) => {
+            const slotStartDt = DateTime.fromISO(slot.isoStartTime, { zone: tz });
+            return slotStartDt >= minNoticeTime;
+          });
 
-          for (const slot of availability.availableSlots) {
-            const [h, m] = slot.startTime.split(':').map(Number);
-            const slotMinutes = h * 60 + m;
-            const diff = Math.abs(slotMinutes - origTargetMinutes);
-            if (diff < minDiff) {
-              minDiff = diff;
-              bestSlot = slot;
+          if (validSlots.length > 0) {
+            // Select slot closest to original customer preferred time of day
+            let bestSlot = validSlots[0];
+            let minDiff = Infinity;
+
+            for (const slot of validSlots) {
+              const [h, m] = slot.startTime.split(':').map(Number);
+              const slotMinutes = h * 60 + m;
+              const diff = Math.abs(slotMinutes - origTargetMinutes);
+              if (diff < minDiff) {
+                minDiff = diff;
+                bestSlot = slot;
+              }
             }
-          }
 
-          return {
-            startAt: new Date(bestSlot.isoStartTime),
-            endAt: new Date(bestSlot.isoEndTime),
-            dateStr: candidateDateStr,
-            startTime: bestSlot.startTime,
-            endTime: bestSlot.endTime,
-            eligibleStaffIds: bestSlot.eligibleStaffIds || [],
-          };
+            return {
+              startAt: new Date(bestSlot.isoStartTime),
+              endAt: new Date(bestSlot.isoEndTime),
+              dateStr: candidateDateStr,
+              startTime: bestSlot.startTime,
+              endTime: bestSlot.endTime,
+              eligibleStaffIds: bestSlot.eligibleStaffIds || [],
+            };
+          }
         }
       } catch (err: any) {
         this.logger.warn(`Availability check error on ${candidateDateStr}: ${err.message}`);
@@ -275,11 +289,7 @@ export class ScheduleConflictResolutionEngine {
       `Found ${conflicts.length} conflicting booking(s) for salon ${query.salonId}. Resolving via automated reschedule...`,
     );
 
-    const salon = await this.prisma.salon.findUnique({
-      where: { id: query.salonId },
-      select: { maxAdvanceDays: true },
-    });
-    const maxHorizon = salon?.maxAdvanceDays || BOOKING_POLICY.MAX_ADVANCE_BOOKING_DAYS;
+    const maxHorizon = BOOKING_POLICY.MAX_ADVANCE_BOOKING_DAYS;
 
     let rescheduledCount = 0;
     let cancelledCount = 0;

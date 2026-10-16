@@ -440,7 +440,13 @@ export class AppointmentAction {
         include: { service: true, stylist: true },
       });
 
-      if (!appt || appt.status !== AppointmentStatus.PENDING_RESCHEDULE || !appt.proposedStartAt || !appt.proposedEndAt) {
+      if (
+        !appt ||
+        appt.status !== AppointmentStatus.PENDING_RESCHEDULE ||
+        !appt.proposedStartAt ||
+        !appt.proposedEndAt ||
+        (appt.expiresAt && new Date() > appt.expiresAt)
+      ) {
         const staleReply = this.templates.buildRescheduleStaleExpiredReply();
         await this.sendMessage(cleanNumber, staleReply, phoneNumberId, salonId);
         return { replyMessage: staleReply.bodyText, state: ConversationState.START };
@@ -450,20 +456,19 @@ export class AppointmentAction {
       const newEnd = appt.proposedEndAt;
       const newStylistId = (appt as any).proposedStylistId || appt.stylistId;
 
-      await this.prisma.appointment.update({
-        where: { id: apptId },
-        data: {
-          startAt: newStart,
-          endAt: newEnd,
-          appointmentDate: TimeUtility.toDbDate(newStart),
-          stylistId: newStylistId,
-          status: AppointmentStatus.CONFIRMED,
-          proposedStartAt: null,
-          proposedEndAt: null,
-          proposedStylistId: null,
-          proposedByAdminId: null,
-          notes: `${appt.notes || ''} [Rescheduled by salon admin and accepted by customer.]`.trim(),
-        },
+      await this.appointmentsService.getModifierService().modifyStatus(salonId, apptId, {
+        startAt: newStart,
+        endAt: newEnd,
+        appointmentDate: TimeUtility.toDbDate(newStart),
+        stylistId: newStylistId,
+        status: AppointmentStatus.CONFIRMED,
+        proposedStartAt: null,
+        proposedEndAt: null,
+        proposedStylistId: null,
+        proposedByAdminId: null,
+        expiresAt: null,
+        notes: `${appt.notes || ''} [Rescheduled by salon admin and accepted by customer.]`.trim(),
+        skipTransitionValidation: true,
       });
 
       let finalStylistName = appt.stylist?.name || 'Stylist';

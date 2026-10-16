@@ -202,6 +202,18 @@ export class SalonBreaksService {
       days: targetDays,
     });
 
+    // Resolve any conflicting bookings across salon facility and send WhatsApp reschedule proposal
+    for (const day of targetDays) {
+      await this.appointmentsService.resolveScheduleConflicts({
+        salonId,
+        scope: 'SALON',
+        dayOfWeek: day,
+        breakHours: { startTime, endTime },
+        isClosedOrOff: false,
+        reason: `Salon facility break (${title}) on ${day} (${startTime}–${endTime})`,
+      });
+    }
+
     return result;
   }
 
@@ -252,6 +264,16 @@ export class SalonBreaksService {
     this.appointmentsService.emitSalonEvent(salonId, 'STAFF_UPDATED', {
       action: 'UPDATE_FACILITY_BREAK',
       breakId,
+    });
+
+    // Resolve any conflicting bookings across salon facility and send WhatsApp reschedule proposal
+    await this.appointmentsService.resolveScheduleConflicts({
+      salonId,
+      scope: 'SALON',
+      dayOfWeek: updated.dayOfWeek,
+      breakHours: { startTime: newStart, endTime: newEnd },
+      isClosedOrOff: false,
+      reason: `Salon facility break updated (${newTitle}) on ${updated.dayOfWeek} (${newStart}–${newEnd})`,
     });
 
     return updated;

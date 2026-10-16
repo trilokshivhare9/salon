@@ -63,14 +63,42 @@ export class WhatsAppTemplateService {
       };
       const friendlyStatus = statusMap[activeAppointment.status] || activeAppointment.status;
 
+      const isQuickBooking =
+        activeAppointment.source === 'QUICK_BOOK' ||
+        activeAppointment.bookingType === 'QUICK';
+
+      const isCheckedInOrLater = [
+        AppointmentStatus.CHECKED_IN,
+        AppointmentStatus.SEATED_IN_CHAIR,
+      ].includes(activeAppointment.status);
+
+      const buttons: Array<{ id: string; title: string }> = [
+        { id: WhatsAppButtonId.ADD_SERVICE, title: '➕ Add Service' },
+      ];
+
+      // Never show reschedule for Quick Bookings or if already checked-in/seated
+      if (!isQuickBooking && !isCheckedInOrLater) {
+        buttons.push({ id: WhatsAppButtonId.RESCHEDULE, title: '🔄 Reschedule' });
+      } else if (!isCheckedInOrLater && activeAppointment.status === AppointmentStatus.CONFIRMED) {
+        if (activeAppointment.clientEtaStatus === 'ON_THE_WAY') {
+          buttons.push({ id: WhatsAppButtonId.ETA_ARRIVED, title: "📍 I've Arrived" });
+        } else {
+          buttons.push({ id: WhatsAppButtonId.ETA_ON_THE_WAY, title: '🚗 On My Way' });
+        }
+      } else {
+        buttons.push({ id: WhatsAppButtonId.INFO, title: '📍 Salon Info' });
+      }
+
+      if (activeAppointment.status !== AppointmentStatus.SEATED_IN_CHAIR) {
+        buttons.push({ id: WhatsAppButtonId.CANCEL_APPT, title: '✕ Cancel Booking' });
+      } else {
+        buttons.push({ id: WhatsAppButtonId.START, title: '🏠 Main Menu' });
+      }
+
       return {
         bodyText: `${localTag}👋 Welcome back to *${salonName}*!\n\n📋 *Active Reservation:*\n📅 ${date} at ${time}\n💈 Status: *${friendlyStatus}*\n\nHow can we assist you today?`,
         interactiveType: 'button' as const,
-        buttons: [
-          { id: WhatsAppButtonId.ADD_SERVICE, title: '➕ Add Service' },
-          { id: WhatsAppButtonId.RESCHEDULE, title: '🔄 Reschedule' },
-          { id: WhatsAppButtonId.CANCEL_APPT, title: '✕ Cancel Booking' },
-        ],
+        buttons,
       };
     }
 
@@ -119,7 +147,7 @@ export class WhatsAppTemplateService {
   }
 
   // 2. Salon Info Template
-  buildSalonInfoMessage(salon: any) {
+  buildSalonInfoMessage(salon: any, hasActiveAppointment = false) {
     const name = salon?.name || 'Salon';
     const address = salon?.address
       ? `${salon.address}${salon.city ? ', ' + salon.city : ''}`
@@ -136,13 +164,20 @@ export class WhatsAppTemplateService {
       mapsLine = `\n🗺️ *Directions:* https://maps.google.com/?q=${encodeURIComponent(salon.address + (salon.city ? ' ' + salon.city : ''))}`;
     }
 
+    const buttons = hasActiveAppointment
+      ? [
+          { id: WhatsAppButtonId.CHECK_LAST_BOOKING, title: '📋 Check Booking' },
+          { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
+        ]
+      : [
+          { id: WhatsAppButtonId.BOOK, title: '📅 Book Slot' },
+          { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
+        ];
+
     return {
       bodyText: `📍 *${name} Info*\n\n🏠 *Address:* ${address}\n📞 *Phone:* ${phone}\n🕒 *Hours:* ${hours}${mapsLine}\n\nWe look forward to styling you!`,
       interactiveType: 'button' as const,
-      buttons: [
-        { id: WhatsAppButtonId.BOOK, title: '📅 Book Slot' },
-        { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
-      ],
+      buttons,
     };
   }
 
@@ -795,6 +830,7 @@ export class WhatsAppTemplateService {
         `• *Date:* *${params.dateFriendly}*\n` +
         `• *Time:* *${params.timeFriendly}*\n` +
         `• *Stylist:* *${params.stylistName || 'Specialist'}*\n\n` +
+        `⏳ *Please respond within 1 hour to secure this slot.*\n\n` +
         `Does this new time work for you?`,
       interactiveType: 'button' as const,
       buttons: [

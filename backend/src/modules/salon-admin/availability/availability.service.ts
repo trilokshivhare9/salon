@@ -353,7 +353,7 @@ export class AvailabilityService {
         },
         ...(excludeAppointmentId ? { id: { not: excludeAppointmentId } } : {}),
       },
-      select: { stylistId: true, proposedStartAt: true, proposedEndAt: true },
+      select: { stylistId: true, proposedStylistId: true, proposedStartAt: true, proposedEndAt: true },
     });
 
     const appointmentsByStylist = new Map<string, { start: number; end: number }[]>();
@@ -370,15 +370,16 @@ export class AvailabilityService {
     }
 
     for (const prop of pendingProposals) {
-      if (!prop.stylistId || !prop.proposedStartAt || !prop.proposedEndAt) continue;
-      if (!appointmentsByStylist.has(prop.stylistId)) {
-        appointmentsByStylist.set(prop.stylistId, []);
+      const targetStylistId = prop.proposedStylistId || prop.stylistId;
+      if (!targetStylistId || !prop.proposedStartAt || !prop.proposedEndAt) continue;
+      if (!appointmentsByStylist.has(targetStylistId)) {
+        appointmentsByStylist.set(targetStylistId, []);
       }
       const propStartDt = DateTime.fromJSDate(prop.proposedStartAt).setZone(timezone);
       const propEndDt = DateTime.fromJSDate(prop.proposedEndAt).setZone(timezone);
       const startMin = propStartDt.hour * 60 + propStartDt.minute;
       const endMin = propEndDt.hour * 60 + propEndDt.minute;
-      appointmentsByStylist.get(prop.stylistId)!.push({ start: startMin, end: endMin });
+      appointmentsByStylist.get(targetStylistId)!.push({ start: startMin, end: endMin });
     }
 
     // 5. Continuous Free-Interval Calculation per Stylist via AvailabilityEngineService

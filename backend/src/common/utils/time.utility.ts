@@ -10,6 +10,30 @@ export class TimeUtility {
   public static readonly DEFAULT_TIMEZONE = 'Asia/Kolkata';
   public static readonly DEFAULT_MAX_ADVANCE_DAYS = BOOKING_POLICY.MAX_ADVANCE_BOOKING_DAYS;
 
+  /**
+   * Resolves the operational timezone for a salon from database or falls back to DEFAULT_TIMEZONE.
+   * Centralized single source of truth across all modules.
+   */
+  public static async getSalonTimezone(prisma: any, salonId: string): Promise<string> {
+    if (!prisma || !salonId) return this.DEFAULT_TIMEZONE;
+    try {
+      const salon = await prisma.salon.findUnique({
+        where: { id: salonId },
+        select: { timezone: true },
+      });
+      return salon?.timezone || this.DEFAULT_TIMEZONE;
+    } catch {
+      return this.DEFAULT_TIMEZONE;
+    }
+  }
+
+  /**
+   * Resolves timezone string with fallback to universal platform default.
+   */
+  public static resolveTimezone(timezone?: string | null): string {
+    return timezone && timezone.trim().length > 0 ? timezone.trim() : this.DEFAULT_TIMEZONE;
+  }
+
 
   /**
    * Returns current Luxon DateTime in the given timezone (defaults to Asia/Kolkata).

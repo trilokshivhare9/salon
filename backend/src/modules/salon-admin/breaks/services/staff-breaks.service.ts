@@ -243,37 +243,7 @@ export class StaffBreaksService {
           );
         }
 
-        // 2. Check future appointment collisions
-        const futureAppointments = await tx.appointment.findMany({
-          where: {
-            stylistId: staffId,
-            startAt: { gt: new Date() },
-            status: { in: [AppointmentStatus.BOOKED, AppointmentStatus.CONFIRMED] },
-          },
-        });
-
-        for (const appt of futureAppointments) {
-          const apptDay = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('cccc').toUpperCase();
-          if (apptDay === day) {
-            const aStart = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('HH:mm');
-            const aEnd = DateTime.fromJSDate(appt.endAt, { zone: tz }).toFormat('HH:mm');
-
-            if (aStart < endTime && aEnd > startTime) {
-              if (autoReschedule) {
-                await tx.appointment.update({
-                  where: { id: appt.id },
-                  data: { status: AppointmentStatus.PENDING_RESCHEDULE },
-                });
-              } else {
-                throw new ConflictException(
-                  `Break on ${day} (${startTime}–${endTime}) conflicts with appointment #${appt.appointmentNumber} (${aStart}–${aEnd}). Set autoReschedule to true to move client to pending reschedule.`,
-                );
-              }
-            }
-          }
-        }
-
-        // 3. Create the customized stylist break
+        // 2. Create the customized stylist break
         const newBreak = await tx.stylistBreak.create({
           data: {
             salonId,
@@ -296,6 +266,19 @@ export class StaffBreaksService {
       staffId,
       days: targetDays,
     });
+
+    // Resolve any conflicting bookings in background and send WhatsApp reschedule proposal
+    for (const day of targetDays) {
+      await this.appointmentsService.resolveScheduleConflicts({
+        salonId,
+        scope: 'STYLIST',
+        stylistId: staffId,
+        dayOfWeek: day,
+        breakHours: { startTime, endTime },
+        isClosedOrOff: false,
+        reason: `Stylist break (${title}) on ${day} (${startTime}–${endTime})`,
+      });
+    }
 
     return {
       stylistId: staffId,
@@ -439,35 +422,6 @@ export class StaffBreaksService {
         );
       }
 
-      // Check future appointments collision on target days
-      const futureAppointments = await this.prisma.appointment.findMany({
-        where: {
-          stylistId: staffId,
-          startAt: { gt: new Date() },
-          status: { in: [AppointmentStatus.BOOKED, AppointmentStatus.CONFIRMED] },
-        },
-      });
-
-      for (const appt of futureAppointments) {
-        const apptDay = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('cccc').toUpperCase() as DayOfWeek;
-        if (apptDay === targetDay) {
-          const aStart = DateTime.fromJSDate(appt.startAt, { zone: tz }).toFormat('HH:mm');
-          const aEnd = DateTime.fromJSDate(appt.endAt, { zone: tz }).toFormat('HH:mm');
-
-          if (aStart < endTime && aEnd > startTime) {
-            if (autoReschedule) {
-              await this.prisma.appointment.update({
-                where: { id: appt.id },
-                data: { status: AppointmentStatus.PENDING_RESCHEDULE },
-              });
-            } else {
-              throw new ConflictException(
-                `Break on ${targetDay} (${startTime}–${endTime}) conflicts with appointment #${appt.appointmentNumber} (${aStart}–${aEnd}). Set autoReschedule to true to move client to pending reschedule.`,
-              );
-            }
-          }
-        }
-      }
     }
 
     // 3. Perform In-Place Atomic Mutations
@@ -543,6 +497,19 @@ export class StaffBreaksService {
       staffId,
       days,
     });
+
+    // Resolve any conflicting bookings in background and send WhatsApp reschedule proposal
+    for (const day of days) {
+      await this.appointmentsService.resolveScheduleConflicts({
+        salonId,
+        scope: 'STYLIST',
+        stylistId: staffId,
+        dayOfWeek: day,
+        breakHours: { startTime, endTime },
+        isClosedOrOff: false,
+        reason: `Stylist break updated (${title}) on ${day} (${startTime}–${endTime})`,
+      });
+    }
 
     return {
       success: true,
@@ -674,6 +641,20 @@ export class StaffBreaksService {
       staffId,
       salonBreakId: dto.salonBreakId,
     });
+
+    // Resolve any conflicting bookings for inherited break
+    for (const masterDay of masterRoutineDays) {
+      if (!targetDays.includes(masterDay.dayOfWeek)) continue;
+      await this.appointmentsService.resolveScheduleConflicts({
+        salonId,
+        scope: 'STYLIST',
+        stylistId: staffId,
+        dayOfWeek: masterDay.dayOfWeek,
+        breakHours: { startTime: masterDay.startTime, endTime: masterDay.endTime },
+        isClosedOrOff: false,
+        reason: `Stylist break inherited (${masterDay.title}) on ${masterDay.dayOfWeek} (${masterDay.startTime}–${masterDay.endTime})`,
+      });
+    }
 
     return {
       success: true,
