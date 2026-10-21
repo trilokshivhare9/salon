@@ -559,6 +559,14 @@ describe('Human-like Scenario Test Suite: Salon Closures & Emergency Holiday Man
       expect(res.data.leaves).toHaveLength(1);
       expect(res.data.leaves[0].stylistName).toBe('Rahul Sharma');
       expect(res.data.leaves[0].leaveType).toBe('SICK_LEAVE');
+
+      // Staff Weekly Offs (Rahul is off on Tuesday, salon is open on Tuesday -> valid staff weekly off)
+      expect(res.data.staffWeeklyOffs).toHaveLength(1);
+      expect(res.data.staffWeeklyOffs[0].stylistName).toBe('Rahul Sharma');
+      expect(res.data.staffWeeklyOffs[0].offDays).toEqual(['TUESDAY']);
+      expect(res.data.staffWeeklyOffs[0].totalDatesCount).toBe(4);
+      expect(res.data.summaryCounts.staffWeeklyOffCount).toBe(4);
+      expect(res.data.summaryCounts.salonWeeklyOffCount).toBe(4); // 4 Mondays in Oct 2026
     });
 
     it('S6.2: Should reject invalid month format or inverted date range', async () => {
@@ -572,6 +580,83 @@ describe('Human-like Scenario Test Suite: Salon Closures & Emergency Holiday Man
           endDate: '2026-10-10',
         }),
       ).rejects.toThrow(/startDate cannot be after endDate/);
+    });
+
+    it('S6.3: Should NOT count staff weekly off if it falls on a salon closed day (suppressed at API level)', async () => {
+      // Both salon and stylist are closed on TUESDAY
+      mockPrismaService.salonWorkingHours.findMany.mockResolvedValue([
+        { dayOfWeek: 'MONDAY', isClosed: false, startTime: '09:00', endTime: '21:00' },
+        { dayOfWeek: 'TUESDAY', isClosed: true, startTime: null, endTime: null },
+        { dayOfWeek: 'WEDNESDAY', isClosed: false, startTime: '10:00', endTime: '20:00' },
+        { dayOfWeek: 'THURSDAY', isClosed: false, startTime: '10:00', endTime: '20:00' },
+        { dayOfWeek: 'FRIDAY', isClosed: false, startTime: '10:00', endTime: '21:00' },
+        { dayOfWeek: 'SATURDAY', isClosed: false, startTime: '09:00', endTime: '22:00' },
+        { dayOfWeek: 'SUNDAY', isClosed: false, startTime: '09:00', endTime: '22:00' },
+      ]);
+      mockPrismaService.salonClosure.findMany.mockResolvedValue([]);
+      mockPrismaService.stylist.findMany.mockResolvedValue([
+        {
+          id: 'stylist-rahul',
+          name: 'Rahul Sharma',
+          profileImageUrl: null,
+          followsSalonSchedule: false,
+          workingHours: [
+            { dayOfWeek: 'TUESDAY', isWorking: false, startTime: null, endTime: null },
+            { dayOfWeek: 'WEDNESDAY', isWorking: true, startTime: '10:00', endTime: '19:00' },
+          ],
+        },
+      ]);
+      mockPrismaService.stylistAbsence.findMany.mockResolvedValue([]);
+
+      const res = await closuresService.getCalendarSchedule(mockSalonId, { month: '2026-10' });
+      expect(res.success).toBe(true);
+      expect(res.data.summaryCounts.salonWeeklyOffCount).toBe(4); // 4 Tuesdays in Oct 2026
+      // Because Tuesday is ALREADY a salon weekly off, staff off is 0!
+      expect(res.data.summaryCounts.staffWeeklyOffCount).toBe(0);
+      expect(res.data.staffWeeklyOffs).toHaveLength(0);
+    });
+
+    it('S6.4: Should return staff weekly off if staff marks an OTHER day when salon is OPEN', async () => {
+      // Salon is closed Tuesday. Rahul takes off on Wednesday (when salon is open).
+      mockPrismaService.salonWorkingHours.findMany.mockResolvedValue([
+        { dayOfWeek: 'MONDAY', isClosed: false, startTime: '09:00', endTime: '21:00' },
+        { dayOfWeek: 'TUESDAY', isClosed: true, startTime: null, endTime: null },
+        { dayOfWeek: 'WEDNESDAY', isClosed: false, startTime: '10:00', endTime: '20:00' },
+        { dayOfWeek: 'THURSDAY', isClosed: false, startTime: '10:00', endTime: '20:00' },
+        { dayOfWeek: 'FRIDAY', isClosed: false, startTime: '10:00', endTime: '21:00' },
+        { dayOfWeek: 'SATURDAY', isClosed: false, startTime: '09:00', endTime: '22:00' },
+        { dayOfWeek: 'SUNDAY', isClosed: false, startTime: '09:00', endTime: '22:00' },
+      ]);
+      mockPrismaService.salonClosure.findMany.mockResolvedValue([]);
+      mockPrismaService.stylist.findMany.mockResolvedValue([
+        {
+          id: 'stylist-rahul',
+          name: 'Rahul Sharma',
+          profileImageUrl: null,
+          followsSalonSchedule: false,
+          workingHours: [
+            { dayOfWeek: 'TUESDAY', isWorking: false, startTime: null, endTime: null }, // Salon off
+            { dayOfWeek: 'WEDNESDAY', isWorking: false, startTime: null, endTime: null }, // Staff off on OPEN day!
+          ],
+        },
+      ]);
+      mockPrismaService.stylistAbsence.findMany.mockResolvedValue([]);
+
+      const res = await closuresService.getCalendarSchedule(mockSalonId, { month: '2026-10' });
+      expect(res.success).toBe(true);
+      expect(res.data.summaryCounts.salonWeeklyOffCount).toBe(4); // 4 Tuesdays
+      // Wednesday is open, so Rahul's Wednesday off counts! (4 Wednesdays in Oct 2026: 7, 14, 21, 28)
+      expect(res.data.summaryCounts.staffWeeklyOffCount).toBe(4);
+      expect(res.data.staffWeeklyOffs).toHaveLength(1);
+      expect(res.data.staffWeeklyOffs[0].stylistName).toBe('Rahul Sharma');
+      expect(res.data.staffWeeklyOffs[0].offDays).toEqual(['WEDNESDAY']);
+      expect(res.data.staffWeeklyOffs[0].totalDatesCount).toBe(4);
+      expect(res.data.staffWeeklyOffs[0].dates).toEqual([
+        '2026-10-07',
+        '2026-10-14',
+        '2026-10-21',
+        '2026-10-28',
+      ]);
     });
   });
 });

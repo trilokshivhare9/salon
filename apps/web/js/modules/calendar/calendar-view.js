@@ -522,6 +522,10 @@ export class CalendarView {
               const e = String(c.endDate).split('T')[0];
               return f.date >= s && f.date <= e;
             });
+            const festDow = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'][new Date(f.date + 'T00:00:00').getDay()];
+            const isWeeklyOff = f.isSalonWeeklyOff !== undefined
+              ? f.isSalonWeeklyOff
+              : (this.scheduleData?.salonSchedule?.weeklyHours || this.app?.salonWorkingHours || []).find((h) => h.dayOfWeek === festDow)?.isClosed ?? false;
             const df = new Date(f.date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
             return `
               <div class="festival-item-row">
@@ -530,9 +534,9 @@ export class CalendarView {
                   <span class="festival-item-date">${df} · ${f.type}</span>
                 </div>
                 <div>
-                  ${isClosed ? '<span class="btn-declare-festival is-already-closed">✓ Closed</span>' : (!isStaff ? `
-                    <button type="button" class="btn-declare-festival btn-quick-declare-festival" data-date="${f.date}" data-name="${f.name.replace(/"/g, '&quot;')}">+ Close Salon</button>
-                  ` : '<span style="font-size:0.68rem;color:#a855f7;">Festival</span>')}
+                  ${isClosed ? '<span class="btn-declare-festival is-already-closed">✓ Closed</span>' : (isWeeklyOff ? '<span class="btn-declare-festival is-already-closed" style="color:#38bdf8;border-color:rgba(56,189,248,0.35);background:rgba(56,189,248,0.1);">💤 Weekly Off</span>' : (!isStaff ? `
+                    <button type="button" class="btn-declare-festival btn-quick-declare-festival" data-date="${f.date}" data-name="${f.name.replace(/"/g, '&quot;')}" data-type="${f.type || 'FESTIVAL'}" data-icon="${f.icon || '🪔'}">+ Close Salon</button>
+                  ` : '<span style="font-size:0.68rem;color:#a855f7;">Festival</span>'))}
                 </div>
               </div>`;
           }).join('')}
@@ -544,7 +548,13 @@ export class CalendarView {
     if (!this.container) return;
     const isStaff = this.calendarFor === 'STAFF' && !!this.staffId;
     const { cells, allMonthLeaves, monthLeaveCount, monthHolidayCount, monthFestivalCount, monthSalonOffCount, monthStaffOffCount } = this._computeGrid();
-    const counts = { monthLeaveCount, monthHolidayCount, monthFestivalCount, monthSalonOffCount, monthStaffOffCount };
+    const counts = {
+      monthLeaveCount: this.scheduleData?.summaryCounts?.staffLeavesCount ?? monthLeaveCount,
+      monthHolidayCount: this.scheduleData?.summaryCounts?.closuresCount ?? monthHolidayCount,
+      monthFestivalCount: this.scheduleData?.summaryCounts?.festivalsCount ?? monthFestivalCount,
+      monthSalonOffCount: this.scheduleData?.summaryCounts?.salonWeeklyOffCount ?? monthSalonOffCount,
+      monthStaffOffCount: this.scheduleData?.summaryCounts?.staffWeeklyOffCount ?? monthStaffOffCount,
+    };
 
     const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     const currentMonthTitle = `${monthNames[this.month]} ${this.year}`;
@@ -724,8 +734,10 @@ export class CalendarView {
             closures: this.scheduleData?.salonSchedule?.closures || this.app?.closuresList || [],
             weeklyHours: this.scheduleData?.salonSchedule?.weeklyHours || this.app?.salonWorkingHours || [],
             staffList: this.scheduleData?.stylists || this.app?.staffList || [],
+            staffWeeklyOffs: this.scheduleData?.staffWeeklyOffs || null,
+            summaryCounts: this.scheduleData?.summaryCounts || null,
             leaves: this.scheduleData?.leaves || [],
-            festivals: this.getFestivalsList(this.year, this.month),
+            festivals: this.scheduleData?.festivals || this.getFestivalsList(this.year, this.month),
             isStaffMode: this.calendarFor === 'STAFF',
             staffId: this.staffId,
             staffName: this.staffName,
@@ -775,9 +787,13 @@ export class CalendarView {
       btn.addEventListener('click', (e) => {
         const fd = e.currentTarget.getAttribute('data-date');
         const fn = e.currentTarget.getAttribute('data-name');
+        const ft = e.currentTarget.getAttribute('data-type') || 'FESTIVAL';
+        const fi = e.currentTarget.getAttribute('data-icon') || '🪔';
         ScheduleDayOffDialog.open({
           initialDate: fd,
-          festivalInfo: { name: fn },
+          closureType: 'FESTIVAL',
+          reason: fn,
+          festivalInfo: { name: fn, type: ft, icon: fi, date: fd },
           salonWorkingHours: this.scheduleData?.salonSchedule?.weeklyHours || this.app?.salonWorkingHours || [],
           existingClosures: this.scheduleData?.salonSchedule?.closures || this.app?.closuresList || [],
           staffList: this.app?.staffList || [],

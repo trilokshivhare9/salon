@@ -107,7 +107,7 @@ export class StaffApplyLeaveDialog {
 
     modalContainer.innerHTML = `
       <div class="modal-backdrop show">
-        <div class="modal-content modal-content-sheet" style="max-width: 480px; width: 100%; padding: 18px 20px; border: 1px solid rgba(168, 85, 247, 0.25); border-radius: 16px; background: #0f172a; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.85);">
+        <div class="modal-content modal-content-sheet" style="max-width: 480px; width: 100%; margin: auto; padding: 18px 20px; border: 1px solid rgba(168, 85, 247, 0.25); border-radius: 16px; background: #0f172a; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.85);">
           <div class="sheet-grab-handle"></div>
           
           <!-- Header -->
@@ -148,10 +148,21 @@ export class StaffApplyLeaveDialog {
               </div>
             ` : `
               <div style="display: flex; flex-direction: column; gap: 3px;">
-                <label for="leave-staff-select" style="font-size: 0.67rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.4px;">Select Specialist / Stylist *</label>
-                <select id="leave-staff-select" required style="height: 32px; background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(168, 85, 247, 0.35); border-radius: 7px; padding: 0 10px; color: #fff; font-size: 0.74rem; font-weight: 600;">
-                  ${buildStaffOptions(staffList, defaultStaffId)}
-                </select>
+                <label style="font-size: 0.67rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.4px;">Select Specialist / Stylist *</label>
+                <div class="custom-select-container" id="leave-staff-select-container" style="position: relative;">
+                  <button type="button" class="custom-select-trigger" id="leave-staff-trigger" style="width: 100%; height: 34px; background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(168, 85, 247, 0.35); border-radius: 7px; padding: 0 10px; color: #fff; font-size: 0.74rem; font-weight: 600; display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none;">
+                    <span id="leave-staff-selected-label" style="display: flex; align-items: center; gap: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                      <span id="leave-staff-name-text">Select specialist...</span>
+                    </span>
+                    <span class="custom-select-chevron" style="font-size: 0.65rem; color: #94a3b8;">▼</span>
+                  </button>
+                  <div class="custom-select-menu" id="leave-staff-menu">
+                    <!-- Stylist options rendered dynamically -->
+                  </div>
+                  <select id="leave-staff-select" required style="display: none;">
+                    ${buildStaffOptions(staffList, defaultStaffId)}
+                  </select>
+                </div>
               </div>
             `}
 
@@ -296,12 +307,23 @@ export class StaffApplyLeaveDialog {
               <input type="text" id="leave-input-reason" class="leave-modern-input" placeholder="e.g. Medical emergency, personal travel" style="height: 32px !important; font-size: 0.74rem !important;" />
             </div>
 
-            <!-- Quick Ideas Dropdown (Dedicated single clean row, zero overlap) -->
+            <!-- Quick Ideas Dropdown -->
             <div style="display: flex; align-items: center; gap: 8px;">
               <span style="font-size: 0.66rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.4px; white-space: nowrap;">Ideas:</span>
-              <select id="leave-ideas-dropdown" class="leave-modern-input leave-ideas-select" style="flex: 1; height: 28px !important; font-size: 0.71rem !important; color: #cbd5e1; cursor: pointer;">
-                <!-- Populated dynamically based on leave type -->
-              </select>
+              <div class="custom-select-container custom-select-dropup" id="leave-ideas-container" style="flex: 1; position: relative;">
+                <button type="button" class="custom-select-trigger" id="leave-ideas-trigger" style="width: 100%; height: 28px; font-size: 0.71rem; padding: 0 10px; background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 7px; color: #cbd5e1; display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none;">
+                  <span id="leave-ideas-selected-text" style="display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    <span>💡 Select a preset</span>
+                  </span>
+                  <span class="custom-select-chevron" style="font-size: 0.65rem; color: #94a3b8;">▼</span>
+                </button>
+                <div class="custom-select-menu" id="leave-ideas-menu" style="max-height: 190px;">
+                  <!-- Populated dynamically based on leave type -->
+                </div>
+                <select id="leave-ideas-dropdown" style="display: none;">
+                  <!-- Kept for compatibility -->
+                </select>
+              </div>
             </div>
 
             <!-- Automated Roster Protection Notice -->
@@ -683,6 +705,9 @@ export class StaffApplyLeaveDialog {
     // Dynamically switch stylist working hours when specialist dropdown changes
     staffSelect?.addEventListener('change', async () => {
       const selectedId = staffSelect?.value;
+      if (typeof renderCustomStaffSelect === 'function' && Array.isArray(staffList)) {
+        renderCustomStaffSelect(staffList, selectedId);
+      }
       if (!selectedId) {
         activeStylistHours = null;
         syncModalState();
@@ -792,9 +817,87 @@ export class StaffApplyLeaveDialog {
       OTHER: 'e.g. Documentation work, Personal relocation',
     };
 
+    // Custom Specialist Dropdown Integration
+    const leaveStaffTrigger = document.getElementById('leave-staff-trigger');
+    const leaveStaffMenu = document.getElementById('leave-staff-menu');
+    const leaveStaffNameText = document.getElementById('leave-staff-name-text');
+
+    const renderCustomStaffSelect = (list, activeId) => {
+      if (!leaveStaffMenu) return;
+      if (!Array.isArray(list) || list.length === 0) {
+        leaveStaffMenu.innerHTML = `<div style="padding: 10px; font-size: 0.74rem; color: #94a3b8; text-align: center;">No specialists available</div>`;
+        if (leaveStaffNameText) leaveStaffNameText.textContent = 'No specialists';
+        return;
+      }
+
+      const currentId = activeId || (staffSelect ? staffSelect.value : list[0].id);
+      const currentStaff = list.find((s) => s.id === currentId) || list[0];
+
+      if (currentStaff && leaveStaffNameText) {
+        const roleOrPhone = currentStaff.role || currentStaff.phone || '';
+        leaveStaffNameText.innerHTML = `
+          <span style="font-weight: 700; color: #fff;">${currentStaff.name}</span>
+          ${roleOrPhone ? `<span style="color: #c084fc; font-size: 0.7rem; font-weight: 500; margin-left: 4px;">(${roleOrPhone})</span>` : ''}
+        `;
+      }
+
+      leaveStaffMenu.innerHTML = list.map((s) => {
+        const isSel = s.id === currentId;
+        const roleOrPhone = s.role || s.phone || '';
+        const initials = (s.name || 'S').trim().charAt(0).toUpperCase();
+        return `
+          <div class="custom-select-option custom-staff-option ${isSel ? 'selected' : ''}" data-id="${s.id}" style="padding: 7px 10px; font-size: 0.74rem; display: flex; align-items: center; justify-content: space-between; border-radius: 6px;">
+            <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+              <div style="width: 24px; height: 24px; border-radius: 50%; background: linear-gradient(135deg, #8b5cf6, #6366f1); display: flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 700; color: #fff; flex-shrink: 0; box-shadow: 0 1px 3px rgba(0,0,0,0.3);">
+                ${initials}
+              </div>
+              <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                <span style="font-weight: 600; color: #fff;">${s.name}</span>
+                ${roleOrPhone ? `<span style="font-size: 0.68rem; color: #94a3b8; margin-left: 5px;">(${roleOrPhone})</span>` : ''}
+              </div>
+            </div>
+            ${isSel ? `<span class="custom-select-opt-check" style="color: #c084fc; font-weight: 700;">✓</span>` : ''}
+          </div>
+        `;
+      }).join('');
+
+      leaveStaffMenu.querySelectorAll('.custom-staff-option').forEach((opt) => {
+        opt.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const staffId = opt.getAttribute('data-id');
+          if (staffSelect) {
+            staffSelect.value = staffId;
+            staffSelect.dispatchEvent(new Event('change'));
+          }
+          renderCustomStaffSelect(list, staffId);
+          toggleStaffMenu(false);
+        });
+      });
+    };
+
+    const toggleStaffMenu = (forceOpen) => {
+      if (!leaveStaffMenu) return;
+      const isOpen = forceOpen !== undefined ? forceOpen : !leaveStaffMenu.classList.contains('open');
+      if (isOpen && typeof toggleLeaveIdeasMenu === 'function') toggleLeaveIdeasMenu(false);
+      leaveStaffMenu.classList.toggle('open', isOpen);
+      leaveStaffMenu.style.display = isOpen ? 'flex' : 'none';
+      leaveStaffTrigger?.classList.toggle('active', isOpen);
+      leaveStaffTrigger?.querySelector('.custom-select-chevron')?.classList.toggle('open', isOpen);
+    };
+
+    leaveStaffTrigger?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleStaffMenu();
+    });
+
+    // Custom Leave Ideas Dropdown Integration
     const leaveIdeasDropdown = document.getElementById('leave-ideas-dropdown');
+    const leaveIdeasTrigger = document.getElementById('leave-ideas-trigger');
+    const leaveIdeasMenu = document.getElementById('leave-ideas-menu');
+    const leaveIdeasSelectedText = document.getElementById('leave-ideas-selected-text');
+
     const updateLeaveIdeasDropdown = (leaveType) => {
-      if (!leaveIdeasDropdown) return;
       const presets = STAFF_LEAVE_PRESETS[leaveType] || STAFF_LEAVE_PRESETS.SICK_LEAVE;
       const leaveNames = {
         SICK_LEAVE: 'Sick Leave',
@@ -804,19 +907,71 @@ export class StaffApplyLeaveDialog {
         OTHER: 'Other',
       };
       const name = leaveNames[leaveType] || 'Leave';
+      const placeholderText = `💡 Select a ${name.toLowerCase()} preset`;
 
-      leaveIdeasDropdown.innerHTML = `
-        <option value="">💡 Select a ${name.toLowerCase()} preset</option>
-        ${presets.map((p) => `<option value="${p.reason.replace(/"/g, '&quot;')}">${p.label}</option>`).join('')}
-      `;
+      if (leaveIdeasSelectedText) {
+        leaveIdeasSelectedText.innerHTML = `<span>${placeholderText}</span>`;
+      }
+
+      if (leaveIdeasDropdown) {
+        leaveIdeasDropdown.innerHTML = `
+          <option value="">${placeholderText}</option>
+          ${presets.map((p) => `<option value="${p.reason.replace(/"/g, '&quot;')}">${p.label}</option>`).join('')}
+        `;
+        leaveIdeasDropdown.value = '';
+      }
+
+      if (leaveIdeasMenu) {
+        leaveIdeasMenu.innerHTML = presets.map((p) => `
+          <div class="custom-select-option leave-idea-opt" data-value="${p.reason.replace(/"/g, '&quot;')}" style="padding: 6px 10px; font-size: 0.73rem;">
+            <span>${p.label}</span>
+          </div>
+        `).join('');
+
+        leaveIdeasMenu.querySelectorAll('.leave-idea-opt').forEach((opt) => {
+          opt.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const selectedReason = opt.getAttribute('data-value');
+            if (selectedReason && reasonInput) {
+              reasonInput.value = selectedReason;
+              reasonInput.focus();
+              if (leaveIdeasSelectedText) {
+                leaveIdeasSelectedText.innerHTML = `<span>${opt.textContent.trim()}</span>`;
+              }
+            }
+            if (leaveIdeasDropdown) {
+              leaveIdeasDropdown.value = selectedReason || '';
+              leaveIdeasDropdown.dispatchEvent(new Event('change'));
+            }
+            toggleLeaveIdeasMenu(false);
+          });
+        });
+      }
     };
 
-    leaveIdeasDropdown?.addEventListener('change', () => {
-      const selectedReason = leaveIdeasDropdown.value;
-      if (selectedReason && reasonInput) {
-        reasonInput.value = selectedReason;
-        reasonInput.focus();
-        leaveIdeasDropdown.value = '';
+    const toggleLeaveIdeasMenu = (forceOpen) => {
+      if (!leaveIdeasMenu) return;
+      const isOpen = forceOpen !== undefined ? forceOpen : !leaveIdeasMenu.classList.contains('open');
+      if (isOpen && typeof toggleStaffMenu === 'function') toggleStaffMenu(false);
+      leaveIdeasMenu.classList.toggle('open', isOpen);
+      leaveIdeasMenu.style.display = isOpen ? 'flex' : 'none';
+      leaveIdeasTrigger?.classList.toggle('active', isOpen);
+      leaveIdeasTrigger?.querySelector('.custom-select-chevron')?.classList.toggle('open', isOpen);
+    };
+
+    leaveIdeasTrigger?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleLeaveIdeasMenu();
+    });
+
+    // Close any open custom select menus when clicking outside
+    modalContainer.addEventListener('click', (e) => {
+      if (!e.target.closest('#leave-staff-select-container')) {
+        toggleStaffMenu(false);
+      }
+      if (!e.target.closest('#leave-ideas-container')) {
+        toggleLeaveIdeasMenu(false);
       }
     });
 
@@ -849,7 +1004,10 @@ export class StaffApplyLeaveDialog {
       radio.addEventListener('change', updateLeaveTypeChips);
     });
 
-    // Initial render of chips and ideas dropdown
+    // Initial render of staff select, chips, and ideas dropdown
+    if (!fixedStaffId && Array.isArray(staffList) && staffList.length > 0) {
+      renderCustomStaffSelect(staffList, defaultStaffId);
+    }
     updateLeaveTypeChips();
 
     // Lazy load staff list if empty
@@ -866,6 +1024,7 @@ export class StaffApplyLeaveDialog {
             });
             staffSelect.innerHTML = buildStaffOptions(staffList, firstStaff.id);
             staffSelect.value = firstStaff.id;
+            renderCustomStaffSelect(staffList, firstStaff.id);
             activeStylistHours = stylistHoursCache.get(firstStaff.id) || null;
             if (!activeStylistHours) {
               ApiClient.getStaffWorkingHours(firstStaff.id).then((whRes) => {

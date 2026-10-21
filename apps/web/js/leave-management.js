@@ -50,15 +50,24 @@ export function calculateDurationDays(sDate, eDate) {
   return diffDays <= 1 ? '1 Day' : `${diffDays} Days`;
 }
 
-// Helper to format application timestamp "Applied Oct 9, 2026 · 6:12 PM"
+// Helper to format application timestamp "Applied 9 Oct · 6:12 PM"
 export function formatAppliedTimestamp(isoString) {
   if (!isoString) return 'Earlier';
   try {
     const d = new Date(isoString);
     if (isNaN(d.getTime())) return 'Earlier';
-    const dateFormatted = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    const timeFormatted = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-    return `${dateFormatted} · ${timeFormatted}`;
+    const monthsShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const mShort = monthsShort[d.getMonth()];
+    const day = d.getDate();
+    const yr = d.getFullYear();
+    let h = d.getHours();
+    const m = String(d.getMinutes()).padStart(2, '0');
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12;
+    h = h ? h : 12;
+    const currentYear = new Date().getFullYear();
+    const yrPart = yr !== currentYear ? ` '${String(yr).slice(-2)}` : '';
+    return `${day} ${mShort}${yrPart} · ${h}:${m} ${ampm}`;
   } catch {
     return 'Earlier';
   }
@@ -309,46 +318,46 @@ export class LeaveManagementUI {
       container.innerHTML = `
         <div style="display: flex; flex-direction: column; gap: 12px;">
           ${absences.map((ab) => {
-            const sDate = ab.startDate;
-            const eDate = ab.endDate;
-            const isMultiDay = sDate && eDate && sDate !== eDate;
-            const dateDisplay = isMultiDay
-              ? `${formatDateFriendly(sDate)} → ${formatDateFriendly(eDate)}`
-              : formatDateWithWeekday(sDate);
-            const durationText = calculateDurationDays(sDate, eDate);
+        const sDate = ab.startDate;
+        const eDate = ab.endDate;
+        const isMultiDay = sDate && eDate && sDate !== eDate;
+        const dateDisplay = isMultiDay
+          ? `${formatDateFriendly(sDate)} → ${formatDateFriendly(eDate)}`
+          : formatDateWithWeekday(sDate);
+        const durationText = calculateDurationDays(sDate, eDate);
 
-            const statusInfo = getUnifiedLeaveStatus(ab);
-            const isCancelled = ab.status === 'CANCELLED' || statusInfo.key === 'CANCELLED';
-            const isPast = ab.isPast !== undefined ? ab.isPast : (() => {
-              const today = new Date().toISOString().split('T')[0];
-              const endIso = eDate ? (typeof eDate === 'string' ? eDate.split('T')[0] : new Date(eDate).toISOString().split('T')[0]) : '';
-              return endIso < today;
-            })();
-            const isActive = !isCancelled;
-            const canCancel = ab.canCancel !== undefined ? ab.canCancel : (isActive && !isPast);
+        const statusInfo = getUnifiedLeaveStatus(ab);
+        const isCancelled = ab.status === 'CANCELLED' || statusInfo.key === 'CANCELLED';
+        const isPast = ab.isPast !== undefined ? ab.isPast : (() => {
+          const today = new Date().toISOString().split('T')[0];
+          const endIso = eDate ? (typeof eDate === 'string' ? eDate.split('T')[0] : new Date(eDate).toISOString().split('T')[0]) : '';
+          return endIso < today;
+        })();
+        const isActive = !isCancelled;
+        const canCancel = ab.canCancel !== undefined ? ab.canCancel : (isActive && !isPast);
 
-            let statusClass = 'lhc-status-onleave';
-            let statusTitle = 'On Leave';
-            if (isCancelled) {
-              statusClass = 'lhc-status-cancelled';
-              statusTitle = 'Cancelled';
-            } else if (isPast) {
-              statusClass = 'lhc-status-completed';
-              statusTitle = 'Completed';
-            }
+        let statusClass = 'lhc-status-onleave';
+        let statusTitle = 'On Leave';
+        if (isCancelled) {
+          statusClass = 'lhc-status-cancelled';
+          statusTitle = 'Cancelled';
+        } else if (isPast) {
+          statusClass = 'lhc-status-completed';
+          statusTitle = 'Completed';
+        }
 
-            const typeInfo = getLeaveTypeDetails(ab.leaveType, ab.reason);
-            const portionInfo = getPortionDetails(ab.isPartialDay, ab.startTime, ab.endTime);
-            const appliedFormatted = formatAppliedTimestamp(ab.createdAt);
+        const typeInfo = getLeaveTypeDetails(ab.leaveType, ab.reason);
+        const portionInfo = getPortionDetails(ab.isPartialDay, ab.startTime, ab.endTime);
+        const appliedFormatted = formatAppliedTimestamp(ab.createdAt);
 
-            const impactClass = 'lhc-impact-clean';
-            const impactIcon = '✓';
-            const impactMainText = `Staff Roster Blocked`;
-            const impactTag = '(Protected)';
+        const impactClass = 'lhc-impact-clean';
+        const impactIcon = '✓';
+        const impactMainText = `Staff Roster Blocked`;
+        const impactTag = '(Protected)';
 
-            const noteOrReason = ab.notes || ab.reason;
+        const noteOrReason = ab.notes || ab.reason;
 
-            return `
+        return `
               <div class="leave-history-card">
                 <!-- Top Header Row: Calendar Icon, Date, Duration Tag & Glowing Status Pill -->
                 <div class="lhc-header-row">
@@ -425,7 +434,7 @@ export class LeaveManagementUI {
                 </div>
               </div>
             `;
-          }).join('')}
+      }).join('')}
         </div>
       `;
 

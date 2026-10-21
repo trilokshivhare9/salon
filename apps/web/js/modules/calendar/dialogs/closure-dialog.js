@@ -17,7 +17,7 @@ export class ClosureDialog {
    * @param {boolean} [options.isStaffMode=false] - View-only for staff
    * @param {Function} options.onRefresh - Callback to refresh calendar after changes
    */
-  static open({ app, year, month, closures = [], isStaffMode = false, onRefresh = () => {} }) {
+  static open({ app, year, month, closures = [], isStaffMode = false, onRefresh = () => { } }) {
     const modalContainer = document.getElementById('modal-container') || document.body;
     const monthNames = [
       'January', 'February', 'March', 'April', 'May', 'June',
@@ -48,7 +48,7 @@ export class ClosureDialog {
       return `${String(hours).padStart(2, '0')}:${minutes} ${ampm}`;
     };
 
-    // Helper: format applied timestamp ("Oct 19, 2026 · 3:00 AM")
+    // Helper: format applied timestamp ("19 Oct · 3:00 AM")
     const formatAppliedTimestamp = (isoStr) => {
       if (!isoStr) return 'Recently';
       const d = new Date(isoStr);
@@ -61,7 +61,9 @@ export class ClosureDialog {
       const ampm = h >= 12 ? 'PM' : 'AM';
       h = h % 12;
       h = h ? h : 12;
-      return `${mShort} ${day}, ${yr} · ${h}:${m} ${ampm}`;
+      const currentYear = new Date().getFullYear();
+      const yrPart = (yr !== currentYear && yr !== year) ? ` '${String(yr).slice(-2)}` : '';
+      return `${day} ${mShort}${yrPart} · ${h}:${m} ${ampm}`;
     };
 
     // Helper: timezone-safe date parsing
@@ -99,81 +101,93 @@ export class ClosureDialog {
       bodyHtml = `
         <div style="display: flex; flex-direction: column; gap: 10px; max-height: 440px; overflow-y: auto; padding-right: 4px; margin-bottom: 16px;">
           ${monthClosures.map((c) => {
-            const dtStart = parseDate(c.startDate);
-            const dtEnd = parseDate(c.endDate);
+        const dtStart = parseDate(c.startDate);
+        const dtEnd = parseDate(c.endDate);
 
-            const isSingleDay = !dtEnd || (dtStart && dtStart.toDateString() === dtEnd.toDateString());
+        const isSingleDay = !dtEnd || (dtStart && dtStart.toDateString() === dtEnd.toDateString());
 
-            let dateDisplay = '';
-            let durationText = '1 Day';
-            if (isSingleDay && dtStart) {
-              const dayShort = shortDays[dtStart.getDay()];
-              const mShort = monthsShort[dtStart.getMonth()];
-              const d = dtStart.getDate();
-              const y = dtStart.getFullYear();
-              dateDisplay = `${dayShort}, ${mShort} ${d}, ${y}`;
-              durationText = '1 Day';
-            } else if (dtStart && dtEnd) {
-              const dayShort1 = shortDays[dtStart.getDay()];
-              const mShort1 = monthsShort[dtStart.getMonth()];
-              const d1 = dtStart.getDate();
-              const dayShort2 = shortDays[dtEnd.getDay()];
-              const mShort2 = monthsShort[dtEnd.getMonth()];
-              const d2 = dtEnd.getDate();
-              const y2 = dtEnd.getFullYear();
-              const diffDays = Math.round((dtEnd - dtStart) / (1000 * 60 * 60 * 24)) + 1;
-              dateDisplay = `${dayShort1}, ${mShort1} ${d1} ➔ ${dayShort2}, ${mShort2} ${d2}, ${y2}`;
-              durationText = `${diffDays} Days`;
-            } else {
-              dateDisplay = String(c.startDate).split('T')[0];
-            }
+        let dateDisplay = '';
+        let durationText = '1 Day';
+        if (isSingleDay && dtStart) {
+          const dayShort = shortDays[dtStart.getDay()];
+          const mShort = monthsShort[dtStart.getMonth()];
+          const d = dtStart.getDate();
+          dateDisplay = `${dayShort}, ${d} ${mShort}`;
+          durationText = '1 Day';
+        } else if (dtStart && dtEnd) {
+          const dayShort1 = shortDays[dtStart.getDay()];
+          const mShort1 = monthsShort[dtStart.getMonth()];
+          const d1 = dtStart.getDate();
+          const dayShort2 = shortDays[dtEnd.getDay()];
+          const mShort2 = monthsShort[dtEnd.getMonth()];
+          const d2 = dtEnd.getDate();
+          const diffDays = Math.round((dtEnd - dtStart) / (1000 * 60 * 60 * 24)) + 1;
+          dateDisplay = `${dayShort1}, ${d1} ${mShort1} ➔ ${dayShort2}, ${d2} ${mShort2}`;
+          durationText = `${diffDays} Days`;
+        } else {
+          dateDisplay = String(c.startDate).split('T')[0];
+        }
 
-            // Status resolution
-            const sISO = String(c.startDate).split('T')[0];
-            const eISO = String(c.endDate).split('T')[0];
-            const isPast = eISO < todayISO;
-            const isToday = sISO <= todayISO && todayISO <= eISO;
+        // Status resolution
+        const sISO = String(c.startDate).split('T')[0];
+        const eISO = String(c.endDate).split('T')[0];
+        const isPast = eISO < todayISO;
+        const isToday = sISO <= todayISO && todayISO <= eISO;
 
-            let statusClass = 'lhc-status-onleave';
-            let statusTitle = 'Closed Today';
-            if (isPast) {
-              statusClass = 'lhc-status-completed';
-              statusTitle = 'Completed';
-            } else if (!isToday) {
-              statusClass = 'lhc-status-upcoming';
-              statusTitle = 'Upcoming';
-            }
+        let statusClass = 'lhc-status-onleave';
+        let statusTitle = 'Closed Today';
+        if (isPast) {
+          statusClass = 'lhc-status-completed';
+          statusTitle = 'Completed';
+        } else if (!isToday) {
+          statusClass = 'lhc-status-upcoming';
+          statusTitle = 'Upcoming';
+        }
 
-            // Category & Type resolution
-            let resolvedType = c.closureType;
-            if (resolvedType === 'HOLIDAY' && c.reason && /diwali|eid|holi|christmas|festival|puja|pongal|navratri|new year/i.test(c.reason)) {
-              resolvedType = 'FESTIVAL';
-            }
+        // Category & Type resolution
+        let resolvedType = c.closureType;
+        if (resolvedType === 'HOLIDAY' && c.reason && /diwali|eid|holi|christmas|festival|puja|pongal|navratri|new year/i.test(c.reason)) {
+          resolvedType = 'FESTIVAL';
+        }
 
-            let typeColor = '#f472b6'; // Vibrant pink/magenta
-            let typeLabel = c.reason || 'Store Closure';
-            if (resolvedType === 'FESTIVAL') {
-              typeColor = '#f472b6';
-            } else if (resolvedType === 'HOLIDAY') {
-              typeColor = '#60a5fa';
-            } else if (resolvedType === 'EMERGENCY_CLOSURE') {
-              typeColor = '#f87171';
-            } else {
-              typeColor = '#cbd5e1';
-            }
+        const isPartial = Boolean(c.isPartialDay || c.closureType === 'PARTIAL_DAY');
 
-            // Shift resolution
-            const isPartial = Boolean(c.isPartialDay || c.closureType === 'PARTIAL_DAY');
-            const start12 = formatTimeTo12Hour(c.startTime || '09:00');
-            const end12 = formatTimeTo12Hour(c.endTime || '21:00');
-            const shiftLabel = isPartial ? `Partial (${start12} - ${end12})` : 'Full Day';
+        let typeColor = '#f472b6'; // Vibrant pink/magenta
+        let typeLabel = 'Store Closure';
+        if (resolvedType === 'FESTIVAL') {
+          typeColor = '#f472b6';
+          typeLabel = 'Festival Holiday';
+        } else if (resolvedType === 'HOLIDAY') {
+          typeColor = '#60a5fa';
+          typeLabel = 'Public Holiday';
+        } else if (resolvedType === 'EMERGENCY_CLOSURE') {
+          typeColor = '#f87171';
+          typeLabel = 'Emergency Closure';
+        } else if (isPartial) {
+          typeColor = '#38bdf8';
+          typeLabel = 'Partial Day Closure';
+        } else if (resolvedType === 'OTHER') {
+          typeColor = '#cbd5e1';
+          typeLabel = 'Store Closure';
+        } else if (resolvedType) {
+          typeColor = '#cbd5e1';
+          typeLabel = resolvedType.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (ch) => ch.toUpperCase());
+        }
 
-            // Applied timestamp & Ref
-            const appliedFormatted = formatAppliedTimestamp(c.createdAt);
-            const refId = c.id ? `#${c.id.slice(0, 8)}` : '#N/A';
+        // Shift resolution
+        const start12 = formatTimeTo12Hour(c.startTime || '09:00');
+        const end12 = formatTimeTo12Hour(c.endTime || '21:00');
+        const shiftLabel = isPartial ? `Partial (${start12} - ${end12})` : 'Full Day';
 
-            return `
-              <div class="leave-history-card">
+        // Applied timestamp & Ref
+        const appliedFormatted = formatAppliedTimestamp(c.createdAt);
+        const refId = c.id ? `#${c.id.slice(0, 8)}` : '#N/A';
+
+        // Note or custom reason text (if different from generic type)
+        const noteText = c.notes || (c.reason && c.reason.toLowerCase() !== typeLabel.toLowerCase() ? c.reason : '');
+
+        return `
+              <div class="leave-history-card lhc-ring-closure">
                 <!-- Top Header Row: Calendar Icon, Date, Duration Tag & Glowing Status Pill -->
                 <div class="lhc-header-row">
                   <div class="lhc-header-left">
@@ -187,18 +201,20 @@ export class ClosureDialog {
                   </div>
                 </div>
 
-                <!-- Middle Info Panel: Type, Shift, Applied Timestamp & Ref ID -->
+                <!-- Middle Info Panel: Type (Dedicated Row), Shift (Dedicated Row), Applied & Ref -->
                 <div class="lhc-meta-panel">
                   <div class="lhc-meta-row">
-                    <div class="lhc-meta-cell lhc-meta-left">
+                    <div class="lhc-meta-cell lhc-meta-left" style="width: 100%;">
                       <span class="lhc-type-dot" style="color: ${typeColor};">●</span>
                       <span class="lhc-meta-label">Type:</span>
-                      <strong class="lhc-meta-type-val" style="color: ${typeColor};">${typeLabel}</strong>
+                      <strong class="lhc-meta-type-val" style="color: ${typeColor}; max-width: 100%;">${typeLabel}</strong>
                     </div>
-                    <div class="lhc-meta-cell lhc-meta-right">
+                  </div>
+                  <div class="lhc-meta-row">
+                    <div class="lhc-meta-cell lhc-meta-left" style="width: 100%;">
                       <span class="lhc-meta-icon">🕒</span>
                       <span class="lhc-meta-label">Shift:</span>
-                      <strong class="lhc-meta-shift-val">${shiftLabel}</strong>
+                      <strong class="lhc-meta-shift-val" style="color: #f8fafc;">${shiftLabel}</strong>
                     </div>
                   </div>
                   <div class="lhc-meta-row">
@@ -211,10 +227,10 @@ export class ClosureDialog {
                       <span class="lhc-meta-ref-val">${refId}</span>
                     </div>
                   </div>
-                  ${c.notes ? `
+                  ${noteText ? `
                     <div class="lhc-meta-note-row">
                       <span class="lhc-meta-label">Note:</span>
-                      <span class="lhc-meta-note-val">${c.notes}</span>
+                      <span class="lhc-meta-note-val">${noteText}</span>
                     </div>
                   ` : ''}
                 </div>
@@ -223,9 +239,8 @@ export class ClosureDialog {
                 <div class="lhc-impact-pill lhc-impact-clean">
                   <div class="lhc-impact-left">
                     <span class="lhc-impact-check">✓</span>
-                    <span class="lhc-impact-text">Staff Roster Blocked</span>
+                    <span class="lhc-impact-text">Staff Roster Blocked · Bookings protected</span>
                   </div>
-                  <span class="lhc-impact-tag">(Protected)</span>
                 </div>
 
                 <!-- Action Buttons: Details & Reopen -->
@@ -245,7 +260,7 @@ export class ClosureDialog {
                 </div>
               </div>
             `;
-          }).join('')}
+      }).join('')}
         </div>
         ${!isStaffMode ? `
           <div style="display: flex; justify-content: flex-end;">
@@ -259,7 +274,7 @@ export class ClosureDialog {
 
     modalContainer.innerHTML = `
       <div class="modal-backdrop show">
-        <div class="modal-content modal-content-sheet" style="max-width: 520px; padding: 20px 22px; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 16px; background: #0f172a; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.75);">
+        <div class="modal-content modal-content-sheet" style="max-width: 560px; padding: 20px 22px; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 16px; background: #0f172a; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.75);">
           <div class="sheet-grab-handle"></div>
           <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px;">
             <div>
@@ -341,7 +356,7 @@ export class ClosureDialog {
   /**
    * Enterprise-grade Detail Modal for a single Salon Closure
    */
-  static showClosureDetailModal(closure, salonWorkingHours = [], onReopen = () => {}) {
+  static showClosureDetailModal(closure, salonWorkingHours = [], onReopen = () => { }) {
     const detailContainer = document.createElement('div');
     detailContainer.className = 'modal-backdrop show';
     detailContainer.style.zIndex = '99999';

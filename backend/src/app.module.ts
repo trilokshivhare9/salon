@@ -22,6 +22,7 @@ import { QuickBookingModule } from './modules/salon-admin/quick-booking/quick-bo
 import { BreaksModule } from './modules/salon-admin/breaks/breaks.module';
 import { WorkingHoursModule } from './modules/salon-admin/working-hours/working-hours.module';
 import { ClosuresModule } from './modules/salon-admin/closures/closures.module';
+import { PersonalProfileModule } from './modules/salon-admin/personal-profile/personal-profile.module';
 
 // Customer Channels
 import { WhatsAppModule } from './modules/channels/whatsapp/whatsapp.module';
@@ -63,6 +64,7 @@ import { CorrelationIdMiddleware } from './common/middleware/correlation-id.midd
     BreaksModule,
     WorkingHoursModule,
     ClosuresModule,
+    PersonalProfileModule,
 
     // Customer Channels
     WhatsAppModule,

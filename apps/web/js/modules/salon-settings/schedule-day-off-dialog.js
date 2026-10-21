@@ -40,11 +40,12 @@ export class ScheduleDayOffDialog {
       ? `${days[dtInit.getDay()]}, ${dtInit.getDate()} ${months[dtInit.getMonth()]} ${dtInit.getFullYear()}`
       : initialDate;
 
-    const defaultReason = festivalInfo ? `${festivalInfo.name} Holiday` : '';
+    const targetType = options.closureType || (festivalInfo ? 'FESTIVAL' : 'FESTIVAL');
+    const defaultReason = options.reason || (festivalInfo ? `${festivalInfo.name}` : '');
 
     modalContainer.innerHTML = `
       <div class="modal-backdrop show">
-        <div class="modal-content modal-content-sheet" style="max-width: 480px; width: 100%; padding: 18px 20px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 16px; background: #0f172a; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.75);">
+        <div class="modal-content modal-content-sheet" style="max-width: 480px; width: 100%; margin: auto; padding: 18px 20px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 16px; background: #0f172a; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.75);">
           <div class="sheet-grab-handle"></div>
           
           <!-- Header -->
@@ -189,22 +190,22 @@ export class ScheduleDayOffDialog {
             <div>
               <div style="display: flex; gap: 4px; width: 100%;">
                 <label class="closure-cat-chip" data-value="FESTIVAL" data-active-border="#f59e0b" data-active-bg="rgba(245, 158, 11, 0.16)" data-active-color="#fbbf24" style="flex: 1; border: 1px solid #f59e0b; background: rgba(245, 158, 11, 0.16); color: #fbbf24; border-radius: 7px; height: 30px; display: flex; align-items: center; justify-content: center; gap: 3px; cursor: pointer; font-size: 0.67rem; font-weight: 600; padding: 0 4px; white-space: nowrap; user-select: none; box-sizing: border-box;">
-                  <input type="radio" name="closureType" value="FESTIVAL" checked style="display: none;" />
+                  <input type="radio" name="closureType" value="FESTIVAL" ${targetType === 'FESTIVAL' ? 'checked' : ''} style="display: none;" />
                   <span style="font-size: 0.76rem; line-height: 1; flex-shrink: 0;">🪔</span>
                   <span>Festival</span>
                 </label>
                 <label class="closure-cat-chip" data-value="HOLIDAY" data-active-border="#3b82f6" data-active-bg="rgba(59, 130, 246, 0.16)" data-active-color="#60a5fa" style="flex: 1; border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.03); color: #94a3b8; border-radius: 7px; height: 30px; display: flex; align-items: center; justify-content: center; gap: 3px; cursor: pointer; font-size: 0.67rem; font-weight: 600; padding: 0 4px; white-space: nowrap; user-select: none; box-sizing: border-box;">
-                  <input type="radio" name="closureType" value="HOLIDAY" style="display: none;" />
+                  <input type="radio" name="closureType" value="HOLIDAY" ${targetType === 'HOLIDAY' ? 'checked' : ''} style="display: none;" />
                   <span style="font-size: 0.76rem; line-height: 1; flex-shrink: 0;">🌴</span>
                   <span>Holiday</span>
                 </label>
                 <label class="closure-cat-chip" data-value="EMERGENCY_CLOSURE" data-active-border="#ef4444" data-active-bg="rgba(239, 68, 68, 0.16)" data-active-color="#f87171" style="flex: 1.35; border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.03); color: #94a3b8; border-radius: 7px; height: 30px; display: flex; align-items: center; justify-content: center; gap: 3px; cursor: pointer; font-size: 0.67rem; font-weight: 600; padding: 0 4px; white-space: nowrap; user-select: none; box-sizing: border-box;">
-                  <input type="radio" name="closureType" value="EMERGENCY_CLOSURE" style="display: none;" />
+                  <input type="radio" name="closureType" value="EMERGENCY_CLOSURE" ${targetType === 'EMERGENCY_CLOSURE' ? 'checked' : ''} style="display: none;" />
                   <span style="font-size: 0.76rem; line-height: 1; flex-shrink: 0;">🚨</span>
                   <span>Emergency</span>
                 </label>
                 <label class="closure-cat-chip" data-value="OTHER" data-active-border="#94a3b8" data-active-bg="rgba(148, 163, 184, 0.16)" data-active-color="#e2e8f0" style="flex: 0.85; border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.03); color: #94a3b8; border-radius: 7px; height: 30px; display: flex; align-items: center; justify-content: center; gap: 3px; cursor: pointer; font-size: 0.67rem; font-weight: 600; padding: 0 4px; white-space: nowrap; user-select: none; box-sizing: border-box;">
-                  <input type="radio" name="closureType" value="OTHER" style="display: none;" />
+                  <input type="radio" name="closureType" value="OTHER" ${targetType === 'OTHER' ? 'checked' : ''} style="display: none;" />
                   <span style="font-size: 0.76rem; line-height: 1; flex-shrink: 0;">📝</span>
                   <span>Other</span>
                 </label>
@@ -217,12 +218,23 @@ export class ScheduleDayOffDialog {
               <input type="text" id="closure-input-reason" class="closure-modern-input" value="${defaultReason.replace(/"/g, '&quot;')}" placeholder="e.g. Diwali Festival Break, Store Maintenance" required style="height: 32px !important; font-size: 0.74rem !important;" />
             </div>
 
-            <!-- Quick Ideas Dropdown (Custom sleek SVG chevron icon, zero ellipsis) -->
+            <!-- Quick Ideas Dropdown -->
             <div style="display: flex; align-items: center; gap: 8px;">
               <span style="font-size: 0.66rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.4px; white-space: nowrap;">Ideas:</span>
-              <select id="closure-ideas-dropdown" class="closure-modern-input closure-ideas-select" style="flex: 1; height: 28px !important; font-size: 0.71rem !important; color: #cbd5e1; cursor: pointer;">
-                <!-- Populated dynamically based on category -->
-              </select>
+              <div class="custom-select-container custom-select-dropup" id="closure-ideas-container" style="flex: 1; position: relative;">
+                <button type="button" class="custom-select-trigger" id="closure-ideas-trigger" style="width: 100%; height: 28px; font-size: 0.71rem; padding: 0 10px; background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 7px; color: #cbd5e1; display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none;">
+                  <span id="closure-ideas-selected-text" style="display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    <span>💡 Select a preset</span>
+                  </span>
+                  <span class="custom-select-chevron" style="font-size: 0.65rem; color: #94a3b8;">▼</span>
+                </button>
+                <div class="custom-select-menu" id="closure-ideas-menu" style="max-height: 190px;">
+                  <!-- Populated dynamically based on category -->
+                </div>
+                <select id="closure-ideas-dropdown" style="display: none;">
+                  <!-- Kept for compatibility -->
+                </select>
+              </div>
             </div>
 
             <!-- Notes / Notice Input (Optional) -->
@@ -660,9 +672,11 @@ export class ScheduleDayOffDialog {
     };
 
     const ideasDropdown = document.getElementById('closure-ideas-dropdown');
+    const ideasTrigger = document.getElementById('closure-ideas-trigger');
+    const ideasMenu = document.getElementById('closure-ideas-menu');
+    const ideasSelectedText = document.getElementById('closure-ideas-selected-text');
 
     const updateIdeasDropdown = (catType) => {
-      if (!ideasDropdown) return;
       const presets = CATEGORY_PRESETS[catType] || CATEGORY_PRESETS.FESTIVAL;
       const catNames = {
         FESTIVAL: 'Festival',
@@ -671,19 +685,69 @@ export class ScheduleDayOffDialog {
         OTHER: 'Other',
       };
       const name = catNames[catType] || 'Preset';
+      const placeholderText = `💡 Select a ${name.toLowerCase()} preset`;
 
-      ideasDropdown.innerHTML = `
-        <option value="">💡 Select a ${name.toLowerCase()} preset</option>
-        ${presets.map((p) => `<option value="${p.reason.replace(/"/g, '&quot;')}">${p.label}</option>`).join('')}
-      `;
+      if (ideasSelectedText) {
+        ideasSelectedText.innerHTML = `<span>${placeholderText}</span>`;
+      }
+
+      if (ideasDropdown) {
+        ideasDropdown.innerHTML = `
+          <option value="">${placeholderText}</option>
+          ${presets.map((p) => `<option value="${p.reason.replace(/"/g, '&quot;')}">${p.label}</option>`).join('')}
+        `;
+        ideasDropdown.value = '';
+      }
+
+      if (ideasMenu) {
+        ideasMenu.innerHTML = presets.map((p) => `
+          <div class="custom-select-option closure-idea-opt" data-value="${p.reason.replace(/"/g, '&quot;')}" style="padding: 6px 10px; font-size: 0.73rem;">
+            <span>${p.label}</span>
+          </div>
+        `).join('');
+
+        ideasMenu.querySelectorAll('.closure-idea-opt').forEach((opt) => {
+          opt.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const selectedReason = opt.getAttribute('data-value');
+            if (selectedReason && reasonInput) {
+              reasonInput.value = selectedReason;
+              reasonInput.focus();
+              if (ideasSelectedText) {
+                ideasSelectedText.innerHTML = `<span>${opt.textContent.trim()}</span>`;
+              }
+            }
+            if (ideasDropdown) {
+              ideasDropdown.value = selectedReason || '';
+              ideasDropdown.dispatchEvent(new Event('change'));
+            }
+            ideasMenu.classList.remove('open');
+            ideasMenu.style.display = 'none';
+            ideasTrigger?.classList.remove('active');
+            ideasTrigger?.querySelector('.custom-select-chevron')?.classList.remove('open');
+          });
+        });
+      }
     };
 
-    ideasDropdown?.addEventListener('change', () => {
-      const selectedReason = ideasDropdown.value;
-      if (selectedReason && reasonInput) {
-        reasonInput.value = selectedReason;
-        reasonInput.focus();
-        ideasDropdown.value = '';
+    const toggleIdeasMenu = (forceOpen) => {
+      if (!ideasMenu) return;
+      const isOpen = forceOpen !== undefined ? forceOpen : !ideasMenu.classList.contains('open');
+      ideasMenu.classList.toggle('open', isOpen);
+      ideasMenu.style.display = isOpen ? 'flex' : 'none';
+      ideasTrigger?.classList.toggle('active', isOpen);
+      ideasTrigger?.querySelector('.custom-select-chevron')?.classList.toggle('open', isOpen);
+    };
+
+    ideasTrigger?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleIdeasMenu();
+    });
+
+    modalContainer.addEventListener('click', (e) => {
+      if (!e.target.closest('#closure-ideas-container')) {
+        toggleIdeasMenu(false);
       }
     });
 
@@ -717,6 +781,7 @@ export class ScheduleDayOffDialog {
 
     // Initial render of category visual state & contextual suggestions
     updateCategoryChips();
+    syncModalState();
 
     // Form Submission
     document.getElementById('form-salon-closure-modal')?.addEventListener('submit', async (e) => {

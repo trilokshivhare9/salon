@@ -18,6 +18,7 @@ import {
 import { ScheduleDayOffDialog, SalonClosuresModal } from './modules/salon-settings/schedule-day-off-dialog.js';
 import { StaffApplyLeaveDialog } from './modules/staff/index.js';
 import { SalonDayOffView } from './modules/salon-settings/salon-day-off-view.js';
+import { PersonalProfileView } from './modules/salon-settings/personal-profile-view.js';
 import {
   SERVICE_DURATION_OPTIONS,
   renderServiceDurationOptions,
@@ -842,10 +843,10 @@ export class SalonDashboard {
           <button class="nav-tab ${this.activeTab === 'staff' ? 'active' : ''}" data-tab="staff">
             ${Icons.users({ size: 16 })}
             <span>Stylists (${this.staffList.length}) \u2022 ${((sl, d) => sl.filter(s => s.status === 'ACTIVE' && !(s.absences || []).some(ab => {
-              const s = (ab.startDate || '').split('T')[0];
-              const e = (ab.endDate || s).split('T')[0];
-              return s <= d && e >= d && ab.status === 'ACTIVE';
-            })).length)(this.staffList, this.selectedDate || new Date().toISOString().split('T')[0])} Available</span>
+      const s = (ab.startDate || '').split('T')[0];
+      const e = (ab.endDate || s).split('T')[0];
+      return s <= d && e >= d && ab.status === 'ACTIVE';
+    })).length)(this.staffList, this.selectedDate || new Date().toISOString().split('T')[0])} Available</span>
           </button>
           <button class="nav-tab ${this.activeTab === 'queue' ? 'active' : ''}" data-tab="queue">
             ${Icons.queue({ size: 16 })}
@@ -1243,10 +1244,10 @@ export class SalonDashboard {
             <h3 style="font-size: 1.15rem; display: flex; align-items: center; gap: 8px;">
               ${Icons.users({ size: 18, color: '#A855F7' })}
               <span>Stylist Floor Status (${((sl, d) => sl.filter(s => s.status === 'ACTIVE' && !(s.absences || []).some(ab => {
-                const s = (ab.startDate || '').split('T')[0];
-                const e = (ab.endDate || s).split('T')[0];
-                return s <= d && e >= d && ab.status === 'ACTIVE';
-              })).length)(this.staffList, this.selectedDate || new Date().toISOString().split('T')[0])} Available Today)</span>
+        const s = (ab.startDate || '').split('T')[0];
+        const e = (ab.endDate || s).split('T')[0];
+        return s <= d && e >= d && ab.status === 'ACTIVE';
+      })).length)(this.staffList, this.selectedDate || new Date().toISOString().split('T')[0])} Available Today)</span>
             </h3>
             <p style="font-size: 0.82rem; color: var(--text-secondary);">Current station occupancy and working specialists.</p>
           </div>
@@ -2101,28 +2102,54 @@ export class SalonDashboard {
 
       return `
                 <div class="stylist-card" data-staff-id="${st.id}" role="button" tabindex="0" title="${st.statusReason || ('Tap to manage ' + st.name)}">
-                  <div class="stylist-card-left">
-                    <div class="stylist-card-avatar-wrap">
-                      ${avatarHtml}
-                      <span class="stylist-status-dot ${st.statusDotClass}"></span>
-                    </div>
-                    <div class="stylist-card-info">
-                      <div class="stylist-card-name">${st.name}</div>
-                      <div class="stylist-card-role">${st.role || 'Hair & Beard Specialist'}</div>
-                      <div class="stylist-card-badges">
-                        <span class="stylist-badge ${st.statusBadgeClass}" title="${st.statusReason}">${st.statusLabel}</span>
-                        <span class="stylist-badge badge-services">✂️ ${(st.services || []).length} Services</span>
+                  <div class="stylist-card-header">
+                    <div class="stylist-card-brand">
+                      <div class="stylist-card-avatar-wrap">
+                        ${avatarHtml}
+                        <span class="stylist-status-dot ${st.statusDotClass}"></span>
                       </div>
-                      ${st.phone ? `
-                        <div class="stylist-card-phone">
-                          <span class="phone-icon">📞</span>
-                          <span>${st.phone}</span>
-                        </div>
-                      ` : ''}
+                      <div class="stylist-card-headings">
+                        <h4 class="stylist-card-name" title="${st.name}">${st.name}</h4>
+                        <span class="stylist-card-role">${st.role || 'Hair & Beard Specialist'}</span>
+                      </div>
+                    </div>
+                    <div class="stylist-card-status-wrap">
+                      <span class="stylist-badge ${st.statusBadgeClass}" title="${st.statusReason || ''}">
+                        <span class="status-pip ${st.statusDotClass}"></span>
+                        <span>${st.statusLabel}</span>
+                      </span>
                     </div>
                   </div>
-                  <div class="stylist-card-right">
-                    <span class="stylist-card-arrow">&gt;</span>
+
+                  <div class="stylist-card-footer">
+                    <div class="stylist-card-meta-group">
+                      <span class="stylist-meta-pill service-count-pill" title="${(st.services || []).length} assigned services">
+                        <svg class="meta-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                          <circle cx="6" cy="6" r="3"></circle>
+                          <circle cx="6" cy="18" r="3"></circle>
+                          <line x1="20" y1="4" x2="8.12" y2="15.88"></line>
+                          <line x1="14.47" y1="14.48" x2="20" y2="20"></line>
+                          <line x1="8.12" y1="8.12" x2="12" y2="12"></line>
+                        </svg>
+                        <span><strong>${(st.services || []).length}</strong> Services</span>
+                      </span>
+                      ${st.phone ? `
+                        <span class="stylist-meta-pill phone-pill" title="Phone: ${st.phone}">
+                          <svg class="meta-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
+                          </svg>
+                          <span>${st.phone}</span>
+                        </span>
+                      ` : ''}
+                    </div>
+                    <div class="stylist-card-action">
+                      <span class="stylist-manage-btn">
+                        <span>Manage</span>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                          <polyline points="9 18 15 12 9 6"></polyline>
+                        </svg>
+                      </span>
+                    </div>
                   </div>
                 </div>
               `;
@@ -5371,87 +5398,301 @@ export class SalonDashboard {
   renderServicesTab() {
     try {
       const services = Array.isArray(this.servicesList) ? this.servicesList : [];
+      const categories = ['ALL', ...new Set(services.map((s) => s.category).filter(Boolean))];
+
+      const getCatIcon = (cat, name) => {
+        const text = `${cat || ''} ${name || ''}`.toLowerCase();
+        if (text.includes('hair') || text.includes('cut') || text.includes('trim')) return '✂️';
+        if (text.includes('beard') || text.includes('shave') || text.includes('mustache')) return '🪒';
+        if (text.includes('facial') || text.includes('skin') || text.includes('glow') || text.includes('clean')) return '✨';
+        if (text.includes('massage') || text.includes('spa') || text.includes('therapy')) return '💆';
+        if (text.includes('nail') || text.includes('mani') || text.includes('pedi')) return '💅';
+        if (text.includes('color') || text.includes('dye') || text.includes('bleach') || text.includes('highlight')) return '🎨';
+        if (text.includes('wash') || text.includes('shampoo')) return '🧴';
+        if (text.includes('wax') || text.includes('thread')) return '🪄';
+        return '✂️';
+      };
+
+      const activeFilters = this.serviceFilters || { category: 'ALL', gender: 'ALL', staff: 'ALL' };
+
+      // Clean up any drawer elements previously appended to document.body from past renders
+      const existingDrawer = document.getElementById('svc-filter-drawer');
+      if (existingDrawer && existingDrawer.parentElement === document.body) {
+        existingDrawer.remove();
+      }
+      const existingBackdrop = document.getElementById('svc-filter-drawer-backdrop');
+      if (existingBackdrop && existingBackdrop.parentElement === document.body) {
+        existingBackdrop.remove();
+      }
 
       return `
-        <div class="glass-panel">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
-            <div>
-              <h3 style="font-size: 1.25rem; display: flex; align-items: center; gap: 8px;">
-                ${Icons.scissors({ size: 20, color: '#A855F7' })}
-                <span>Service Menu & Pricing</span>
-              </h3>
-              <p style="color: var(--text-secondary); font-size: 0.85rem;">Manage prices, duration intervals, and client booking offerings.</p>
+        <div class="services-hub-view" style="position: relative;">
+          <!-- Filter Drawer Backdrop -->
+          <div class="services-filter-drawer-backdrop" id="svc-filter-drawer-backdrop"></div>
+
+          <!-- Natural Full Height Filter Drawer (Slides out smoothly from right edge) -->
+          <div class="services-filter-drawer" id="svc-filter-drawer">
+            <div class="drawer-header">
+              <div class="drawer-header-left">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+                </svg>
+                <span class="drawer-title">Filter Services</span>
+                <span class="drawer-tally-sub" id="svc-drawer-match-count">${services.length} items</span>
+              </div>
+              <button type="button" class="drawer-close-btn" id="btn-close-filter-drawer" title="Close drawer">✕</button>
             </div>
-            <div style="display: flex; gap: 8px;">
-              <button class="btn btn-secondary btn-sm" id="btn-manage-categories" style="gap: 6px;">
-                <span>📂 Manage Categories</span>
-              </button>
-              <button class="btn btn-primary btn-sm" id="btn-add-service" style="gap: 6px;">
-                ${Icons.plus({ size: 14 })}
-                <span>Add New Service</span>
-              </button>
+
+            <div class="drawer-body">
+              <!-- Filter by Category -->
+              <div class="filter-group">
+                <div class="filter-group-header-row">
+                  <span class="filter-group-label">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                      <rect x="3" y="3" width="7" height="7" rx="1.5"></rect>
+                      <rect x="14" y="3" width="7" height="7" rx="1.5"></rect>
+                      <rect x="14" y="14" width="7" height="7" rx="1.5"></rect>
+                      <rect x="3" y="14" width="7" height="7" rx="1.5"></rect>
+                    </svg>
+                    Category (${categories.length > 1 ? categories.length - 1 : 0})
+                  </span>
+                  <button type="button" class="btn-drawer-manage-cat-link" id="btn-drawer-manage-cat-link">Manage Categories</button>
+                </div>
+                <div class="filter-chips-row" id="drawer-category-chips">
+                  <button type="button" class="filter-chip-btn ${(activeFilters.category || 'ALL').toUpperCase() === 'ALL' ? 'is-active' : ''}" data-filter-type="category" data-value="ALL">
+                    All (${services.length})
+                  </button>
+                  ${categories.filter((c) => c !== 'ALL').map((c) => {
+                    const count = services.filter((s) => (s.category || '').toUpperCase() === (c || '').toUpperCase()).length;
+                    const isAct = (activeFilters.category || '').toUpperCase() === c.toUpperCase();
+                    return `
+                      <button type="button" class="filter-chip-btn ${isAct ? 'is-active' : ''}" data-filter-type="category" data-value="${c}">
+                        <span>${getCatIcon(c, '')}</span>
+                        <span>${c}</span>
+                        <span class="filter-chip-count">(${count})</span>
+                      </button>
+                    `;
+                  }).join('')}
+                </div>
+              </div>
+
+              <!-- Filter by Target Audience / Gender -->
+              <div class="filter-group">
+                <div class="filter-group-header-row">
+                  <span class="filter-group-label">👤 Target Audience / Gender</span>
+                </div>
+                <div class="filter-chips-row" id="drawer-gender-chips">
+                  <button type="button" class="filter-chip-btn ${(activeFilters.gender || 'ALL').toUpperCase() === 'ALL' ? 'is-active' : ''}" data-filter-type="gender" data-value="ALL">
+                    All (${services.length})
+                  </button>
+                  <button type="button" class="filter-chip-btn ${(activeFilters.gender || '').toUpperCase() === 'MALE' ? 'is-active' : ''}" data-filter-type="gender" data-value="MALE">
+                    <span>👤</span>
+                    <span>Men</span>
+                    <span class="filter-chip-count">(${services.filter((s) => (s.targetGender || '').toUpperCase() === 'MALE').length})</span>
+                  </button>
+                  <button type="button" class="filter-chip-btn ${(activeFilters.gender || '').toUpperCase() === 'FEMALE' ? 'is-active' : ''}" data-filter-type="gender" data-value="FEMALE">
+                    <span>👩</span>
+                    <span>Women</span>
+                    <span class="filter-chip-count">(${services.filter((s) => (s.targetGender || '').toUpperCase() === 'FEMALE').length})</span>
+                  </button>
+                  <button type="button" class="filter-chip-btn ${(activeFilters.gender || '').toUpperCase() === 'UNISEX' ? 'is-active' : ''}" data-filter-type="gender" data-value="UNISEX">
+                    <span>👥</span>
+                    <span>Unisex</span>
+                    <span class="filter-chip-count">(${services.filter((s) => !s.targetGender || (s.targetGender || '').toUpperCase() === 'UNISEX').length})</span>
+                  </button>
+                  <button type="button" class="filter-chip-btn ${(activeFilters.gender || '').toUpperCase() === 'KIDS' ? 'is-active' : ''}" data-filter-type="gender" data-value="KIDS">
+                    <span>👶</span>
+                    <span>Kids</span>
+                    <span class="filter-chip-count">(${services.filter((s) => (s.targetGender || '').toUpperCase() === 'KIDS').length})</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Filter by Staffing Assignment -->
+              <div class="filter-group">
+                <div class="filter-group-header-row">
+                  <span class="filter-group-label">✂️ Stylist Assignment</span>
+                </div>
+                <div class="filter-chips-row" id="drawer-staff-chips">
+                  <button type="button" class="filter-chip-btn ${(activeFilters.staff || 'ALL').toUpperCase() === 'ALL' ? 'is-active' : ''}" data-filter-type="staff" data-value="ALL">
+                    All (${services.length})
+                  </button>
+                  <button type="button" class="filter-chip-btn ${(activeFilters.staff || '').toUpperCase() === 'ASSIGNED' ? 'is-active' : ''}" data-filter-type="staff" data-value="ASSIGNED">
+                    <span>●</span>
+                    <span>Assigned</span>
+                    <span class="filter-chip-count">(${services.filter((s) => ((s.stylists && s.stylists.length) || s._count?.stylists || 0) > 0).length})</span>
+                  </button>
+                  <button type="button" class="filter-chip-btn ${(activeFilters.staff || '').toUpperCase() === 'UNASSIGNED' ? 'is-active' : ''}" data-filter-type="staff" data-value="UNASSIGNED">
+                    <span>○</span>
+                    <span>Unassigned</span>
+                    <span class="filter-chip-count">(${services.filter((s) => ((s.stylists && s.stylists.length) || s._count?.stylists || 0) === 0).length})</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="drawer-footer-actions">
+              <button type="button" class="btn-reset-filters" id="btn-drawer-reset-filters">Reset All</button>
+              <button type="button" class="btn-apply-filters" id="btn-drawer-apply-filters">Show Results</button>
             </div>
           </div>
 
+          <!-- 1. Header Bar: Title & Count (Left) + Primary Action: Add Service (Right) -->
+          <div class="service-operations-bar">
+            <div class="service-hub-title-wrap">
+              <span class="service-hub-icon">✂️</span>
+              <h3 class="service-hub-title">Services & Pricing</h3>
+              <span class="service-hub-count" id="svc-total-count">${services.length}</span>
+            </div>
+            <button type="button" class="service-hub-btn btn-primary" id="btn-add-service" title="Add Service">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+              <span>Add Service</span>
+            </button>
+          </div>
+
           ${services.length === 0 ? `
-            <div style="text-align: center; padding: 48px 20px; background: rgba(0,0,0,0.2); border-radius: var(--radius-md); border: 1px dashed var(--border-subtle);">
-              <div style="margin-bottom: 14px;">
-                ${Icons.scissors({ size: 44, color: '#64748b' })}
-              </div>
-              <h4 style="color: #fff; margin-bottom: 6px; font-weight: 700;">No Services Added Yet</h4>
-              <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 16px;">Create your service offerings (e.g. Haircut, Shave, Facial) with prices and durations.</p>
-              <button class="btn btn-primary btn-sm" id="btn-empty-add-service" style="gap: 6px;">
-                ${Icons.plus({ size: 14 })}
+            <div style="text-align: center; padding: 40px 20px; background: rgba(255,255,255,0.02); border-radius: var(--radius-md); border: 1px dashed rgba(255,255,255,0.1);">
+              <div style="font-size: 2rem; margin-bottom: 8px;">✂️</div>
+              <h4 style="color: #fff; margin-bottom: 4px; font-weight: 700; font-size: 0.95rem;">No Services Added Yet</h4>
+              <p style="color: var(--text-secondary); font-size: 0.8rem; margin-bottom: 14px;">Create your service offerings with pricing and duration intervals.</p>
+              <button type="button" class="service-hub-btn btn-primary" id="btn-empty-add-service" style="margin: 0 auto;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                 <span>Add First Service</span>
               </button>
             </div>
           ` : `
-            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 16px;">
+            <!-- 2. Search & Filter Bar: Live Search (Left) + Filter Trigger Button (Right) -->
+            <div class="service-search-filter-toolbar">
+              <!-- Live Search Box with Clear Button -->
+              <div class="services-search-box">
+                <svg class="search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                <input type="text" class="services-search-input" id="svc-search-input" placeholder="Search services..." />
+                <button type="button" class="btn-clear-search" id="btn-clear-svc-search" style="display: none;" title="Clear search">✕</button>
+              </div>
+
+              <!-- Filter Drawer Trigger Button (Right Side) -->
+              <button type="button" class="service-filter-drawer-trigger" id="btn-open-filter-drawer" title="Filter by Category, Gender & Staff">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="4" y1="21" x2="4" y2="14"></line>
+                  <line x1="4" y1="10" x2="4" y2="3"></line>
+                  <line x1="12" y1="21" x2="12" y2="12"></line>
+                  <line x1="12" y1="8" x2="12" y2="3"></line>
+                  <line x1="20" y1="21" x2="20" y2="16"></line>
+                  <line x1="20" y1="12" x2="20" y2="3"></line>
+                  <line x1="1" y1="14" x2="7" y2="14"></line>
+                  <line x1="9" y1="8" x2="15" y2="8"></line>
+                  <line x1="17" y1="16" x2="23" y2="16"></line>
+                </svg>
+                <span>Filter</span>
+                <span class="filter-count-badge" id="svc-active-filter-badge" style="display: none;">0</span>
+              </button>
+            </div>
+
+            <!-- Active Filter Badges Bar (Shows selected Category/Gender/Staff with ✕ to remove) -->
+            <div class="service-active-filters-bar" id="svc-active-filters-bar" style="display: none;">
+              <span class="active-filters-label">Active:</span>
+              <div class="active-filters-chips" id="svc-active-filters-chips"></div>
+              <button type="button" class="btn-clear-all-filters" id="btn-clear-all-filters">Clear all</button>
+            </div>
+
+            <!-- 3. Dedicated Frameless Service List Container (Separated from Operations) -->
+            <div class="service-list-container" id="svc-list-container">
               ${services.map((s) => {
-        const count = (s.stylists && s.stylists.length) || s._count?.stylists || 0;
-        const g = s.targetGender || 'UNISEX';
-        const labelMap = { MALE: 'Men', FEMALE: 'Women', UNISEX: 'Unisex', KIDS: 'Kids' };
-        const genderLabel = labelMap[g] || 'Unisex';
+                const count = (s.stylists && s.stylists.length) || s._count?.stylists || 0;
+                const g = (s.targetGender || 'UNISEX').toUpperCase();
+                const labelMap = { MALE: 'Men', FEMALE: 'Women', UNISEX: 'Unisex', KIDS: 'Kids' };
+                const genderIcons = { MALE: '👤', FEMALE: '👩', UNISEX: '👥', KIDS: '👶' };
+                const genderLabel = labelMap[g] || 'Unisex';
+                const gIcon = genderIcons[g] || '👥';
+                const catName = s.category || 'General';
+                const catIcon = getCatIcon(catName, s.name);
 
-        return `
-                  <div class="staff-card" style="display: flex; flex-direction: column; justify-content: space-between; padding: 18px;">
-                    <div>
-                      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
-                        <div style="font-weight: 700; font-size: 1.1rem; color: #fff; line-height: 1.2;">${s.name || 'Service'}</div>
-                        <div style="font-weight: 800; color: #fbbf24; font-size: 1.25rem; font-family: var(--font-heading);">₹${s.price || 0}</div>
-                      </div>
-                      <p style="font-size: 0.84rem; color: var(--text-secondary); margin-bottom: 12px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 36px;">
-                        ${s.description || 'Standard salon treatment service.'}
-                      </p>
-                      
-                      <!-- Subtle Metadata Bullet Row (Replaces Loud Pills) -->
-                      <div class="meta-bullet-row" style="margin-bottom: 12px;">
-                        <span>⏱ <strong>${s.durationMinutes || 30}</strong> mins</span>
-                        <span class="meta-bullet-dot">•</span>
-                        <span>${s.category || 'General'}</span>
-                        <span class="meta-bullet-dot">•</span>
-                        <span>${genderLabel}</span>
+                return `
+                  <div class="service-card-item" data-category="${catName.toUpperCase()}" data-name="${(s.name || '').toLowerCase()}" data-gender="${g}" data-staff-count="${count}">
+                    <!-- Top: Icon + Headings & Tags (Left) | Action Buttons (Right) -->
+                    <div class="service-card-header">
+                      <div class="service-card-brand">
+                        <div class="service-card-icon-badge">${catIcon}</div>
+                        <div class="service-card-headings">
+                          <h4 class="service-card-name" title="${(s.name || 'Service').replace(/"/g, '&quot;')}">${s.name || 'Service'}</h4>
+                          <div class="service-card-pills-row">
+                            <span class="service-card-cat-pill">${catName}</span>
+                            <span class="service-card-gender-pill gender-${g.toLowerCase()}">
+                              <span>${gIcon}</span>
+                              <span>${genderLabel}</span>
+                            </span>
+                          </div>
+                        </div>
                       </div>
 
-                      <div style="margin-bottom: 14px;">
-                        ${count > 0
-            ? `<span style="font-size: 0.78rem; font-weight: 600; color: #34d399; display: flex; align-items: center; gap: 6px;"><span class="status-dot status-dot-free" style="width: 7px; height: 7px;"></span>${count} Stylist${count > 1 ? 's' : ''} Assigned</span>`
-            : `<span style="font-size: 0.78rem; font-weight: 600; color: #f87171; display: flex; align-items: center; gap: 6px;"><span class="status-dot status-dot-busy" style="width: 7px; height: 7px;"></span>⚠️ 0 Staff (Unbookable)</span>`}
+                      <div class="service-card-actions">
+                        <button type="button" class="service-action-icon-btn btn-edit-service" 
+                          data-id="${s.id}" 
+                          data-name="${(s.name || '').replace(/"/g, '&quot;')}" 
+                          data-price="${s.price || 0}" 
+                          data-duration="${s.durationMinutes || 30}" 
+                          data-category="${(s.category || '').replace(/"/g, '&quot;')}" 
+                          data-desc="${(s.description || '').replace(/"/g, '&quot;')}" 
+                          title="Edit Service">
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                          </svg>
+                        </button>
+                        <button type="button" class="service-action-icon-btn action-del btn-delete-service" 
+                          data-id="${s.id}" 
+                          data-name="${(s.name || '').replace(/"/g, '&quot;')}" 
+                          title="Delete Service">
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="3 6 5 6 21 6"></polyline>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                          </svg>
+                        </button>
                       </div>
                     </div>
 
-                    <div style="display: flex; gap: 8px; border-top: 1px solid var(--border-subtle); padding-top: 12px; align-items: center;">
-                      <button class="btn btn-secondary btn-sm btn-edit-service" data-id="${s.id}" data-name="${s.name || ''}" data-price="${s.price || 0}" data-duration="${s.durationMinutes || 30}" data-category="${s.category || ''}" data-desc="${s.description || ''}" style="flex: 1; gap: 6px; justify-content: center;">
-                        ${Icons.edit({ size: 13 })}
-                        <span>Edit</span>
-                      </button>
-                      <button class="btn btn-danger-outline btn-sm btn-delete-service" data-id="${s.id}" data-name="${s.name || ''}" style="padding: 6px 12px;" title="Delete Service">
-                        ${Icons.trash({ size: 13 })}
-                      </button>
+                    <!-- Middle: Description (if available) -->
+                    ${s.description && s.description.trim() ? `
+                      <p class="service-card-desc" title="${s.description.replace(/"/g, '&quot;')}">${s.description}</p>
+                    ` : ''}
+
+                    <!-- Bottom: Duration & Stylist Assignment (Left) | Price (Right) -->
+                    <div class="service-card-footer">
+                      <div class="service-card-meta-group">
+                        <span class="service-meta-pill" title="Duration">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polyline points="12 6 12 12 16 14"></polyline>
+                          </svg>
+                          <span><strong>${s.durationMinutes || 30}</strong> mins</span>
+                        </span>
+
+                        <span class="service-staff-pill ${count > 0 ? 'is-assigned' : 'is-unassigned'}" title="${count > 0 ? `${count} Stylist(s) assigned` : 'No stylists assigned'}">
+                          <span class="staff-dot ${count > 0 ? 'dot-active' : 'dot-unassigned'}"></span>
+                          <span>${count > 0 ? `${count} Stylist${count > 1 ? 's' : ''}` : 'Unassigned'}</span>
+                        </span>
+                      </div>
+
+                      <div class="service-card-price-wrap">
+                        <span class="service-card-currency">₹</span><span class="service-card-amount">${s.price || 0}</span>
+                      </div>
                     </div>
                   </div>
                 `;
-      }).join('')}
+              }).join('')}
+            </div>
+
+            <!-- Empty Search / Filter State -->
+            <div id="svc-no-results" class="services-empty-search-state" style="display: none;">
+              <div class="empty-search-icon">🔍</div>
+              <p class="empty-search-text">No services match your active filters or search.</p>
+              <button type="button" class="btn-reset-search-state" id="btn-reset-empty-search">Reset Filters</button>
             </div>
           `}
         </div>
@@ -5949,6 +6190,14 @@ export class SalonDashboard {
 
   renderProfileSubtabContent() {
     const subtab = this.activeProfileSubtab || 'account';
+
+    // SECTION 1: PERSONAL ACCOUNT & SALON PROFILE (Clean 2-Section PersonalProfileView)
+    if (subtab === 'account') {
+      return `
+        <div id="personal-profile-mount-point" class="personal-profile-view-root"></div>
+      `;
+    }
+
     const profile = this.salonProfile || {};
     const adminUser = this.currentUser || SalonAuth.getUser() || {};
     const slug = profile.slug || 'the-grand-royal-barber-1';
@@ -5959,122 +6208,6 @@ export class SalonDashboard {
     const quotaReset = this.summaryData?.whatsappQuota?.resetsOn || '1st of next month';
     const todayClosure = this.getTodayClosure();
     const isClosedToday = !!todayClosure;
-
-    // SECTION 1: PERSONAL ACCOUNT, SALON PROFILE & ADDRESS
-    if (subtab === 'account') {
-      const adminName = adminUser.name || profile.name || '';
-      const adminEmail = adminUser.email || profile.email || '';
-      const adminPhone = adminUser.phone || profile.phone || '';
-      const currentSalonName = profile.name || 'Salon Operations';
-      const currentCity = profile.city || (profile.address ? profile.address.split(',')[0].trim() : 'Indore');
-
-      return `
-        <div class="settings-panel-card">
-          <div class="settings-panel-header" style="margin-bottom: 14px; padding-bottom: 12px;">
-            <div class="settings-header-left">
-              <div class="settings-header-icon" style="background: rgba(139, 61, 255, 0.15); color: #A855F7;">
-                ${Icons.user({ size: 20 })}
-              </div>
-              <div>
-                <h3 class="settings-panel-title">Personal Profile & Salon Identity</h3>
-                <p class="settings-panel-subtitle">Manage login credentials, brand identity, and verified GPS store address.</p>
-              </div>
-            </div>
-            <span class="badge badge-in_service" style="font-size: 0.68rem; padding: 3px 8px; border-radius: 6px;">
-              👑 ${adminUser.role === 'SALON_OWNER' ? 'Salon Owner' : 'Salon Admin'}
-            </span>
-          </div>
-
-          <div id="prof-profile-alert"></div>
-
-          <form id="form-update-owner-profile" class="settings-panel-body" onsubmit="return false;" style="gap: 12px;">
-            
-            <!-- Section A: Salon Owner Account -->
-            <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 12px; padding: 12px 14px;">
-              <div style="font-size: 0.72rem; font-weight: 800; color: #a5b4fc; text-transform: uppercase; letter-spacing: 0.06em; display: flex; align-items: center; gap: 6px; margin-bottom: 10px;">
-                ${Icons.user({ size: 13, color: '#A855F7' })}
-                <span>Salon Owner Credentials</span>
-              </div>
-
-              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 10px;">
-                <div class="form-group" style="margin-bottom: 0;">
-                  <label class="form-label" for="prof-manager-name">Owner Full Name *</label>
-                  <input type="text" class="form-control" id="prof-manager-name" value="${adminName.replace(/"/g, '&quot;')}" placeholder="e.g. Trilok Shivhare" required style="height: 38px;" />
-                </div>
-
-                <div class="form-group" style="margin-bottom: 0;">
-                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                    <label class="form-label" for="prof-manager-phone" style="margin-bottom: 0;">Registered Phone</label>
-                    <span style="font-size: 0.62rem; color: #34d399; font-weight: 700; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25); padding: 1px 6px; border-radius: 4px;">
-                      ✓ Verified Login
-                    </span>
-                  </div>
-                  <input type="tel" class="form-control" id="prof-manager-phone" value="${adminPhone.replace(/"/g, '&quot;')}" readonly disabled style="cursor: not-allowed; opacity: 0.85; background: rgba(15, 23, 42, 0.5); border: 1px solid rgba(255, 255, 255, 0.08); color: #cbd5e1; height: 38px;" />
-                </div>
-              </div>
-
-              <div class="form-group" style="margin-bottom: 0;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                  <label class="form-label" for="prof-manager-email" style="margin-bottom: 0;">Recovery Email *</label>
-                  <span style="font-size: 0.64rem; color: #A855F7; font-weight: 600;">Used for password reset</span>
-                </div>
-                <input type="email" class="form-control" id="prof-manager-email" value="${adminEmail.replace(/"/g, '&quot;')}" placeholder="owner@gmail.com" required style="height: 38px;" />
-              </div>
-            </div>
-
-            <!-- Section B: Salon Brand & Physical Store Location -->
-            <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 12px; padding: 12px 14px;">
-              <div style="font-size: 0.72rem; font-weight: 800; color: #34d399; text-transform: uppercase; letter-spacing: 0.06em; display: flex; align-items: center; gap: 6px; margin-bottom: 10px;">
-                ${Icons.scissors({ size: 13, color: '#34d399' })}
-                <span>Salon Brand & Store Location</span>
-              </div>
-
-              <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 10px; margin-bottom: 10px;">
-                <div class="form-group" style="margin-bottom: 0;">
-                  <label class="form-label" for="prof-salon-name">Salon Brand Name *</label>
-                  <input type="text" class="form-control" id="prof-salon-name" value="${currentSalonName.replace(/"/g, '&quot;')}" placeholder="e.g. Developer Bazaar" required style="height: 38px;" />
-                </div>
-
-                <div class="form-group" style="margin-bottom: 0;">
-                  <label class="form-label" for="prof-salon-city">City *</label>
-                  <input type="text" class="form-control" id="prof-salon-city" value="${currentCity.replace(/"/g, '&quot;')}" placeholder="e.g. Indore" required style="height: 38px;" />
-                </div>
-              </div>
-
-              <!-- Location & GPS Navigation Component Container -->
-              <div class="form-group" style="margin-bottom: 0;">
-                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
-                  <label class="form-label" style="margin-bottom: 0; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; color: #cbd5e1;">
-                    GPS Navigation & Address Capture
-                  </label>
-                  <span style="font-size: 0.64rem; color: #34d399; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;">
-                    <span>✓</span> Client Turn-by-Turn
-                  </span>
-                </div>
-                <div id="prof-location-picker-container"></div>
-              </div>
-            </div>
-
-            <!-- Save Action Button -->
-            <div style="margin-top: 4px;">
-              <button type="submit" class="btn btn-primary" id="btn-save-profile" style="width: 100%; min-height: 42px; height: 42px; padding: 0 20px; font-weight: 700; font-size: 0.86rem; border-radius: 9px; background: linear-gradient(135deg, #8B3DFF 0%, #9D5CFF 100%); box-shadow: 0 4px 14px rgba(139, 61, 255, 0.35); display: flex; align-items: center; justify-content: center; gap: 8px;">
-                ${Icons.check({ size: 16 })}
-                <span>Save Profile & Salon Changes</span>
-              </button>
-            </div>
-          </form>
-
-          <!-- Minimal Security Footer (No Developer Jargon) -->
-          <div style="margin-top: 12px; padding: 8px 12px; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 8px; display: flex; align-items: center; justify-content: space-between; font-size: 0.72rem; color: #94a3b8;">
-            <div style="display: flex; align-items: center; gap: 6px;">
-              <span style="color: #34d399;">🔒</span>
-              <span>Authenticated Store Session</span>
-            </div>
-            <span style="color: #34d399; font-weight: 600;">✓ Verified Store Credentials</span>
-          </div>
-        </div>
-      `;
-    }
 
     // SECTION 2: CLIENT BOOKING & RECEPTION QR
     if (subtab === 'booking-qr' || subtab === 'storefront') {
@@ -6820,124 +6953,10 @@ export class SalonDashboard {
       };
     }
 
-    // 3. Subtab: Account Profile Form
-    // Mount LocationPicker for Profile tab
-    if (document.getElementById('prof-location-picker-container')) {
-      const profile = this.salonProfile || {};
-      this.profileLocationPicker = new LocationPicker('prof-location-picker-container', {
-        hideHeader: true,
-        hideCityInput: true,
-        syncCityInputId: 'prof-salon-city',
-        initialData: {
-          address: profile.address || '',
-          city: profile.city || '',
-          state: profile.state || '',
-          latitude: profile.latitude !== undefined ? profile.latitude : null,
-          longitude: profile.longitude !== undefined ? profile.longitude : null,
-          googleMapsUrl: profile.googleMapsUrl || '',
-          locationType: profile.locationType || 'MANUAL',
-        },
-        getCity: () => document.getElementById('prof-salon-city')?.value?.trim() || profile.city || '',
-        onChange: (locData) => {
-          const cityEl = document.getElementById('prof-salon-city');
-          if (cityEl && locData.city) {
-            cityEl.value = locData.city;
-          }
-        },
-      });
-
-      // Synchronize city input with location search scope
-      document.getElementById('prof-salon-city')?.addEventListener('input', () => {
-        if (this.profileLocationPicker && this.profileLocationPicker.activeMode === 'search') {
-          this.profileLocationPicker.render();
-        }
-      });
-    }
-
-    // 3. Subtab: Account Profile & Salon Form
-    const formProfile = document.getElementById('form-update-owner-profile');
-    if (formProfile) {
-      formProfile.onsubmit = async (e) => {
-        e.preventDefault();
-        const ownerName = document.getElementById('prof-manager-name')?.value.trim();
-        const ownerEmail = document.getElementById('prof-manager-email')?.value.trim();
-        const salonName = document.getElementById('prof-salon-name')?.value.trim();
-        const salonCity = document.getElementById('prof-salon-city')?.value.trim();
-        const btnSave = document.getElementById('btn-save-profile');
-        const alertBox = document.getElementById('prof-profile-alert');
-
-        if (!ownerName || !ownerEmail) {
-          if (alertBox) alertBox.innerHTML = `<div class="toast-error" style="padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; font-size: 0.85rem;">Owner Name and Recovery Email cannot be empty.</div>`;
-          return;
-        }
-
-        if (!salonName) {
-          if (alertBox) alertBox.innerHTML = `<div class="toast-error" style="padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; font-size: 0.85rem;">Salon Name cannot be empty.</div>`;
-          return;
-        }
-
-        const locData = this.profileLocationPicker ? this.profileLocationPicker.getValue() : {};
-
-        const originalBtnHtml = btnSave ? btnSave.innerHTML : '';
-        if (btnSave) {
-          btnSave.disabled = true;
-          btnSave.innerHTML = `<span>Saving...</span>`;
-        }
-
-        try {
-          // 1. Update personal owner profile (owner name, recovery email)
-          const profileRes = await ApiClient.updateProfile({ name: ownerName, email: ownerEmail });
-          if (profileRes?.admin) {
-            this.currentUser = { ...this.currentUser, ...profileRes.admin };
-          }
-
-          // 2. Update salon details (name, address, city, state, coordinates, maps URL)
-          const salonPayload = {
-            name: salonName,
-            address: locData.address || this.salonProfile?.address || '',
-            city: salonCity || locData.city || this.salonProfile?.city || '',
-            state: locData.state || this.salonProfile?.state || '',
-            googleMapsUrl: locData.googleMapsUrl || this.salonProfile?.googleMapsUrl || undefined,
-            locationType: locData.locationType || this.salonProfile?.locationType || 'MANUAL',
-          };
-          if (typeof locData.latitude === 'number' && !isNaN(locData.latitude)) {
-            salonPayload.latitude = locData.latitude;
-          }
-          if (typeof locData.longitude === 'number' && !isNaN(locData.longitude)) {
-            salonPayload.longitude = locData.longitude;
-          }
-
-          const updatedSalon = await ApiClient.updateSalonProfile(salonPayload);
-          if (updatedSalon) {
-            this.salonProfile = { ...this.salonProfile, ...salonPayload };
-          }
-
-          // 3. Update UI elements across header and identity card
-          document.querySelectorAll('.header-salon-name').forEach((el) => {
-            el.textContent = salonName;
-          });
-          document.querySelectorAll('.settings-identity-name').forEach((el) => {
-            el.textContent = ownerName;
-          });
-          document.querySelectorAll('.settings-identity-sub').forEach((el) => {
-            el.textContent = `${salonName} · ${salonPayload.city || 'Indore'}`;
-          });
-
-          if (alertBox) {
-            alertBox.innerHTML = `<div style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.3); color: #34d399; padding: 12px 16px; border-radius: 8px; margin-bottom: 14px; font-size: 0.88rem; display: flex; align-items: center; gap: 8px;"><span>✓</span><span>Owner profile, salon brand name, and verified location updated successfully!</span></div>`;
-          }
-          this.showToast('Profile and salon changes saved successfully!', 'success');
-        } catch (err) {
-          if (alertBox) {
-            alertBox.innerHTML = `<div style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171; padding: 12px 16px; border-radius: 8px; margin-bottom: 14px; font-size: 0.88rem;">${err.message || 'Failed to update profile.'}</div>`;
-          }
-        } finally {
-          if (btnSave) {
-            btnSave.disabled = false;
-            btnSave.innerHTML = originalBtnHtml;
-          }
-        }
-      };
+    // 3. Subtab: Account Profile & Salon Information (PersonalProfileView)
+    const ppMount = document.getElementById('personal-profile-mount-point');
+    if (ppMount) {
+      PersonalProfileView.init(ppMount, this);
     }
 
     // 4. Subtab: Client Booking & QR Link
@@ -7406,6 +7425,351 @@ export class SalonDashboard {
         }
       });
     }
+  }
+
+  openServicesFilterDrawer() {
+    const drawer = document.getElementById('svc-filter-drawer');
+    const backdrop = document.getElementById('svc-filter-drawer-backdrop');
+    if (!drawer) return;
+
+    // Relocate to document.body so that fixed positioning is 100vh viewport-wide
+    // and cannot be constrained or trapped by any parent transform, filter, or backdrop-filter
+    if (drawer.parentElement !== document.body) {
+      if (backdrop) document.body.appendChild(backdrop);
+      document.body.appendChild(drawer);
+    }
+
+    // Force reflow for smooth slide transition
+    void drawer.offsetHeight;
+
+    drawer.classList.add('is-open');
+    if (backdrop) backdrop.classList.add('is-open');
+    document.body.style.overflow = 'hidden';
+
+    // Synchronize active chips immediately upon opening
+    this.syncServicesFilterPills();
+  }
+
+  closeServicesFilterDrawer() {
+    const drawer = document.getElementById('svc-filter-drawer');
+    const backdrop = document.getElementById('svc-filter-drawer-backdrop');
+    if (drawer) drawer.classList.remove('is-open');
+    if (backdrop) backdrop.classList.remove('is-open');
+    document.body.style.overflow = '';
+  }
+
+  syncServicesFilterPills() {
+    if (!this.serviceFilters) {
+      this.serviceFilters = { category: 'ALL', gender: 'ALL', staff: 'ALL' };
+    }
+    const activeCat = (this.serviceFilters.category || 'ALL').toUpperCase();
+    const activeGender = (this.serviceFilters.gender || 'ALL').toUpperCase();
+    const activeStaff = (this.serviceFilters.staff || 'ALL').toUpperCase();
+
+    // Category chips in drawer (searches document-wide by data-filter-type to reach body-relocated drawer)
+    document.querySelectorAll('.filter-chip-btn[data-filter-type="category"]').forEach((btn) => {
+      const val = (btn.getAttribute('data-value') || '').toUpperCase();
+      btn.classList.toggle('is-active', val === activeCat);
+    });
+    // Gender chips in drawer
+    document.querySelectorAll('.filter-chip-btn[data-filter-type="gender"]').forEach((btn) => {
+      const val = (btn.getAttribute('data-value') || '').toUpperCase();
+      btn.classList.toggle('is-active', val === activeGender);
+    });
+    // Staff chips in drawer
+    document.querySelectorAll('.filter-chip-btn[data-filter-type="staff"]').forEach((btn) => {
+      const val = (btn.getAttribute('data-value') || '').toUpperCase();
+      btn.classList.toggle('is-active', val === activeStaff);
+    });
+  }
+
+  triggerServicesFilter() {
+    this.syncServicesFilterPills();
+    const searchInput = document.getElementById('svc-search-input');
+    const q = (searchInput?.value || '').trim().toLowerCase();
+    const clearSearchBtn = document.getElementById('btn-clear-svc-search');
+    if (clearSearchBtn) {
+      clearSearchBtn.style.display = q ? 'flex' : 'none';
+    }
+
+    const activeCat = (this.serviceFilters?.category || 'ALL').toUpperCase();
+    const activeGender = (this.serviceFilters?.gender || 'ALL').toUpperCase();
+    const activeStaff = (this.serviceFilters?.staff || 'ALL').toUpperCase();
+
+    const cards = document.querySelectorAll('.service-card-item, .service-row-card, .service-compact-card');
+    let visible = 0;
+    cards.forEach((card) => {
+      const name = (card.getAttribute('data-name') || '').toLowerCase();
+      const cat = (card.getAttribute('data-category') || '').toUpperCase();
+      const gender = (card.getAttribute('data-gender') || 'UNISEX').toUpperCase();
+      const staffCount = parseInt(card.getAttribute('data-staff-count') || '0', 10);
+
+      const matchesQuery = !q || name.includes(q) || cat.toLowerCase().includes(q);
+      const matchesCat = activeCat === 'ALL' || cat === activeCat;
+      const matchesGender = activeGender === 'ALL' || gender === activeGender;
+      let matchesStaff = true;
+      if (activeStaff === 'ASSIGNED') matchesStaff = staffCount > 0;
+      else if (activeStaff === 'UNASSIGNED') matchesStaff = staffCount === 0;
+
+      if (matchesQuery && matchesCat && matchesGender && matchesStaff) {
+        card.style.display = 'flex';
+        visible++;
+      } else {
+        card.style.display = 'none';
+      }
+    });
+
+    const noResults = document.getElementById('svc-no-results');
+    if (noResults) {
+      noResults.style.display = visible === 0 && cards.length > 0 ? 'flex' : 'none';
+    }
+    const drawerTally = document.getElementById('svc-drawer-match-count');
+    if (drawerTally) {
+      drawerTally.textContent = `${visible} items`;
+    }
+    const activeBadge = document.getElementById('svc-active-filter-badge');
+    const openDrawerBtn = document.getElementById('btn-open-filter-drawer');
+    let activeCount = 0;
+    if (activeCat !== 'ALL') activeCount++;
+    if (activeGender !== 'ALL') activeCount++;
+    if (activeStaff !== 'ALL') activeCount++;
+    if (activeBadge) {
+      if (activeCount > 0) {
+        activeBadge.textContent = String(activeCount);
+        activeBadge.style.display = 'inline-flex';
+        openDrawerBtn?.classList.add('is-filtered');
+      } else {
+        activeBadge.style.display = 'none';
+        openDrawerBtn?.classList.remove('is-filtered');
+      }
+    }
+
+    const activeBar = document.getElementById('svc-active-filters-bar');
+    const activeChipsContainer = document.getElementById('svc-active-filters-chips');
+    if (activeBar && activeChipsContainer) {
+      const pills = [];
+      if (activeCat !== 'ALL') pills.push({ type: 'category', label: `Category: ${this.serviceFilters.category}` });
+      if (activeGender !== 'ALL') {
+        const gLabels = { MALE: 'Men', FEMALE: 'Women', UNISEX: 'Unisex', KIDS: 'Kids' };
+        pills.push({ type: 'gender', label: `Gender: ${gLabels[activeGender] || activeGender}` });
+      }
+      if (activeStaff !== 'ALL') {
+        pills.push({ type: 'staff', label: activeStaff === 'ASSIGNED' ? 'Assigned' : 'Unassigned' });
+      }
+      if (pills.length > 0) {
+        activeBar.style.display = 'flex';
+        activeChipsContainer.innerHTML = pills.map((p) => `
+          <span class="active-filter-pill">
+            <span>${p.label}</span>
+            <button type="button" class="btn-remove-filter" data-filter-type="${p.type}" title="Remove filter">✕</button>
+          </span>
+        `).join('');
+      } else {
+        activeBar.style.display = 'none';
+        activeChipsContainer.innerHTML = '';
+      }
+    }
+  }
+
+  attachServicesTabListeners(tabContent) {
+    const root = tabContent || this.container || document;
+    const searchInput = root.querySelector('#svc-search-input');
+    const clearSearchBtn = root.querySelector('#btn-clear-svc-search');
+    const cards = root.querySelectorAll('.service-card-item, .service-row-card, .service-compact-card');
+    const catTabs = root.querySelectorAll('.service-cat-tab-btn[data-cat]');
+    const noResults = root.querySelector('#svc-no-results');
+    const resetEmptyBtn = root.querySelector('#btn-reset-empty-search');
+
+    // Drawer elements (search document in case relocated to body)
+    const drawer = document.getElementById('svc-filter-drawer') || root.querySelector('#svc-filter-drawer');
+    const backdrop = document.getElementById('svc-filter-drawer-backdrop') || root.querySelector('#svc-filter-drawer-backdrop');
+    const openDrawerBtn = root.querySelector('#btn-open-filter-drawer');
+    const closeDrawerBtn = document.getElementById('btn-close-filter-drawer') || root.querySelector('#btn-close-filter-drawer');
+    const applyDrawerBtn = document.getElementById('btn-drawer-apply-filters') || root.querySelector('#btn-drawer-apply-filters');
+    const resetDrawerBtn = document.getElementById('btn-drawer-reset-filters') || root.querySelector('#btn-drawer-reset-filters');
+    const drawerTally = document.getElementById('svc-drawer-match-count') || root.querySelector('#svc-drawer-match-count');
+    const activeBadge = root.querySelector('#svc-active-filter-badge');
+
+    // Active filters bar
+    const activeBar = root.querySelector('#svc-active-filters-bar');
+    const activeChipsContainer = root.querySelector('#svc-active-filters-chips');
+    const clearAllBtn = root.querySelector('#btn-clear-all-filters');
+
+    // Filter states
+    if (!this.serviceFilters) {
+      this.serviceFilters = { category: 'ALL', gender: 'ALL', staff: 'ALL' };
+    }
+
+    const openDrawer = () => {
+      this.openServicesFilterDrawer();
+    };
+
+    const closeDrawer = () => {
+      this.closeServicesFilterDrawer();
+    };
+
+    openDrawerBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openDrawer();
+    });
+    closeDrawerBtn?.addEventListener('click', closeDrawer);
+    backdrop?.addEventListener('click', closeDrawer);
+    applyDrawerBtn?.addEventListener('click', closeDrawer);
+
+    // Close on ESC
+    const handleKeydown = (e) => {
+      if (e.key === 'Escape' && drawer?.classList.contains('is-open')) {
+        closeDrawer();
+      }
+    };
+    if (this._svcDrawerEscHandler) {
+      document.removeEventListener('keydown', this._svcDrawerEscHandler);
+    }
+    this._svcDrawerEscHandler = handleKeydown;
+    document.addEventListener('keydown', this._svcDrawerEscHandler);
+
+    const updateFilterBadgeAndPills = () => {
+      let activeCount = 0;
+      const pills = [];
+
+      if (this.serviceFilters.category && this.serviceFilters.category !== 'ALL') {
+        activeCount++;
+        pills.push({ type: 'category', label: `Category: ${this.serviceFilters.category}` });
+      }
+      if (this.serviceFilters.gender && this.serviceFilters.gender !== 'ALL') {
+        activeCount++;
+        const gLabels = { MALE: 'Men', FEMALE: 'Women', UNISEX: 'Unisex', KIDS: 'Kids' };
+        pills.push({ type: 'gender', label: `Gender: ${gLabels[this.serviceFilters.gender] || this.serviceFilters.gender}` });
+      }
+      if (this.serviceFilters.staff && this.serviceFilters.staff !== 'ALL') {
+        activeCount++;
+        pills.push({ type: 'staff', label: this.serviceFilters.staff === 'ASSIGNED' ? 'Staffed (>0)' : 'No Stylists (0)' });
+      }
+
+      if (activeBadge) {
+        if (activeCount > 0) {
+          activeBadge.textContent = String(activeCount);
+          activeBadge.style.display = 'inline-flex';
+          openDrawerBtn?.classList.add('is-filtered');
+        } else {
+          activeBadge.style.display = 'none';
+          openDrawerBtn?.classList.remove('is-filtered');
+        }
+      }
+
+      if (activeBar && activeChipsContainer) {
+        if (pills.length > 0) {
+          activeBar.style.display = 'flex';
+          activeChipsContainer.innerHTML = pills.map((p) => `
+            <span class="active-filter-pill">
+              <span>${p.label}</span>
+              <button type="button" class="btn-remove-filter" data-filter-type="${p.type}" title="Remove filter">✕</button>
+            </span>
+          `).join('');
+
+          activeChipsContainer.querySelectorAll('.btn-remove-filter').forEach((btn) => {
+            btn.addEventListener('click', (e) => {
+              const type = e.currentTarget.getAttribute('data-filter-type');
+              if (type) {
+                this.serviceFilters[type] = 'ALL';
+                syncDrawerPills();
+                filterServices();
+              }
+            });
+          });
+        } else {
+          activeBar.style.display = 'none';
+          activeChipsContainer.innerHTML = '';
+        }
+      }
+    };
+
+    const syncDrawerPills = () => {
+      this.syncServicesFilterPills();
+    };
+
+    const filterServices = () => {
+      const q = (searchInput?.value || '').trim().toLowerCase();
+      if (clearSearchBtn) {
+        clearSearchBtn.style.display = q ? 'flex' : 'none';
+      }
+
+      const activeCat = (this.serviceFilters.category || 'ALL').toUpperCase();
+      const activeGender = (this.serviceFilters.gender || 'ALL').toUpperCase();
+      const activeStaff = (this.serviceFilters.staff || 'ALL').toUpperCase();
+
+      let visible = 0;
+      cards.forEach((card) => {
+        const name = (card.getAttribute('data-name') || '').toLowerCase();
+        const cat = (card.getAttribute('data-category') || '').toUpperCase();
+        const gender = (card.getAttribute('data-gender') || 'UNISEX').toUpperCase();
+        const staffCount = parseInt(card.getAttribute('data-staff-count') || '0', 10);
+
+        const matchesQuery = !q || name.includes(q) || cat.toLowerCase().includes(q);
+        const matchesCat = activeCat === 'ALL' || cat === activeCat;
+        const matchesGender = activeGender === 'ALL' || gender === activeGender;
+        let matchesStaff = true;
+        if (activeStaff === 'ASSIGNED') matchesStaff = staffCount > 0;
+        else if (activeStaff === 'UNASSIGNED') matchesStaff = staffCount === 0;
+
+        if (matchesQuery && matchesCat && matchesGender && matchesStaff) {
+          card.style.display = 'flex';
+          visible++;
+        } else {
+          card.style.display = 'none';
+        }
+      });
+
+      if (noResults) {
+        noResults.style.display = visible === 0 && cards.length > 0 ? 'flex' : 'none';
+      }
+      if (drawerTally) {
+        drawerTally.textContent = `${visible} items`;
+      }
+
+      updateFilterBadgeAndPills();
+    };
+
+    searchInput?.addEventListener('input', filterServices);
+    clearSearchBtn?.addEventListener('click', () => {
+      if (searchInput) searchInput.value = '';
+      filterServices();
+    });
+
+    // Expose filter trigger for delegated listener
+    this.triggerServicesFilter = () => {
+      syncDrawerPills();
+      filterServices();
+    };
+
+    // Drawer chips click (search document-wide so relocated drawer is fully wired)
+    document.querySelectorAll('.filter-chip-btn[data-filter-type]').forEach((btn) => {
+      btn.onclick = (e) => {
+        e.preventDefault();
+        const type = btn.getAttribute('data-filter-type');
+        const val = btn.getAttribute('data-value');
+        if (type && val) {
+          this.serviceFilters[type] = val;
+          syncDrawerPills();
+          filterServices();
+        }
+      };
+    });
+
+    const resetAllFilters = () => {
+      this.serviceFilters = { category: 'ALL', gender: 'ALL', staff: 'ALL' };
+      if (searchInput) searchInput.value = '';
+      syncDrawerPills();
+      filterServices();
+    };
+
+    resetDrawerBtn?.addEventListener('click', resetAllFilters);
+    clearAllBtn?.addEventListener('click', resetAllFilters);
+    resetEmptyBtn?.addEventListener('click', resetAllFilters);
+
+    // Initial sync and filtering
+    syncDrawerPills();
+    filterServices();
   }
 
   attachStaffTabListeners(tabContent) {
@@ -7954,6 +8318,101 @@ export class SalonDashboard {
         }
       });
     }
+
+    // Call tab event listeners for active tab content
+    this.attachTabEventListeners();
+
+    // Global Delegated Filter Drawer Controller (guarantees filter trigger button always works)
+    if (!this._servicesFilterGlobalDelegated) {
+      this._servicesFilterGlobalDelegated = true;
+
+      document.addEventListener('click', (e) => {
+        const openTrigger = e.target.closest('#btn-open-filter-drawer');
+        if (openTrigger) {
+          e.preventDefault();
+          e.stopPropagation();
+          this.openServicesFilterDrawer();
+          return;
+        }
+
+        const catTrigger = e.target.closest('#btn-manage-categories, #btn-drawer-manage-cat-link');
+        if (catTrigger) {
+          e.preventDefault();
+          e.stopPropagation();
+          this.closeServicesFilterDrawer();
+          this.showManageCategoriesModal();
+          return;
+        }
+
+        const closeTrigger = e.target.closest('#btn-close-filter-drawer, .drawer-close-btn, #btn-drawer-apply-filters');
+        if (closeTrigger) {
+          e.preventDefault();
+          this.closeServicesFilterDrawer();
+          return;
+        }
+
+        const backdropTrigger = e.target.closest('#svc-filter-drawer-backdrop');
+        if (backdropTrigger) {
+          e.preventDefault();
+          this.closeServicesFilterDrawer();
+          return;
+        }
+
+        // Delegated Filter Chip Selection (Reliable even when drawer is relocated to document.body)
+        const chipTrigger = e.target.closest('.filter-chip-btn');
+        if (chipTrigger) {
+          e.preventDefault();
+          const type = chipTrigger.getAttribute('data-filter-type');
+          const val = chipTrigger.getAttribute('data-value');
+          if (type && val) {
+            if (!this.serviceFilters) {
+              this.serviceFilters = { category: 'ALL', gender: 'ALL', staff: 'ALL' };
+            }
+            this.serviceFilters[type] = val;
+            this.syncServicesFilterPills();
+            this.triggerServicesFilter();
+          }
+          return;
+        }
+
+        // Delegated Reset All Filters
+        const resetTrigger = e.target.closest('#btn-drawer-reset-filters, #btn-clear-all-filters, #btn-reset-empty-search');
+        if (resetTrigger) {
+          e.preventDefault();
+          this.serviceFilters = { category: 'ALL', gender: 'ALL', staff: 'ALL' };
+          const searchInput = document.getElementById('svc-search-input');
+          if (searchInput) searchInput.value = '';
+          this.syncServicesFilterPills();
+          this.triggerServicesFilter();
+          return;
+        }
+
+        // Delegated Remove Filter Pill
+        const removePillTrigger = e.target.closest('.btn-remove-filter');
+        if (removePillTrigger) {
+          e.preventDefault();
+          const type = removePillTrigger.getAttribute('data-filter-type');
+          if (type) {
+            if (!this.serviceFilters) {
+              this.serviceFilters = { category: 'ALL', gender: 'ALL', staff: 'ALL' };
+            }
+            this.serviceFilters[type] = 'ALL';
+            this.syncServicesFilterPills();
+            this.triggerServicesFilter();
+          }
+          return;
+        }
+      });
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          const drawer = document.getElementById('svc-filter-drawer');
+          if (drawer && drawer.classList.contains('is-open')) {
+            this.closeServicesFilterDrawer();
+          }
+        }
+      });
+    }
   }
 
   /**
@@ -8108,6 +8567,9 @@ export class SalonDashboard {
     }
 
     // Services Tab Buttons
+    if (this.activeTab === 'services') {
+      this.attachServicesTabListeners(tabContent);
+    }
     document.getElementById('btn-manage-categories')?.addEventListener('click', () => this.showManageCategoriesModal());
     tabContent.querySelectorAll('.btn-edit-service').forEach((btn) => {
       btn.addEventListener('click', (e) => {
@@ -9347,90 +9809,220 @@ export class SalonDashboard {
     const modalContainer = this.getModalContainer();
     const activeStaff = (this.staffList || []).filter((st) => st.status === 'ACTIVE' || !st.status);
 
+    const renderCatOptions = (selected = '') => {
+      if (!this.categoriesList || this.categoriesList.length === 0) {
+        return '<option value="General" selected>✂️ General Services</option><option value="CUSTOM">➕ Other / Custom Category...</option>';
+      }
+      return this.categoriesList.map((c) => `<option value="${c.name}" data-id="${c.id}" ${c.name === selected ? 'selected' : ''}>${c.icon || '✂️'} ${c.name}</option>`).join('') + '<option value="CUSTOM">➕ Other / Custom Category...</option>';
+    };
+
+    const catList = (this.categoriesList && this.categoriesList.length > 0)
+      ? this.categoriesList
+      : [{ id: 'cat-general', name: 'General', icon: '✂️' }];
+
+    const firstCat = catList[0];
+    const initialCatName = firstCat.name;
+    const initialCatIcon = firstCat.icon || '✂️';
+
     modalContainer.innerHTML = `
       <div class="modal-backdrop show">
-        <div class="modal-content modal-content-lg" style="max-height: 90vh; overflow-y: auto;">
-          <div class="modal-header">
-            <h3>✂️ Add New Service</h3>
-            <button class="close-btn" id="btn-close-modal">&times;</button>
+        <div class="modal-content modal-content-md service-modal-form" style="max-height: 90vh; overflow-y: auto; padding: 24px; max-width: 520px; width: 100%;">
+          <!-- Header (Compact, no subtitle) -->
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; padding-bottom: 12px; border-bottom: 1px solid var(--border-subtle);">
+            <h3 style="font-size: 1.2rem; font-weight: 700; color: #fff; margin: 0; display: flex; align-items: center; gap: 8px;">
+              <span>✂️</span>
+              <span>Add New Service</span>
+            </h3>
+            <button class="close-btn" id="btn-close-modal" style="font-size: 1.4rem; line-height: 1; padding: 2px 6px;">&times;</button>
           </div>
 
-          <form id="add-service-form">
-            <!-- 1. Category Selector Dropdown -->
+          <form id="add-service-form" style="display: flex; flex-direction: column; gap: 15px;">
+            <!-- 1. Service Name -->
             <div class="form-group">
-              <label>Service Category *</label>
-              <select class="form-control" id="svc-category-select" required>
-                ${this.categoriesList && this.categoriesList.length > 0
-        ? this.categoriesList.map((c) => `<option value="${c.name}" data-id="${c.id}">${c.icon || '✂️'} ${c.name}</option>`).join('') + '<option value="CUSTOM">➕ Other / Custom Category...</option>'
-        : '<option value="CUSTOM" selected>➕ Create Custom Category...</option>'
-      }
-              </select>
+              <label style="font-size: 0.85rem; font-weight: 600; color: #fff; margin-bottom: 6px; display: block;">Service Name *</label>
+              <input type="text" class="form-control" id="svc-name" placeholder="e.g. Standard Haircut, Beard Trim, Facial" style="height: 40px; font-size: 0.88rem;" required />
             </div>
 
-            <!-- Custom Category Input (Revealed if Other is picked) -->
-            <div class="form-group" id="svc-custom-cat-group" style="${this.categoriesList && this.categoriesList.length > 0 ? 'display: none;' : 'display: block;'}">
-              <label>Custom Category Name *</label>
-              <input type="text" class="form-control" id="svc-custom-cat-input" placeholder="e.g. Bridal Special, Pedicure, Tattoo" />
-            </div>
-
-            <!-- Target Audience / Gender -->
-            <div class="form-group">
-              <label>Target Audience / Gender *</label>
-              <select class="form-control" id="svc-gender" required>
-                <option value="UNISEX" selected>✂️ Unisex (Both Men & Women)</option>
-                <option value="MALE">👨 Men Only</option>
-                <option value="FEMALE">👩 Women Only</option>
-                <option value="KIDS">👶 Kids Only</option>
-              </select>
-            </div>
-
-            <!-- 2. Service Name Text Field -->
-            <div class="form-group">
-              <label>Service Name *</label>
-              <input type="text" class="form-control" id="svc-name" placeholder="e.g. Standard Haircut / Hair + Beard Combo" required />
-            </div>
-
-            <!-- 3. Price & Duration -->
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-              <div class="form-group">
-                <label>Price (₹) *</label>
-                <input type="number" class="form-control" id="svc-price" placeholder="100" min="0" required />
+            <!-- 2. Category with Custom Dropdown + Inline New Category -->
+            <div class="form-group" style="position: relative;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <label style="font-size: 0.85rem; font-weight: 600; color: #fff; margin: 0;">Category *</label>
+                <button type="button" id="btn-toggle-inline-cat" class="btn btn-secondary btn-sm" style="font-size: 0.72rem; padding: 2px 8px; border-radius: 6px;">
+                  ➕ New Category
+                </button>
               </div>
-              <div class="form-group">
-                <label>Duration * <span style="color: var(--text-muted); font-size: 0.8rem; font-weight: normal;">(Min 30m, 15m steps)</span></label>
-                <select class="form-control" id="svc-duration" required>
-                  ${renderServiceDurationOptions(30)}
+
+              <!-- Custom Category Select (replaces native OS select) -->
+              <div class="custom-select-container" id="svc-cat-custom-container">
+                <button type="button" class="custom-select-trigger" id="svc-cat-custom-trigger">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span id="svc-cat-selected-icon">${initialCatIcon}</span>
+                    <span id="svc-cat-selected-name" style="color: #fff; font-size: 0.88rem; font-weight: 500;">${initialCatName}</span>
+                  </div>
+                  <span class="custom-select-chevron" id="svc-cat-custom-chevron">▼</span>
+                </button>
+
+                <div class="custom-select-menu" id="svc-cat-custom-menu">
+                  ${catList.map((c) => `
+                    <div class="custom-select-option ${c.name === initialCatName ? 'selected' : ''}" data-value="${c.name}" data-icon="${c.icon || '✂️'}" data-id="${c.id || ''}">
+                      <div style="display: flex; align-items: center; gap: 8px;">
+                        <span>${c.icon || '✂️'}</span>
+                        <span>${c.name}</span>
+                      </div>
+                      ${c.name === initialCatName ? '<span class="custom-select-opt-check">✓</span>' : ''}
+                    </div>
+                  `).join('')}
+                  <div class="custom-select-option" data-value="CUSTOM" data-icon="➕" data-id="" style="border-top: 1px solid rgba(255,255,255,0.08); margin-top: 4px; padding-top: 8px; color: #c084fc;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <span>➕</span>
+                      <span>Other / Custom Category...</span>
+                    </div>
+                  </div>
+                </div>
+
+                <select class="form-control" id="svc-category-select" style="display: none;" required>
+                  ${renderCatOptions(initialCatName)}
                 </select>
               </div>
+
+              <!-- Inline Add Category Box -->
+              <div id="svc-inline-cat-box" class="inline-cat-box" style="display: none; margin-top: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                  <span style="font-size: 0.75rem; font-weight: 600; color: #fff;">Quick Create Category</span>
+                  <button type="button" id="btn-close-inline-cat" style="background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.8rem;">✕</button>
+                </div>
+                <div style="display: flex; gap: 6px; align-items: center;">
+                  <input type="text" id="inline-cat-icon" value="✂️" style="width: 40px; text-align: center; height: 34px; font-size: 1rem;" class="form-control" />
+                  <input type="text" id="inline-cat-name" placeholder="Category name (e.g. Spa, Shave)" class="form-control" style="flex: 1; height: 34px; font-size: 0.82rem;" />
+                  <button type="button" id="btn-save-inline-cat" class="btn btn-primary btn-sm" style="height: 34px; padding: 0 12px; font-size: 0.8rem;">Add</button>
+                </div>
+              </div>
+
+              <!-- Custom Category Input fallback -->
+              <div id="svc-custom-cat-group" style="display: none; margin-top: 8px;">
+                <input type="text" class="form-control" id="svc-custom-cat-input" placeholder="Type custom category name..." style="height: 38px;" />
+              </div>
             </div>
 
-            <!-- 4. Description -->
+            <!-- 3. Target Audience / Gender -->
             <div class="form-group">
-              <label>Service Description <span style="color: var(--text-muted); font-weight: normal; font-size: 0.8rem;">(Optional)</span></label>
-              <textarea class="form-control" id="svc-desc" rows="2" placeholder="Brief details about the treatment / service..."></textarea>
+              <label style="font-size: 0.85rem; font-weight: 600; color: #fff; margin-bottom: 6px; display: block;">Target Audience *</label>
+              <div class="audience-selector-grid" style="gap: 8px;">
+                <button type="button" class="audience-toggle-btn svc-aud-btn selected" data-val="UNISEX" style="padding: 8px; font-size: 0.82rem;">✂️ Unisex</button>
+                <button type="button" class="audience-toggle-btn svc-aud-btn" data-val="MALE" style="padding: 8px; font-size: 0.82rem;">👨 Men</button>
+                <button type="button" class="audience-toggle-btn svc-aud-btn" data-val="FEMALE" style="padding: 8px; font-size: 0.82rem;">👩 Women</button>
+                <button type="button" class="audience-toggle-btn svc-aud-btn" data-val="KIDS" style="padding: 8px; font-size: 0.82rem;">👶 Kids</button>
+              </div>
+              <input type="hidden" id="svc-gender" value="UNISEX" />
             </div>
 
-            <!-- 5. Assigned Team Members -->
-            <div class="form-group">
+            <!-- 4. Price & Duration (Side by side) -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+              <div class="form-group">
+                <label style="font-size: 0.85rem; font-weight: 600; color: #fff; margin-bottom: 6px; display: block;">Price (₹) *</label>
+                <div style="position: relative;">
+                  <span style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-weight: 700; color: #fbbf24; font-size: 0.95rem;">₹</span>
+                  <input type="number" class="form-control" id="svc-price" placeholder="100" min="0" step="1" style="padding-left: 28px; height: 40px; font-size: 0.88rem;" required />
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label style="font-size: 0.85rem; font-weight: 600; color: #fff; margin-bottom: 6px; display: block;">Duration *</label>
+                <div class="custom-select-container" id="svc-dur-custom-container">
+                  <button type="button" class="custom-select-trigger" id="svc-dur-custom-trigger">
+                    <span id="svc-dur-selected-label" style="color: #fff; font-size: 0.88rem;">30 mins</span>
+                    <span class="custom-select-chevron" id="svc-dur-custom-chevron">▼</span>
+                  </button>
+                  <div class="custom-select-menu" id="svc-dur-custom-menu">
+                    ${SERVICE_DURATION_OPTIONS.map((opt) => `
+                      <div class="custom-select-option ${opt.value === 30 ? 'selected' : ''}" data-value="${opt.value}">
+                        <span>${opt.label}</span>
+                        ${opt.value === 30 ? '<span class="custom-select-opt-check">✓</span>' : ''}
+                      </div>
+                    `).join('')}
+                  </div>
+                  <select class="form-control" id="svc-duration" style="display: none;" required>
+                    ${renderServiceDurationOptions(30)}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <!-- 5. Assigned Stylists (Multi-Select Dropdown) -->
+            <div class="form-group" style="position: relative;">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                <label style="margin-bottom: 0;">Assigned Stylists <span style="color: var(--text-muted); font-size: 0.8rem; font-weight: normal;">(Who provides this service?)</span></label>
-                ${activeStaff.length > 0 ? `
-                  <button type="button" id="btn-toggle-all-svc-staff" class="btn btn-secondary btn-sm" style="font-size: 0.75rem; padding: 2px 8px;">Deselect All</button>
-                ` : ''}
+                <label style="font-size: 0.85rem; font-weight: 600; color: #fff; margin: 0;">Assigned Stylists</label>
+                <span id="svc-staff-hint" style="font-size: 0.74rem; color: #c084fc; font-weight: 500;">
+                  ${activeStaff.length === 0 ? 'No stylists' : `All ${activeStaff.length} Stylists Selected`}
+                </span>
               </div>
-              <div style="max-height: 140px; overflow-y: auto; background: var(--bg-input); padding: 8px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);">
-                ${activeStaff.length === 0 ? `
-                  <div style="font-size: 0.8rem; color: var(--text-muted); padding: 4px;">No active stylists in salon yet. Staff can be assigned later.</div>
-                ` : activeStaff.map((st) => `
-                  <label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; margin-bottom: 6px; cursor: pointer;">
-                    <input type="checkbox" class="svc-staff-assign-chk" value="${st.id}" checked />
-                    <span>${st.name} ${st.phone ? `<span style="color: var(--text-muted); font-size: 0.78rem;">(${st.phone})</span>` : ''}</span>
-                  </label>
-                `).join('')}
+
+              <div class="svc-staff-dd-wrapper" id="svc-staff-dd-wrapper">
+                <button type="button" class="svc-staff-dd-trigger" id="svc-staff-dd-trigger">
+                  <div class="svc-staff-dd-label">
+                    <span>👥</span>
+                    <span id="svc-staff-dd-label-text">
+                      ${activeStaff.length === 0 ? 'No stylists available' : `All Stylists Assigned (${activeStaff.length})`}
+                    </span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="svc-staff-dd-badge" id="svc-staff-dd-badge">${activeStaff.length}/${activeStaff.length}</span>
+                    <span class="svc-staff-dd-chevron" id="svc-staff-dd-chevron">▼</span>
+                  </div>
+                </button>
+
+                <div class="svc-staff-dd-menu" id="svc-staff-dd-menu">
+                  <div class="svc-staff-dd-toolbar">
+                    <div class="svc-staff-dd-search-wrap">
+                      <span class="svc-staff-dd-search-icon">🔍</span>
+                      <input type="text" class="svc-staff-dd-search" id="svc-staff-search" placeholder="Search stylist name..." autocomplete="off" />
+                    </div>
+                    <div class="svc-staff-dd-actions-row">
+                      <span class="svc-staff-dd-count-text" id="svc-staff-dd-count-text">
+                        ${activeStaff.length} of ${activeStaff.length} selected
+                      </span>
+                      <div class="svc-staff-dd-actions">
+                        <button type="button" class="svc-staff-dd-action-btn" id="svc-staff-select-all">Select All</button>
+                        <button type="button" class="svc-staff-dd-action-btn" id="svc-staff-clear-all">Clear All</button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="svc-staff-dd-list" id="svc-staff-dd-list">
+                    ${activeStaff.length === 0 ? `
+                      <div style="font-size: 0.8rem; color: var(--text-muted); padding: 12px; text-align: center;">No active stylists yet. Can be assigned later.</div>
+                    ` : activeStaff.map((st) => {
+                      const initials = st.name.split(' ').map((n) => n[0]).join('').substring(0, 2).toUpperCase();
+                      return `
+                        <div class="svc-staff-dd-item selected" data-id="${st.id}" data-name="${st.name.toLowerCase()}">
+                          <input type="checkbox" class="svc-staff-assign-chk" value="${st.id}" checked style="display: none;" />
+                          <div class="svc-staff-dd-checkbox">✓</div>
+                          <span class="svc-staff-avatar">${initials}</span>
+                          <span class="svc-staff-name" title="${st.name}">${st.name}</span>
+                        </div>
+                      `;
+                    }).join('')}
+                  </div>
+
+                  <div class="svc-staff-dd-footer">
+                    <span style="font-size: 0.74rem; color: var(--text-muted);">Click to toggle selection</span>
+                    <button type="button" class="svc-staff-dd-footer-btn" id="svc-staff-dd-done-btn">Done ✓</button>
+                  </div>
+                </div>
               </div>
             </div>
 
-            <button type="submit" class="btn btn-primary" style="width: 100%;">Create Service →</button>
+            <!-- 6. Service Description (Clean & Simple) -->
+            <div class="form-group">
+              <label style="font-size: 0.85rem; font-weight: 600; color: #fff; margin-bottom: 6px; display: block;">
+                Description <span style="font-weight: normal; color: var(--text-muted); font-size: 0.78rem;">(Optional)</span>
+              </label>
+              <input type="text" class="form-control" id="svc-desc" placeholder="Brief details about what is included in this service..." style="height: 40px; font-size: 0.88rem;" />
+            </div>
+
+            <button type="submit" class="btn btn-primary" id="btn-submit-svc-form" style="width: 100%; height: 42px; font-weight: 700; font-size: 0.9rem; margin-top: 4px;">
+              Create Service →
+            </button>
           </form>
         </div>
       </div>
@@ -9445,13 +10037,300 @@ export class SalonDashboard {
     const priceInput = document.getElementById('svc-price');
     const durationSelect = document.getElementById('svc-duration');
     const descInput = document.getElementById('svc-desc');
+    const genderInput = document.getElementById('svc-gender');
 
-    document.getElementById('btn-toggle-all-svc-staff')?.addEventListener('click', (e) => {
-      const chks = document.querySelectorAll('.svc-staff-assign-chk');
-      const allChecked = Array.from(chks).every((c) => c.checked);
-      chks.forEach((c) => (c.checked = !allChecked));
-      e.target.textContent = allChecked ? 'Select All' : 'Deselect All';
+    // Audience toggle buttons
+    document.querySelectorAll('.svc-aud-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.svc-aud-btn').forEach((b) => b.classList.remove('selected'));
+        btn.classList.add('selected');
+        if (genderInput) genderInput.value = btn.getAttribute('data-val');
+      });
     });
+
+    // Inline category toggle & creation
+    const inlineBox = document.getElementById('svc-inline-cat-box');
+    document.getElementById('btn-toggle-inline-cat')?.addEventListener('click', () => {
+      inlineBox.style.display = inlineBox.style.display === 'none' ? 'block' : 'none';
+      if (inlineBox.style.display === 'block') {
+        document.getElementById('inline-cat-name')?.focus();
+      }
+    });
+
+    document.getElementById('btn-close-inline-cat')?.addEventListener('click', () => {
+      inlineBox.style.display = 'none';
+    });
+
+    document.getElementById('btn-save-inline-cat')?.addEventListener('click', async () => {
+      const catName = document.getElementById('inline-cat-name')?.value.trim();
+      const catIcon = document.getElementById('inline-cat-icon')?.value.trim() || '✂️';
+      if (!catName) return;
+
+      try {
+        const newCat = await ApiClient.createServiceCategory({ name: catName, icon: catIcon });
+        this.categoriesList = await ApiClient.getServiceCategories(true).catch(() => [
+          ...(this.categoriesList || []),
+          newCat || { id: `cat-${Date.now()}`, name: catName, icon: catIcon },
+        ]);
+        categorySelect.innerHTML = renderCatOptions(catName);
+        categorySelect.value = catName;
+        if (catSelectedIcon) catSelectedIcon.textContent = catIcon;
+        if (catSelectedName) catSelectedName.textContent = catName;
+
+        if (catMenu) {
+          catMenu.innerHTML = `
+            ${this.categoriesList.map((c) => `
+              <div class="custom-select-option ${c.name === catName ? 'selected' : ''}" data-value="${c.name}" data-icon="${c.icon || '✂️'}" data-id="${c.id || ''}">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span>${c.icon || '✂️'}</span>
+                  <span>${c.name}</span>
+                </div>
+                ${c.name === catName ? '<span class="custom-select-opt-check">✓</span>' : ''}
+              </div>
+            `).join('')}
+            <div class="custom-select-option" data-value="CUSTOM" data-icon="➕" data-id="" style="border-top: 1px solid rgba(255,255,255,0.08); margin-top: 4px; padding-top: 8px; color: #c084fc;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span>➕</span>
+                <span>Other / Custom Category...</span>
+              </div>
+            </div>
+          `;
+          bindCatOptions();
+        }
+
+        inlineBox.style.display = 'none';
+        document.getElementById('inline-cat-name').value = '';
+        this.showToast(`Category "${catName}" added!`, 'success');
+      } catch (err) {
+        this.showToast(err.message || 'Failed to create category', 'error');
+      }
+    });
+
+    // Custom Category Dropdown Interactions
+    const catContainer = document.getElementById('svc-cat-custom-container');
+    const catTrigger = document.getElementById('svc-cat-custom-trigger');
+    const catMenu = document.getElementById('svc-cat-custom-menu');
+    const catChevron = document.getElementById('svc-cat-custom-chevron');
+    const catSelectedIcon = document.getElementById('svc-cat-selected-icon');
+    const catSelectedName = document.getElementById('svc-cat-selected-name');
+
+    const toggleCatMenu = (forceOpen) => {
+      if (!catMenu) return;
+      const isOpen = forceOpen !== undefined ? forceOpen : !catMenu.classList.contains('open');
+      catMenu.classList.toggle('open', isOpen);
+      catTrigger?.classList.toggle('active', isOpen);
+      catChevron?.classList.toggle('open', isOpen);
+    };
+
+    catTrigger?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleDdMenu?.(false);
+      toggleDurMenu?.(false);
+      toggleCatMenu();
+    });
+
+    const bindCatOptions = () => {
+      catMenu?.querySelectorAll('.custom-select-option').forEach((opt) => {
+        opt.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const val = opt.getAttribute('data-value');
+          const icon = opt.getAttribute('data-icon') || '✂️';
+          const name = opt.querySelector('span:nth-child(2)')?.textContent || val;
+
+          if (categorySelect) {
+            categorySelect.value = val;
+            categorySelect.dispatchEvent(new Event('change'));
+          }
+
+          if (catSelectedIcon) catSelectedIcon.textContent = icon;
+          if (catSelectedName) catSelectedName.textContent = val === 'CUSTOM' ? 'Custom Category' : name;
+
+          catMenu.querySelectorAll('.custom-select-option').forEach((o) => {
+            o.classList.toggle('selected', o === opt);
+            const check = o.querySelector('.custom-select-opt-check');
+            if (check) check.remove();
+            if (o === opt) {
+              const checkSpan = document.createElement('span');
+              checkSpan.className = 'custom-select-opt-check';
+              checkSpan.textContent = '✓';
+              o.appendChild(checkSpan);
+            }
+          });
+
+          toggleCatMenu(false);
+        });
+      });
+    };
+    bindCatOptions();
+
+    // Custom Duration Dropdown Interactions
+    const durContainer = document.getElementById('svc-dur-custom-container');
+    const durTrigger = document.getElementById('svc-dur-custom-trigger');
+    const durMenu = document.getElementById('svc-dur-custom-menu');
+    const durChevron = document.getElementById('svc-dur-custom-chevron');
+    const durLabel = document.getElementById('svc-dur-selected-label');
+
+    const toggleDurMenu = (forceOpen) => {
+      if (!durMenu) return;
+      const isOpen = forceOpen !== undefined ? forceOpen : !durMenu.classList.contains('open');
+      durMenu.classList.toggle('open', isOpen);
+      durTrigger?.classList.toggle('active', isOpen);
+      durChevron?.classList.toggle('open', isOpen);
+    };
+
+    durTrigger?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleDdMenu?.(false);
+      toggleCatMenu?.(false);
+      toggleDurMenu();
+    });
+
+    durMenu?.querySelectorAll('.custom-select-option').forEach((opt) => {
+      opt.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const val = opt.getAttribute('data-value');
+        const text = opt.querySelector('span')?.textContent || `${val} mins`;
+        if (durationSelect) durationSelect.value = val;
+        if (durLabel) durLabel.textContent = text;
+
+        durMenu.querySelectorAll('.custom-select-option').forEach((o) => {
+          o.classList.toggle('selected', o === opt);
+          const check = o.querySelector('.custom-select-opt-check');
+          if (check) check.remove();
+          if (o === opt) {
+            const checkSpan = document.createElement('span');
+            checkSpan.className = 'custom-select-opt-check';
+            checkSpan.textContent = '✓';
+            o.appendChild(checkSpan);
+          }
+        });
+        toggleDurMenu(false);
+      });
+    });
+
+    document.addEventListener('click', (e) => {
+      if (catContainer && !catContainer.contains(e.target)) toggleCatMenu(false);
+      if (durContainer && !durContainer.contains(e.target)) toggleDurMenu(false);
+    });
+
+    // Multi-Select Stylist Dropdown Interactions
+    const ddWrapper = document.getElementById('svc-staff-dd-wrapper');
+    const ddTrigger = document.getElementById('svc-staff-dd-trigger');
+    const ddMenu = document.getElementById('svc-staff-dd-menu');
+    const ddChevron = document.getElementById('svc-staff-dd-chevron');
+    const ddSearch = document.getElementById('svc-staff-search');
+    const ddLabelText = document.getElementById('svc-staff-dd-label-text');
+    const ddBadge = document.getElementById('svc-staff-dd-badge');
+    const ddHint = document.getElementById('svc-staff-hint');
+    const ddFooterCount = document.getElementById('svc-staff-dd-footer-count');
+    const ddDoneBtn = document.getElementById('svc-staff-dd-done-btn');
+    const ddSelectAll = document.getElementById('svc-staff-select-all');
+    const ddClearAll = document.getElementById('svc-staff-clear-all');
+
+    const updateStaffDropdownState = () => {
+      const items = Array.from(document.querySelectorAll('#svc-staff-dd-list .svc-staff-dd-item'));
+      const total = items.length;
+      if (total === 0) return;
+      const checkedItems = items.filter((it) => {
+        const chk = it.querySelector('.svc-staff-assign-chk');
+        return chk && chk.checked;
+      });
+      const checkedCount = checkedItems.length;
+
+      if (ddBadge) ddBadge.textContent = `${checkedCount}/${total}`;
+      const countText = document.getElementById('svc-staff-dd-count-text');
+      if (countText) countText.textContent = `${checkedCount} of ${total} selected`;
+
+      if (checkedCount === total) {
+        if (ddLabelText) ddLabelText.textContent = `All Stylists Assigned (${total})`;
+        if (ddHint) ddHint.textContent = `All ${total} Stylists Selected`;
+      } else if (checkedCount === 0) {
+        if (ddLabelText) ddLabelText.textContent = `No Stylists Selected`;
+        if (ddHint) ddHint.textContent = `0 Selected`;
+      } else if (checkedCount === 1) {
+        const name = checkedItems[0].querySelector('.svc-staff-name')?.textContent || '1 Stylist';
+        if (ddLabelText) ddLabelText.textContent = name;
+        if (ddHint) ddHint.textContent = `1 of ${total} Selected`;
+      } else if (checkedCount === 2) {
+        const names = checkedItems.map((it) => it.querySelector('.svc-staff-name')?.textContent || '').filter(Boolean).join(', ');
+        if (ddLabelText) ddLabelText.textContent = names;
+        if (ddHint) ddHint.textContent = `2 of ${total} Selected`;
+      } else {
+        if (ddLabelText) ddLabelText.textContent = `${checkedCount} Stylists Selected`;
+        if (ddHint) ddHint.textContent = `${checkedCount} of ${total} Selected`;
+      }
+    };
+
+    const toggleDdMenu = (forceOpen) => {
+      if (!ddMenu) return;
+      const isOpen = forceOpen !== undefined ? forceOpen : !ddMenu.classList.contains('open');
+      ddMenu.classList.toggle('open', isOpen);
+      ddTrigger?.classList.toggle('active', isOpen);
+      ddChevron?.classList.toggle('open', isOpen);
+      if (isOpen && ddSearch) {
+        ddSearch.value = '';
+        ddSearch.focus({ preventScroll: true });
+        document.querySelectorAll('#svc-staff-dd-list .svc-staff-dd-item').forEach((it) => (it.style.display = 'flex'));
+      }
+    };
+
+    ddTrigger?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleDdMenu();
+    });
+
+    ddDoneBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleDdMenu(false);
+    });
+
+    ddSearch?.addEventListener('input', (e) => {
+      const q = (e.target.value || '').toLowerCase().trim();
+      document.querySelectorAll('#svc-staff-dd-list .svc-staff-dd-item').forEach((it) => {
+        const name = (it.getAttribute('data-name') || '').toLowerCase();
+        it.style.display = name.includes(q) ? 'flex' : 'none';
+      });
+    });
+
+    ddSearch?.addEventListener('click', (e) => e.stopPropagation());
+
+    document.querySelectorAll('#svc-staff-dd-list .svc-staff-dd-item').forEach((item) => {
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const chk = item.querySelector('.svc-staff-assign-chk');
+        if (!chk) return;
+        chk.checked = !chk.checked;
+        item.classList.toggle('selected', chk.checked);
+        updateStaffDropdownState();
+      });
+    });
+
+    ddSelectAll?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.querySelectorAll('#svc-staff-dd-list .svc-staff-dd-item').forEach((it) => {
+        const chk = it.querySelector('.svc-staff-assign-chk');
+        if (chk) chk.checked = true;
+        it.classList.add('selected');
+      });
+      updateStaffDropdownState();
+    });
+
+    ddClearAll?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.querySelectorAll('#svc-staff-dd-list .svc-staff-dd-item').forEach((it) => {
+        const chk = it.querySelector('.svc-staff-assign-chk');
+        if (chk) chk.checked = false;
+        it.classList.remove('selected');
+      });
+      updateStaffDropdownState();
+    });
+
+    const onAddModalClickOutside = (e) => {
+      if (ddWrapper && !ddWrapper.contains(e.target)) {
+        toggleDdMenu(false);
+      }
+    };
+    document.addEventListener('click', onAddModalClickOutside);
 
     categorySelect?.addEventListener('change', (e) => {
       if (e.target.value === 'CUSTOM') {
@@ -9489,7 +10368,7 @@ export class SalonDashboard {
         durationMinutes: dur,
         category: finalCategory,
         categoryId: finalCategoryId,
-        targetGender: document.getElementById('svc-gender').value || 'UNISEX',
+        targetGender: genderInput?.value || 'UNISEX',
         description: descInput.value.trim(),
         stylistIds: selectedStylistIds,
       };
@@ -9502,6 +10381,7 @@ export class SalonDashboard {
         }
 
         modalContainer.innerHTML = '';
+        this.showToast(`Service "${payload.name}" created!`, 'success');
         this.render();
 
         this.loadData(true).then(() => {
@@ -9518,95 +10398,242 @@ export class SalonDashboard {
     const matchedCat = (this.categoriesList || []).find((c) => c.name === service.category);
     const initialCatValue = matchedCat ? service.category : 'CUSTOM';
     const activeStaff = (this.staffList || []).filter((st) => st.status === 'ACTIVE' || !st.status);
+    const currentAudience = (service.targetGender || 'UNISEX').toUpperCase();
+    const currentDuration = service.durationMinutes || 30;
+
+    const renderCatOptions = (selected = '') => {
+      if (!this.categoriesList || this.categoriesList.length === 0) {
+        return '<option value="General" selected>✂️ General Services</option><option value="CUSTOM">➕ Other / Custom Category...</option>';
+      }
+      return this.categoriesList.map((c) => `<option value="${c.name}" data-id="${c.id}" ${c.name === selected ? 'selected' : ''}>${c.icon || '✂️'} ${c.name}</option>`).join('') + '<option value="CUSTOM">➕ Other / Custom Category...</option>';
+    };
+
+    const initialAssignedCount = activeStaff.filter((st) =>
+      (service.stylists || []).some((s) => String(s.stylistId || s.stylist?.id || s.id) === String(st.id))
+    ).length;
+
+    let initialStaffLabel = 'No Stylists Assigned';
+    if (initialAssignedCount === activeStaff.length && activeStaff.length > 0) {
+      initialStaffLabel = `All Stylists Assigned (${activeStaff.length})`;
+    } else if (initialAssignedCount === 1) {
+      const oneSt = activeStaff.find((st) => (service.stylists || []).some((s) => String(s.stylistId || s.stylist?.id || s.id) === String(st.id)));
+      initialStaffLabel = oneSt ? oneSt.name : '1 Stylist Assigned';
+    } else if (initialAssignedCount > 0) {
+      initialStaffLabel = `${initialAssignedCount} Stylists Assigned`;
+    }
+
+    const catList = (this.categoriesList && this.categoriesList.length > 0)
+      ? this.categoriesList
+      : [{ id: 'cat-general', name: 'General', icon: '✂️' }];
+
+    let editSelectedCatName = matchedCat ? service.category : (service.category || 'General');
+    let editSelectedCatIcon = matchedCat?.icon || '✂️';
+    if (!matchedCat && service.category) {
+      editSelectedCatName = 'CUSTOM';
+      editSelectedCatIcon = '➕';
+    }
+
+    const matchedDur = SERVICE_DURATION_OPTIONS.find((opt) => opt.value === currentDuration);
+    const initialDurLabel = matchedDur ? matchedDur.label : `${currentDuration} mins`;
 
     modalContainer.innerHTML = `
       <div class="modal-backdrop show">
-        <div class="modal-content modal-content-lg" style="max-height: 90vh; overflow-y: auto;">
-          <div class="modal-header">
-            <h3>✏️ Edit Service: ${service.name}</h3>
-            <button class="close-btn" id="btn-close-modal">&times;</button>
+        <div class="modal-content modal-content-md service-modal-form" style="max-height: 90vh; overflow-y: auto; padding: 24px; max-width: 520px; width: 100%;">
+          <!-- Header (Compact, no subtitle) -->
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; padding-bottom: 12px; border-bottom: 1px solid var(--border-subtle);">
+            <h3 style="font-size: 1.2rem; font-weight: 700; color: #fff; margin: 0; display: flex; align-items: center; gap: 8px;">
+              <span>✏️</span>
+              <span>Edit Service: ${service.name}</span>
+            </h3>
+            <button class="close-btn" id="btn-close-modal" style="font-size: 1.4rem; line-height: 1; padding: 2px 6px;">&times;</button>
           </div>
 
-          <form id="edit-service-form">
-            <!-- 1. Category Selector Dropdown -->
+          <form id="edit-service-form" style="display: flex; flex-direction: column; gap: 15px;">
+            <!-- 1. Service Name -->
             <div class="form-group">
-              <label>Service Category *</label>
-              <select class="form-control" id="edit-svc-category-select" required>
-                ${this.categoriesList && this.categoriesList.length > 0
-        ? this.categoriesList.map((c) => `<option value="${c.name}" ${c.name === service.category ? 'selected' : ''}>${c.icon || '✂️'} ${c.name}</option>`).join('')
-        : '<option value="General" selected>✂️ General Services</option>'
-      }
-                <option value="CUSTOM" ${initialCatValue === 'CUSTOM' ? 'selected' : ''}>➕ Other / Custom Category...</option>
-              </select>
+              <label style="font-size: 0.85rem; font-weight: 600; color: #fff; margin-bottom: 6px; display: block;">Service Name *</label>
+              <input type="text" class="form-control" id="edit-svc-name" value="${service.name}" style="height: 40px; font-size: 0.88rem;" required />
             </div>
 
-            <!-- Custom Category Input -->
-            <div class="form-group" id="edit-svc-custom-cat-group" style="${initialCatValue === 'CUSTOM' ? 'display: block;' : 'display: none;'}">
-              <label>Custom Category Name *</label>
-              <input type="text" class="form-control" id="edit-svc-custom-cat-input" value="${initialCatValue === 'CUSTOM' ? (service.category || '') : ''}" placeholder="e.g. Bridal & Groom Special" />
-            </div>
-
-            <!-- Target Audience / Gender -->
-            <div class="form-group">
-              <label>Target Audience / Gender *</label>
-              <select class="form-control" id="edit-svc-gender" required>
-                <option value="UNISEX" ${(service.targetGender || 'UNISEX') === 'UNISEX' ? 'selected' : ''}>✂️ Unisex (Both Men & Women)</option>
-                <option value="MALE" ${service.targetGender === 'MALE' ? 'selected' : ''}>👨 Men Only</option>
-                <option value="FEMALE" ${service.targetGender === 'FEMALE' ? 'selected' : ''}>👩 Women Only</option>
-                <option value="KIDS" ${service.targetGender === 'KIDS' ? 'selected' : ''}>👶 Kids Only</option>
-              </select>
-            </div>
-
-            <!-- 2. Service Name -->
-            <div class="form-group">
-              <label>Service Name *</label>
-              <input type="text" class="form-control" id="edit-svc-name" value="${service.name}" required />
-            </div>
-
-            <!-- 3. Price & Duration -->
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-              <div class="form-group">
-                <label>Price (₹) *</label>
-                <input type="number" class="form-control" id="edit-svc-price" value="${service.price}" min="0" required />
+            <!-- 2. Category with Custom Dropdown + Inline New Category -->
+            <div class="form-group" style="position: relative;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <label style="font-size: 0.85rem; font-weight: 600; color: #fff; margin: 0;">Category *</label>
+                <button type="button" id="edit-btn-toggle-inline-cat" class="btn btn-secondary btn-sm" style="font-size: 0.72rem; padding: 2px 8px; border-radius: 6px;">
+                  ➕ New Category
+                </button>
               </div>
-              <div class="form-group">
-                <label>Duration * <span style="color: var(--text-muted); font-size: 0.8rem; font-weight: normal;">(Min 30m, 15m steps)</span></label>
-                <select class="form-control" id="edit-svc-duration" required>
-                  ${renderServiceDurationOptions(service.durationMinutes || 30)}
+
+              <!-- Custom Category Select (replaces native OS select) -->
+              <div class="custom-select-container" id="edit-svc-cat-custom-container">
+                <button type="button" class="custom-select-trigger" id="edit-svc-cat-custom-trigger">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span id="edit-svc-cat-selected-icon">${editSelectedCatIcon}</span>
+                    <span id="edit-svc-cat-selected-name" style="color: #fff; font-size: 0.88rem; font-weight: 500;">${editSelectedCatName === 'CUSTOM' ? 'Custom Category' : editSelectedCatName}</span>
+                  </div>
+                  <span class="custom-select-chevron" id="edit-svc-cat-custom-chevron">▼</span>
+                </button>
+
+                <div class="custom-select-menu" id="edit-svc-cat-custom-menu">
+                  ${catList.map((c) => `
+                    <div class="custom-select-option ${c.name === editSelectedCatName ? 'selected' : ''}" data-value="${c.name}" data-icon="${c.icon || '✂️'}" data-id="${c.id || ''}">
+                      <div style="display: flex; align-items: center; gap: 8px;">
+                        <span>${c.icon || '✂️'}</span>
+                        <span>${c.name}</span>
+                      </div>
+                      ${c.name === editSelectedCatName ? '<span class="custom-select-opt-check">✓</span>' : ''}
+                    </div>
+                  `).join('')}
+                  <div class="custom-select-option ${editSelectedCatName === 'CUSTOM' ? 'selected' : ''}" data-value="CUSTOM" data-icon="➕" data-id="" style="border-top: 1px solid rgba(255,255,255,0.08); margin-top: 4px; padding-top: 8px; color: #c084fc;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <span>➕</span>
+                      <span>Other / Custom Category...</span>
+                    </div>
+                  </div>
+                </div>
+
+                <select class="form-control" id="edit-svc-category-select" style="display: none;" required>
+                  ${renderCatOptions(service.category)}
                 </select>
               </div>
+
+              <!-- Inline Add Category Box -->
+              <div id="edit-svc-inline-cat-box" class="inline-cat-box" style="display: none; margin-top: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                  <span style="font-size: 0.75rem; font-weight: 600; color: #fff;">Quick Create Category</span>
+                  <button type="button" id="edit-btn-close-inline-cat" style="background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.8rem;">✕</button>
+                </div>
+                <div style="display: flex; gap: 6px; align-items: center;">
+                  <input type="text" id="edit-inline-cat-icon" value="✂️" style="width: 40px; text-align: center; height: 34px; font-size: 1rem;" class="form-control" />
+                  <input type="text" id="edit-inline-cat-name" placeholder="Category name (e.g. Spa, Shave)" class="form-control" style="flex: 1; height: 34px; font-size: 0.82rem;" />
+                  <button type="button" id="edit-btn-save-inline-cat" class="btn btn-primary btn-sm" style="height: 34px; padding: 0 12px; font-size: 0.8rem;">Add</button>
+                </div>
+              </div>
+
+              <!-- Custom Category Input fallback -->
+              <div id="edit-svc-custom-cat-group" style="${initialCatValue === 'CUSTOM' ? 'display: block;' : 'display: none;'} margin-top: 8px;">
+                <input type="text" class="form-control" id="edit-svc-custom-cat-input" value="${initialCatValue === 'CUSTOM' ? (service.category || '') : ''}" placeholder="Type custom category name..." style="height: 38px;" />
+              </div>
             </div>
 
-            <!-- 4. Description -->
+            <!-- 3. Target Audience / Gender -->
             <div class="form-group">
-              <label>Description</label>
-              <textarea class="form-control" id="edit-svc-desc" rows="2">${service.description || ''}</textarea>
+              <label style="font-size: 0.85rem; font-weight: 600; color: #fff; margin-bottom: 6px; display: block;">Target Audience *</label>
+              <div class="audience-selector-grid" style="gap: 8px;">
+                <button type="button" class="audience-toggle-btn edit-svc-aud-btn ${currentAudience === 'UNISEX' ? 'selected' : ''}" data-val="UNISEX" style="padding: 8px; font-size: 0.82rem;">✂️ Unisex</button>
+                <button type="button" class="audience-toggle-btn edit-svc-aud-btn ${currentAudience === 'MALE' ? 'selected' : ''}" data-val="MALE" style="padding: 8px; font-size: 0.82rem;">👨 Men</button>
+                <button type="button" class="audience-toggle-btn edit-svc-aud-btn ${currentAudience === 'FEMALE' ? 'selected' : ''}" data-val="FEMALE" style="padding: 8px; font-size: 0.82rem;">👩 Women</button>
+                <button type="button" class="audience-toggle-btn edit-svc-aud-btn ${currentAudience === 'KIDS' ? 'selected' : ''}" data-val="KIDS" style="padding: 8px; font-size: 0.82rem;">👶 Kids</button>
+              </div>
+              <input type="hidden" id="edit-svc-gender" value="${currentAudience}" />
             </div>
 
-            <!-- 5. Assigned Team Members -->
-            <div class="form-group">
+            <!-- 4. Price & Duration (Side by side) -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+              <div class="form-group">
+                <label style="font-size: 0.85rem; font-weight: 600; color: #fff; margin-bottom: 6px; display: block;">Price (₹) *</label>
+                <div style="position: relative;">
+                  <span style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-weight: 700; color: #fbbf24; font-size: 0.95rem;">₹</span>
+                  <input type="number" class="form-control" id="edit-svc-price" value="${service.price}" min="0" step="1" style="padding-left: 28px; height: 40px; font-size: 0.88rem;" required />
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label style="font-size: 0.85rem; font-weight: 600; color: #fff; margin-bottom: 6px; display: block;">Duration *</label>
+                <div class="custom-select-container" id="edit-svc-dur-custom-container">
+                  <button type="button" class="custom-select-trigger" id="edit-svc-dur-custom-trigger">
+                    <span id="edit-svc-dur-selected-label" style="color: #fff; font-size: 0.88rem;">${initialDurLabel}</span>
+                    <span class="custom-select-chevron" id="edit-svc-dur-custom-chevron">▼</span>
+                  </button>
+                  <div class="custom-select-menu" id="edit-svc-dur-custom-menu">
+                    ${SERVICE_DURATION_OPTIONS.map((opt) => `
+                      <div class="custom-select-option ${opt.value === currentDuration ? 'selected' : ''}" data-value="${opt.value}">
+                        <span>${opt.label}</span>
+                        ${opt.value === currentDuration ? '<span class="custom-select-opt-check">✓</span>' : ''}
+                      </div>
+                    `).join('')}
+                  </div>
+                  <select class="form-control" id="edit-svc-duration" style="display: none;" required>
+                    ${renderServiceDurationOptions(currentDuration)}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <!-- 5. Assigned Stylists (Multi-Select Dropdown) -->
+            <div class="form-group" style="position: relative;">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                <label style="margin-bottom: 0;">Assigned Stylists <span style="color: var(--text-muted); font-size: 0.8rem; font-weight: normal;">(Who provides this service?)</span></label>
-                ${activeStaff.length > 0 ? `
-                  <button type="button" id="btn-toggle-all-edit-svc-staff" class="btn btn-secondary btn-sm" style="font-size: 0.75rem; padding: 2px 8px;">Toggle All</button>
-                ` : ''}
+                <label style="font-size: 0.85rem; font-weight: 600; color: #fff; margin: 0;">Assigned Stylists</label>
+                <span id="edit-svc-staff-hint" style="font-size: 0.74rem; color: #c084fc; font-weight: 500;">
+                  ${initialAssignedCount === activeStaff.length ? `All ${activeStaff.length} Stylists Assigned` : `${initialAssignedCount} of ${activeStaff.length} Selected`}
+                </span>
               </div>
-              <div style="max-height: 140px; overflow-y: auto; background: var(--bg-input); padding: 8px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);">
-                ${activeStaff.length === 0 ? `
-                  <div style="font-size: 0.8rem; color: var(--text-muted); padding: 4px;">No active stylists in salon yet.</div>
-                ` : activeStaff.map((st) => {
-        const isAssigned = (service.stylists || []).some((s) => String(s.stylistId || s.stylist?.id || s.id) === String(st.id));
-        return `
-                    <label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; margin-bottom: 6px; cursor: pointer;">
-                      <input type="checkbox" class="edit-svc-staff-assign-chk" value="${st.id}" ${isAssigned ? 'checked' : ''} />
-                      <span>${st.name} ${st.phone ? `<span style="color: var(--text-muted); font-size: 0.78rem;">(${st.phone})</span>` : ''}</span>
-                    </label>
-                  `;
-      }).join('')}
+
+              <div class="svc-staff-dd-wrapper" id="edit-svc-staff-dd-wrapper">
+                <button type="button" class="svc-staff-dd-trigger" id="edit-svc-staff-dd-trigger">
+                  <div class="svc-staff-dd-label">
+                    <span>👥</span>
+                    <span id="edit-svc-staff-dd-label-text">${initialStaffLabel}</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="svc-staff-dd-badge" id="edit-svc-staff-dd-badge">${initialAssignedCount}/${activeStaff.length}</span>
+                    <span class="svc-staff-dd-chevron" id="edit-svc-staff-dd-chevron">▼</span>
+                  </div>
+                </button>
+
+                <div class="svc-staff-dd-menu" id="edit-svc-staff-dd-menu">
+                  <div class="svc-staff-dd-toolbar">
+                    <div class="svc-staff-dd-search-wrap">
+                      <span class="svc-staff-dd-search-icon">🔍</span>
+                      <input type="text" class="svc-staff-dd-search" id="edit-svc-staff-search" placeholder="Search stylist name..." autocomplete="off" />
+                    </div>
+                    <div class="svc-staff-dd-actions-row">
+                      <span class="svc-staff-dd-count-text" id="edit-svc-staff-dd-count-text">
+                        ${initialAssignedCount} of ${activeStaff.length} selected
+                      </span>
+                      <div class="svc-staff-dd-actions">
+                        <button type="button" class="svc-staff-dd-action-btn" id="edit-svc-staff-select-all">Select All</button>
+                        <button type="button" class="svc-staff-dd-action-btn" id="edit-svc-staff-clear-all">Clear All</button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="svc-staff-dd-list" id="edit-svc-staff-dd-list">
+                    ${activeStaff.length === 0 ? `
+                      <div style="font-size: 0.8rem; color: var(--text-muted); padding: 12px; text-align: center;">No active stylists in salon yet.</div>
+                    ` : activeStaff.map((st) => {
+                      const isAssigned = (service.stylists || []).some((s) => String(s.stylistId || s.stylist?.id || s.id) === String(st.id));
+                      const initials = st.name.split(' ').map((n) => n[0]).join('').substring(0, 2).toUpperCase();
+                      return `
+                        <div class="svc-staff-dd-item ${isAssigned ? 'selected' : ''}" data-id="${st.id}" data-name="${st.name.toLowerCase()}">
+                          <input type="checkbox" class="edit-svc-staff-assign-chk" value="${st.id}" ${isAssigned ? 'checked' : ''} style="display: none;" />
+                          <div class="svc-staff-dd-checkbox">✓</div>
+                          <span class="svc-staff-avatar">${initials}</span>
+                          <span class="svc-staff-name" title="${st.name}">${st.name}</span>
+                        </div>
+                      `;
+                    }).join('')}
+                  </div>
+
+                  <div class="svc-staff-dd-footer">
+                    <span style="font-size: 0.74rem; color: var(--text-muted);">Click to toggle selection</span>
+                    <button type="button" class="svc-staff-dd-footer-btn" id="edit-svc-staff-dd-done-btn">Done ✓</button>
+                  </div>
+                </div>
               </div>
             </div>
 
-            <button type="submit" class="btn btn-primary" style="width: 100%;">Save Changes to Menu →</button>
+            <!-- 6. Service Description (Clean & Simple) -->
+            <div class="form-group">
+              <label style="font-size: 0.85rem; font-weight: 600; color: #fff; margin-bottom: 6px; display: block;">
+                Description <span style="font-weight: normal; color: var(--text-muted); font-size: 0.78rem;">(Optional)</span>
+              </label>
+              <input type="text" class="form-control" id="edit-svc-desc" value="${service.description || ''}" placeholder="Brief details about what is included in this service..." style="height: 40px; font-size: 0.88rem;" />
+            </div>
+
+            <button type="submit" class="btn btn-primary" id="btn-submit-edit-svc" style="width: 100%; height: 42px; font-weight: 700; font-size: 0.9rem; margin-top: 4px;">
+              Save Changes to Menu →
+            </button>
           </form>
         </div>
       </div>
@@ -9617,6 +10644,302 @@ export class SalonDashboard {
     const categorySelect = document.getElementById('edit-svc-category-select');
     const customCatGroup = document.getElementById('edit-svc-custom-cat-group');
     const customCatInput = document.getElementById('edit-svc-custom-cat-input');
+    const durationSelect = document.getElementById('edit-svc-duration');
+    const genderInput = document.getElementById('edit-svc-gender');
+
+    // Audience toggle buttons
+    document.querySelectorAll('.edit-svc-aud-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.edit-svc-aud-btn').forEach((b) => b.classList.remove('selected'));
+        btn.classList.add('selected');
+        if (genderInput) genderInput.value = btn.getAttribute('data-val');
+      });
+    });
+
+    // Multi-Select Stylist Dropdown Interactions (Edit Modal)
+    const editDdWrapper = document.getElementById('edit-svc-staff-dd-wrapper');
+    const editDdTrigger = document.getElementById('edit-svc-staff-dd-trigger');
+    const editDdMenu = document.getElementById('edit-svc-staff-dd-menu');
+    const editDdChevron = document.getElementById('edit-svc-staff-dd-chevron');
+    const editDdSearch = document.getElementById('edit-svc-staff-search');
+    const editDdLabelText = document.getElementById('edit-svc-staff-dd-label-text');
+    const editDdBadge = document.getElementById('edit-svc-staff-dd-badge');
+    const editDdHint = document.getElementById('edit-svc-staff-hint');
+    const editDdFooterCount = document.getElementById('edit-svc-staff-dd-footer-count');
+    const editDdDoneBtn = document.getElementById('edit-svc-staff-dd-done-btn');
+    const editDdSelectAll = document.getElementById('edit-svc-staff-select-all');
+    const editDdClearAll = document.getElementById('edit-svc-staff-clear-all');
+
+    const updateEditStaffDropdownState = () => {
+      const items = Array.from(document.querySelectorAll('#edit-svc-staff-dd-list .svc-staff-dd-item'));
+      const total = items.length;
+      if (total === 0) return;
+      const checkedItems = items.filter((it) => {
+        const chk = it.querySelector('.edit-svc-staff-assign-chk');
+        return chk && chk.checked;
+      });
+      const checkedCount = checkedItems.length;
+
+      if (editDdBadge) editDdBadge.textContent = `${checkedCount}/${total}`;
+      const editCountText = document.getElementById('edit-svc-staff-dd-count-text');
+      if (editCountText) editCountText.textContent = `${checkedCount} of ${total} selected`;
+
+      if (checkedCount === total) {
+        if (editDdLabelText) editDdLabelText.textContent = `All Stylists Assigned (${total})`;
+        if (editDdHint) editDdHint.textContent = `All ${total} Stylists Assigned`;
+      } else if (checkedCount === 0) {
+        if (editDdLabelText) editDdLabelText.textContent = `No Stylists Assigned`;
+        if (editDdHint) editDdHint.textContent = `0 Selected`;
+      } else if (checkedCount === 1) {
+        const name = checkedItems[0].querySelector('.svc-staff-name')?.textContent || '1 Stylist';
+        if (editDdLabelText) editDdLabelText.textContent = name;
+        if (editDdHint) editDdHint.textContent = `1 of ${total} Selected`;
+      } else if (checkedCount === 2) {
+        const names = checkedItems.map((it) => it.querySelector('.svc-staff-name')?.textContent || '').filter(Boolean).join(', ');
+        if (editDdLabelText) editDdLabelText.textContent = names;
+        if (editDdHint) editDdHint.textContent = `2 of ${total} Selected`;
+      } else {
+        if (editDdLabelText) editDdLabelText.textContent = `${checkedCount} Stylists Assigned`;
+        if (editDdHint) editDdHint.textContent = `${checkedCount} of ${total} Selected`;
+      }
+    };
+
+    const toggleEditDdMenu = (forceOpen) => {
+      if (!editDdMenu) return;
+      const isOpen = forceOpen !== undefined ? forceOpen : !editDdMenu.classList.contains('open');
+      editDdMenu.classList.toggle('open', isOpen);
+      editDdTrigger?.classList.toggle('active', isOpen);
+      editDdChevron?.classList.toggle('open', isOpen);
+      if (isOpen && editDdSearch) {
+        editDdSearch.value = '';
+        editDdSearch.focus({ preventScroll: true });
+        document.querySelectorAll('#edit-svc-staff-dd-list .svc-staff-dd-item').forEach((it) => (it.style.display = 'flex'));
+      }
+    };
+
+    editDdTrigger?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleEditDdMenu();
+    });
+
+    editDdDoneBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleEditDdMenu(false);
+    });
+
+    editDdSearch?.addEventListener('input', (e) => {
+      const q = (e.target.value || '').toLowerCase().trim();
+      document.querySelectorAll('#edit-svc-staff-dd-list .svc-staff-dd-item').forEach((it) => {
+        const name = (it.getAttribute('data-name') || '').toLowerCase();
+        it.style.display = name.includes(q) ? 'flex' : 'none';
+      });
+    });
+
+    editDdSearch?.addEventListener('click', (e) => e.stopPropagation());
+
+    document.querySelectorAll('#edit-svc-staff-dd-list .svc-staff-dd-item').forEach((item) => {
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const chk = item.querySelector('.edit-svc-staff-assign-chk');
+        if (!chk) return;
+        chk.checked = !chk.checked;
+        item.classList.toggle('selected', chk.checked);
+        updateEditStaffDropdownState();
+      });
+    });
+
+    editDdSelectAll?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.querySelectorAll('#edit-svc-staff-dd-list .svc-staff-dd-item').forEach((it) => {
+        const chk = it.querySelector('.edit-svc-staff-assign-chk');
+        if (chk) chk.checked = true;
+        it.classList.add('selected');
+      });
+      updateEditStaffDropdownState();
+    });
+
+    editDdClearAll?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.querySelectorAll('#edit-svc-staff-dd-list .svc-staff-dd-item').forEach((it) => {
+        const chk = it.querySelector('.edit-svc-staff-assign-chk');
+        if (chk) chk.checked = false;
+        it.classList.remove('selected');
+      });
+      updateEditStaffDropdownState();
+    });
+
+    const onEditModalClickOutside = (e) => {
+      if (editDdWrapper && !editDdWrapper.contains(e.target)) {
+        toggleEditDdMenu(false);
+      }
+    };
+    document.addEventListener('click', onEditModalClickOutside);
+
+    // Inline category toggle & creation
+    const inlineBox = document.getElementById('edit-svc-inline-cat-box');
+    document.getElementById('edit-btn-toggle-inline-cat')?.addEventListener('click', () => {
+      inlineBox.style.display = inlineBox.style.display === 'none' ? 'block' : 'none';
+      if (inlineBox.style.display === 'block') {
+        document.getElementById('edit-inline-cat-name')?.focus();
+      }
+    });
+
+    document.getElementById('edit-btn-close-inline-cat')?.addEventListener('click', () => {
+      inlineBox.style.display = 'none';
+    });
+
+    document.getElementById('edit-btn-save-inline-cat')?.addEventListener('click', async () => {
+      const catName = document.getElementById('edit-inline-cat-name')?.value.trim();
+      const catIcon = document.getElementById('edit-inline-cat-icon')?.value.trim() || '✂️';
+      if (!catName) return;
+
+      try {
+        const newCat = await ApiClient.createServiceCategory({ name: catName, icon: catIcon });
+        this.categoriesList = await ApiClient.getServiceCategories(true).catch(() => [
+          ...(this.categoriesList || []),
+          newCat || { id: `cat-${Date.now()}`, name: catName, icon: catIcon },
+        ]);
+        categorySelect.innerHTML = renderCatOptions(catName);
+        categorySelect.value = catName;
+        if (editCatSelectedIcon) editCatSelectedIcon.textContent = catIcon;
+        if (editCatSelectedName) editCatSelectedName.textContent = catName;
+
+        if (editCatMenu) {
+          editCatMenu.innerHTML = `
+            ${this.categoriesList.map((c) => `
+              <div class="custom-select-option ${c.name === catName ? 'selected' : ''}" data-value="${c.name}" data-icon="${c.icon || '✂️'}" data-id="${c.id || ''}">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span>${c.icon || '✂️'}</span>
+                  <span>${c.name}</span>
+                </div>
+                ${c.name === catName ? '<span class="custom-select-opt-check">✓</span>' : ''}
+              </div>
+            `).join('')}
+            <div class="custom-select-option" data-value="CUSTOM" data-icon="➕" data-id="" style="border-top: 1px solid rgba(255,255,255,0.08); margin-top: 4px; padding-top: 8px; color: #c084fc;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span>➕</span>
+                <span>Other / Custom Category...</span>
+              </div>
+            </div>
+          `;
+          bindEditCatOptions();
+        }
+
+        inlineBox.style.display = 'none';
+        document.getElementById('edit-inline-cat-name').value = '';
+        this.showToast(`Category "${catName}" added!`, 'success');
+      } catch (err) {
+        this.showToast(err.message || 'Failed to create category', 'error');
+      }
+    });
+
+    // Custom Category Dropdown Interactions (Edit Modal)
+    const editCatContainer = document.getElementById('edit-svc-cat-custom-container');
+    const editCatTrigger = document.getElementById('edit-svc-cat-custom-trigger');
+    const editCatMenu = document.getElementById('edit-svc-cat-custom-menu');
+    const editCatChevron = document.getElementById('edit-svc-cat-custom-chevron');
+    const editCatSelectedIcon = document.getElementById('edit-svc-cat-selected-icon');
+    const editCatSelectedName = document.getElementById('edit-svc-cat-selected-name');
+
+    const toggleEditCatMenu = (forceOpen) => {
+      if (!editCatMenu) return;
+      const isOpen = forceOpen !== undefined ? forceOpen : !editCatMenu.classList.contains('open');
+      editCatMenu.classList.toggle('open', isOpen);
+      editCatTrigger?.classList.toggle('active', isOpen);
+      editCatChevron?.classList.toggle('open', isOpen);
+    };
+
+    editCatTrigger?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleEditDdMenu?.(false);
+      toggleEditDurMenu?.(false);
+      toggleEditCatMenu();
+    });
+
+    const bindEditCatOptions = () => {
+      editCatMenu?.querySelectorAll('.custom-select-option').forEach((opt) => {
+        opt.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const val = opt.getAttribute('data-value');
+          const icon = opt.getAttribute('data-icon') || '✂️';
+          const name = opt.querySelector('span:nth-child(2)')?.textContent || val;
+
+          if (categorySelect) {
+            categorySelect.value = val;
+            categorySelect.dispatchEvent(new Event('change'));
+          }
+
+          if (editCatSelectedIcon) editCatSelectedIcon.textContent = icon;
+          if (editCatSelectedName) editCatSelectedName.textContent = val === 'CUSTOM' ? 'Custom Category' : name;
+
+          editCatMenu.querySelectorAll('.custom-select-option').forEach((o) => {
+            o.classList.toggle('selected', o === opt);
+            const check = o.querySelector('.custom-select-opt-check');
+            if (check) check.remove();
+            if (o === opt) {
+              const checkSpan = document.createElement('span');
+              checkSpan.className = 'custom-select-opt-check';
+              checkSpan.textContent = '✓';
+              o.appendChild(checkSpan);
+            }
+          });
+
+          toggleEditCatMenu(false);
+        });
+      });
+    };
+    bindEditCatOptions();
+
+    // Custom Duration Dropdown Interactions (Edit Modal)
+    const editDurContainer = document.getElementById('edit-svc-dur-custom-container');
+    const editDurTrigger = document.getElementById('edit-svc-dur-custom-trigger');
+    const editDurMenu = document.getElementById('edit-svc-dur-custom-menu');
+    const editDurChevron = document.getElementById('edit-svc-dur-custom-chevron');
+    const editDurLabel = document.getElementById('edit-svc-dur-selected-label');
+    const editDurSelect = document.getElementById('edit-svc-duration');
+
+    const toggleEditDurMenu = (forceOpen) => {
+      if (!editDurMenu) return;
+      const isOpen = forceOpen !== undefined ? forceOpen : !editDurMenu.classList.contains('open');
+      editDurMenu.classList.toggle('open', isOpen);
+      editDurTrigger?.classList.toggle('active', isOpen);
+      editDurChevron?.classList.toggle('open', isOpen);
+    };
+
+    editDurTrigger?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleEditDdMenu?.(false);
+      toggleEditCatMenu?.(false);
+      toggleEditDurMenu();
+    });
+
+    editDurMenu?.querySelectorAll('.custom-select-option').forEach((opt) => {
+      opt.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const val = opt.getAttribute('data-value');
+        const text = opt.querySelector('span')?.textContent || `${val} mins`;
+        if (editDurSelect) editDurSelect.value = val;
+        if (editDurLabel) editDurLabel.textContent = text;
+
+        editDurMenu.querySelectorAll('.custom-select-option').forEach((o) => {
+          o.classList.toggle('selected', o === opt);
+          const check = o.querySelector('.custom-select-opt-check');
+          if (check) check.remove();
+          if (o === opt) {
+            const checkSpan = document.createElement('span');
+            checkSpan.className = 'custom-select-opt-check';
+            checkSpan.textContent = '✓';
+            o.appendChild(checkSpan);
+          }
+        });
+        toggleEditDurMenu(false);
+      });
+    });
+
+    document.addEventListener('click', (e) => {
+      if (editCatContainer && !editCatContainer.contains(e.target)) toggleEditCatMenu(false);
+      if (editDurContainer && !editDurContainer.contains(e.target)) toggleEditDurMenu(false);
+    });
 
     categorySelect?.addEventListener('change', (e) => {
       if (e.target.value === 'CUSTOM') {
@@ -9624,12 +10947,6 @@ export class SalonDashboard {
       } else {
         customCatGroup.style.display = 'none';
       }
-    });
-
-    document.getElementById('btn-toggle-all-edit-svc-staff')?.addEventListener('click', () => {
-      const chks = document.querySelectorAll('.edit-svc-staff-assign-chk');
-      const allChecked = Array.from(chks).every((c) => c.checked);
-      chks.forEach((c) => (c.checked = !allChecked));
     });
 
     document.getElementById('edit-service-form')?.addEventListener('submit', async (e) => {
@@ -9649,7 +10966,7 @@ export class SalonDashboard {
         price: parseFloat(document.getElementById('edit-svc-price').value),
         durationMinutes: dur,
         category: finalCategory,
-        targetGender: document.getElementById('edit-svc-gender').value || 'UNISEX',
+        targetGender: genderInput?.value || 'UNISEX',
         description: document.getElementById('edit-svc-desc').value.trim(),
         stylistIds: selectedStylistIds,
       };
@@ -9669,6 +10986,7 @@ export class SalonDashboard {
         }
 
         modalContainer.innerHTML = '';
+        this.showToast(`Service "${payload.name}" updated!`, 'success');
         this.render();
 
         this.loadData(true).then(() => {

@@ -259,14 +259,94 @@ export class ClosuresService {
         : null,
     }));
 
-    // Format stylists with their individual 7-day shift schedules
+    // Iterate day-by-day across target range in salon timezone for precision calendar calculations
+    const startDt = DateTime.fromISO(startIso, { zone: tz });
+    const endDt = DateTime.fromISO(endIso, { zone: tz });
+    const allDaysInRange: Array<{
+      dateStr: string;
+      dow: DayOfWeek;
+      isSalonWeeklyOff: boolean;
+      isClosure: boolean;
+    }> = [];
+
+    let curr = startDt;
+    while (curr <= endDt) {
+      const dateStr = curr.toISODate()!;
+      const dow = TimeUtility.getDayOfWeekEnum(curr, tz);
+
+      const salonHour = salonWorkingHours.find((h) => h.dayOfWeek === dow);
+      const isSalonWeeklyOff = salonHour?.isClosed ?? false;
+      const isClosure = formattedClosures.some(
+        (c) => dateStr >= c.startDate && dateStr <= c.endDate && !c.isPartialDay,
+      );
+
+      allDaysInRange.push({
+        dateStr,
+        dow,
+        isSalonWeeklyOff,
+        isClosure,
+      });
+
+      curr = curr.plus({ days: 1 });
+    }
+
+    // ARCHITECTURAL VALIDATION RULE:
+    // A specialist weekly off ONLY exists on days when the salon is OPEN.
+    // If the salon is already closed on Tuesday, Tuesday is a Salon Weekly Off,
+    // NOT an individual staff off. If staff marks an OTHER day (e.g. Wednesday),
+    // it is an authentic staff off and is returned.
+    const staffWeeklyOffs = stylists
+      .map((st) => {
+        const effectiveOffDays: DayOfWeek[] = [];
+
+        DAYS_ORDER.forEach((day) => {
+          const stHour = st.workingHours.find((h) => h.dayOfWeek === day);
+          const isWorking = stHour ? stHour.isWorking : true;
+          const salonHour = salonWorkingHours.find((h) => h.dayOfWeek === day);
+          const isSalonClosed = salonHour?.isClosed ?? false;
+
+          // Only valid if stylist is off AND salon is OPEN on that day
+          if (!isWorking && !isSalonClosed) {
+            effectiveOffDays.push(day);
+          }
+        });
+
+        // Resolve exact dates within range where stylist is off and no store closure applies
+        const dates: string[] = [];
+        allDaysInRange.forEach((dayObj) => {
+          if (effectiveOffDays.includes(dayObj.dow) && !dayObj.isClosure) {
+            dates.push(dayObj.dateStr);
+          }
+        });
+
+        const dayLabels = effectiveOffDays.map((d) => d.charAt(0) + d.slice(1).toLowerCase());
+
+        return {
+          stylistId: st.id,
+          stylistName: st.name,
+          profileImageUrl: st.profileImageUrl || null,
+          offDays: effectiveOffDays,
+          formattedDays: dayLabels.join(', '),
+          dates,
+          totalDatesCount: dates.length,
+        };
+      })
+      .filter((st) => st.totalDatesCount > 0);
+
+    // Format stylists with their individual 7-day shift schedules enriched with effective off flag
     const formattedStylists = stylists.map((st) => {
       const stylistWeeklyHours = DAYS_ORDER.map((day) => {
         const match = st.workingHours.find((h) => h.dayOfWeek === day);
         const isWorking = match ? match.isWorking : true;
+        const salonHour = salonWorkingHours.find((h) => h.dayOfWeek === day);
+        const isSalonClosed = salonHour?.isClosed ?? false;
+        const isEffectiveStaffOff = !isWorking && !isSalonClosed;
+
         return {
           dayOfWeek: day,
           isWorking,
+          isSalonClosed,
+          isEffectiveStaffOff,
           startTime: match && isWorking ? match.startTime : null,
           endTime: match && isWorking ? match.endTime : null,
         };
@@ -281,25 +361,76 @@ export class ClosuresService {
       };
     });
 
-    // Format single flat leaves list with embedded stylist metadata
-    const formattedLeaves = stylistAbsences.map((ab) => ({
-      id: ab.id,
-      stylistId: ab.stylistId,
-      stylistName: ab.stylist?.name || 'Specialist',
-      profileImageUrl: ab.stylist?.profileImageUrl || null,
-      startDate: TimeUtility.formatDateToISO(ab.startDate, tz),
-      endDate: TimeUtility.formatDateToISO(ab.endDate, tz),
-      isPartialDay: Boolean(ab.isPartialDay),
-      startTime: ab.startTime || null,
-      endTime: ab.endTime || null,
-      leaveType: ab.leaveType,
-      status: ab.status,
-      reason: ab.reason || null,
-      notes: ab.notes || null,
-    }));
+    const todayIso = now.toISODate()!;
 
-    // 5. Authentic Indian Festivals & Gazetted Holidays directly from official dependencies
-    const authenticFestivals = this.holidaysProvider.getHolidaysForRange(startIso, endIso);
+    // Format single flat leaves list with embedded stylist metadata & calculated duration
+    const formattedLeaves = stylistAbsences.map((ab) => {
+      const sDate = TimeUtility.formatDateToISO(ab.startDate, tz);
+      const eDate = TimeUtility.formatDateToISO(ab.endDate, tz);
+      const isPast = eDate < todayIso;
+
+      const sDt = DateTime.fromISO(sDate, { zone: tz });
+      const eDt = DateTime.fromISO(eDate, { zone: tz });
+      const durationDays = Math.max(1, Math.round(eDt.diff(sDt, 'days').days) + 1);
+
+      return {
+        id: ab.id,
+        stylistId: ab.stylistId,
+        stylistName: ab.stylist?.name || 'Specialist',
+        profileImageUrl: ab.stylist?.profileImageUrl || null,
+        startDate: sDate,
+        endDate: eDate,
+        durationDays,
+        isPast,
+        isPartialDay: Boolean(ab.isPartialDay),
+        startTime: ab.startTime || null,
+        endTime: ab.endTime || null,
+        leaveType: ab.leaveType,
+        status: ab.status,
+        reason: ab.reason || null,
+        notes: ab.notes || null,
+        createdAt: ab.createdAt || null,
+      };
+    });
+
+    // 5. Authentic Indian Festivals & Gazetted Holidays enriched with operational status flags
+    const rawFestivals = this.holidaysProvider.getHolidaysForRange(startIso, endIso);
+    const enrichedFestivals = rawFestivals.map((fest) => {
+      const isPast = fest.date < todayIso;
+      const isClosed = formattedClosures.some(
+        (c) => fest.date >= c.startDate && fest.date <= c.endDate && !c.isPartialDay,
+      );
+      const festDt = DateTime.fromISO(fest.date, { zone: tz });
+      const festDow = TimeUtility.getDayOfWeekEnum(festDt, tz);
+      const salonHour = salonWorkingHours.find((h) => h.dayOfWeek === festDow);
+      const isSalonWeeklyOff = salonHour?.isClosed ?? false;
+      const canClose = !isPast && !isClosed && !isSalonWeeklyOff;
+
+      return {
+        ...fest,
+        isPast,
+        isClosed,
+        isSalonWeeklyOff,
+        canClose,
+      };
+    });
+
+    // Single source of truth summary counts
+    const distinctSalonWeeklyOffDates = new Set(
+      allDaysInRange.filter((d) => d.isSalonWeeklyOff).map((d) => d.dateStr),
+    );
+    const distinctStaffOffDates = new Set<string>();
+    staffWeeklyOffs.forEach((st) => {
+      st.dates.forEach((d) => distinctStaffOffDates.add(d));
+    });
+
+    const summaryCounts = {
+      closuresCount: formattedClosures.length,
+      salonWeeklyOffCount: distinctSalonWeeklyOffDates.size,
+      staffWeeklyOffCount: distinctStaffOffDates.size,
+      staffLeavesCount: formattedLeaves.length,
+      festivalsCount: enrichedFestivals.length,
+    };
 
     return {
       success: true,
@@ -317,13 +448,15 @@ export class ClosuresService {
           startDate: startIso,
           endDate: endIso,
         },
+        summaryCounts,
         salonSchedule: {
           weeklyHours: salonWeeklyHours,
           closures: formattedClosures,
         },
         stylists: formattedStylists,
+        staffWeeklyOffs,
         leaves: formattedLeaves,
-        festivals: authenticFestivals,
+        festivals: enrichedFestivals,
       },
     };
   }
@@ -409,35 +542,14 @@ export class ClosuresService {
     const startWorkingHours = await this.getSalonHoursForDate(salonId, dto.startDate);
     const endWorkingHours = isSingleDay ? startWorkingHours : await this.getSalonHoursForDate(salonId, dto.endDate);
 
-    // Edge Case 5a: Weekly Off Validation Rules
-    if (isSingleDay) {
-      if (startWorkingHours.isClosed) {
-        const dayLabel = startWorkingHours.dayOfWeek
-          ? startWorkingHours.dayOfWeek.charAt(0) + startWorkingHours.dayOfWeek.slice(1).toLowerCase()
-          : 'This day';
-        throw new BadRequestException(
-          `${dayLabel} is already a scheduled weekly off for the salon. You cannot schedule a single-day closure on a regular off day.`,
-        );
-      }
-    } else {
-      // Multi-Day Range: Cannot START on a weekly off (salon already closed)
-      if (startWorkingHours.isClosed) {
-        const dayLabel = startWorkingHours.dayOfWeek
-          ? startWorkingHours.dayOfWeek.charAt(0) + startWorkingHours.dayOfWeek.slice(1).toLowerCase()
-          : 'Start date';
-        throw new BadRequestException(
-          `Cannot start a multi-day closure on ${dayLabel} because the salon is already closed for weekly off. Please select an operating day as the start date.`,
-        );
-      }
-      // Cannot END on a weekly off (salon already closed)
-      if (endWorkingHours.isClosed) {
-        const dayLabel = endWorkingHours.dayOfWeek
-          ? endWorkingHours.dayOfWeek.charAt(0) + endWorkingHours.dayOfWeek.slice(1).toLowerCase()
-          : 'End date';
-        throw new BadRequestException(
-          `Cannot end a multi-day closure on ${dayLabel} because the salon is already closed for weekly off. Please select an operating day as the end date.`,
-        );
-      }
+    // Edge Case 5a: Single-day closures cannot be scheduled on an existing regular weekly off
+    if (isSingleDay && startWorkingHours.isClosed) {
+      const dayLabel = startWorkingHours.dayOfWeek
+        ? startWorkingHours.dayOfWeek.charAt(0) + startWorkingHours.dayOfWeek.slice(1).toLowerCase()
+        : 'This day';
+      throw new BadRequestException(
+        `${dayLabel} is already a scheduled weekly off for the salon. You cannot schedule a single-day closure on a regular off day.`,
+      );
     }
 
     const finalStart = isPartial && dto.startTime ? dto.startTime : startWorkingHours.startTime;

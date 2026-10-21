@@ -49,37 +49,70 @@ export class SalonWeeklyOffDialog {
     let bodyHtml = '';
     if (salonOffDays.length === 0) {
       bodyHtml = `
-        <div style="text-align: center; padding: 28px 16px; background: rgba(255,255,255,0.02); border: 1px dashed rgba(255,255,255,0.1); border-radius: 12px; margin-bottom: 16px;">
+        <div style="text-align: center; padding: 28px 16px; background: rgba(255,255,255,0.02); border: 1px dashed rgba(255,255,255,0.1); border-radius: 12px; margin-bottom: 8px;">
           <div style="font-size: 2rem; margin-bottom: 8px;">✨</div>
           <div style="font-size: 0.9rem; font-weight: 700; color: #fff; margin-bottom: 4px;">Open 7 Days a Week</div>
           <div style="font-size: 0.76rem; color: #94a3b8; max-width: 320px; margin: 0 auto;">The salon has no fixed weekly routine off-days configured. Operating shifts are active every day.</div>
         </div>
       `;
     } else {
-      const offDaysFormatted = salonOffDays.map((d) => d.charAt(0) + d.slice(1).toLowerCase()).join(', ');
       bodyHtml = `
-        <div style="margin-bottom: 14px; background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 10px; padding: 12px 14px;">
-          <div style="font-size: 0.82rem; font-weight: 700; color: #e0f2fe; margin-bottom: 4px;">
-            Configured Routine: <span style="color: #38bdf8;">Every ${offDaysFormatted}</span>
-          </div>
-          <div style="font-size: 0.72rem; color: #94a3b8;">
-            The salon automatically blocks customer bookings and displays diagonal hatching on these days.
-          </div>
-        </div>
+        <div style="display: flex; flex-direction: column; gap: 10px; max-height: 420px; overflow-y: auto; padding-right: 4px; margin-bottom: 6px;">
+          ${salonOffDays.map((dow) => {
+            const dayFormatted = dow.charAt(0) + dow.slice(1).toLowerCase();
+            const datesForDay = salonOffDates.filter((item) => item.dayOfWeek === dow);
 
-        <div style="font-size: 0.74rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 8px;">
-          Exact Off Dates in ${currentMonthName}:
-        </div>
-
-        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; margin-bottom: 16px;">
-          ${salonOffDates.map((item) => {
-            const dObj = new Date(item.dateStr + 'T00:00:00');
-            const formattedDate = dObj.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', weekday: 'short' });
-            const isPast = item.dateStr < todayISO;
             return `
-              <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 8px 10px; text-align: center; ${isPast ? 'opacity: 0.6;' : ''}">
-                <div style="font-size: 0.84rem; font-weight: 800; color: #38bdf8;">${formattedDate}</div>
-                <div style="font-size: 0.64rem; color: #94a3b8; margin-top: 2px;">Weekly Routine Off</div>
+              <div class="leave-history-card lhc-ring-salon-off" style="--card-accent: #38bdf8;">
+                <!-- Top Header Row: Date & Status -->
+                <div class="lhc-header-row">
+                  <div class="lhc-header-left">
+                    <span class="lhc-cal-icon">🏢</span>
+                    <strong class="lhc-date-title">Every ${dayFormatted}</strong>
+                    <span class="lhc-duration-tag">${datesForDay.length} Days</span>
+                  </div>
+                  <div class="lhc-status-pill lhc-status-upcoming">
+                    <span class="lhc-status-dot"></span>
+                    <span>Routine Off</span>
+                  </div>
+                </div>
+
+                <!-- Middle Info Panel -->
+                <div class="lhc-meta-panel">
+                  <div class="lhc-meta-row">
+                    <div class="lhc-meta-cell lhc-meta-left">
+                      <span class="lhc-type-dot" style="color: #38bdf8;">●</span>
+                      <span class="lhc-meta-label">Type:</span>
+                      <strong class="lhc-meta-type-val" style="color: #38bdf8;">Weekly Routine Off</strong>
+                    </div>
+                    <div class="lhc-meta-cell lhc-meta-right">
+                      <span class="lhc-meta-icon">🕒</span>
+                      <span class="lhc-meta-label">Shift:</span>
+                      <strong class="lhc-meta-shift-val">Full Day Closed</strong>
+                    </div>
+                  </div>
+                  <div style="font-size: 0.72rem; color: #94a3b8; margin-top: 5px; margin-bottom: 3px;">Exact Off Dates in ${currentMonthName}:</div>
+                  <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                    ${datesForDay.map((item) => {
+                      const dObj = new Date(item.dateStr + 'T00:00:00');
+                      const formattedDate = dObj.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', weekday: 'short' });
+                      const isPast = item.dateStr < todayISO;
+                      return `
+                        <span style="font-size: 0.7rem; font-weight: 700; padding: 2.5px 8px; border-radius: 6px; background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.25); color: #38bdf8; ${isPast ? 'opacity: 0.55;' : ''}">
+                          ${formattedDate}
+                        </span>
+                      `;
+                    }).join('')}
+                  </div>
+                </div>
+
+                <!-- Schedule Impact Pill -->
+                <div class="lhc-impact-pill lhc-impact-clean">
+                  <div class="lhc-impact-left">
+                    <span class="lhc-impact-check">✓</span>
+                    <span class="lhc-impact-text">Store Closed · Bookings protected</span>
+                  </div>
+                </div>
               </div>
             `;
           }).join('')}
@@ -87,19 +120,11 @@ export class SalonWeeklyOffDialog {
       `;
     }
 
-    bodyHtml += `
-      <div style="display: flex; justify-content: flex-end;">
-        <button type="button" class="btn btn-secondary btn-sm" id="btn-inspector-edit-hours" style="font-size: 0.76rem; font-weight: 700; color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);">
-          ⚙️ Edit Salon Hours & Weekly Offs
-        </button>
-      </div>
-    `;
-
     modalContainer.innerHTML = `
       <div class="modal-backdrop show">
-        <div class="modal-content modal-content-sheet" style="max-width: 540px; padding: 22px; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 16px; background: #0f172a; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);">
+        <div class="modal-content modal-content-sheet" style="max-width: 560px; padding: 20px 22px; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 16px; background: #0f172a; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);">
           <div class="sheet-grab-handle"></div>
-          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px;">
             <div>
               <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
                 <span style="font-size: 1.15rem;">🏢</span>
@@ -122,15 +147,6 @@ export class SalonWeeklyOffDialog {
     document.getElementById('btn-close-salon-off-dialog')?.addEventListener('click', closeModal);
     modalContainer.querySelector('.modal-backdrop')?.addEventListener('click', (e) => {
       if (e.target === e.currentTarget) closeModal();
-    });
-
-    document.getElementById('btn-inspector-edit-hours')?.addEventListener('click', () => {
-      closeModal();
-      if (app) {
-        app.activeTab = 'settings';
-        app.activeSubtab = 'hours';
-        app.render();
-      }
     });
   }
 }

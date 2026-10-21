@@ -209,6 +209,7 @@ async function executeRealmRequest(realm, endpoint, options = {}, ttlMs = 0) {
 export class PlatformAuth {
   static getToken() { return PlatformRealm.getAccessToken(); }
   static getUser() { return PlatformRealm.getUser(); }
+  static setUser(user) { return PlatformRealm.setUser(user); }
   static isAuthenticated() {
     const user = PlatformRealm.getUser();
     return !!(user && (user.role === 'SUPER_ADMIN' || user.role === 'PLATFORM_ADMIN'));
@@ -253,6 +254,7 @@ export class PlatformAuth {
 export class SalonAuth {
   static getToken() { return SalonRealm.getAccessToken(); }
   static getUser() { return SalonRealm.getUser(); }
+  static setUser(user) { return SalonRealm.setUser(user); }
   static isAuthenticated() {
     const user = SalonRealm.getUser();
     return !!user;
@@ -1016,6 +1018,19 @@ export class ApiClient {
     this.invalidateCache('/salons');
     this.invalidateCache('/reports');
     return this.request('/salons/profile', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  static async getPersonalProfile(bypassCache = false) {
+    return this.request('/salons/personal-profile', {}, bypassCache ? 0 : 60000);
+  }
+
+  static async updatePersonalProfile(payload) {
+    this.invalidateCache('/salons');
+    this.invalidateCache('/reports');
+    return this.request('/salons/personal-profile', {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
