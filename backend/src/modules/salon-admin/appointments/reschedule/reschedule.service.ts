@@ -21,7 +21,6 @@ import {
   ServiceStatus,
   AbsenceStatus,
   DayOfWeek,
-  LeavePortion,
 } from '@prisma/client';
 import { DateTime } from 'luxon';
 import { TimeUtility } from '../../../../common/utils/time.utility';
@@ -286,10 +285,8 @@ export class RescheduleService {
               salonId,
               stylistId: targetStylistId,
               status: AbsenceStatus.ACTIVE,
-              OR: [
-                { startDate: { lte: targetDateObj }, endDate: { gte: targetDateObj } },
-                { absenceDate: targetDateObj },
-              ],
+              startDate: { lte: targetDateObj },
+              endDate: { gte: targetDateObj },
             },
           });
 
@@ -329,13 +326,11 @@ export class RescheduleService {
               salonId,
               stylistId: targetStylistId,
               status: AbsenceStatus.ACTIVE,
-              OR: [
-                { startDate: { lte: new Date(`${dto.newDate}T00:00:00.000Z`) }, endDate: { gte: new Date(`${dto.newDate}T00:00:00.000Z`) } },
-                { absenceDate: new Date(`${dto.newDate}T00:00:00.000Z`) },
-              ],
+              startDate: { lte: new Date(`${dto.newDate}T00:00:00.000Z`) },
+              endDate: { gte: new Date(`${dto.newDate}T00:00:00.000Z`) },
             },
           });
-          if (rescheduleAbsence && (!rescheduleAbsence.leavePortion || rescheduleAbsence.leavePortion === 'FULL_DAY')) {
+          if (rescheduleAbsence && !rescheduleAbsence.isPartialDay) {
             throw new ConflictException('Selected specialist is marked absent on the new date.');
           }
 
@@ -526,7 +521,7 @@ export class RescheduleService {
     tx: any,
     stylist?: any,
   ): Promise<boolean> {
-    if (!absence.leavePortion || absence.leavePortion === LeavePortion.FULL_DAY) {
+    if (!absence.isPartialDay) {
       return true;
     }
 

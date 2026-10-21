@@ -9,8 +9,7 @@ import { LeaveReassignmentEngine } from '../../../../src/modules/salon-admin/sta
 import { LeaveValidationService } from '../../../../src/modules/salon-admin/staff/services/leave-validation.service';
 import { LeaveProcessingService } from '../../../../src/modules/salon-admin/staff/services/leave-processing.service';
 import { AvailabilityEngineService } from '../../../../src/modules/salon-admin/availability/availability-engine.service';
-import { ConflictException } from '@nestjs/common';
-import { AbsenceStatus, LeavePortion, AppointmentStatus } from '@prisma/client';
+import { AbsenceStatus, AppointmentStatus } from '@prisma/client';
 import { DateTime } from 'luxon';
 
 describe('Cross-Module Leave Remediation Tests (BUG-01, BUG-02, BUG-03, BUG-04)', () => {
@@ -161,7 +160,7 @@ describe('Cross-Module Leave Remediation Tests (BUG-01, BUG-02, BUG-03, BUG-04)'
           stylistId: mockStylistId,
           startDate: new Date(`${mockDate}T00:00:00.000Z`),
           endDate: new Date(`${mockDate}T00:00:00.000Z`),
-          leavePortion: LeavePortion.FULL_DAY,
+          isPartialDay: false,
           status: AbsenceStatus.ACTIVE,
         },
       ]);
@@ -186,7 +185,9 @@ describe('Cross-Module Leave Remediation Tests (BUG-01, BUG-02, BUG-03, BUG-04)'
           stylistId: mockStylistId,
           startDate: new Date(`${mockDate}T00:00:00.000Z`),
           endDate: new Date(`${mockDate}T00:00:00.000Z`),
-          leavePortion: LeavePortion.FIRST_HALF,
+          isPartialDay: true,
+          startTime: '09:00',
+          endTime: '13:00',
           status: AbsenceStatus.ACTIVE,
         },
       ]);
@@ -211,7 +212,9 @@ describe('Cross-Module Leave Remediation Tests (BUG-01, BUG-02, BUG-03, BUG-04)'
           stylistId: mockStylistId,
           startDate: new Date(`${mockDate}T00:00:00.000Z`),
           endDate: new Date(`${mockDate}T00:00:00.000Z`),
-          leavePortion: LeavePortion.FIRST_HALF,
+          isPartialDay: true,
+          startTime: '09:00',
+          endTime: '13:00',
           status: AbsenceStatus.ACTIVE,
         },
       ]);
@@ -236,9 +239,9 @@ describe('Cross-Module Leave Remediation Tests (BUG-01, BUG-02, BUG-03, BUG-04)'
           stylistId: mockStylistId,
           startDate: new Date(`${mockDate}T00:00:00.000Z`),
           endDate: new Date(`${mockDate}T00:00:00.000Z`),
-          leavePortion: LeavePortion.CUSTOM_HOURS,
-          customStartTime: '11:00',
-          customEndTime: '14:00',
+          isPartialDay: true,
+          startTime: '11:00',
+          endTime: '14:00',
           status: AbsenceStatus.ACTIVE,
         },
       ]);
@@ -265,7 +268,9 @@ describe('Cross-Module Leave Remediation Tests (BUG-01, BUG-02, BUG-03, BUG-04)'
               stylistId: mockStylistId,
               startDate: new Date(`${mockDate}T00:00:00.000Z`),
               endDate: new Date(`${mockDate}T00:00:00.000Z`),
-              leavePortion: LeavePortion.FIRST_HALF,
+              isPartialDay: true,
+              startTime: '09:00',
+              endTime: '13:00',
               status: AbsenceStatus.ACTIVE,
             },
           ]);

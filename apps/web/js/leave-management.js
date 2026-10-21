@@ -1,4 +1,5 @@
 import { ApiClient } from './api.js';
+import { StaffApplyLeaveDialog } from './modules/staff/index.js';
 
 /**
  * EMPLOYEE LEAVE & AVAILABILITY OVERRIDE FRONTEND MODULE
@@ -26,9 +27,7 @@ export const LEAVE_TYPE_LABELS = {
 
 export const LEAVE_PORTION_LABELS = {
   FULL_DAY: 'Full Day',
-  FIRST_HALF: 'First Half',
-  SECOND_HALF: 'Second Half',
-  CUSTOM_HOURS: 'Custom Hours',
+  PARTIAL_DAY: 'Partial Day',
 };
 
 // Helper to format date with weekday (e.g. "Fri, Oct 9, 2026")
@@ -82,18 +81,11 @@ export function getLeaveTypeDetails(type, reason) {
 }
 
 // Helper to get leave portion & shift window details
-export function getPortionDetails(portion, customStart, customEnd) {
-  switch (portion) {
-    case 'FIRST_HALF':
-      return { icon: '🌅', label: 'First Half', shiftText: 'Morning Shift', fullLabel: 'First Half (Morning Shift)' };
-    case 'SECOND_HALF':
-      return { icon: '🌇', label: 'Second Half', shiftText: 'Afternoon Shift', fullLabel: 'Second Half (Afternoon Shift)' };
-    case 'CUSTOM_HOURS':
-      return { icon: '⏱️', label: 'Custom Hours', shiftText: `${customStart || '00:00'} – ${customEnd || '00:00'}`, fullLabel: `Custom (${customStart || ''} – ${customEnd || ''})` };
-    case 'FULL_DAY':
-    default:
-      return { icon: '⏰', label: 'Full Day', shiftText: 'All Working Shifts', fullLabel: 'Full Working Shift' };
+export function getPortionDetails(isPartialDay, startTime, endTime) {
+  if (isPartialDay && startTime && endTime) {
+    return { icon: '⏱️', label: 'Partial Day', shiftText: `${startTime} – ${endTime}`, fullLabel: `Partial Day (${startTime} – ${endTime})` };
   }
+  return { icon: '⏰', label: 'Full Day', shiftText: 'All Working Shifts', fullLabel: 'Full Working Shift' };
 }
 
 export const PROCESSING_STATUS_BADGES = {
@@ -150,481 +142,36 @@ export class LeaveManagementUI {
   }
 
   /**
-   * 1. CREATE / MARK LEAVE FORM MODAL (COMPACT & EXECUTIVE)
+   * 1. CREATE / MARK LEAVE FORM MODAL
+   * Delegates directly to authoritative StaffApplyLeaveDialog.
    */
   showCreateLeaveModal(staffId, staffName, defaultDate = null) {
-    const modalContainer = document.getElementById('modal-container');
-    if (!modalContainer) return;
-
-    const initialDate = defaultDate || this.app.selectedCalDate || this.app.selectedDate || new Date().toISOString().split('T')[0];
-    const staffList = this.app.staffList || [];
+    const initialDate = defaultDate || this.app?.selectedCalDate || this.app?.selectedDate || new Date().toISOString().split('T')[0];
+    const staffList = this.app?.staffList || [];
     const targetStaff = staffList.find((s) => s.id === staffId);
-    const initialStaffName = staffName || targetStaff?.name || 'Specialist';
+    const resolvedStaffName = staffName || targetStaff?.name || null;
 
-    const formatPresentationDate = (dateStr) => {
-      if (!dateStr) return 'Select date';
-      const parts = dateStr.split('-');
-      if (parts.length !== 3) return dateStr;
-      const y = parseInt(parts[0], 10);
-      const m = parseInt(parts[1], 10) - 1;
-      const d = parseInt(parts[2], 10);
-      const dt = new Date(y, m, d);
-      if (isNaN(dt.getTime())) return dateStr;
-      const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      return `${days[dt.getDay()]}, ${d} ${months[dt.getMonth()]} ${y}`;
-    };
-
-    modalContainer.innerHTML = `
-      <div class="modal-backdrop show">
-        <div class="apply-leave-dialog">
-          <!-- Compact Header -->
-          <div class="ald-header">
-            <div class="ald-header-left">
-              <div class="ald-icon-badge">🗓️</div>
-              <div class="ald-title-wrap">
-                <h3 class="ald-title">Record Specialist Leave</h3>
-                ${staffId ? `<span class="ald-staff-chip">${initialStaffName}</span>` : ''}
-              </div>
-            </div>
-            <button class="ald-close-btn" id="btn-close-leave-modal" title="Close modal">&times;</button>
-          </div>
-
-          <form id="leave-management-form">
-            <!-- Specialist Select (Only if not pre-set) -->
-            ${staffId ? `
-              <input type="hidden" id="leave-staff-id" value="${staffId}" />
-            ` : `
-              <div class="ald-row-1">
-                <label class="ald-label">Specialist *</label>
-                <select class="ald-input" id="leave-staff-id" required>
-                  <option value="" disabled selected>-- Select Specialist --</option>
-                  ${staffList.map((st) => `<option value="${st.id}">${st.name} (${st.phone || 'No phone'})</option>`).join('')}
-                </select>
-              </div>
-            `}
-
-            <!-- Row 1: Start Date & End Date -->
-            <div class="ald-row-2">
-              <div class="ald-col">
-                <label class="ald-label" for="leave-start-date">Start Date *</label>
-                <div class="ald-date-box" id="leave-start-date-box" tabindex="0">
-                  <div class="ald-date-display">
-                    <span class="ald-date-icon">🗓️</span>
-                    <span class="ald-date-value" id="leave-start-date-text">${formatPresentationDate(initialDate)}</span>
-                  </div>
-                  <span class="ald-date-arrow">▾</span>
-                  <input type="date" class="ald-date-native" id="leave-start-date" value="${initialDate}" required />
-                </div>
-              </div>
-
-              <div class="ald-col">
-                <div class="ald-label-row">
-                  <label class="ald-label" for="leave-end-date">End Date *</label>
-                  <span class="ald-pill-badge" id="leave-duration-badge">✨ 1 Day</span>
-                </div>
-                <div class="ald-date-box" id="leave-end-date-box" tabindex="0">
-                  <div class="ald-date-display">
-                    <span class="ald-date-icon">🗓️</span>
-                    <span class="ald-date-value" id="leave-end-date-text">${formatPresentationDate(initialDate)}</span>
-                  </div>
-                  <span class="ald-date-arrow">▾</span>
-                  <input type="date" class="ald-date-native" id="leave-end-date" value="${initialDate}" required />
-                </div>
-              </div>
-            </div>
-
-            <!-- Row 2: Leave Type & Shift Coverage -->
-            <div class="ald-row-2">
-              <!-- Leave Type Custom Dropdown -->
-              <div class="ald-col">
-                <label class="ald-label">Leave Type *</label>
-                <input type="hidden" id="leave-type" value="SICK_LEAVE" />
-                <div class="cselect-wrap" id="cselect-leave-type">
-                  <div class="cselect-trigger" tabindex="0">
-                    <span class="cselect-label">🤒 Sick Leave</span>
-                    <span class="cselect-arrow">▼</span>
-                  </div>
-                  <div class="cselect-menu">
-                    <div class="cselect-option is-selected" data-value="SICK_LEAVE">🤒 Sick Leave</div>
-                    <div class="cselect-option" data-value="CASUAL_LEAVE">🌴 Casual Leave</div>
-                    <div class="cselect-option" data-value="EMERGENCY_LEAVE">🚨 Emergency Leave</div>
-                    <div class="cselect-option" data-value="UNPAID_LEAVE">📄 Unpaid Leave</div>
-                    <div class="cselect-option" data-value="OTHER">📝 Other</div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Shift Coverage Custom Dropdown -->
-              <div class="ald-col">
-                <label class="ald-label">Shift Coverage *</label>
-                <input type="hidden" id="leave-portion" value="FULL_DAY" />
-                <div class="cselect-wrap" id="cselect-leave-portion">
-                  <div class="cselect-trigger" tabindex="0">
-                    <span class="cselect-label">☀️ Full Day</span>
-                    <span class="cselect-arrow">▼</span>
-                  </div>
-                  <div class="cselect-menu">
-                    <div class="cselect-option is-selected" data-value="FULL_DAY">☀️ Full Day</div>
-                    <div class="cselect-option" data-value="FIRST_HALF">🌅 First Half (Morning)</div>
-                    <div class="cselect-option" data-value="SECOND_HALF">🌇 Second Half (Afternoon)</div>
-                    <div class="cselect-option" data-value="CUSTOM_HOURS">⏱️ Custom Hours</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Row 3: Custom Hours Window (Conditional) -->
-            <div id="leave-custom-hours-group" class="ald-custom-hours" style="display: none;">
-              <div style="font-size: 0.72rem; font-weight: 600; color: #c084fc; display: flex; align-items: center; gap: 5px;">
-                <span>⏱️ Window:</span>
-                <span id="leave-custom-hours-calc" style="background: rgba(168,85,247,0.2); padding: 1px 5px; border-radius: 4px; font-size: 0.65rem;">4.0 hrs</span>
-              </div>
-              <div class="ald-custom-hours-inputs">
-                <input type="time" id="leave-custom-start-time" value="09:00" />
-                <span style="font-size: 0.7rem; color: #94a3b8;">to</span>
-                <input type="time" id="leave-custom-end-time" value="13:00" />
-              </div>
-            </div>
-
-            <!-- Row 4: Reason (Full Width) -->
-            <div class="ald-row-1">
-              <label class="ald-label">Reason (Optional)</label>
-              <input type="text" class="ald-input" id="leave-reason" placeholder="e.g. Medical checkup, personal leave" />
-            </div>
-
-            <!-- Row 5: Internal Notes (Full Width) -->
-            <div class="ald-row-1">
-              <label class="ald-label">Internal Notes (Optional)</label>
-              <input type="text" class="ald-input" id="leave-notes" placeholder="e.g. Informed manager in advance" />
-            </div>
-
-            <!-- Row 6: Unified Operational Banner -->
-            <div class="ald-compact-notice is-clean" style="border: 1px solid rgba(168, 85, 247, 0.25); background: rgba(168, 85, 247, 0.05); padding: 12px 14px; border-radius: 10px; margin-bottom: 16px;">
-              <div class="ald-notice-main" style="display: flex; align-items: flex-start; gap: 10px;">
-                <span style="font-size: 1.1rem; line-height: 1;">⚡</span>
-                <div>
-                  <div style="font-weight: 700; color: #fff; font-size: 0.84rem; margin-bottom: 2px;">Automated Booking Protection</div>
-                  <div style="font-size: 0.78rem; color: #94a3b8; line-height: 1.35;">Staff roster will be blocked immediately. Any overlapping client bookings will automatically receive an interactive WhatsApp reschedule proposal for the next available slot.</div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Row 7: Footer Actions -->
-            <div class="ald-footer">
-              <button type="button" class="ald-btn-cancel" id="btn-cancel-leave-modal">Cancel</button>
-              <button type="submit" class="ald-btn-submit" id="btn-submit-leave">
-                <span>🚫 Confirm & Process Leave</span>
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    `;
-
-    const closeModal = () => { modalContainer.innerHTML = ''; };
-    document.getElementById('btn-close-leave-modal')?.addEventListener('click', closeModal);
-    document.getElementById('btn-cancel-leave-modal')?.addEventListener('click', closeModal);
-
-    const startDateEl = document.getElementById('leave-start-date');
-    const endDateEl = document.getElementById('leave-end-date');
-    const leaveTypeInput = document.getElementById('leave-type');
-    const portionInput = document.getElementById('leave-portion');
-    const customHoursGroup = document.getElementById('leave-custom-hours-group');
-    const customStartEl = document.getElementById('leave-custom-start-time');
-    const customEndEl = document.getElementById('leave-custom-end-time');
-    const staffSelectEl = document.getElementById('leave-staff-id');
-    const durationBadge = document.getElementById('leave-duration-badge');
-
-    // Helper: Update Duration Badge
-    const updateDurationBadge = () => {
-      if (!durationBadge || !startDateEl || !endDateEl) return;
-      const s = startDateEl.value;
-      const e = endDateEl.value;
-      if (!s || !e) {
-        durationBadge.textContent = '✨ 1 Day';
-        return;
-      }
-      const dur = calculateDurationDays(s, e);
-      durationBadge.textContent = `✨ ${dur}`;
-    };
-
-    // Helper: Calculate Custom Hours Window
-    const updateCustomHoursCalc = () => {
-      const calcEl = document.getElementById('leave-custom-hours-calc');
-      if (!calcEl || !customStartEl || !customEndEl) return;
-      const s = customStartEl.value || '09:00';
-      const e = customEndEl.value || '13:00';
-      const [sh, sm] = s.split(':').map(Number);
-      const [eh, em] = e.split(':').map(Number);
-      const startMin = sh * 60 + sm;
-      const endMin = eh * 60 + em;
-      if (endMin <= startMin) {
-        calcEl.textContent = '⚠️ Invalid';
-        calcEl.style.background = 'rgba(239, 68, 68, 0.25)';
-        calcEl.style.color = '#fca5a5';
-      } else {
-        const diffHours = ((endMin - startMin) / 60).toFixed(1);
-        calcEl.textContent = `${diffHours.endsWith('.0') ? parseInt(diffHours, 10) : diffHours} hrs`;
-        calcEl.style.background = 'rgba(168, 85, 247, 0.2)';
-        calcEl.style.color = '#d8b4fe';
-      }
-    };
-
-    // Quick Date Presets calculation
-    const getPresetDates = (preset) => {
-      const now = new Date();
-      const pad = (n) => String(n).padStart(2, '0');
-      const formatYMD = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-
-      if (preset === 'today') {
-        const dStr = formatYMD(now);
-        return { start: dStr, end: dStr };
-      }
-      if (preset === 'tomorrow') {
-        const tm = new Date(now);
-        tm.setDate(tm.getDate() + 1);
-        const dStr = formatYMD(tm);
-        return { start: dStr, end: dStr };
-      }
-      if (preset === '3days') {
-        const s = formatYMD(now);
-        const e = new Date(now);
-        e.setDate(e.getDate() + 2);
-        return { start: s, end: formatYMD(e) };
-      }
-      if (preset === 'this_week') {
-        const day = now.getDay();
-        const distToSun = day === 0 ? 0 : 7 - day;
-        const sun = new Date(now);
-        sun.setDate(sun.getDate() + distToSun);
-        return { start: formatYMD(now), end: formatYMD(sun) };
-      }
-      const todayStr = formatYMD(now);
-      return { start: todayStr, end: todayStr };
-    };
-
-    // Quick Preset link click
-    modalContainer.querySelectorAll('.ald-quick-link').forEach((link) => {
-      link.addEventListener('click', (e) => {
-        e.preventDefault();
-        const presetKey = e.currentTarget.getAttribute('data-preset');
-        const { start, end } = getPresetDates(presetKey);
-        startDateEl.value = start;
-        endDateEl.value = end;
-        updateDateDisplays();
-        updateDurationBadge();
-        debouncedPreview();
-      });
-    });
-
-    const startDateTextEl = document.getElementById('leave-start-date-text');
-    const endDateTextEl = document.getElementById('leave-end-date-text');
-
-    const updateDateDisplays = () => {
-      if (startDateTextEl && startDateEl) {
-        startDateTextEl.textContent = formatPresentationDate(startDateEl.value);
-      }
-      if (endDateTextEl && endDateEl) {
-        endDateTextEl.textContent = formatPresentationDate(endDateEl.value);
-      }
-    };
-
-    // Date change listeners
-    startDateEl.addEventListener('change', () => {
-      if (!endDateEl.value || endDateEl.value < startDateEl.value) {
-        endDateEl.value = startDateEl.value;
-      }
-      updateDateDisplays();
-      updateDurationBadge();
-      debouncedPreview();
-    });
-    startDateEl.addEventListener('input', () => {
-      updateDateDisplays();
-    });
-
-    endDateEl.addEventListener('change', () => {
-      if (endDateEl.value < startDateEl.value) {
-        startDateEl.value = endDateEl.value;
-      }
-      updateDateDisplays();
-      updateDurationBadge();
-      debouncedPreview();
-    });
-    endDateEl.addEventListener('input', () => {
-      updateDateDisplays();
-    });
-
-    // Box click helper to open picker smoothly
-    const startBox = document.getElementById('leave-start-date-box');
-    const endBox = document.getElementById('leave-end-date-box');
-    startBox?.addEventListener('click', (e) => {
-      if (e.target !== startDateEl) {
-        try { startDateEl.showPicker(); } catch (_) { startDateEl.focus(); }
-      }
-    });
-    endBox?.addEventListener('click', (e) => {
-      if (e.target !== endDateEl) {
-        try { endDateEl.showPicker(); } catch (_) { endDateEl.focus(); }
-      }
-    });
-
-    // Setup Custom Selects
-    const initCustomSelect = (wrapId, hiddenInputId, onSelect) => {
-      const wrap = modalContainer.querySelector(`#${wrapId}`);
-      const input = modalContainer.querySelector(`#${hiddenInputId}`);
-      if (!wrap || !input) return;
-
-      const trigger = wrap.querySelector('.cselect-trigger');
-      const menu = wrap.querySelector('.cselect-menu');
-      const label = wrap.querySelector('.cselect-label');
-
-      trigger.onclick = (e) => {
-        e.stopPropagation();
-        const wasOpen = menu.classList.contains('is-open');
-        modalContainer.querySelectorAll('.cselect-menu.is-open').forEach((m) => m.classList.remove('is-open'));
-        modalContainer.querySelectorAll('.cselect-trigger.is-active').forEach((t) => t.classList.remove('is-active'));
-        if (!wasOpen) {
-          menu.classList.add('is-open');
-          trigger.classList.add('is-active');
+    StaffApplyLeaveDialog.open({
+      staffId: staffId || null,
+      staffName: resolvedStaffName,
+      initialDate,
+      showModeSwitch: !staffId,
+      staffList,
+      salonWorkingHours: this.app?.salonWorkingHours || [],
+      onSuccess: async () => {
+        if (this.currentStaffId) {
+          await this.loadStaffLeaves(this.currentStaffId);
         }
-      };
-
-      menu.querySelectorAll('.cselect-option').forEach((opt) => {
-        opt.onclick = (e) => {
-          e.stopPropagation();
-          const val = opt.getAttribute('data-value');
-          const primaryText = opt.querySelector('span:first-child')?.textContent || opt.textContent;
-          input.value = val;
-          label.textContent = primaryText;
-          menu.querySelectorAll('.cselect-option').forEach((o) => o.classList.remove('is-selected'));
-          opt.classList.add('is-selected');
-          menu.classList.remove('is-open');
-          trigger.classList.remove('is-active');
-          if (typeof onSelect === 'function') onSelect(val);
-        };
-      });
-    };
-
-    // Close custom dropdowns on modal backdrop click
-    modalContainer.addEventListener('click', () => {
-      modalContainer.querySelectorAll('.cselect-menu.is-open').forEach((m) => m.classList.remove('is-open'));
-      modalContainer.querySelectorAll('.cselect-trigger.is-active').forEach((t) => t.classList.remove('is-active'));
-    });
-
-    // Initialize Leave Type dropdown
-    initCustomSelect('cselect-leave-type', 'leave-type', () => {});
-
-    // Initialize Shift Coverage dropdown
-    initCustomSelect('cselect-leave-portion', 'leave-portion', (val) => {
-      const isCustom = val === 'CUSTOM_HOURS';
-      if (customHoursGroup) {
-        customHoursGroup.style.display = isCustom ? 'flex' : 'none';
-      }
-      if (isCustom) updateCustomHoursCalc();
-      debouncedPreview();
-    });
-
-    // Custom Hours listeners
-    customStartEl.addEventListener('input', () => {
-      updateCustomHoursCalc();
-      debouncedPreview();
-    });
-    customEndEl.addEventListener('input', () => {
-      updateCustomHoursCalc();
-    });
-
-    // Initialize Duration Badge
-    updateDurationBadge();
-
-    // Submit handler
-    document.getElementById('leave-management-form')?.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const targetStaffId = staffId || staffSelectEl?.value;
-      const sDate = startDateEl.value;
-      const eDate = endDateEl.value;
-      const portion = portionInput.value || 'FULL_DAY';
-      const leaveTypeVal = leaveTypeInput.value || 'SICK_LEAVE';
-
-      if (!targetStaffId) {
-        this.toast('Please select a specialist', 'error');
-        return;
-      }
-
-      if (sDate > eDate) {
-        this.toast('Start date cannot be after end date', 'error');
-        return;
-      }
-
-      if (portion === 'CUSTOM_HOURS') {
-        if (!customStartEl.value || !customEndEl.value) {
-          this.toast('Please specify both Custom Start Time and Custom End Time', 'error');
-          return;
-        }
-        if (customStartEl.value >= customEndEl.value) {
-          this.toast('Custom start time must be before custom end time', 'error');
-          return;
-        }
-      }
-
-      const btnSubmit = document.getElementById('btn-submit-leave');
-      if (btnSubmit) {
-        btnSubmit.disabled = true;
-        btnSubmit.innerHTML = `
-          <div class="spinner-small" style="display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
-          <span>Processing...</span>
-        `;
-      }
-
-      try {
-        const payload = {
-          startDate: sDate,
-          endDate: eDate,
-          leaveType: leaveTypeVal,
-          leavePortion: portion,
-          reason: document.getElementById('leave-reason')?.value || undefined,
-          notes: document.getElementById('leave-notes')?.value || undefined,
-        };
-
-        if (portion === 'CUSTOM_HOURS') {
-          payload.customStartTime = customStartEl.value;
-          payload.customEndTime = customEndEl.value;
-        }
-
-        const foundStaff = staffList.find((s) => s.id === targetStaffId);
-        const stName = foundStaff ? foundStaff.name : (staffName || 'Specialist');
-
-        const result = await ApiClient.markStaffAbsent(targetStaffId, payload);
-        closeModal();
-
-        // Immediate in-memory synchronization
-        const foundSt = (this.app?.staffList || []).find((s) => s.id === targetStaffId);
-        if (foundSt && result?.absence) {
-          foundSt.absences = Array.isArray(foundSt.absences) ? foundSt.absences : [];
-          foundSt.absences = foundSt.absences.filter((a) => a.id !== result.absence.id);
-          foundSt.absences.unshift(result.absence);
-          foundSt.operationalStatus = 'ON_LEAVE';
-          foundSt.operationalStatusLabel = 'On Leave';
-          foundSt.operationalStatusReason = result.absence.reason || 'Approved leave';
-        }
-
-        // Show result summary view
-        this.showLeaveResultModal(stName, result);
-
-        // Refresh dashboard and staff workspaces
-        if (typeof this.app.loadData === 'function') {
+        if (typeof this.app?.loadData === 'function') {
           await this.app.loadData(true);
-        } else if (typeof this.app.loadStaff === 'function') {
+        } else if (typeof this.app?.loadStaff === 'function') {
           await this.app.loadStaff();
         }
-        if (typeof this.app.render === 'function') {
+        if (typeof this.app?.render === 'function') {
           this.app.render();
         }
-      } catch (err) {
-        this.toast(err.message || 'Failed to record leave', 'error');
-        if (btnSubmit) {
-          btnSubmit.disabled = false;
-          btnSubmit.innerHTML = '<span>🚫 Confirm & Process Leave</span>';
+        if (this.app?.calendarView?.refresh) {
+          this.app.calendarView.refresh();
         }
       }
     });
@@ -661,7 +208,7 @@ export class LeaveManagementUI {
 
           <div style="margin-bottom: 16px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px 14px;">
             <p style="color: #cbd5e1; font-size: 0.86rem; margin: 0 0 8px 0; line-height: 1.4;">
-              Leave recorded for <strong>${staffName}</strong> from <strong>${formatDateFriendly(absence.startDate || absence.absenceDate)}</strong> to <strong>${formatDateFriendly(absence.endDate || absence.absenceDate)}</strong>.
+              Leave recorded for <strong>${staffName}</strong> from <strong>${formatDateFriendly(absence.startDate)}</strong> to <strong>${formatDateFriendly(absence.endDate)}</strong>.
             </p>
             <div style="display: flex; align-items: center; gap: 8px;">
               <span style="font-size: 0.76rem; color: #94a3b8;">Calendar Status:</span>
@@ -762,8 +309,8 @@ export class LeaveManagementUI {
       container.innerHTML = `
         <div style="display: flex; flex-direction: column; gap: 12px;">
           ${absences.map((ab) => {
-            const sDate = ab.startDate || ab.absenceDate;
-            const eDate = ab.endDate || ab.absenceDate;
+            const sDate = ab.startDate;
+            const eDate = ab.endDate;
             const isMultiDay = sDate && eDate && sDate !== eDate;
             const dateDisplay = isMultiDay
               ? `${formatDateFriendly(sDate)} → ${formatDateFriendly(eDate)}`
@@ -791,7 +338,7 @@ export class LeaveManagementUI {
             }
 
             const typeInfo = getLeaveTypeDetails(ab.leaveType, ab.reason);
-            const portionInfo = getPortionDetails(ab.leavePortion, ab.customStartTime, ab.customEndTime);
+            const portionInfo = getPortionDetails(ab.isPartialDay, ab.startTime, ab.endTime);
             const appliedFormatted = formatAppliedTimestamp(ab.createdAt);
 
             const impactClass = 'lhc-impact-clean';
@@ -938,7 +485,7 @@ export class LeaveManagementUI {
     const modalContainer = document.getElementById('modal-container');
     if (!modalContainer) return;
 
-    const currentEndDate = absence.endDate || absence.absenceDate;
+    const currentEndDate = absence.endDate;
     const currentEndObj = new Date(currentEndDate);
     currentEndObj.setDate(currentEndObj.getDate() + 1);
     const defaultNewEnd = currentEndObj.toISOString().split('T')[0];
@@ -954,7 +501,7 @@ export class LeaveManagementUI {
             <button class="close-btn" id="btn-close-extend-modal">&times;</button>
           </div>
           <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 14px;">
-            Current Leave Period: <strong>${formatDateFriendly(absence.startDate || absence.absenceDate)}</strong> to <strong>${formatDateFriendly(currentEndDate)}</strong>.
+            Current Leave Period: <strong>${formatDateFriendly(absence.startDate)}</strong> to <strong>${formatDateFriendly(currentEndDate)}</strong>.
           </p>
 
           <form id="extend-leave-form">
@@ -1001,7 +548,9 @@ export class LeaveManagementUI {
       const queryParams = {
         startDate: defaultNewEnd,
         endDate: newEndDateVal,
-        leavePortion: absence.leavePortion || 'FULL_DAY',
+        isPartialDay: absence.isPartialDay || false,
+        startTime: absence.startTime || undefined,
+        endTime: absence.endTime || undefined,
       };
 
       try {
@@ -1068,8 +617,8 @@ export class LeaveManagementUI {
     const modalContainer = document.getElementById('modal-container');
     if (!modalContainer) return;
 
-    const sDate = absence.startDate || absence.absenceDate;
-    const eDate = absence.endDate || absence.absenceDate;
+    const sDate = absence.startDate;
+    const eDate = absence.endDate;
     const isMultiDay = sDate && eDate && sDate !== eDate;
     const dateDisplay = isMultiDay
       ? `${formatDateFriendly(sDate)} → ${formatDateFriendly(eDate)}`
@@ -1097,7 +646,7 @@ export class LeaveManagementUI {
     }
 
     const typeInfo = getLeaveTypeDetails(absence.leaveType, absence.reason);
-    const portionInfo = getPortionDetails(absence.leavePortion, absence.customStartTime, absence.customEndTime);
+    const portionInfo = getPortionDetails(absence.isPartialDay, absence.startTime, absence.endTime);
     const appliedFormatted = formatAppliedTimestamp(absence.createdAt);
 
     modalContainer.innerHTML = `

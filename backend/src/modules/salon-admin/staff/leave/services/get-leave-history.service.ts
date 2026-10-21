@@ -34,16 +34,9 @@ export class GetLeaveHistoryService {
         ? new Date(`${query.endDate}T23:59:59.999Z`)
         : new Date('2099-12-31T23:59:59.999Z');
 
-      whereClause.OR = [
-        {
-          AND: [
-            { startDate: { lte: filterEnd } },
-            { endDate: { gte: filterStart } },
-          ],
-        },
-        {
-          absenceDate: { gte: filterStart, lte: filterEnd },
-        },
+      whereClause.AND = [
+        { startDate: { lte: filterEnd } },
+        { endDate: { gte: filterStart } },
       ];
     }
 
@@ -60,7 +53,7 @@ export class GetLeaveHistoryService {
     });
 
     return absences.map((ab) => {
-      const eDate = ab.endDate || ab.absenceDate;
+      const eDate = ab.endDate;
       const eIso = eDate ? eDate.toISOString().split('T')[0] : '';
       const eParsed = DateTime.fromISO(eIso, { zone: timezone }).startOf('day');
       const isPast = eParsed < todayInSalon;
@@ -71,6 +64,9 @@ export class GetLeaveHistoryService {
 
       return {
         ...ab,
+        isPartialDay: Boolean(ab.isPartialDay),
+        startTime: ab.startTime || null,
+        endTime: ab.endTime || null,
         statusKey,
         statusTitle,
         isPast,

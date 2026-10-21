@@ -1,17 +1,20 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { SalonsService } from '../../../../src/modules/salon-admin/salons/salons.service';
+import { ClosuresService } from '../../../../src/modules/salon-admin/closures/closures.service';
 import { PrismaService } from '../../../../src/database/prisma.service';
 import { AppointmentsService } from '../../../../src/modules/salon-admin/appointments/appointments.service';
 import { AvailabilityService } from '../../../../src/modules/salon-admin/availability/availability.service';
 import { AvailabilityEngineService } from '../../../../src/modules/salon-admin/availability/availability-engine.service';
 import { ConfigService } from '@nestjs/config';
 import { WhatsAppService } from '../../../../src/modules/channels/whatsapp/whatsapp.service';
-import { SalonClosureType, AppointmentStatus, DayOfWeek } from '@prisma/client';
-import { DateTime } from 'luxon';
+import { SalonClosureType } from '@prisma/client';
+import { SlotSqueezePolicy } from '../../../../src/modules/salon-admin/availability/policies/slot-squeeze.policy';
+import { StylistStatusEngine } from '../../../../src/modules/salon-admin/staff/engines/stylist-status.engine';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { DateTime } from 'luxon';
+import { HolidaysProviderService } from '../../../../src/modules/salon-admin/closures/holidays-provider.service';
 
 describe('Human-like Scenario Test Suite: Salon Closures & Emergency Holiday Management', () => {
-  let salonsService: SalonsService;
+  let closuresService: ClosuresService;
   let availabilityService: AvailabilityService;
   let appointmentsService: AppointmentsService;
   let prismaService: PrismaService;
@@ -30,7 +33,7 @@ describe('Human-like Scenario Test Suite: Salon Closures & Emergency Holiday Man
 
   const mockPrismaService = {
     salonClosure: {
-      findMany: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
       findFirst: jest.fn(),
       create: jest.fn(),
       delete: jest.fn(),
@@ -40,8 +43,22 @@ describe('Human-like Scenario Test Suite: Salon Closures & Emergency Holiday Man
       findMany: jest.fn(),
     },
     salonWorkingHours: {
-      findMany: jest.fn(),
-      findUnique: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([
+        { dayOfWeek: 'MONDAY', isClosed: false, startTime: '09:00', endTime: '21:00' },
+        { dayOfWeek: 'TUESDAY', isClosed: false, startTime: '09:00', endTime: '21:00' },
+        { dayOfWeek: 'WEDNESDAY', isClosed: false, startTime: '09:00', endTime: '21:00' },
+        { dayOfWeek: 'THURSDAY', isClosed: false, startTime: '09:00', endTime: '21:00' },
+        { dayOfWeek: 'FRIDAY', isClosed: false, startTime: '09:00', endTime: '21:00' },
+        { dayOfWeek: 'SATURDAY', isClosed: false, startTime: '09:00', endTime: '21:00' },
+        { dayOfWeek: 'SUNDAY', isClosed: true, startTime: '10:00', endTime: '18:00' },
+      ]),
+      findUnique: jest.fn().mockImplementation((args: any) => {
+        const dow = args?.where?.salonId_dayOfWeek?.dayOfWeek;
+        if (dow === 'SUNDAY') {
+          return Promise.resolve({ dayOfWeek: 'SUNDAY', isClosed: true, startTime: '10:00', endTime: '18:00' });
+        }
+        return Promise.resolve({ dayOfWeek: dow || 'MONDAY', isClosed: false, startTime: '09:00', endTime: '21:00' });
+      }),
     },
     salon: {
       findUnique: jest.fn().mockResolvedValue(mockSalon),
@@ -62,12 +79,25 @@ describe('Human-like Scenario Test Suite: Salon Closures & Emergency Holiday Man
       findUnique: jest.fn(),
       update: jest.fn(),
     },
+    stylist: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+    stylistAbsence: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
   };
 
   const mockAppointmentsService = {
     updateStatus: jest.fn(),
     emitSalonEvent: jest.fn(),
     autoCompleteElapsedAppointments: jest.fn().mockResolvedValue(0),
+    resolveScheduleConflicts: jest.fn().mockResolvedValue({
+      totalAffected: 0,
+      rescheduledCount: 0,
+      cancelledCount: 0,
+      details: [],
+      message: 'No conflicts found.',
+    }),
   };
 
   const mockAvailabilityEngineService = {
@@ -93,20 +123,24 @@ describe('Human-like Scenario Test Suite: Salon Closures & Emergency Holiday Man
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockPrismaService.salon.findUnique.mockResolvedValue(mockSalon);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        SalonsService,
+        ClosuresService,
         AvailabilityService,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: AppointmentsService, useValue: mockAppointmentsService },
         { provide: AvailabilityEngineService, useValue: mockAvailabilityEngineService },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: WhatsAppService, useValue: mockWhatsAppService },
+        { provide: SlotSqueezePolicy, useValue: { canSqueeze: jest.fn().mockReturnValue(false) } },
+        { provide: StylistStatusEngine, useValue: { calculateStatus: jest.fn() } },
+        { provide: HolidaysProviderService, useValue: { getHolidaysForYear: jest.fn().mockReturnValue([]), getHolidaysForRange: jest.fn().mockReturnValue([]) } },
       ],
     }).compile();
 
-    salonsService = module.get<SalonsService>(SalonsService);
+    closuresService = module.get<ClosuresService>(ClosuresService);
     availabilityService = module.get<AvailabilityService>(AvailabilityService);
     appointmentsService = module.get<AppointmentsService>(AppointmentsService);
     prismaService = module.get<PrismaService>(PrismaService);
@@ -117,49 +151,70 @@ describe('Human-like Scenario Test Suite: Salon Closures & Emergency Holiday Man
   // =========================================================================
   describe('Scenario 1: Planned Festival Holiday (Advance Date Blocking)', () => {
     it('S1.1: Should successfully create a planned Diwali holiday date range', async () => {
+      const futureDate1 = DateTime.now().setZone('Asia/Kolkata').plus({ days: 10 }).toISODate()!;
+      const futureDate2 = DateTime.now().setZone('Asia/Kolkata').plus({ days: 11 }).toISODate()!;
+
       const dto = {
-        closureType: SalonClosureType.HOLIDAY,
-        startDate: '2026-11-01',
-        endDate: '2026-11-02',
+        closureType: SalonClosureType.FESTIVAL,
+        startDate: futureDate1,
+        endDate: futureDate2,
         reason: 'Diwali Festival Holidays',
-        autoCancelAppointments: true,
       };
 
-      mockPrismaService.appointment.findMany.mockResolvedValue([]);
+      mockPrismaService.salonClosure.findFirst.mockResolvedValue(null);
       mockPrismaService.salonClosure.create.mockResolvedValue({
         id: 'closure-diwali-101',
         salonId: mockSalonId,
-        closureType: SalonClosureType.HOLIDAY,
-        startDate: new Date('2026-11-01T00:00:00Z'),
-        endDate: new Date('2026-11-02T00:00:00Z'),
+        closureType: SalonClosureType.FESTIVAL,
+        startDate: new Date(futureDate1 + 'T00:00:00Z'),
+        endDate: new Date(futureDate2 + 'T00:00:00Z'),
         reason: dto.reason,
         affectedBookingsCount: 0,
         cancelledCount: 0,
       });
 
-      const closure = await salonsService.createSalonClosure(mockSalonId, dto, mockAdminId);
+      const result = await closuresService.createClosure(mockSalonId, dto, mockAdminId);
 
-      expect(closure.id).toBe('closure-diwali-101');
-      expect(closure.reason).toBe('Diwali Festival Holidays');
+      expect(result.closure.id).toBe('closure-diwali-101');
+      expect(result.closure.reason).toBe('Diwali Festival Holidays');
+      expect(mockAppointmentsService.resolveScheduleConflicts).toHaveBeenCalledWith(
+        expect.objectContaining({
+          salonId: mockSalonId,
+          scope: 'SALON',
+          isClosedOrOff: true,
+          reason: 'Diwali Festival Holidays',
+          dateRange: expect.objectContaining({
+            startTime: '09:00',
+            endTime: '21:00',
+            isPartialDay: false,
+          }),
+        }),
+      );
       expect(mockPrismaService.salonClosure.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           salonId: mockSalonId,
-          closureType: SalonClosureType.HOLIDAY,
+          closureType: SalonClosureType.FESTIVAL,
           reason: 'Diwali Festival Holidays',
           createdByAdminId: mockAdminId,
         }),
       });
+      expect(mockAppointmentsService.emitSalonEvent).toHaveBeenCalledWith(
+        mockSalonId,
+        'STATUS_UPDATED',
+        expect.objectContaining({ type: 'SALON_CLOSURE_CREATED' }),
+      );
     });
 
-    it('S1.2: AvailabilityService should intercept Diwali date and return STORE_CLOSED with zero slots', async () => {
-      const holidayDateStr = '2026-11-01';
+    it('S1.2: AvailabilityService should intercept holiday date and return STORE_CLOSED with zero slots', async () => {
+      const holidayDateStr = DateTime.now().setZone('Asia/Kolkata').plus({ days: 10 }).toISODate()!;
 
       mockPrismaService.salonClosure.findFirst.mockResolvedValue({
         id: 'closure-diwali-101',
         salonId: mockSalonId,
-        closureType: SalonClosureType.HOLIDAY,
-        startDate: new Date('2026-11-01T00:00:00.000Z'),
-        endDate: new Date('2026-11-02T23:59:59.999Z'),
+        closureType: SalonClosureType.FESTIVAL,
+        startDate: new Date(holidayDateStr + 'T00:00:00.000Z'),
+        endDate: new Date(holidayDateStr + 'T23:59:59.999Z'),
+        isPartialDay: false,
         reason: 'Diwali Festival Holidays',
       });
 
@@ -176,108 +231,51 @@ describe('Human-like Scenario Test Suite: Salon Closures & Emergency Holiday Man
   });
 
   // =========================================================================
-  // SCENARIO 2: EMERGENCY STORE CLOSURE & ZERO CUSTOMER PENALTY
+  // SCENARIO 2: EMERGENCY STORE CLOSURE & CONFLICT RESOLUTION
   // =========================================================================
   describe('Scenario 2: Instant Emergency Store Closure (Sudden Power Cut)', () => {
-    it('S2.1: Should auto-cancel active CONFIRMED & CHECKED_IN appointments with SALON_EMERGENCY reason category', async () => {
+    it('S2.1: Should invoke resolveScheduleConflicts with isEmergency: true', async () => {
+      const emergDate = DateTime.now().setZone('Asia/Kolkata').plus({ days: 1 }).toISODate()!;
+
       const emergencyDto = {
         closureType: SalonClosureType.EMERGENCY_CLOSURE,
-        startDate: '2026-10-10',
-        endDate: '2026-10-10',
+        startDate: emergDate,
+        endDate: emergDate,
         reason: 'Sudden Transformer Explosion & Power Failure',
-        autoCancelAppointments: true,
       };
 
-      const mockActiveAppointments = [
-        {
-          id: 'appt-confirmed-101',
-          appointmentNumber: 'APT-1001',
-          customerName: 'Amit Shah',
-          customerPhone: '919811122233',
-          status: AppointmentStatus.CONFIRMED,
-          startAt: new Date('2026-10-10T11:00:00.000Z'),
-          endAt: new Date('2026-10-10T11:30:00.000Z'),
-        },
-        {
-          id: 'appt-checkedin-102',
-          appointmentNumber: 'APT-1002',
-          customerName: 'Kavita Roy',
-          customerPhone: '919844455566',
-          status: AppointmentStatus.CHECKED_IN,
-          startAt: new Date('2026-10-10T11:30:00.000Z'),
-          endAt: new Date('2026-10-10T12:00:00.000Z'),
-        },
-      ];
+      mockPrismaService.salonClosure.findFirst.mockResolvedValue(null);
+      mockAppointmentsService.resolveScheduleConflicts.mockResolvedValue({
+        totalAffected: 2,
+        rescheduledCount: 2,
+        cancelledCount: 0,
+        details: [{ appointmentId: 'apt-1' }, { appointmentId: 'apt-2' }],
+        message: '2 appointments rescheduled.',
+      });
 
-      mockPrismaService.appointment.findMany.mockResolvedValue(mockActiveAppointments);
       mockPrismaService.salonClosure.create.mockResolvedValue({
         id: 'closure-emerg-202',
         salonId: mockSalonId,
         closureType: SalonClosureType.EMERGENCY_CLOSURE,
-        startDate: new Date('2026-10-10T00:00:00Z'),
-        endDate: new Date('2026-10-10T00:00:00Z'),
+        startDate: new Date(emergDate + 'T00:00:00Z'),
+        endDate: new Date(emergDate + 'T00:00:00Z'),
         reason: emergencyDto.reason,
         affectedBookingsCount: 2,
         cancelledCount: 2,
       });
 
-      mockAppointmentsService.updateStatus.mockResolvedValue({ status: AppointmentStatus.CANCELLED });
+      const result = await closuresService.createClosure(mockSalonId, emergencyDto, mockAdminId);
 
-      const closure = await salonsService.createSalonClosure(mockSalonId, emergencyDto, mockAdminId);
-
-      expect(mockAppointmentsService.updateStatus).toHaveBeenCalledTimes(2);
-
-      // Verify ZERO penalty reasonCategory = SALON_EMERGENCY
-      expect(mockAppointmentsService.updateStatus).toHaveBeenNthCalledWith(
-        1,
-        mockSalonId,
-        'appt-confirmed-101',
-        {
-          status: AppointmentStatus.CANCELLED,
-          reason: 'Store Closure: Sudden Transformer Explosion & Power Failure',
-          reasonCategory: 'SALON_EMERGENCY',
-        },
-      );
-
-      expect(mockAppointmentsService.updateStatus).toHaveBeenNthCalledWith(
-        2,
-        mockSalonId,
-        'appt-checkedin-102',
-        {
-          status: AppointmentStatus.CANCELLED,
-          reason: 'Store Closure: Sudden Transformer Explosion & Power Failure',
-          reasonCategory: 'SALON_EMERGENCY',
-        },
-      );
-
-      expect(closure.cancelledCount).toBe(2);
-    });
-
-    it('S2.2: Verify IN_SERVICE (client in chair) appointments are NOT queried for cancellation', async () => {
-      const emergencyDto = {
-        closureType: SalonClosureType.EMERGENCY_CLOSURE,
-        startDate: '2026-10-10',
-        endDate: '2026-10-10',
-        reason: 'Emergency Water Pipe Burst',
-        autoCancelAppointments: true,
-      };
-
-      await salonsService.createSalonClosure(mockSalonId, emergencyDto, mockAdminId);
-
-      // Verify findMany status filter explicitly excludes IN_SERVICE
-      expect(mockPrismaService.appointment.findMany).toHaveBeenCalledWith({
-        where: expect.objectContaining({
-          status: {
-            in: [
-              AppointmentStatus.CONFIRMED,
-              AppointmentStatus.CHECKED_IN,
-              AppointmentStatus.PENDING_ACCEPTANCE,
-              AppointmentStatus.PENDING_RESCHEDULE,
-            ],
-          },
+      expect(mockAppointmentsService.resolveScheduleConflicts).toHaveBeenCalledWith(
+        expect.objectContaining({
+          salonId: mockSalonId,
+          scope: 'SALON',
+          isClosedOrOff: true,
+          reason: 'Sudden Transformer Explosion & Power Failure',
+          adminId: mockAdminId,
         }),
-        include: expect.anything(),
-      });
+      );
+      expect(result.rescheduledCount).toBe(2);
     });
   });
 
@@ -285,42 +283,34 @@ describe('Human-like Scenario Test Suite: Salon Closures & Emergency Holiday Man
   // SCENARIO 3: PARTIAL-DAY STORE CLOSURE (CLOSING EARLY AT 14:00)
   // =========================================================================
   describe('Scenario 3: Partial-Day Store Closure (Closing Early at 14:00)', () => {
-    it('S3.1: Should only cancel appointments falling inside partial-day window (14:00 - 18:00)', async () => {
+    it('S3.1: Should pass custom start/end time window to resolveScheduleConflicts', async () => {
+      const partialDate = DateTime.now().setZone('Asia/Kolkata').plus({ days: 2 }).toISODate()!;
+
       const partialDto = {
-        closureType: SalonClosureType.PARTIAL_DAY,
-        startDate: '2026-10-12',
-        endDate: '2026-10-12',
+        closureType: SalonClosureType.OTHER,
+        startDate: partialDate,
+        endDate: partialDate,
         isPartialDay: true,
         startTime: '14:00',
         endTime: '18:00',
         reason: 'Store Renovation Work',
-        autoCancelAppointments: true,
       };
 
-      const mockAppointmentsOnDate = [
-        {
-          id: 'appt-morning',
-          appointmentNumber: 'APT-MORN',
-          startAt: new Date('2026-10-12T05:30:00.000Z'), // 11:00 AM IST (outside window)
-          endAt: new Date('2026-10-12T06:00:00.000Z'),   // 11:30 AM IST
-          status: AppointmentStatus.CONFIRMED,
-        },
-        {
-          id: 'appt-afternoon',
-          appointmentNumber: 'APT-AFT',
-          startAt: new Date('2026-10-12T09:30:00.000Z'), // 15:00 PM IST (inside 14:00-18:00 window)
-          endAt: new Date('2026-10-12T10:00:00.000Z'),   // 15:30 PM IST
-          status: AppointmentStatus.CONFIRMED,
-        },
-      ];
+      mockPrismaService.salonClosure.findFirst.mockResolvedValue(null);
+      mockAppointmentsService.resolveScheduleConflicts.mockResolvedValue({
+        totalAffected: 1,
+        rescheduledCount: 1,
+        cancelledCount: 0,
+        details: [{ appointmentId: 'apt-1' }],
+        message: '1 appointment rescheduled.',
+      });
 
-      mockPrismaService.appointment.findMany.mockResolvedValue(mockAppointmentsOnDate);
       mockPrismaService.salonClosure.create.mockResolvedValue({
         id: 'closure-partial-303',
         salonId: mockSalonId,
-        closureType: SalonClosureType.PARTIAL_DAY,
-        startDate: new Date('2026-10-12T00:00:00Z'),
-        endDate: new Date('2026-10-12T00:00:00Z'),
+        closureType: SalonClosureType.OTHER,
+        startDate: new Date(partialDate + 'T00:00:00Z'),
+        endDate: new Date(partialDate + 'T00:00:00Z'),
         isPartialDay: true,
         startTime: '14:00',
         endTime: '18:00',
@@ -329,17 +319,19 @@ describe('Human-like Scenario Test Suite: Salon Closures & Emergency Holiday Man
         cancelledCount: 1,
       });
 
-      mockAppointmentsService.updateStatus.mockResolvedValue({ status: AppointmentStatus.CANCELLED });
+      const result = await closuresService.createClosure(mockSalonId, partialDto, mockAdminId);
 
-      const closure = await salonsService.createSalonClosure(mockSalonId, partialDto, mockAdminId);
-
-      // Only 1 appointment (afternoon) should be cancelled! Morning appointment remains untouched!
-      expect(mockAppointmentsService.updateStatus).toHaveBeenCalledTimes(1);
-      expect(mockAppointmentsService.updateStatus).toHaveBeenCalledWith(
-        mockSalonId,
-        'appt-afternoon',
-        expect.anything(),
+      expect(mockAppointmentsService.resolveScheduleConflicts).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scope: 'SALON',
+          dateRange: expect.objectContaining({
+            startTime: '14:00',
+            endTime: '18:00',
+            isPartialDay: true,
+          }),
+        }),
       );
+      expect(result.closure.isPartialDay).toBe(true);
     });
   });
 
@@ -347,16 +339,17 @@ describe('Human-like Scenario Test Suite: Salon Closures & Emergency Holiday Man
   // SCENARIO 4: STORE REOPENING & DELETION
   // =========================================================================
   describe('Scenario 4: Store Reopening & Closure Deletion', () => {
-    it('S4.1: Should delete store closure and emit SALON_CLOSURE_DELETED event', async () => {
+    it('S4.1: Should delete upcoming store closure and emit SALON_CLOSURE_DELETED event', async () => {
       mockPrismaService.salonClosure.findFirst.mockResolvedValue({
         id: 'closure-diwali-101',
         salonId: mockSalonId,
+        endDate: new Date('2099-11-02T00:00:00Z'),
       });
       mockPrismaService.salonClosure.delete.mockResolvedValue({ id: 'closure-diwali-101' });
 
-      const result = await salonsService.deleteSalonClosure(mockSalonId, 'closure-diwali-101');
+      const result = await closuresService.deleteClosure(mockSalonId, 'closure-diwali-101');
 
-      expect(result.message).toContain('removed successfully');
+      expect(result.message).toContain('reopened successfully');
       expect(mockPrismaService.salonClosure.delete).toHaveBeenCalledWith({
         where: { id: 'closure-diwali-101' },
       });
@@ -376,31 +369,210 @@ describe('Human-like Scenario Test Suite: Salon Closures & Emergency Holiday Man
   // =========================================================================
   describe('Scenario 5: Validation & Boundary Edge Cases', () => {
     it('S5.1: Should throw BadRequestException if startDate is after endDate', async () => {
+      const pastStart = DateTime.now().setZone('Asia/Kolkata').plus({ days: 5 }).toISODate()!;
+      const earlierEnd = DateTime.now().setZone('Asia/Kolkata').plus({ days: 1 }).toISODate()!;
+
       const invalidDto = {
         closureType: SalonClosureType.HOLIDAY,
-        startDate: '2026-11-05',
-        endDate: '2026-11-01',
+        startDate: pastStart,
+        endDate: earlierEnd,
         reason: 'Invalid Date Range',
       };
 
-      await expect(salonsService.createSalonClosure(mockSalonId, invalidDto, mockAdminId)).rejects.toThrow(
+      await expect(closuresService.createClosure(mockSalonId, invalidDto, mockAdminId)).rejects.toThrow(
         BadRequestException,
       );
     });
 
     it('S5.2: Should throw NotFoundException if salon does not exist', async () => {
       mockPrismaService.salon.findUnique.mockResolvedValue(null);
+      const validDate = DateTime.now().setZone('Asia/Kolkata').plus({ days: 3 }).toISODate()!;
 
       const dto = {
         closureType: SalonClosureType.HOLIDAY,
-        startDate: '2026-11-01',
-        endDate: '2026-11-01',
+        startDate: validDate,
+        endDate: validDate,
         reason: 'Non-existent salon',
       };
 
-      await expect(salonsService.createSalonClosure('invalid-salon-id', dto, mockAdminId)).rejects.toThrow(
+      await expect(closuresService.createClosure('invalid-salon-id', dto, mockAdminId)).rejects.toThrow(
         NotFoundException,
       );
     });
+
+    it('S5.3: Should throw BadRequestException if partial-day closure spans multiple dates', async () => {
+      const d1 = DateTime.now().setZone('Asia/Kolkata').plus({ days: 2 }).toISODate()!;
+      const d2 = DateTime.now().setZone('Asia/Kolkata').plus({ days: 4 }).toISODate()!;
+
+      const dto = {
+        closureType: SalonClosureType.OTHER,
+        startDate: d1,
+        endDate: d2,
+        isPartialDay: true,
+        startTime: '14:00',
+        endTime: '18:00',
+        reason: 'Invalid multi-day partial closure',
+      };
+
+      await expect(closuresService.createClosure(mockSalonId, dto, mockAdminId)).rejects.toThrow(
+        /Partial-day closures can only be scheduled for a single date/,
+      );
+    });
+
+    it('S5.4: Should throw BadRequestException if closure range exceeds 60 days', async () => {
+      const d1 = DateTime.now().setZone('Asia/Kolkata').plus({ days: 1 }).toISODate()!;
+      const d2 = DateTime.now().setZone('Asia/Kolkata').plus({ days: 80 }).toISODate()!;
+
+      const dto = {
+        closureType: SalonClosureType.HOLIDAY,
+        startDate: d1,
+        endDate: d2,
+        reason: 'Absurdly long closure range',
+      };
+
+      await expect(closuresService.createClosure(mockSalonId, dto, mockAdminId)).rejects.toThrow(
+        /cannot exceed 60 consecutive days/,
+      );
+    });
+
+    it('S5.5: Should detect and reject overlapping partial closure hours on same date', async () => {
+      const d = DateTime.now().setZone('Asia/Kolkata').plus({ days: 3 }).toISODate()!;
+
+      mockPrismaService.salonClosure.findMany.mockResolvedValue([
+        {
+          id: 'closure-existing-1',
+          startDate: new Date(d + 'T00:00:00Z'),
+          endDate: new Date(d + 'T00:00:00Z'),
+          isPartialDay: true,
+          startTime: '10:00',
+          endTime: '14:00',
+          reason: 'Morning Maintenance',
+        },
+      ]);
+
+      const overlappingDto = {
+        closureType: SalonClosureType.OTHER,
+        startDate: d,
+        endDate: d,
+        isPartialDay: true,
+        startTime: '13:00', // Overlaps with 10:00-14:00
+        endTime: '16:00',
+        reason: 'Afternoon Training',
+      };
+
+      await expect(closuresService.createClosure(mockSalonId, overlappingDto, mockAdminId)).rejects.toThrow(
+        /overlap with an existing closure/,
+      );
+    });
+  });
+
+  describe('Scenario S6: Unified Calendar Schedule & Closures Overview API', () => {
+    it('S6.1: Should return consolidated schedule with 7-day shifts, closures, stylist shifts, and leaves', async () => {
+      mockPrismaService.salonWorkingHours.findMany.mockResolvedValue([
+        { dayOfWeek: 'MONDAY', isClosed: true, startTime: '09:00', endTime: '21:00' },
+        { dayOfWeek: 'TUESDAY', isClosed: false, startTime: '10:00', endTime: '20:00' },
+        { dayOfWeek: 'WEDNESDAY', isClosed: false, startTime: '10:00', endTime: '20:00' },
+        { dayOfWeek: 'THURSDAY', isClosed: false, startTime: '10:00', endTime: '20:00' },
+        { dayOfWeek: 'FRIDAY', isClosed: false, startTime: '10:00', endTime: '21:00' },
+        { dayOfWeek: 'SATURDAY', isClosed: false, startTime: '09:00', endTime: '22:00' },
+        { dayOfWeek: 'SUNDAY', isClosed: false, startTime: '09:00', endTime: '22:00' },
+      ]);
+
+      mockPrismaService.salonClosure.findMany.mockResolvedValue([
+        {
+          id: 'closure-1',
+          closureType: SalonClosureType.HOLIDAY,
+          startDate: new Date('2026-10-02T00:00:00Z'),
+          endDate: new Date('2026-10-02T00:00:00Z'),
+          isPartialDay: false,
+          startTime: '10:00',
+          endTime: '20:00',
+          reason: 'Gandhi Jayanti',
+          notes: 'Store closed',
+        },
+      ]);
+
+      mockPrismaService.stylist.findMany.mockResolvedValue([
+        {
+          id: 'stylist-rahul',
+          name: 'Rahul Sharma',
+          profileImageUrl: '/avatars/rahul.jpg',
+          followsSalonSchedule: false,
+          workingHours: [
+            { dayOfWeek: 'MONDAY', isWorking: true, startTime: '10:00', endTime: '19:00' },
+            { dayOfWeek: 'TUESDAY', isWorking: false, startTime: null, endTime: null },
+            { dayOfWeek: 'WEDNESDAY', isWorking: true, startTime: '10:00', endTime: '19:00' },
+            { dayOfWeek: 'THURSDAY', isWorking: true, startTime: '10:00', endTime: '19:00' },
+            { dayOfWeek: 'FRIDAY', isWorking: true, startTime: '10:00', endTime: '20:00' },
+            { dayOfWeek: 'SATURDAY', isWorking: true, startTime: '09:00', endTime: '21:00' },
+            { dayOfWeek: 'SUNDAY', isWorking: true, startTime: '09:00', endTime: '21:00' },
+          ],
+        },
+      ]);
+
+      mockPrismaService.stylistAbsence.findMany.mockResolvedValue([
+        {
+          id: 'leave-1',
+          stylistId: 'stylist-rahul',
+          startDate: new Date('2026-10-08T00:00:00Z'),
+          endDate: new Date('2026-10-09T00:00:00Z'),
+          leaveType: 'SICK_LEAVE',
+          isPartialDay: false,
+          startTime: null,
+          endTime: null,
+          status: 'ACTIVE',
+          reason: 'Viral fever',
+          notes: null,
+          stylist: { id: 'stylist-rahul', name: 'Rahul Sharma', profileImageUrl: '/avatars/rahul.jpg' },
+        },
+      ]);
+
+      const res = await closuresService.getCalendarSchedule(mockSalonId, { month: '2026-10' });
+
+      expect(res.success).toBe(true);
+      expect(res.data.dateRange.startDate).toBe('2026-10-01');
+      expect(res.data.dateRange.endDate).toBe('2026-10-31');
+
+      // Salon Weekly Hours (7 days)
+      expect(res.data.salonSchedule.weeklyHours).toHaveLength(7);
+      const mondayHour = res.data.salonSchedule.weeklyHours.find((h: any) => h.dayOfWeek === 'MONDAY');
+      expect(mondayHour.isClosed).toBe(true);
+      expect(mondayHour.startTime).toBeNull();
+
+      const saturdayHour = res.data.salonSchedule.weeklyHours.find((h: any) => h.dayOfWeek === 'SATURDAY');
+      expect(saturdayHour.isClosed).toBe(false);
+      expect(saturdayHour.startTime).toBe('09:00');
+      expect(saturdayHour.endTime).toBe('22:00');
+
+      // Closures
+      expect(res.data.salonSchedule.closures).toHaveLength(1);
+      expect(res.data.salonSchedule.closures[0].reason).toBe('Gandhi Jayanti');
+
+      // Stylists & Stylist Weekly Off
+      expect(res.data.stylists).toHaveLength(1);
+      const rahul = res.data.stylists[0];
+      expect(rahul.name).toBe('Rahul Sharma');
+      const rahulTuesday = rahul.weeklyHours.find((h: any) => h.dayOfWeek === 'TUESDAY');
+      expect(rahulTuesday.isWorking).toBe(false);
+
+      // Leaves (single flat list with embedded stylist metadata)
+      expect(res.data.leaves).toHaveLength(1);
+      expect(res.data.leaves[0].stylistName).toBe('Rahul Sharma');
+      expect(res.data.leaves[0].leaveType).toBe('SICK_LEAVE');
+    });
+
+    it('S6.2: Should reject invalid month format or inverted date range', async () => {
+      await expect(closuresService.getCalendarSchedule(mockSalonId, { month: 'invalid-month' })).rejects.toThrow(
+        /Invalid month format/,
+      );
+
+      await expect(
+        closuresService.getCalendarSchedule(mockSalonId, {
+          startDate: '2026-10-20',
+          endDate: '2026-10-10',
+        }),
+      ).rejects.toThrow(/startDate cannot be after endDate/);
+    });
   });
 });
+

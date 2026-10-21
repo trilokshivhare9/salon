@@ -220,27 +220,15 @@ export class AvailabilityEngineService {
     absence: any,
     effectiveOpen: number,
     effectiveClose: number,
-    effectiveBreaks: MinuteInterval[],
+    effectiveBreaks: MinuteInterval[] = [],
   ): MinuteInterval[] {
-    if (!absence.leavePortion || absence.leavePortion === 'FULL_DAY') {
-      return [{ start: effectiveOpen, end: effectiveClose }];
-    }
+    const isPartial = Boolean(absence.isPartialDay);
+    const startTime = absence.startTime;
+    const endTime = absence.endTime;
 
-    const midPoint = Math.floor(effectiveOpen + (effectiveClose - effectiveOpen) / 2);
-    const firstBreak = effectiveBreaks.length > 0 ? effectiveBreaks[0] : null;
-
-    const firstHalfEnd = firstBreak ? firstBreak.start : midPoint;
-    const secondHalfStart = firstBreak ? firstBreak.end : midPoint;
-
-    if (absence.leavePortion === 'FIRST_HALF') {
-      return [{ start: effectiveOpen, end: firstHalfEnd }];
-    }
-    if (absence.leavePortion === 'SECOND_HALF') {
-      return [{ start: secondHalfStart, end: effectiveClose }];
-    }
-    if (absence.leavePortion === 'CUSTOM_HOURS' && absence.customStartTime && absence.customEndTime) {
-      const customStart = this.parseTimeStringToMinutes(absence.customStartTime);
-      const customEnd = this.parseTimeStringToMinutes(absence.customEndTime);
+    if (isPartial && startTime && endTime) {
+      const customStart = this.parseTimeStringToMinutes(startTime);
+      const customEnd = this.parseTimeStringToMinutes(endTime);
       const clampedStart = Math.max(effectiveOpen, customStart);
       const clampedEnd = Math.min(effectiveClose, customEnd);
       if (clampedStart < clampedEnd) {

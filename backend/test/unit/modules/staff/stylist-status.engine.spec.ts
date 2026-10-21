@@ -1,5 +1,5 @@
 import { StylistStatusEngine, StylistOperationalStatus } from '../../../../src/modules/salon-admin/staff/engines/stylist-status.engine';
-import { StylistStatus, DayOfWeek, AppointmentStatus, LeavePortion } from '@prisma/client';
+import { StylistStatus, DayOfWeek, AppointmentStatus } from '@prisma/client';
 import { DateTime } from 'luxon';
 
 describe('StylistStatusEngine', () => {
@@ -111,8 +111,7 @@ describe('StylistStatusEngine', () => {
         stylistId: 'stylist-1',
         status: 'ACTIVE',
         startDate: new Date('2026-10-12T00:00:00.000Z'),
-        endDate: new Date('2026-10-12T23:59:59.000Z'),
-        leavePortion: LeavePortion.FULL_DAY,
+        isPartialDay: false,
         leaveType: 'SICK_LEAVE',
         reason: 'Viral Fever',
       },

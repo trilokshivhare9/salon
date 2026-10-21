@@ -177,11 +177,14 @@ export class StaffWorkingHoursService {
           (endTime !== salonDay.endTime && !salonDay.isClosed);
 
         // Shifts that match salon facility operating hours are never customized
-        const isCustomized = item.isCustomized === false ? false : isDifferentFromSalon;
+        // An explicit day off when salon is open is ALWAYS customized
+        const isCustomized = !isWorking && !salonDay?.isClosed
+          ? true
+          : (item.isCustomized === false ? false : isDifferentFromSalon);
 
         const finalStartTime = !isCustomized && salonDay?.startTime ? salonDay.startTime : startTime;
         const finalEndTime = !isCustomized && salonDay?.endTime ? salonDay.endTime : endTime;
-        const finalIsWorking = !isCustomized && salonDay ? !salonDay.isClosed : isWorking;
+        const finalIsWorking = isWorking === false ? false : (!isCustomized && salonDay ? !salonDay.isClosed : isWorking);
 
         const updated = await tx.stylistWorkingHours.upsert({
           where: {
@@ -340,10 +343,13 @@ export class StaffWorkingHoursService {
       (endTime !== salonDay.endTime && !salonDay.isClosed);
 
     // Shifts matching salon operating hours are never customized
-    const isCustomized = dto.isCustomized === false ? false : isDifferentFromSalon;
+    // An explicit day off when salon is open is ALWAYS customized
+    const isCustomized = !isWorking && !salonDay?.isClosed
+      ? true
+      : (dto.isCustomized === false ? false : isDifferentFromSalon);
     const finalStartTime = !isCustomized && salonDay?.startTime ? salonDay.startTime : startTime;
     const finalEndTime = !isCustomized && salonDay?.endTime ? salonDay.endTime : endTime;
-    const finalIsWorking = !isCustomized && salonDay ? !salonDay.isClosed : isWorking;
+    const finalIsWorking = isWorking === false ? false : (!isCustomized && salonDay ? !salonDay.isClosed : isWorking);
 
     const updated = await this.prisma.stylistWorkingHours.upsert({
       where: {

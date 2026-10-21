@@ -366,7 +366,7 @@ describe('AvailabilityService (Unit Tests)', () => {
       jest.spyOn(prisma.stylist, 'findMany').mockResolvedValue([mockStylists[0]] as any);
       jest.spyOn(prisma.appointment, 'findMany').mockResolvedValue([]);
       const absenceSpy = jest.spyOn(prisma.stylistAbsence, 'findMany').mockResolvedValue([
-        { stylistId: mockStylistId1, leavePortion: 'FULL_DAY', status: 'ACTIVE' },
+        { stylistId: mockStylistId1, isPartialDay: false, status: 'ACTIVE' },
       ] as any);
 
       const result = await service.getAvailableSlots(mockSalonId, mockService1.id, testDateStr);
@@ -401,7 +401,7 @@ describe('AvailabilityService (Unit Tests)', () => {
         },
       ] as any);
 
-      const result = await service.getQualifiedStylists(mockSalonId, mockService1.id);
+      const result = await service.getQualifiedStylists(mockSalonId, mockService1.id, { targetDate: `${testDateStr}T11:00:00` });
       expect(result).toHaveLength(1);
       expect(result[0].customerStatusText).toBeDefined();
       expect(result[0].customerStatusText).toContain('Available');

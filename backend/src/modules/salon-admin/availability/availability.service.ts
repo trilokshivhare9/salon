@@ -272,15 +272,8 @@ export class AvailabilityService {
         where: {
           salonId,
           status: 'ACTIVE',
-          OR: [
-            {
-              startDate: { lte: targetDateObj },
-              endDate: { gte: targetDateObj },
-            },
-            {
-              absenceDate: targetDateObj,
-            },
-          ],
+          startDate: { lte: targetDateObj },
+          endDate: { gte: targetDateObj },
         },
       }),
     ]);
@@ -419,10 +412,21 @@ export class AvailabilityService {
       const effectiveClose = shiftWindow.effectiveCloseMinutes;
       const busyIntervals: MinuteInterval[] = [...shiftWindow.effectiveBreaks];
 
+      // Add store-wide partial closure interval if active today
+      if (activeClosure && activeClosure.isPartialDay && activeClosure.startTime && activeClosure.endTime) {
+        const cOpen = this.parseTimeStringToMinutes(activeClosure.startTime);
+        const cClose = this.parseTimeStringToMinutes(activeClosure.endTime);
+        const clampedStart = Math.max(effectiveOpen, cOpen);
+        const clampedEnd = Math.min(effectiveClose, cClose);
+        if (clampedStart < clampedEnd) {
+          busyIntervals.push({ start: clampedStart, end: clampedEnd });
+        }
+      }
+
       // Check active leaves for this stylist on targetDateObj
       const activeAbsence = activeAbsences.find((ab) => ab.stylistId === stylist.id);
       if (activeAbsence) {
-        if (!activeAbsence.leavePortion || activeAbsence.leavePortion === 'FULL_DAY') {
+        if (!activeAbsence.isPartialDay) {
           continue; // Entire day unavailable
         }
         const leaveBlocks = this.engine.getLeaveBlockedIntervals(

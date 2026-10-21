@@ -1,3 +1,5 @@
+import { StaffApplyLeaveDialog } from './staff-apply-leave-dialog.js';
+
 /**
  * StaffProfileHub
  * Executive Stylist Profile Overview Hub.
@@ -76,8 +78,8 @@ export class StaffProfileHub {
       if (st !== 'ACTIVE' && st !== 'APPROVED') return false;
       const stylistMatch = !a.stylistId || String(a.stylistId) === String(staff.id) || !a.staffId || String(a.staffId) === String(staff.id);
       if (!stylistMatch) return false;
-      const sDate = a.startDate instanceof Date ? a.startDate.toISOString().split('T')[0] : (a.startDate || a.absenceDate || '').split('T')[0];
-      const eDate = a.endDate instanceof Date ? a.endDate.toISOString().split('T')[0] : (a.endDate || a.absenceDate || '').split('T')[0];
+      const sDate = a.startDate instanceof Date ? a.startDate.toISOString().split('T')[0] : (a.startDate || '').split('T')[0];
+      const eDate = a.endDate instanceof Date ? a.endDate.toISOString().split('T')[0] : (a.endDate || '').split('T')[0];
       return sDate <= todayStr && eDate >= todayStr;
     });
 
@@ -340,8 +342,8 @@ export class StaffProfileHub {
     const todayLeave = schedule?.todayAbsence || staffLeaves.find((l) => {
       const st = (l.status || '').toUpperCase();
       if (st !== 'ACTIVE' && st !== 'APPROVED') return false;
-      const sDate = l.startDate instanceof Date ? l.startDate.toISOString().split('T')[0] : (l.startDate || l.absenceDate || '').split('T')[0];
-      const eDate = l.endDate instanceof Date ? l.endDate.toISOString().split('T')[0] : (l.endDate || l.absenceDate || '').split('T')[0];
+      const sDate = l.startDate instanceof Date ? l.startDate.toISOString().split('T')[0] : (l.startDate || '').split('T')[0];
+      const eDate = l.endDate instanceof Date ? l.endDate.toISOString().split('T')[0] : (l.endDate || '').split('T')[0];
       return sDate <= todayStr && eDate >= todayStr;
     });
 
@@ -393,19 +395,17 @@ export class StaffProfileHub {
     let leaveSubtitle = 'No leaves recorded';
     if (staffLeaves.length > 0) {
       const sortedLeaves = [...staffLeaves].sort((a, b) => {
-        const da = a.startDate || a.absenceDate || '';
-        const db = b.startDate || b.absenceDate || '';
+        const da = a.startDate || '';
+        const db = b.startDate || '';
         return db.localeCompare(da);
       });
       const latest = sortedLeaves[0];
       const startFormatted = latest.startDate
         ? new Date(latest.startDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
         : 'Recently';
-      const portionLabel = latest.leavePortion === 'FIRST_HALF'
-        ? '1st Half'
-        : (latest.leavePortion === 'SECOND_HALF'
-            ? '2nd Half'
-            : (latest.leavePortion === 'CUSTOM_HOURS' ? 'Custom' : 'Full Day'));
+      const portionLabel = latest.isPartialDay
+        ? (latest.startTime ? `${latest.startTime}–${latest.endTime}` : 'Partial Day')
+        : 'Full Day';
       const reasonLabel = latest.reason || latest.leaveType || 'Personal';
       const isCurrent = (schedule?.isOnLeaveToday || todayLeave) && (latest.id === todayLeave?.id);
       leaveSubtitle = `${isCurrent ? 'Active' : 'Last'}: ${startFormatted} (${portionLabel} - ${reasonLabel})`;
@@ -766,7 +766,17 @@ export class StaffProfileHub {
         e.preventDefault();
         e.stopPropagation();
         const todayStr = new Date().toISOString().split('T')[0];
-        manager.ctx.leaveUI?.showCreateLeaveModal(staff.id, staff.name, todayStr);
+        StaffApplyLeaveDialog.open({
+          staffId: staff.id,
+          staffName: staff.name,
+          initialDate: todayStr,
+          showModeSwitch: false,
+          stylistHours: staff.workingHours || [],
+          salonWorkingHours: manager.ctx?.salonWorkingHours || [],
+          onSuccess: async () => {
+            if (manager.refreshCurrentView) await manager.refreshCurrentView();
+          },
+        });
       };
     }
   }

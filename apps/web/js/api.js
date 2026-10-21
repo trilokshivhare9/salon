@@ -238,7 +238,7 @@ export class PlatformAuth {
         await executeRealmRequest(PlatformRealm, '/auth/logout', {
           method: 'POST',
           body: JSON.stringify({ refreshToken: refresh }),
-        }).catch(() => {});
+        }).catch(() => { });
       }
     } finally {
       PlatformRealm.clear();
@@ -278,7 +278,7 @@ export class SalonAuth {
         await executeRealmRequest(SalonRealm, '/auth/logout', {
           method: 'POST',
           body: JSON.stringify({ refreshToken: refresh }),
-        }).catch(() => {});
+        }).catch(() => { });
       }
     } finally {
       SalonRealm.clear();
@@ -412,7 +412,7 @@ export class ApiClient {
         if (onFreshData && JSON.stringify(freshData) !== JSON.stringify(cached.data)) {
           onFreshData(freshData);
         }
-      }).catch(() => {});
+      }).catch(() => { });
 
       return { data: cached.data, isStale: Date.now() - cached.timestamp > ttlMs };
     }
@@ -432,7 +432,7 @@ export class ApiClient {
 
   static async logoutAllDevices() {
     try {
-      await this.request('/auth/logout-all', { method: 'POST' }).catch(() => {});
+      await this.request('/auth/logout-all', { method: 'POST' }).catch(() => { });
     } finally {
       SalonRealm.clear();
     }
@@ -576,6 +576,7 @@ export class ApiClient {
 
   static async createSalonClosure(payload) {
     this.invalidateCache('/salons/closures');
+    this.invalidateCache('/salons/closures/calendar-schedule');
     this.invalidateCache('/appointments');
     this.invalidateCache('/reports');
     return this.request('/salons/closures', {
@@ -586,11 +587,37 @@ export class ApiClient {
 
   static async deleteSalonClosure(id) {
     this.invalidateCache('/salons/closures');
+    this.invalidateCache('/salons/closures/calendar-schedule');
     this.invalidateCache('/appointments');
     this.invalidateCache('/reports');
     return this.request(`/salons/closures/${id}`, {
       method: 'DELETE',
     });
+  }
+
+  static async getCalendarSchedule(options = {}, bypassCache = false) {
+    const params = new URLSearchParams();
+    if (options.month) params.append('month', options.month);
+    if (options.startDate) params.append('startDate', options.startDate);
+    if (options.endDate) params.append('endDate', options.endDate);
+    if (options.calendarFor) params.append('calendarFor', options.calendarFor);
+    const targetStaffId = options.staffId || options.stylistId;
+    if (targetStaffId) {
+      params.append('staffId', targetStaffId);
+      params.append('stylistId', targetStaffId);
+    }
+    const queryStr = params.toString() ? `?${params.toString()}` : '';
+    return this.request(`/salons/closures/calendar-schedule${queryStr}`, {}, bypassCache ? 0 : 30000);
+  }
+
+  static async getHolidays(options = {}) {
+    const params = new URLSearchParams();
+    if (options.startDate) params.append('startDate', options.startDate);
+    if (options.endDate) params.append('endDate', options.endDate);
+    if (options.year) params.append('year', options.year);
+    if (options.month) params.append('month', options.month);
+    const queryStr = params.toString() ? `?${params.toString()}` : '';
+    return this.request(`/salons/closures/holidays${queryStr}`);
   }
 
 
@@ -667,6 +694,7 @@ export class ApiClient {
 
   static async updateStaffWorkingHours(staffId, hours, followsSalonSchedule) {
     this.invalidateCache('/staff');
+    this.invalidateCache('/salons/closures/calendar-schedule');
     const sanitizedHours = (hours || []).map((h) => {
       const clean = {
         dayOfWeek: h.dayOfWeek,
@@ -687,16 +715,19 @@ export class ApiClient {
       body: JSON.stringify(payload),
     });
     this.invalidateCache('/staff');
+    this.invalidateCache('/salons/closures/calendar-schedule');
     return res;
   }
 
   static async patchStaffDayShift(staffId, dayOfWeek, shiftData) {
     this.invalidateCache('/staff');
+    this.invalidateCache('/salons/closures/calendar-schedule');
     const res = await this.request(`/staff/${staffId}/working-hours/${dayOfWeek}`, {
       method: 'PATCH',
       body: JSON.stringify(shiftData),
     });
     this.invalidateCache('/staff');
+    this.invalidateCache('/salons/closures/calendar-schedule');
     return res;
   }
 
@@ -811,9 +842,9 @@ export class ApiClient {
       if (queryParams.date) params.append('date', queryParams.date);
       if (queryParams.startDate) params.append('startDate', queryParams.startDate);
       if (queryParams.endDate) params.append('endDate', queryParams.endDate);
-      if (queryParams.leavePortion) params.append('leavePortion', queryParams.leavePortion);
-      if (queryParams.customStartTime) params.append('customStartTime', queryParams.customStartTime);
-      if (queryParams.customEndTime) params.append('customEndTime', queryParams.customEndTime);
+      if (queryParams.isPartialDay !== undefined) params.append('isPartialDay', String(queryParams.isPartialDay));
+      if (queryParams.startTime) params.append('startTime', queryParams.startTime);
+      if (queryParams.endTime) params.append('endTime', queryParams.endTime);
       const qStr = params.toString();
       if (qStr) url += `?${qStr}`;
     }
@@ -1319,3 +1350,6 @@ export function formatTime12h(val) {
   });
 }
 
+if (typeof window !== 'undefined') {
+  window.ApiClient = ApiClient;
+}

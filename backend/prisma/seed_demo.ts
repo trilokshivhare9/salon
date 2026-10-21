@@ -198,8 +198,8 @@ async function main() {
   for (const day of days) {
     await prisma.stylistWorkingHours.createMany({
       data: [
-        { stylistId: stylist1.id, dayOfWeek: day, startTime: '09:00', endTime: '21:00', isWorking: true },
-        { stylistId: stylist2.id, dayOfWeek: day, startTime: '09:00', endTime: '21:00', isWorking: true },
+        { salonId: salon.id, stylistId: stylist1.id, dayOfWeek: day, startTime: '09:00', endTime: '21:00', isWorking: true },
+        { salonId: salon.id, stylistId: stylist2.id, dayOfWeek: day, startTime: '09:00', endTime: '21:00', isWorking: true },
       ],
     });
     await prisma.salonWorkingHours.create({

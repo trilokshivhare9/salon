@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { StylistStatus, DayOfWeek, AppointmentStatus, LeavePortion } from '@prisma/client';
+import { StylistStatus, DayOfWeek, AppointmentStatus } from '@prisma/client';
 import { DateTime } from 'luxon';
 import { TimeUtility } from '../../../../common/utils/time.utility';
 import { PrismaService } from '../../../../database/prisma.service';
@@ -19,7 +19,9 @@ export interface StylistStatusMetadata {
   customerName?: string;
   breakWindow?: { start: string; end: string; name?: string };
   leaveType?: string;
-  leavePortion?: string;
+  isPartialDay?: boolean;
+  startTime?: string | null;
+  endTime?: string | null;
   closureReason?: string;
   closureType?: string;
 }
@@ -342,8 +344,9 @@ export class StylistStatusEngine {
       if (ab.stylistId && ab.stylistId !== stylist.id) return false;
       if (ab.status && ab.status !== 'ACTIVE') return false;
 
-      const sDate = ab.startDate instanceof Date ? ab.startDate.toISOString().split('T')[0] : (ab.startDate || ab.absenceDate || '').split('T')[0];
-      const eDate = ab.endDate instanceof Date ? ab.endDate.toISOString().split('T')[0] : (ab.endDate || ab.absenceDate || '').split('T')[0];
+      const sDate = ab.startDate instanceof Date ? ab.startDate.toISOString().split('T')[0] : (ab.startDate || '').split('T')[0];
+      const rawEnd = ab.endDate || ab.startDate;
+      const eDate = rawEnd instanceof Date ? rawEnd.toISOString().split('T')[0] : (rawEnd || '').split('T')[0];
       return evalDateIso >= sDate && evalDateIso <= eDate;
     });
 
@@ -373,27 +376,14 @@ export class StylistStatusEngine {
 
     // If active leave on a working day
     if (activeAbsence) {
-      const portion = activeAbsence.leavePortion || LeavePortion.FULL_DAY;
+      const isPartial = Boolean(activeAbsence.isPartialDay);
       let isLeaveNow = false;
 
-      let stShiftStart = salonOpenMin;
-      let stShiftEnd = salonCloseMin;
-      if (customWh && customWh.isWorking) {
-        if (customWh.startTime) stShiftStart = this.parseTimeToMinutes(customWh.startTime);
-        if (customWh.endTime) stShiftEnd = this.parseTimeToMinutes(customWh.endTime);
-      }
-
-      if (portion === LeavePortion.FULL_DAY) {
+      if (!isPartial) {
         isLeaveNow = true;
-      } else if (portion === LeavePortion.FIRST_HALF) {
-        const midPoint = Math.floor(stShiftStart + (stShiftEnd - stShiftStart) / 2);
-        isLeaveNow = evalMin < midPoint;
-      } else if (portion === LeavePortion.SECOND_HALF) {
-        const midPoint = Math.floor(stShiftStart + (stShiftEnd - stShiftStart) / 2);
-        isLeaveNow = evalMin >= midPoint;
-      } else if (portion === LeavePortion.CUSTOM_HOURS && activeAbsence.customStartTime && activeAbsence.customEndTime) {
-        const cStart = this.parseTimeToMinutes(activeAbsence.customStartTime);
-        const cEnd = this.parseTimeToMinutes(activeAbsence.customEndTime);
+      } else if (activeAbsence.startTime && activeAbsence.endTime) {
+        const cStart = this.parseTimeToMinutes(activeAbsence.startTime);
+        const cEnd = this.parseTimeToMinutes(activeAbsence.endTime);
         isLeaveNow = evalMin >= cStart && evalMin < cEnd;
       }
 
@@ -406,7 +396,9 @@ export class StylistStatusEngine {
           reason: activeAbsence.reason || (activeAbsence.leaveType ? `Leave (${activeAbsence.leaveType.replace('_', ' ')})` : 'On Leave'),
           metadata: {
             leaveType: activeAbsence.leaveType,
-            leavePortion: activeAbsence.leavePortion,
+            isPartialDay: activeAbsence.isPartialDay,
+            startTime: activeAbsence.startTime,
+            endTime: activeAbsence.endTime,
           },
         };
       }

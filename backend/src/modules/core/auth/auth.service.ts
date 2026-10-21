@@ -32,7 +32,10 @@ export class AuthService {
   ) {}
 
   async login(loginDto: LoginDto, userAgent?: string, ipAddress?: string) {
-    const rawInput = (loginDto.email || '').trim();
+    const rawInput = (loginDto.email || loginDto.identifier || '').trim();
+    if (!rawInput) {
+      throw new BadRequestException('Please provide your registered mobile number or email.');
+    }
     const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawInput);
 
     let admin: any = null;

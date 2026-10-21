@@ -49,7 +49,7 @@ export class CancelLeaveService {
     const timezone = salon?.timezone || 'Asia/Kolkata';
     const todayInSalon = DateTime.now().setZone(timezone).startOf('day');
 
-    const leaveEndDate = absence.endDate || absence.absenceDate;
+    const leaveEndDate = absence.endDate;
     const leaveEndIso = leaveEndDate ? leaveEndDate.toISOString().split('T')[0] : '';
     const leaveEndParsed = DateTime.fromISO(leaveEndIso, { zone: timezone }).startOf('day');
 

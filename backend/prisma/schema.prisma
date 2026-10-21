@@ -183,13 +183,6 @@ enum LeaveType {
   OTHER
 }
 
-enum LeavePortion {
-  FULL_DAY
-  FIRST_HALF
-  SECOND_HALF
-  CUSTOM_HOURS
-}
-
 // -----------------------------------------------------------------------------
 // 1. ADMINS (Super Admin & Salon Owners)
 // -----------------------------------------------------------------------------
@@ -847,12 +840,12 @@ model StylistAbsence {
 
   startDate             DateTime              @default(now()) @map("start_date") @db.Date
   endDate               DateTime              @default(now()) @map("end_date") @db.Date
-  absenceDate           DateTime?             @map("absence_date") @db.Date
+
+  isPartialDay          Boolean               @default(false) @map("is_partial_day")
+  startTime             String?               @map("start_time")
+  endTime               String?               @map("end_time")
 
   leaveType             LeaveType             @default(SICK_LEAVE) @map("leave_type")
-  leavePortion          LeavePortion          @default(FULL_DAY) @map("leave_portion")
-  customStartTime       String?               @map("custom_start_time")
-  customEndTime         String?               @map("custom_end_time")
 
   reason                String?
   notes                 String?
@@ -876,9 +869,10 @@ model StylistAbsence {
 // SALON CLOSURE & HOLIDAY MANAGEMENT
 // -----------------------------------------------------------------------------
 enum SalonClosureType {
-  HOLIDAY             // Advance planned holiday (Festivals, Public Holidays)
+  HOLIDAY             // Advance planned holiday (Public Holidays, Store Anniversary)
+  FESTIVAL            // Festival holiday (Diwali, Eid, Christmas, Holi, New Year, etc.)
   EMERGENCY_CLOSURE   // Last-minute emergency store closure (Power outage, Maintenance)
-  PARTIAL_DAY         // Partial day store closure (e.g. closing early at 4 PM)
+  OTHER               // Private events, renovations, staff training
 }
 
 model SalonClosure {

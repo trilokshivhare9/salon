@@ -21,7 +21,6 @@ import {
   StylistStatus,
   ServiceStatus,
   AbsenceStatus,
-  LeavePortion,
   NotificationChannel,
   NotificationStatus,
   AdminRole,
@@ -66,7 +65,7 @@ export class AppointmentCreationService {
     tx: any,
     stylist?: any,
   ): Promise<boolean> {
-    if (!absence.leavePortion || absence.leavePortion === LeavePortion.FULL_DAY) {
+    if (!absence.isPartialDay) {
       return true;
     }
 
@@ -401,11 +400,8 @@ export class AppointmentCreationService {
               where: {
                 salonId,
                 stylistId: requestedStylistId,
-                status: AbsenceStatus.ACTIVE,
-                OR: [
-                  { startDate: { lte: targetDateObj }, endDate: { gte: targetDateObj } },
-                  { absenceDate: targetDateObj },
-                ],
+                startDate: { lte: targetDateObj },
+                endDate: { gte: targetDateObj },
               },
             });
 
@@ -454,11 +450,8 @@ export class AppointmentCreationService {
                     where: {
                       salonId,
                       stylistId: candidateId,
-                      status: AbsenceStatus.ACTIVE,
-                      OR: [
-                        { startDate: { lte: targetDateObj }, endDate: { gte: targetDateObj } },
-                        { absenceDate: targetDateObj },
-                      ],
+                      startDate: { lte: targetDateObj },
+                      endDate: { gte: targetDateObj },
                     },
                   });
 
@@ -508,14 +501,11 @@ export class AppointmentCreationService {
             where: {
               salonId,
               stylistId: assignedStylistId!,
-              status: AbsenceStatus.ACTIVE,
-              OR: [
-                { startDate: { lte: new Date(`${dto.date}T00:00:00.000Z`) }, endDate: { gte: new Date(`${dto.date}T00:00:00.000Z`) } },
-                { absenceDate: new Date(`${dto.date}T00:00:00.000Z`) },
-              ],
+              startDate: { lte: new Date(`${dto.date}T00:00:00.000Z`) },
+              endDate: { gte: new Date(`${dto.date}T00:00:00.000Z`) },
             },
           });
-          if (activeAbsence && (!activeAbsence.leavePortion || activeAbsence.leavePortion === 'FULL_DAY')) {
+          if (activeAbsence && !activeAbsence.isPartialDay) {
             throw new ConflictException('Selected specialist is marked absent on this date.');
           }
 

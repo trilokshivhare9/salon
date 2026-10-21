@@ -370,6 +370,18 @@ export class AppointmentsService {
     return this.conflictEngine.resolveScheduleConflicts(query);
   }
 
+  async findConflictingAppointments(query: ScheduleConflictQuery): Promise<any[]> {
+    if (!this.conflictEngine) {
+      this.conflictEngine = new ScheduleConflictResolutionEngine(
+        this.prisma,
+        this.availabilityService!,
+        this.getStatusService(),
+        this.getCancellationService(),
+      );
+    }
+    return this.conflictEngine.findConflictingAppointments(query);
+  }
+
   formatAppointment(appt: any) {
     return formatAppointment(appt);
   }

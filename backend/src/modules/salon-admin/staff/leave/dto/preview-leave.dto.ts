@@ -1,5 +1,4 @@
-import { IsDateString, IsEnum, IsOptional, IsString } from 'class-validator';
-import { LeavePortion } from '@prisma/client';
+import { IsDateString, IsOptional, IsString, IsBoolean } from 'class-validator';
 
 export class PreviewLeaveQueryDto {
   @IsDateString()
@@ -14,18 +13,19 @@ export class PreviewLeaveQueryDto {
   @IsOptional()
   endDate?: string; // "YYYY-MM-DD"
 
-  @IsEnum(LeavePortion)
   @IsOptional()
-  leavePortion?: LeavePortion;
+  @IsBoolean()
+  isPartialDay?: boolean;
 
   @IsString()
   @IsOptional()
-  customStartTime?: string;
+  startTime?: string;
 
   @IsString()
   @IsOptional()
-  customEndTime?: string;
+  endTime?: string;
 }
 
-// Backward-compatible alias
+// Canonical alias
 export class PreviewAbsenceQueryDto extends PreviewLeaveQueryDto {}
+

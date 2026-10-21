@@ -1,6 +1,5 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { TimeUtility } from '../../../../../common/utils/time.utility';
-import { LeavePortion } from '@prisma/client';
 import { PreviewLeaveQueryDto } from '../dto/preview-leave.dto';
 import { LeaveEdgeCaseEngine } from '../engines/leave-edge-case.engine';
 import { AppointmentsService } from '../../../appointments/appointments.service';
@@ -27,37 +26,42 @@ export class PreviewLeaveService {
       throw new BadRequestException('Start date and end date must be provided.');
     }
 
+    const isPartial = Boolean(query.isPartialDay);
+    const sTime = isPartial ? (query.startTime || null) : null;
+    const eTime = isPartial ? (query.endTime || null) : null;
+
     await this.edgeCaseEngine.validateLeaveApplication(
       salonId,
       stylistId,
       {
         startDateStr,
         endDateStr,
-        customStartTime: query.customStartTime,
-        customEndTime: query.customEndTime,
+        isPartialDay: isPartial,
+        startTime: sTime || undefined,
+        endTime: eTime || undefined,
       },
     );
 
     const startDateObj = TimeUtility.toDbDate(startDateStr);
     const endDateObj = TimeUtility.toDbDate(endDateStr);
-    const leavePortion = query.leavePortion || LeavePortion.FULL_DAY;
 
-    const conflicts = await (this.appointmentsService as any).conflictEngine?.findConflictingAppointments?.({
+    const conflicts = await this.appointmentsService.findConflictingAppointments({
       salonId,
       scope: 'STYLIST',
       stylistId,
       dateRange: {
         startDate: startDateObj,
         endDate: endDateObj,
-        startTime: query.customStartTime,
-        endTime: query.customEndTime,
-        isPartialDay: leavePortion !== LeavePortion.FULL_DAY,
+        startTime: sTime || undefined,
+        endTime: eTime || undefined,
+        isPartialDay: isPartial,
       },
       isClosedOrOff: true,
-    }) || [];
+    });
 
     return {
       conflicts,
     };
   }
 }
+

@@ -1,10 +1,23 @@
 import { ApiClient, formatTime12h } from './api.js';
+import * as IndianFestivals from '@aryanjsx/indian-festivals';
 import { RealtimeNotifier } from './realtime.js';
 import { SoundManager } from './sound.js';
 import { Icons } from './icons.js';
 import { LeaveManagementUI } from './leave-management.js';
 import { LocationPicker } from './location-picker.js';
 import { StaffManager } from './modules/staff/staff-manager.js';
+import {
+  CalendarView,
+  ClosureDialog,
+  SalonWeeklyOffDialog,
+  StaffWeeklyOffDialog,
+  StaffLeaveDialog,
+  FestivalDialog,
+  DateEventsDialog,
+} from './modules/calendar/index.js';
+import { ScheduleDayOffDialog, SalonClosuresModal } from './modules/salon-settings/schedule-day-off-dialog.js';
+import { StaffApplyLeaveDialog } from './modules/staff/index.js';
+import { SalonDayOffView } from './modules/salon-settings/salon-day-off-view.js';
 import {
   SERVICE_DURATION_OPTIONS,
   renderServiceDurationOptions,
@@ -104,61 +117,40 @@ if (typeof window !== 'undefined') {
   window.getApptServices = getApptServices;
 }
 
-export const INDIAN_FESTIVALS_DATASET = [
-  // 2025
-  { date: '2025-01-14', name: 'Makar Sankranti', icon: '🪁', type: 'FESTIVAL' },
-  { date: '2025-01-26', name: 'Republic Day', icon: '🇮🇳', type: 'NATIONAL' },
-  { date: '2025-02-26', name: 'Maha Shivratri', icon: '🔱', type: 'FESTIVAL' },
-  { date: '2025-03-14', name: 'Holi', icon: '🎨', type: 'FESTIVAL' },
-  { date: '2025-03-31', name: 'Eid-ul-Fitr', icon: '🌙', type: 'FESTIVAL' },
-  { date: '2025-04-14', name: 'Ambedkar Jayanti', icon: '🌾', type: 'REGIONAL' },
-  { date: '2025-08-15', name: 'Independence Day', icon: '🇮🇳', type: 'NATIONAL' },
-  { date: '2025-08-09', name: 'Raksha Bandhan', icon: '🧵', type: 'FESTIVAL' },
-  { date: '2025-08-16', name: 'Janmashtami', icon: '🦚', type: 'FESTIVAL' },
-  { date: '2025-08-27', name: 'Ganesh Chaturthi', icon: '🐘', type: 'FESTIVAL' },
-  { date: '2025-10-02', name: 'Gandhi Jayanti', icon: '🇮🇳', type: 'NATIONAL' },
-  { date: '2025-10-02', name: 'Dussehra', icon: '🏹', type: 'FESTIVAL' },
-  { date: '2025-10-20', name: 'Diwali', icon: '🪔', type: 'FESTIVAL' },
-  { date: '2025-10-22', name: 'Bhai Dooj', icon: '👫', type: 'FESTIVAL' },
-  { date: '2025-12-25', name: 'Christmas Day', icon: '🎄', type: 'FESTIVAL' },
-
-  // 2026
-  { date: '2026-01-14', name: 'Makar Sankranti / Pongal', icon: '🪁', type: 'FESTIVAL' },
-  { date: '2026-01-26', name: 'Republic Day', icon: '🇮🇳', type: 'NATIONAL' },
-  { date: '2026-02-15', name: 'Maha Shivratri', icon: '🔱', type: 'FESTIVAL' },
-  { date: '2026-03-04', name: 'Holi', icon: '🎨', type: 'FESTIVAL' },
-  { date: '2026-03-20', name: 'Eid-ul-Fitr', icon: '🌙', type: 'FESTIVAL' },
-  { date: '2026-04-14', name: 'Ambedkar Jayanti / Baisakhi', icon: '🌾', type: 'REGIONAL' },
-  { date: '2026-05-01', name: 'Labour Day', icon: '🛠️', type: 'NATIONAL' },
-  { date: '2026-05-27', name: 'Eid-al-Adha (Bakrid)', icon: '🌙', type: 'FESTIVAL' },
-  { date: '2026-08-15', name: 'Independence Day', icon: '🇮🇳', type: 'NATIONAL' },
-  { date: '2026-08-28', name: 'Raksha Bandhan', icon: '🧵', type: 'FESTIVAL' },
-  { date: '2026-09-04', name: 'Janmashtami', icon: '🦚', type: 'FESTIVAL' },
-  { date: '2026-09-14', name: 'Ganesh Chaturthi', icon: '🐘', type: 'FESTIVAL' },
-  { date: '2026-10-02', name: 'Gandhi Jayanti', icon: '🇮🇳', type: 'NATIONAL' },
-  { date: '2026-10-20', name: 'Dussehra (Vijayadashami)', icon: '🏹', type: 'FESTIVAL' },
-  { date: '2026-10-24', name: 'Diwali (Deepavali)', icon: '🪔', type: 'FESTIVAL' },
-  { date: '2026-10-25', name: 'Govardhan Puja', icon: '✨', type: 'FESTIVAL' },
-  { date: '2026-10-26', name: 'Bhai Dooj', icon: '👫', type: 'FESTIVAL' },
-  { date: '2026-11-24', name: 'Guru Nanak Jayanti', icon: '🕯️', type: 'FESTIVAL' },
-  { date: '2026-12-25', name: 'Christmas Day', icon: '🎄', type: 'FESTIVAL' },
-
-  // 2027
-  { date: '2027-01-01', name: "New Year's Day", icon: '🎉', type: 'FESTIVAL' },
-  { date: '2027-01-14', name: 'Makar Sankranti', icon: '🪁', type: 'FESTIVAL' },
-  { date: '2027-01-26', name: 'Republic Day', icon: '🇮🇳', type: 'NATIONAL' },
-  { date: '2027-03-06', name: 'Maha Shivratri', icon: '🔱', type: 'FESTIVAL' },
-  { date: '2027-03-23', name: 'Holi', icon: '🎨', type: 'FESTIVAL' },
-  { date: '2027-03-10', name: 'Eid-ul-Fitr', icon: '🌙', type: 'FESTIVAL' },
-  { date: '2027-08-15', name: 'Independence Day', icon: '🇮🇳', type: 'NATIONAL' },
-  { date: '2027-10-02', name: 'Gandhi Jayanti', icon: '🇮🇳', type: 'NATIONAL' },
-  { date: '2027-10-09', name: 'Dussehra', icon: '🏹', type: 'FESTIVAL' },
-  { date: '2027-10-29', name: 'Diwali', icon: '🪔', type: 'FESTIVAL' },
-  { date: '2027-12-25', name: 'Christmas Day', icon: '🎄', type: 'FESTIVAL' },
-];
+// Dynamic Icon resolver for Indian festivals
+export function getFestivalIcon(name = '', religion = '') {
+  const lower = String(name || '').toLowerCase();
+  if (lower.includes('diwali') || lower.includes('deepavali')) return '🪔';
+  if (lower.includes('dhanteras')) return '🪙';
+  if (lower.includes('dussehra') || lower.includes('vijayadashami')) return '🏹';
+  if (lower.includes('durga puja') || lower.includes('navratri')) return '🌸';
+  if (lower.includes('holi')) return '🎨';
+  if (lower.includes('raksha bandhan')) return '🧵';
+  if (lower.includes('janmashtami')) return '🪈';
+  if (lower.includes('ganesh')) return '🐘';
+  if (lower.includes('shivratri')) return '🔱';
+  if (lower.includes('republic') || lower.includes('independence') || lower.includes('gandhi') || lower.includes('unity') || lower.includes('constitution')) return '🇮🇳';
+  if (lower.includes('eid') || lower.includes('muharram') || lower.includes('ramadan') || lower.includes('bakrid')) return '🌙';
+  if (lower.includes('christmas') || lower.includes('easter') || lower.includes('good friday') || lower.includes('saints')) return '🎄';
+  if (lower.includes('guru') || lower.includes('baisakhi') || lower.includes('bandi') || lower.includes('lohri')) return '🪯';
+  if (lower.includes('buddha') || lower.includes('dhammachakra')) return '☸️';
+  if (lower.includes('mahavir') || lower.includes('jain')) return '🕊️';
+  if (lower.includes('karwa chauth')) return '🌙';
+  if (lower.includes('chhath')) return '☀️';
+  if (lower.includes('bhai dooj')) return '✨';
+  if (lower.includes('govardhan')) return '🏔️';
+  if (lower.includes('onam') || lower.includes('pongal') || lower.includes('makar')) return '🌾';
+  if (lower.includes('children')) return '🎈';
+  if (religion === 'National') return '🇮🇳';
+  if (religion === 'Hindu') return '🪔';
+  return '🎉';
+}
 
 export class SalonDashboard {
+
   constructor(containerId, currentUser = null) {
+    window.salonDashboard = this;
+    window.dashboardApp = this;
     this.container = document.getElementById(containerId);
     this.currentUser = currentUser;
     this.activeTab = 'dashboard';
@@ -185,7 +177,55 @@ export class SalonDashboard {
     this.staffSearchQuery = '';
     this.staffStatusFilter = 'ALL';
     this.activeStaffSubtab = 'leaves';
+    this.calendarSchedule = null;
     this.staffManager = new StaffManager(this);
+  }
+
+  /**
+   * Retrieves authentic Indian festivals from official @aryanjsx/indian-festivals dependency
+   * Falls back gracefully if backend has custom loaded festivals
+   */
+  getFestivalsList(targetYear = this.calYear, targetMonth = this.calMonth) {
+    const y = targetYear !== undefined ? targetYear : this.calYear;
+    const m = targetMonth !== undefined ? targetMonth : this.calMonth;
+
+    // 1. If backend returned festivals for this exact month, use them
+    if (Array.isArray(this.calendarSchedule?.festivals) && this.calendarSchedule.festivals.length > 0) {
+      const monthPrefix = `${y}-${String(m + 1).padStart(2, '0')}`;
+      const matching = this.calendarSchedule.festivals.filter((f) => f.date && f.date.startsWith(monthPrefix));
+      if (matching.length > 0) {
+        return matching;
+      }
+    }
+
+    // 2. Query official @aryanjsx/indian-festivals dependency directly
+    try {
+      const monthNum = m + 1; // 1-indexed (1=Jan, 10=Oct)
+      const data = IndianFestivals.getFestivalsByMonth(monthNum, y);
+      const list = data?.festivals || [];
+      return list.map((f) => ({
+        date: f.date,
+        name: f.name,
+        festivalId: f.festivalId || null,
+        icon: getFestivalIcon(f.name, f.religion),
+        type: f.religion === 'National' ? 'NATIONAL' : 'FESTIVAL',
+        religion: f.religion || 'General',
+        isPublicHoliday: f.religion === 'National' || f.festivalId === 'diwali' || f.festivalId === 'holi',
+        source: '@aryanjsx/indian-festivals',
+      }));
+    } catch (err) {
+      console.warn('[Dashboard] Error querying @aryanjsx/indian-festivals:', err);
+      return [];
+    }
+  }
+
+  getFestivalForDate(dateStr) {
+    if (!dateStr) return null;
+    const [yStr, mStr] = dateStr.split('-');
+    const y = parseInt(yStr, 10);
+    const m = parseInt(mStr, 10) - 1; // 0-indexed
+    const list = this.getFestivalsList(y, m);
+    return list.find((f) => f.date === dateStr) || null;
   }
 
   showToast(msg, type = 'info') {
@@ -385,6 +425,7 @@ export class SalonDashboard {
       this.render();
 
       window.salonDashboard = this;
+      window.dashboardApp = this;
 
       window.addEventListener('beforeunload', () => {
         this.flushPendingScheduleSave();
@@ -477,7 +518,11 @@ export class SalonDashboard {
       const staffTabSpan = this.container.querySelector('.nav-tab[data-tab="staff"] span');
       if (staffTabSpan && this.staffList) {
         const _tabDateIso = (this.selectedDate || new Date().toISOString().split('T')[0]);
-        const _tabAvailCount = this.staffList.filter(s => s.status === 'ACTIVE' && !(s.absences || []).some(ab => (ab.absenceDate || '').split('T')[0] === _tabDateIso && ab.status === 'ACTIVE')).length;
+        const _tabAvailCount = this.staffList.filter(s => s.status === 'ACTIVE' && !(s.absences || []).some(ab => {
+          const s = (ab.startDate || '').split('T')[0];
+          const e = (ab.endDate || s).split('T')[0];
+          return s <= _tabDateIso && e >= _tabDateIso && ab.status === 'ACTIVE';
+        })).length;
         staffTabSpan.textContent = `Stylists (${this.staffList.length}) \u2022 ${_tabAvailCount} Available`;
       }
       const servicesTabSpan = this.container.querySelector('.nav-tab[data-tab="services"] span');
@@ -550,7 +595,7 @@ export class SalonDashboard {
 
     if (fullReload) {
       try {
-        const [summary, staff, services, profile, categories, closures, workingHours, salonBreaks] = await Promise.all([
+        const [summary, staff, services, profile, categories, calendarScheduleRes, workingHours, salonBreaks] = await Promise.all([
           ApiClient.getDashboardSummary(this.selectedDate, true).catch((err) => {
             console.warn('[Dashboard] Summary fetch error:', err);
             return fallbackSummary;
@@ -571,9 +616,11 @@ export class SalonDashboard {
             console.warn('[Dashboard] Categories fetch error:', err);
             return this.categoriesList || [];
           }),
-          ApiClient.getSalonClosures(true).catch((err) => {
-            console.warn('[Dashboard] Closures fetch error:', err);
-            return this.closuresList || [];
+          ApiClient.getCalendarSchedule({
+            month: `${this.calYear}-${String(this.calMonth + 1).padStart(2, '0')}`,
+          }, true).catch((err) => {
+            console.warn('[Dashboard] Calendar schedule fetch error:', err);
+            return null;
           }),
           ApiClient.getSalonWorkingHours(true).catch((err) => {
             console.warn('[Dashboard] Working hours fetch error:', err);
@@ -590,8 +637,10 @@ export class SalonDashboard {
         this.servicesList = Array.isArray(services) ? services : [];
         this.categoriesList = Array.isArray(categories) ? categories : [];
         this.salonProfile = profile || {};
-        this.closuresList = Array.isArray(closures) ? closures : [];
-        this.salonWorkingHours = Array.isArray(workingHours) ? workingHours : (profile?.workingHours || []);
+        const calData = calendarScheduleRes?.data || calendarScheduleRes;
+        this.calendarSchedule = calData || null;
+        this.closuresList = this.calendarSchedule?.salonSchedule?.closures || [];
+        this.salonWorkingHours = this.calendarSchedule?.salonSchedule?.weeklyHours || (Array.isArray(workingHours) ? workingHours : (profile?.workingHours || []));
         if (salonBreaks && typeof salonBreaks === 'object') {
           if (Array.isArray(salonBreaks)) {
             this.salonBreaks = salonBreaks;
@@ -792,7 +841,11 @@ export class SalonDashboard {
           </button>
           <button class="nav-tab ${this.activeTab === 'staff' ? 'active' : ''}" data-tab="staff">
             ${Icons.users({ size: 16 })}
-            <span>Stylists (${this.staffList.length}) \u2022 ${((sl, d) => sl.filter(s => s.status === 'ACTIVE' && !(s.absences || []).some(ab => (ab.absenceDate || '').split('T')[0] === d && ab.status === 'ACTIVE')).length)(this.staffList, this.selectedDate || new Date().toISOString().split('T')[0])} Available</span>
+            <span>Stylists (${this.staffList.length}) \u2022 ${((sl, d) => sl.filter(s => s.status === 'ACTIVE' && !(s.absences || []).some(ab => {
+              const s = (ab.startDate || '').split('T')[0];
+              const e = (ab.endDate || s).split('T')[0];
+              return s <= d && e >= d && ab.status === 'ACTIVE';
+            })).length)(this.staffList, this.selectedDate || new Date().toISOString().split('T')[0])} Available</span>
           </button>
           <button class="nav-tab ${this.activeTab === 'queue' ? 'active' : ''}" data-tab="queue">
             ${Icons.queue({ size: 16 })}
@@ -1007,8 +1060,8 @@ export class SalonDashboard {
           const _stDateIso = (this.selectedDate || new Date().toISOString().split('T')[0]);
           const _stAbsent = (st.absences || []).some((ab) => {
             if (ab.status !== 'ACTIVE') return false;
-            const sDate = (ab.startDate || ab.absenceDate || '').split('T')[0];
-            const eDate = (ab.endDate || ab.absenceDate || '').split('T')[0];
+            const sDate = (ab.startDate || '').split('T')[0];
+            const eDate = (ab.endDate || sDate).split('T')[0];
             return _stDateIso >= sDate && _stDateIso <= eDate;
           });
           const _stStatusColor = todayClosure ? '#f87171' : _stAbsent ? '#fb7185' : isOccupied ? '#c084fc' : '#34d399';
@@ -1189,7 +1242,11 @@ export class SalonDashboard {
           <div>
             <h3 style="font-size: 1.15rem; display: flex; align-items: center; gap: 8px;">
               ${Icons.users({ size: 18, color: '#A855F7' })}
-              <span>Stylist Floor Status (${((sl, d) => sl.filter(s => s.status === 'ACTIVE' && !(s.absences || []).some(ab => (ab.absenceDate || '').split('T')[0] === d && ab.status === 'ACTIVE')).length)(this.staffList, this.selectedDate || new Date().toISOString().split('T')[0])} Available Today)</span>
+              <span>Stylist Floor Status (${((sl, d) => sl.filter(s => s.status === 'ACTIVE' && !(s.absences || []).some(ab => {
+                const s = (ab.startDate || '').split('T')[0];
+                const e = (ab.endDate || s).split('T')[0];
+                return s <= d && e >= d && ab.status === 'ACTIVE';
+              })).length)(this.staffList, this.selectedDate || new Date().toISOString().split('T')[0])} Available Today)</span>
             </h3>
             <p style="font-size: 0.82rem; color: var(--text-secondary);">Current station occupancy and working specialists.</p>
           </div>
@@ -1205,8 +1262,8 @@ export class SalonDashboard {
         const _fsDateIso = (this.selectedDate || new Date().toISOString().split('T')[0]);
         const _fsAbsent = (st.absences || []).some((ab) => {
           if (ab.status !== 'ACTIVE') return false;
-          const sDate = (ab.startDate || ab.absenceDate || '').split('T')[0];
-          const eDate = (ab.endDate || ab.absenceDate || '').split('T')[0];
+          const sDate = (ab.startDate || '').split('T')[0];
+          const eDate = (ab.endDate || sDate).split('T')[0];
           return _fsDateIso >= sDate && _fsDateIso <= eDate;
         });
         const _fsBorderColor = _fsAbsent ? '#fb7185' : isBusy ? '#8b5cf6' : '#10b981';
@@ -2077,11 +2134,18 @@ export class SalonDashboard {
   }
 
   renderStaffLeavesSubtab(st) {
-    return this.renderModularCalendar({
-      mode: 'STAFF',
-      staffId: st.id,
-      staffName: st.name,
-    });
+    setTimeout(() => {
+      const calRoot = document.querySelector('.stylist-detail-subtab-body') || document.getElementById('staff-leaves-calendar-root');
+      if (calRoot) {
+        CalendarView.mount(calRoot, {
+          app: this,
+          calendarFor: 'STAFF',
+          staffId: st.id,
+          staffName: st.name,
+        });
+      }
+    }, 0);
+    return `<div id="staff-leaves-calendar-root" style="display:flex;align-items:center;justify-content:center;min-height:360px;color:#a5b4fc;"><div style="font-size:0.88rem;font-weight:600;">Loading specialist leaves...</div></div>`;
   }
 
   renderStaffHoursSubtab(st) {
@@ -2118,8 +2182,8 @@ export class SalonDashboard {
       const salonEnd = salonWh?.endTime || salonMaxEnd || defaultSalonEnd;
 
       // Explicit isCustomized check per day:
-      // True only if specifically customized for this stylist
-      const isCustomized = Boolean(customWh?.isCustomized);
+      // True if specifically customized for this stylist or if explicitly marked off while salon is open
+      const isCustomized = Boolean(customWh?.isCustomized) || (customWh && customWh.isWorking === false && !isSalonClosed);
 
       let isWorking = true;
       let startTime = salonStart;
@@ -2159,7 +2223,7 @@ export class SalonDashboard {
       }
 
       // Schedule evaluation:
-      if (isCustomized) {
+      if (isCustomized || (customWh && (customWh.isWorking === false || customWh.isOff === true))) {
         isWorking = customWh.isWorking !== undefined ? Boolean(customWh.isWorking) : !customWh.isOff;
         startTime = customWh.startTime || salonStart;
         endTime = customWh.endTime || salonEnd;
@@ -2435,82 +2499,95 @@ export class SalonDashboard {
 
     const doSave = async () => {
       this._pendingScheduleSaveFn = null;
-      this.syncRoutineBreaksToDays();
-
-      const daysArr = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
-      const hoursPayload = [];
-
-      for (const day of daysArr) {
-        const d = this.currentStaffHoursState?.days ? this.currentStaffHoursState.days[day] : null;
-        const isSalonClosed = d ? Boolean(d.isSalonClosed) : false;
-        const isWorking = !isSalonClosed && (d ? Boolean(d.isWorking) : false);
-        const start = d?.startTime || d?.salonStart || this.salonProfile?.defaultStartTime;
-        const end = d?.endTime || d?.salonEnd || this.salonProfile?.defaultEndTime;
-
-        const breaks = (d?.breaks || [])
-          .map((b) => ({
-            title: (b.title || 'Break').trim(),
-            startTime: b.startTime,
-            endTime: b.endTime,
-          }))
-          .filter((b) => b.startTime && b.endTime && b.startTime < b.endTime);
-
-        let effStart = start;
-        let effEnd = end;
-        breaks.forEach((b) => {
-          if (!effStart || b.startTime < effStart) effStart = b.startTime;
-          if (!effEnd || b.endTime > effEnd) effEnd = b.endTime;
-        });
-
-        const salonStart = d?.salonStart || this.salonProfile?.defaultStartTime;
-        const salonEnd = d?.salonEnd || this.salonProfile?.defaultEndTime;
-        const isIdenticalToSalon = !isSalonClosed && isWorking && effStart === salonStart && effEnd === salonEnd;
-        const effectiveIsCustomized = isIdenticalToSalon ? false : (d ? Boolean(d.isCustomized) : false);
-
-        if (d) {
-          d.startTime = effStart;
-          d.endTime = effEnd;
-          d.isCustomized = effectiveIsCustomized;
-        }
-
-        if (isWorking && effStart < effEnd) {
-          hoursPayload.push({
-            dayOfWeek: day,
-            isWorking,
-            isCustomized: effectiveIsCustomized,
-            startTime: effStart,
-            endTime: effEnd,
-            breaks,
-            breakStartTime: null,
-            breakEndTime: null,
-            hasBreakOverride: true,
-          });
-        } else {
-          hoursPayload.push({
-            dayOfWeek: day,
-            isWorking: false,
-            isCustomized,
-            startTime: effStart,
-            endTime: effEnd,
-            breaks,
-            breakStartTime: null,
-            breakEndTime: null,
-            hasBreakOverride: true,
-          });
-        }
-      }
-
       try {
+        this.syncRoutineBreaksToDays();
+
+        const daysArr = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+        const hoursPayload = [];
+
+        for (const day of daysArr) {
+          const d = this.currentStaffHoursState?.days ? this.currentStaffHoursState.days[day] : null;
+          const isSalonClosed = d ? Boolean(d.isSalonClosed) : false;
+          const isWorking = !isSalonClosed && (d ? Boolean(d.isWorking) : false);
+          const start = d?.startTime || d?.salonStart || this.salonProfile?.defaultStartTime;
+          const end = d?.endTime || d?.salonEnd || this.salonProfile?.defaultEndTime;
+
+          const breaks = (d?.breaks || [])
+            .map((b) => ({
+              title: (b.title || 'Break').trim(),
+              startTime: b.startTime,
+              endTime: b.endTime,
+            }))
+            .filter((b) => b.startTime && b.endTime && b.startTime < b.endTime);
+
+          let effStart = start;
+          let effEnd = end;
+          breaks.forEach((b) => {
+            if (!effStart || b.startTime < effStart) effStart = b.startTime;
+            if (!effEnd || b.endTime > effEnd) effEnd = b.endTime;
+          });
+
+          const salonStart = d?.salonStart || this.salonProfile?.defaultStartTime;
+          const salonEnd = d?.salonEnd || this.salonProfile?.defaultEndTime;
+          const isIdenticalToSalon = !isSalonClosed && isWorking && effStart === salonStart && effEnd === salonEnd;
+          const effectiveIsCustomized = !isIdenticalToSalon;
+
+          if (d) {
+            d.startTime = effStart;
+            d.endTime = effEnd;
+            d.isCustomized = effectiveIsCustomized;
+          }
+
+          if (isWorking && effStart < effEnd) {
+            hoursPayload.push({
+              dayOfWeek: day,
+              isWorking,
+              isCustomized: effectiveIsCustomized,
+              startTime: effStart,
+              endTime: effEnd,
+              breaks,
+              breakStartTime: null,
+              breakEndTime: null,
+              hasBreakOverride: true,
+            });
+          } else {
+            hoursPayload.push({
+              dayOfWeek: day,
+              isWorking: false,
+              isCustomized: effectiveIsCustomized,
+              startTime: effStart,
+              endTime: effEnd,
+              breaks,
+              breakStartTime: null,
+              breakEndTime: null,
+              hasBreakOverride: true,
+            });
+          }
+        }
+
         const anyCustom = hoursPayload.some((h) => h.isCustomized);
         const followsSalon = !anyCustom;
         const updated = await ApiClient.updateStaffWorkingHours(staffId, hoursPayload, followsSalon);
         const st = (this.staffList || []).find((s) => s.id === staffId);
         if (st) {
-          st.workingHours = updated && Array.isArray(updated) && updated.length > 0 ? updated : hoursPayload;
+          st.workingHours = (updated && Array.isArray(updated.hours)) ? updated.hours : (Array.isArray(updated) && updated.length > 0 ? updated : hoursPayload);
           st.followsSalonSchedule = followsSalon;
         }
         if (this.currentStaffHoursState && this.currentStaffHoursState.staffId === staffId) {
           this.currentStaffHoursState.followsSalon = followsSalon;
+        }
+        // Immediately sync in-memory calendar schedule so calendar reflects the change live
+        if (this.calendarSchedule && Array.isArray(this.calendarSchedule.stylists)) {
+          const calSt = this.calendarSchedule.stylists.find((s) => (s.stylistId || s.id) === staffId);
+          if (calSt) {
+            calSt.weeklyHours = hoursPayload.map((h) => ({
+              dayOfWeek: h.dayOfWeek,
+              isWorking: Boolean(h.isWorking),
+              startTime: h.isWorking ? h.startTime : null,
+              endTime: h.isWorking ? h.endTime : null,
+            }));
+            calSt.followsSalonSchedule = followsSalon;
+          }
         }
         if (statusBadge) {
           statusBadge.innerHTML = `<span class="autosave-dot"></span><span class="autosave-text">✓ Auto-saved</span>`;
@@ -3957,21 +4034,21 @@ export class SalonDashboard {
                   ✓ All 7 days already match store hours
                 </div>
               ` : customizedDays.map((dKey) => {
-                const dayData = this.currentStaffHoursState.days[dKey];
-                const salonDay = (this.salonWorkingHours || []).find((h) => h.dayOfWeek === dKey);
-                const isClosed = salonDay ? Boolean(salonDay.isClosed) : false;
-                const sStart = salonDay?.startTime || this.salonProfile?.defaultStartTime || '09:00';
-                const sEnd = salonDay?.endTime || this.salonProfile?.defaultEndTime || '19:00';
+      const dayData = this.currentStaffHoursState.days[dKey];
+      const salonDay = (this.salonWorkingHours || []).find((h) => h.dayOfWeek === dKey);
+      const isClosed = salonDay ? Boolean(salonDay.isClosed) : false;
+      const sStart = salonDay?.startTime || this.salonProfile?.defaultStartTime || '09:00';
+      const sEnd = salonDay?.endTime || this.salonProfile?.defaultEndTime || '19:00';
 
-                const customTime = !dayData.isWorking 
-                  ? '<span style="color: #fca5a5; font-style: italic; font-weight: 500;">Personal Off</span>' 
-                  : `${formatTime12h(dayData.startTime)} – ${formatTime12h(dayData.endTime)}`;
+      const customTime = !dayData.isWorking
+        ? '<span style="color: #fca5a5; font-style: italic; font-weight: 500;">Personal Off</span>'
+        : `${formatTime12h(dayData.startTime)} – ${formatTime12h(dayData.endTime)}`;
 
-                const storeTime = isClosed
-                  ? '<span style="color: #f87171; font-weight: 600;">🔒 Store Closed</span>'
-                  : `${formatTime12h(sStart)} – ${formatTime12h(sEnd)}`;
+      const storeTime = isClosed
+        ? '<span style="color: #f87171; font-weight: 600;">🔒 Store Closed</span>'
+        : `${formatTime12h(sStart)} – ${formatTime12h(sEnd)}`;
 
-                return `
+      return `
                   <div style="display: flex; align-items: center; justify-content: space-between; padding: 7px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.035); background: rgba(0, 0, 0, 0.12);">
                     <div style="display: flex; align-items: center; gap: 7px; min-width: 0;">
                       <span style="background: rgba(139, 92, 246, 0.14); color: #c4b5fd; border: 1px solid rgba(139, 92, 246, 0.28); border-radius: 4px; padding: 1px 5px; font-weight: 800; font-size: 0.6rem; text-transform: uppercase; flex-shrink: 0;">${dayData.dayShort || dKey.slice(0, 3)}</span>
@@ -3983,7 +4060,7 @@ export class SalonDashboard {
                     </div>
                   </div>
                 `;
-              }).join('')}
+    }).join('')}
             </div>
 
             ${closedSalonDays.length > 0 ? `
@@ -6262,9 +6339,15 @@ export class SalonDashboard {
       return this.renderSalonHoursSection();
     }
 
-    // SECTION 4B: SALON HOLIDAYS & DAYS OFF (INTERACTIVE CALENDAR HUB)
+    // SECTION 4B: SALON HOLIDAYS & DAYS OFF (MODULAR VIEW)
     if (subtab === 'closures') {
-      return this.renderHolidayCalendar();
+      setTimeout(() => {
+        const container = document.getElementById('profile-subtab-container');
+        if (container && this.activeProfileSubtab === 'closures') {
+          SalonDayOffView.mount(container, this);
+        }
+      }, 0);
+      return `<div id="profile-subtab-container-loading" style="display:flex;align-items:center;justify-content:center;min-height:360px;color:#a5b4fc;"><div style="font-size:0.88rem;font-weight:600;">Loading live salon calendar...</div></div>`;
     }
 
     // SECTION 5: STORE USERS & CUSTOMER CRM
@@ -6418,745 +6501,13 @@ export class SalonDashboard {
 
   renderHolidayCalendar() {
     this.selectedStaffId = null;
-    return this.renderModularCalendar({ mode: 'SALON' });
-  }
-
-  renderModularCalendar(config = {}) {
-    const mode = config.mode || 'SALON'; // 'SALON' or 'STAFF'
-    const staffId = config.staffId || null;
-    const staffName = config.staffName || 'Specialist';
-    const staff = staffId ? (this.staffList || []).find((s) => s.id === staffId) : null;
-
-    const year = this.calYear;
-    const month = this.calMonth;
-    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-    const currentMonthTitle = `${monthNames[month]} ${year}`;
-    const todayISO = this.getLocalDateString();
-    this.selectedCalDate = this.selectedCalDate || todayISO;
-
-    const firstDayJs = new Date(year, month, 1).getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
-    const startOffset = (firstDayJs + 6) % 7; // 0=Mon, 1=Tue, ..., 6=Sun
-    const totalDays = new Date(year, month + 1, 0).getDate();
-    const prevMonthDays = new Date(year, month, 0).getDate();
-
-    const dayNames = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
-    let monthHolidayCount = 0;
-    let monthFestivalCount = 0;
-    let monthLeaveCount = 0;
-
-    const cells = [];
-
-    // 1. Previous month padding cells
-    for (let i = startOffset - 1; i >= 0; i--) {
-      cells.push({
-        dayNum: prevMonthDays - i,
-        isPadding: true,
-        dateKey: '',
-      });
-    }
-
-    // 2. Current month days
-    for (let d = 1; d <= totalDays; d++) {
-      const mStr = String(month + 1).padStart(2, '0');
-      const dStr = String(d).padStart(2, '0');
-      const dateKey = `${year}-${mStr}-${dStr}`;
-      const isToday = dateKey === todayISO;
-      const isPast = dateKey < todayISO;
-
-      // Salon closure
-      const closure = (this.closuresList || []).find((c) => {
-        const s = String(c.startDate).split('T')[0];
-        const e = String(c.endDate).split('T')[0];
-        return dateKey >= s && dateKey <= e;
-      });
-      if (closure) monthHolidayCount++;
-
-      // Stylist active leaves
-      const leaves = [];
-      let stylistLeave = null;
-
-      if (mode === 'STAFF' && staff) {
-        (staff.absences || []).forEach((ab) => {
-          if (ab.status === 'ACTIVE') {
-            const s = String(ab.startDate || ab.absenceDate || '').split('T')[0];
-            const e = String(ab.endDate || ab.absenceDate || '').split('T')[0];
-            if (dateKey >= s && dateKey <= e) {
-              stylistLeave = ab;
-              leaves.push({ stylistName: staff.name, absence: ab });
-            }
-          }
-        });
-      } else {
-        (this.staffList || []).forEach((st) => {
-          (st.absences || []).forEach((ab) => {
-            if (ab.status === 'ACTIVE') {
-              const s = String(ab.startDate || ab.absenceDate || '').split('T')[0];
-              const e = String(ab.endDate || ab.absenceDate || '').split('T')[0];
-              if (dateKey >= s && dateKey <= e) {
-                leaves.push({ stylistName: st.name || 'Specialist', absence: ab });
-              }
-            }
-          });
-        });
+    setTimeout(() => {
+      const container = document.getElementById('profile-subtab-container');
+      if (container) {
+        SalonDayOffView.mount(container, this);
       }
-      if (leaves.length > 0) monthLeaveCount++;
-
-      // Festival info
-      const festival = INDIAN_FESTIVALS_DATASET.find((f) => f.date === dateKey);
-      if (festival) monthFestivalCount++;
-
-      cells.push({
-        dayNum: d,
-        isPadding: false,
-        dateKey,
-        isToday,
-        isPast,
-        closure,
-        leaves,
-        stylistLeave,
-        festival,
-      });
-    }
-
-    // 3. Next month padding cells
-    const remaining = (7 - (cells.length % 7)) % 7;
-    for (let p = 1; p <= remaining; p++) {
-      cells.push({
-        dayNum: p,
-        isPadding: true,
-        dateKey: '',
-      });
-    }
-
-    const closures = this.closuresList || [];
-
-    // Mode-specific configuration
-    const isStaffMode = mode === 'STAFF';
-    const panelTitle = isStaffMode ? `📅 Leaves & Off-Days: ${staffName}` : 'Holidays & Days Off';
-    const panelSubtitle = isStaffMode
-      ? `Manage approved leaves, closures & salon holidays for ${staffName}`
-      : 'Festivals, planned off-days & specialist leaves';
-    const topActionBtnHtml = isStaffMode
-      ? `<button type="button" class="btn btn-primary btn-sm btn-schedule-top" id="btn-apply-staff-leave" data-staff-id="${staffId}" data-staff-name="${staffName.replace(/"/g, '&quot;')}">
-           ➕ Apply Leave
-         </button>`
-      : `<button type="button" class="btn btn-primary btn-sm btn-schedule-top" id="btn-add-holiday-closure">
-           ➕ Schedule Day Off
-         </button>`;
-
-    let activeTab = this.activeOverviewTab;
-    if (activeTab === 'WEEKLY_OFFS') activeTab = 'HOLIDAYS';
-    if (!activeTab) activeTab = isStaffMode ? 'LEAVES' : 'HOLIDAYS';
-
-    if (isStaffMode) {
-      const monthFestivalList = cells
-        .filter((c) => !c.isPadding && c.festival)
-        .map((c) => c.festival.name);
-      const uniqueFestivals = [...new Set(monthFestivalList)];
-      const monthFestivalCountStaff = uniqueFestivals.length;
-      const subtitleParts = [];
-      if (monthFestivalCountStaff > 0) {
-        subtitleParts.push(`${monthFestivalCountStaff} festival${monthFestivalCountStaff > 1 ? 's' : ''}`);
-      }
-      if (monthHolidayCount > 0) {
-        subtitleParts.push(`${monthHolidayCount} holiday${monthHolidayCount > 1 ? 's' : ''}`);
-      }
-      const festivalTooltip = uniqueFestivals.length > 0
-        ? `Festivals: ${uniqueFestivals.join(', ')}`
-        : 'Regular monthly schedule';
-      const monthMetaSub = subtitleParts.length > 0
-        ? `<span class="cal-meta-dot-green">●</span> <span>${subtitleParts.join(' · ')}</span>`
-        : `<span class="cal-meta-dot-gray">●</span> <span>Regular Schedule</span>`;
-
-      return `
-        <div class="staff-cal-container" data-cal-mode="STAFF" data-staff-id="${staffId || ''}">
-          <!-- Sleek Dark Luxury Calendar Card Shell -->
-          <div class="stylist-cal-card">
-            <!-- Row 1: Unified Navigation Bar (< Month Year > | Today | History) - Never Wraps -->
-            <div class="stylist-cal-top-row">
-              <div class="stylist-cal-month-nav">
-                <button type="button" class="cal-nav-arrow-btn" id="btn-cal-prev" aria-label="Previous Month">‹</button>
-                <span class="stylist-cal-month-heading">${currentMonthTitle}</span>
-                <button type="button" class="cal-nav-arrow-btn" id="btn-cal-next" aria-label="Next Month">›</button>
-              </div>
-
-              <div class="stylist-cal-quick-actions">
-                <button type="button" class="cal-nav-pill-btn" id="btn-cal-today">Today</button>
-                <button type="button" class="cal-history-pill-btn btn-view-leave-history" id="btn-view-leave-history" data-staff-id="${staffId}" data-staff-name="${staffName.replace(/"/g, '&quot;')}" title="View leave history log">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                  <span>History</span>
-                </button>
-              </div>
-            </div>
-
-            <!-- Full-Width Apply Leave Action -->
-            <button type="button" class="btn-cal-full-apply btn-action-apply-leave" id="btn-apply-staff-leave" data-staff-id="${staffId}" data-staff-name="${staffName.replace(/"/g, '&quot;')}">
-              <span class="btn-plus-sym">＋</span>
-              <span>Apply Leave</span>
-            </button>
-
-            <!-- Context Bar: Festivals/Holidays Summary on Line 1 + Minimalist Dot Legend on Line 2 -->
-            <div class="stylist-cal-context-bar">
-              <div class="stylist-cal-meta-row">
-                <div class="stylist-cal-meta-badge" title="${festivalTooltip}">
-                  ${monthMetaSub}
-                </div>
-              </div>
-              <div class="stylist-cal-dot-legend">
-                <div class="dot-legend-item" title="Applied Leave">
-                  <span class="legend-dot dot-leave"></span>
-                  <span>Leave</span>
-                </div>
-                <div class="dot-legend-item" title="Salon Closed / Holiday">
-                  <span class="legend-dot dot-closed"></span>
-                  <span>Closed</span>
-                </div>
-                <div class="dot-legend-item" title="Special Festival">
-                  <span class="legend-dot dot-festival"></span>
-                  <span>Festival</span>
-                </div>
-              </div>
-            </div>
-
-            <!-- 7 Weekday Headers -->
-            <div class="stylist-cal-weekdays">
-              <div class="stylist-weekday-col">MON</div>
-              <div class="stylist-weekday-col">TUE</div>
-              <div class="stylist-weekday-col">WED</div>
-              <div class="stylist-weekday-col">THU</div>
-              <div class="stylist-weekday-col">FRI</div>
-              <div class="stylist-weekday-col">SAT</div>
-              <div class="stylist-weekday-col">SUN</div>
-            </div>
-
-            <!-- 7-Column Day Cells Grid (Compact Squircle with Solid Colors) -->
-            <div class="holiday-cal-grid stylist-cal-grid">
-              ${cells.map((c) => {
-        if (c.isPadding) {
-          return `
-                    <div class="holiday-cal-day-cell is-padding-day">
-                      <span class="cal-day-number">${c.dayNum}</span>
-                    </div>
-                  `;
-        }
-
-        const classes = ['holiday-cal-day-cell'];
-        if (c.isPast) classes.push('is-past');
-        if (c.isToday) classes.push('is-today');
-        if (c.dateKey === this.selectedCalDate) classes.push('is-selected');
-
-        let microIconHtml = '';
-
-        if (c.stylistLeave) {
-          classes.push('is-leave-day');
-          microIconHtml = `<span class="cal-cell-micro-icon icon-leave">📅</span>`;
-        } else if (c.closure) {
-          classes.push(c.closure.closureType === 'EMERGENCY_CLOSURE' ? 'is-emergency' : 'is-closed');
-          microIconHtml = `<span class="cal-cell-micro-icon icon-closed">🔒</span>`;
-        } else if (c.festival) {
-          classes.push('is-festival');
-          microIconHtml = `<span class="cal-cell-micro-icon icon-festival">✨</span>`;
-        } else if (c.isToday) {
-          microIconHtml = `<span class="cal-cell-today-dot">●</span>`;
-        }
-
-        const tooltipParts = [];
-        if (c.stylistLeave) tooltipParts.push(`🏖️ My Leave: ${(c.stylistLeave.leaveType || 'Leave').replace('_', ' ')}`);
-        if (c.closure) tooltipParts.push(`🌴 Salon Closed: ${c.closure.reason || 'Planned Closure'}`);
-        if (c.festival) tooltipParts.push(`🪔 ${c.festival.name}`);
-        if (tooltipParts.length === 0) tooltipParts.push(c.isPast ? 'Past date' : 'Available');
-        const cellTooltip = `${c.dateKey} · ${tooltipParts.join(' · ')}`;
-
-        return `
-                  <div class="${classes.join(' ')}" data-date="${c.dateKey}" data-absence-id="${c.stylistLeave ? (c.stylistLeave.id || '') : ''}" title="${cellTooltip}">
-                    <span class="cal-day-number">${c.dayNum}</span>
-                    ${microIconHtml}
-                  </div>
-                `;
-      }).join('')}
-            </div>
-          </div>
-
-          <!-- Right / Bottom Panel: Management Rail on Desktop -->
-          <div class="holiday-cal-side" id="holiday-management-section">
-            ${this.renderManagementPanelContent(month, year, 'STAFF', staffId, staffName)}
-          </div>
-        </div>
-      `;
-    }
-
-    // SALON MODE (Inside Profile > Holidays)
-    return `
-      <div class="settings-panel-card holiday-panel-card" data-cal-mode="SALON">
-        <div class="settings-panel-header holiday-header-compact">
-          <div class="settings-header-left">
-            <div class="settings-header-icon" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; width: 34px; height: 34px; border-radius: 8px;">
-              ${Icons.calendar ? Icons.calendar({ size: 18 }) : '🌴'}
-            </div>
-            <div>
-              <h3 class="settings-panel-title" style="font-size: 1.02rem; margin: 0;">${panelTitle}</h3>
-              <p class="settings-panel-subtitle holiday-subtitle-desktop" style="margin: 0; font-size: 0.72rem; color: #94a3b8;">${panelSubtitle}</p>
-            </div>
-          </div>
-          ${topActionBtnHtml}
-        </div>
-
-        <div class="settings-panel-body" style="gap: 8px;">
-          <!-- Zero-Penalty Booking Protection Micro-Strip -->
-          <div class="zero-penalty-micro-strip">
-            <div class="zero-penalty-text">
-              <span>🛡️ Zero-Penalty Protection Active</span>
-              <span class="zero-penalty-sub">· Appointment slots safely blocked with 0 penalties</span>
-            </div>
-            <span class="zero-penalty-pill">${closures.length} Scheduled Closures</span>
-          </div>
-
-          <!-- Top Interactive Month Overview Bar -->
-          <div class="cal-top-overview-bar">
-            <div class="cal-overview-pill ${activeTab === 'HOLIDAYS' ? 'active' : ''}" data-overview-tab="HOLIDAYS" role="button" tabindex="0" title="View Scheduled Holidays & Closures">
-              <span class="cal-overview-num" style="color: #fbbf24;">${monthHolidayCount}</span>
-              <span class="cal-overview-label">
-                <span class="cal-pill-icon">🌴</span>
-                <span class="cal-label-desktop">Salon Holidays</span>
-                <span class="cal-label-mobile">Holidays</span>
-              </span>
-            </div>
-            <div class="cal-overview-pill ${activeTab === 'LEAVES' ? 'active' : ''}" data-overview-tab="LEAVES" role="button" tabindex="0" title="View Staff Leaves">
-              <span class="cal-overview-num" style="color: #34d399;">${monthLeaveCount}</span>
-              <span class="cal-overview-label">
-                <span class="cal-pill-icon">👤</span>
-                <span class="cal-label-desktop">Staff Leaves</span>
-                <span class="cal-label-mobile">Leaves</span>
-              </span>
-            </div>
-            <div class="cal-overview-pill ${activeTab === 'FESTIVALS' ? 'active' : ''}" data-overview-tab="FESTIVALS" role="button" tabindex="0" title="View Gazetted Festivals">
-              <span class="cal-overview-num" style="color: #c084fc;">${monthFestivalCount}</span>
-              <span class="cal-overview-label">
-                <span class="cal-pill-icon">✨</span>
-                <span class="cal-label-desktop">Festivals</span>
-                <span class="cal-label-mobile">Festivals</span>
-              </span>
-            </div>
-          </div>
-
-          <!-- Split-Panel Layout -->
-          <div class="holiday-cal-layout">
-            <div class="holiday-cal-main">
-              <div class="holiday-cal-grid-wrapper">
-                <div class="holiday-cal-header-card">
-                  <!-- Row 1: Month Nav -->
-                  <div class="cal-nav-header-row">
-                    <div class="cal-nav-month-group">
-                      <button type="button" class="cal-nav-btn" id="btn-cal-prev" aria-label="Previous Month">‹</button>
-                      <h4 class="holiday-cal-month-title">${currentMonthTitle}</h4>
-                      <button type="button" class="cal-nav-btn" id="btn-cal-next" aria-label="Next Month">›</button>
-                    </div>
-                    <div class="cal-nav-actions-group">
-                      <button type="button" class="cal-nav-today-btn" id="btn-cal-today">Today</button>
-                    </div>
-                  </div>
-                  <!-- Row 2: Legend Indicators -->
-                  <div class="cal-legend-strip">
-                    <div class="cal-legend-chip chip-closed" title="Salon Planned Holiday / Closure">
-                      <span class="legend-chip-dot dot-closed"></span>
-                      <span class="legend-chip-label">Holiday</span>
-                    </div>
-                    <div class="cal-legend-chip chip-leave" title="Approved Specialist Leave">
-                      <span class="legend-chip-dot dot-leave"></span>
-                      <span class="legend-chip-label">Staff Leave</span>
-                    </div>
-                    <div class="cal-legend-chip chip-festival" title="Gazetted Festival / Observance">
-                      <span class="legend-chip-dot dot-festival"></span>
-                      <span class="legend-chip-label">Festival</span>
-                    </div>
-                    <div class="cal-legend-chip chip-today" title="Current Date">
-                      <span class="legend-chip-dot dot-today"></span>
-                      <span class="legend-chip-label">Today</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="holiday-cal-weekdays">
-                  <div class="holiday-cal-weekday-label">Mon</div>
-                  <div class="holiday-cal-weekday-label">Tue</div>
-                  <div class="holiday-cal-weekday-label">Wed</div>
-                  <div class="holiday-cal-weekday-label">Thu</div>
-                  <div class="holiday-cal-weekday-label">Fri</div>
-                  <div class="holiday-cal-weekday-label">Sat</div>
-                  <div class="holiday-cal-weekday-label">Sun</div>
-                </div>
-
-                <div class="holiday-cal-grid">
-                  ${cells.map((c) => {
-      if (c.isPadding) {
-        return `
-            <div class="holiday-cal-day-cell is-padding-day">
-              <span class="cal-day-number">${c.dayNum}</span>
-            </div>
-          `;
-      }
-
-      const classes = ['holiday-cal-day-cell'];
-      if (c.isPast) classes.push('is-past');
-      if (c.isToday) classes.push('is-today');
-      if (c.dateKey === this.selectedCalDate) classes.push('is-selected');
-
-      if (c.closure) classes.push(c.closure.closureType === 'EMERGENCY_CLOSURE' ? 'is-emergency' : 'is-closed');
-      else if (c.festival) classes.push('is-festival');
-      else if (c.leaves.length > 0) classes.push('is-leave-day');
-
-      let microIconHtml = '';
-      if (c.closure) {
-        microIconHtml = `<span class="cal-cell-micro-icon icon-closed">🔒</span>`;
-      } else if (c.festival) {
-        microIconHtml = `<span class="cal-cell-micro-icon icon-festival">✨</span>`;
-      } else if (c.leaves.length > 0) {
-        microIconHtml = `<span class="cal-cell-micro-icon icon-leave">👤</span>`;
-      } else if (c.isToday) {
-        microIconHtml = `<span class="cal-cell-today-dot">●</span>`;
-      }
-
-      const festivalTitle = c.festival ? c.festival.name.replace(/"/g, '&quot;') : '';
-      const closureTitle = c.closure ? (c.closure.reason || 'Salon Closed').replace(/"/g, '&quot;') : '';
-      const cellTooltip = c.isPast
-        ? `${c.dateKey} · Past date`
-        : (closureTitle || festivalTitle || (c.leaves.length > 0 ? `${c.leaves.length} staff on leave` : 'Click to inspect date'));
-
-      return `
-          <div class="${classes.join(' ')}" data-date="${c.dateKey}" title="${cellTooltip}">
-            <span class="cal-day-number">${c.dayNum}</span>
-            ${microIconHtml}
-          </div>
-        `;
-    }).join('')}
-                </div>
-
-                <div class="cal-mobile-inspector" id="cal-mobile-inspector">
-                  <div class="cal-inspector-header">
-                    <div class="cal-inspector-title">
-                      <span class="cal-inspector-title-icon">${Icons.calendar({ size: 15, color: '#A855F7' })}</span>
-                      <span id="cal-inspector-date-label">Selected Date</span>
-                    </div>
-                    <span class="cal-inspector-badge badge-open" id="cal-inspector-status-badge">AVAILABLE</span>
-                  </div>
-                  <div class="cal-inspector-body" id="cal-inspector-body">
-                    Tap any date above to inspect festival closures or specialist leaves.
-                  </div>
-                  <div class="cal-inspector-actions" id="cal-inspector-actions">
-                    <button type="button" class="btn btn-sm btn-primary" id="btn-inspector-action" style="display: none; width: 100%; font-weight: 700; height: 38px; border-radius: 8px;">
-                      Action
-                    </button>
-                  </div>
-                </div>
-
-                <button type="button" class="btn btn-secondary btn-sm cal-open-sheet-btn-mobile" id="btn-open-holiday-sheet" style="margin-top: 10px; width: 100%; height: 38px; border-radius: 9px; font-weight: 700; font-size: 0.78rem; display: flex; align-items: center; justify-content: center; gap: 8px; background: rgba(139, 61, 255, 0.12); border: 1px solid rgba(139, 61, 255, 0.35); color: #c7d2fe; cursor: pointer;">
-                  <span>📋 Manage Holidays, Leaves & Festivals</span>
-                  <span style="font-size: 0.75rem;">▴</span>
-                </button>
-              </div>
-            </div>
-
-            <div class="holiday-cal-side" id="holiday-management-section">
-              ${this.renderManagementPanelContent(month, year, 'SALON')}
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
-  }
-
-  renderManagementPanelContent(month, year, mode = 'SALON', staffId = null, staffName = '') {
-    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-    const currentMonthName = monthNames[month];
-    const mStr = String(month + 1).padStart(2, '0');
-    const todayISO = this.getLocalDateString();
-    const isStaffMode = mode === 'STAFF';
-    let activeTab = this.activeOverviewTab;
-    if (activeTab === 'WEEKLY_OFFS') activeTab = 'HOLIDAYS';
-    if (!activeTab) activeTab = isStaffMode ? 'LEAVES' : 'HOLIDAYS';
-    const staff = staffId ? (this.staffList || []).find((s) => s.id === staffId) : null;
-
-    // 1. Festivals Management Panel
-    if (activeTab === 'FESTIVALS') {
-      const todayObj = new Date(todayISO);
-      const futureObj = new Date(todayObj.getTime() + 60 * 24 * 60 * 60 * 1000);
-      const upcomingFestivals = INDIAN_FESTIVALS_DATASET.filter((f) => {
-        const fDate = new Date(f.date);
-        return fDate >= todayObj && fDate <= futureObj;
-      });
-
-      return `
-        <div class="cal-side-card">
-          <div class="cal-management-header">
-            <div class="cal-management-title">
-              <span>✨ Gazetted Festivals & Events</span>
-              <span class="cal-management-pill-count">${upcomingFestivals.length} Upcoming</span>
-            </div>
-            <span style="font-size: 0.65rem; color: #c084fc; font-weight: 700;">AUTO-DETECT</span>
-          </div>
-
-          <p style="font-size: 0.72rem; color: #94a3b8; margin: 0 0 10px 0;">
-            1-tap declare holidays on recognized festivals to block bookings with zero penalties:
-          </p>
-
-          <div class="festivals-list-container">
-            ${upcomingFestivals.length === 0 ? `
-              <div style="font-size: 0.74rem; color: #94a3b8; text-align: center; padding: 16px 0;">
-                No major gazetted festivals in next 60 days.
-              </div>
-            ` : upcomingFestivals.map((fest) => {
-        const isClosed = (this.closuresList || []).some((c) => {
-          const s = String(c.startDate).split('T')[0];
-          const e = String(c.endDate).split('T')[0];
-          return fest.date >= s && fest.date <= e;
-        });
-        const dateFormatted = new Date(fest.date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', weekday: 'short' });
-
-        return `
-                <div class="festival-item-row">
-                  <div class="festival-item-info">
-                    <span class="festival-item-name">${fest.icon || '✨'} ${fest.name}</span>
-                    <span class="festival-item-date">${dateFormatted} · ${fest.type}</span>
-                  </div>
-                  <div>
-                    ${isClosed ? `
-                      <span class="btn-declare-festival is-already-closed">✓ Closed</span>
-                    ` : (!isStaffMode ? `
-                      <button type="button" class="btn-declare-festival btn-quick-declare-festival" data-date="${fest.date}" data-name="${fest.name.replace(/"/g, '&quot;')}">
-                        + Close Salon
-                      </button>
-                    ` : `
-                      <span style="font-size: 0.68rem; color: #a855f7;">Festival</span>
-                    `)}
-                  </div>
-                </div>
-              `;
-      }).join('')}
-          </div>
-        </div>
-      `;
-    }
-
-    // 2. Staff Leaves Management Panel (Full-Control with Cancel Leave)
-    if (activeTab === 'LEAVES') {
-      const monthLeaves = [];
-      const staffSource = isStaffMode && staff ? [staff] : (this.staffList || []);
-
-      staffSource.forEach((st) => {
-        (st.absences || []).forEach((ab) => {
-          if (ab.status === 'ACTIVE') {
-            const s = String(ab.startDate || ab.absenceDate || '').split('T')[0];
-            const e = String(ab.endDate || ab.absenceDate || '').split('T')[0];
-            const [sy, sm] = s.split('-');
-            const [ey, em] = e.split('-');
-            if ((sy == year && sm == mStr) || (ey == year && em == mStr) || (s <= `${year}-${mStr}-01` && e >= `${year}-${mStr}-28`)) {
-              monthLeaves.push({
-                staffId: st.id,
-                staffName: st.name || 'Specialist',
-                role: st.role || 'Stylist',
-                absenceId: ab.id,
-                startDate: s,
-                endDate: e,
-                leaveType: ab.leaveType,
-                leavePortion: ab.leavePortion,
-                reason: ab.reason,
-              });
-            }
-          }
-        });
-      });
-
-      return `
-        <div class="cal-side-card">
-          <div class="cal-management-header">
-            <div class="cal-management-title">
-              <span>${isStaffMode ? '🏖️ Leave Records' : '👤 Specialist Leaves'}</span>
-              <span class="cal-management-pill-count">${monthLeaves.length} Scheduled</span>
-            </div>
-            <div style="display: flex; gap: 6px; align-items: center;">
-              ${isStaffMode ? `
-                <button type="button" class="btn btn-secondary btn-sm btn-view-leave-history" id="btn-panel-leave-history" data-staff-id="${staffId || ''}" data-staff-name="${(staffName || '').replace(/"/g, '&quot;')}" style="font-size: 0.68rem; padding: 3px 8px; color: #c7d2fe; border-color: rgba(139, 61, 255, 0.35); background: rgba(139, 61, 255, 0.12);">
-                  📜 History
-                </button>
-              ` : ''}
-              <button type="button" class="btn btn-secondary btn-sm" id="btn-quick-add-staff-leave" data-staff-id="${staffId || ''}" data-staff-name="${(staffName || '').replace(/"/g, '&quot;')}" style="font-size: 0.68rem; padding: 3px 8px; color: #34d399; border-color: rgba(52, 211, 153, 0.35); background: rgba(52, 211, 153, 0.1);">
-                ➕ Add Leave
-              </button>
-            </div>
-          </div>
-
-          <div style="font-size: 0.72rem; color: #94a3b8; margin-bottom: 6px;">
-            ${isStaffMode ? `Recorded leaves for ${staffName} in ${currentMonthName}.` : `Specialists on leave in ${currentMonthName}.`}
-          </div>
-
-          ${monthLeaves.length === 0 ? `
-            <div style="text-align: center; padding: 18px 8px; font-size: 0.76rem; color: #94a3b8;">
-              <div style="font-size: 1.5rem; margin-bottom: 4px;">✨</div>
-              <strong>${isStaffMode ? `${staffName} has no leaves scheduled!` : 'All specialists are available!'}</strong><br>
-              <span style="font-size: 0.68rem; color: #64748b;">No leaves booked for ${currentMonthName}.</span>
-            </div>
-          ` : `
-            <div class="staff-leaves-list">
-              ${monthLeaves.map((l) => {
-        const sFormatted = new Date(l.startDate + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
-        const eFormatted = new Date(l.endDate + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
-        const dateDisplay = sFormatted === eFormatted ? sFormatted : `${sFormatted} → ${eFormatted}`;
-        const isPastLeave = l.endDate < todayISO;
-        const initials = l.staffName.split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase() || 'ST';
-
-        return `
-                  <div class="staff-leave-card">
-                    <div class="staff-leave-info">
-                      <div class="staff-avatar-initials">${initials}</div>
-                      <div class="staff-leave-meta">
-                        <div class="staff-leave-name-row">
-                          <span>${l.staffName}</span>
-                          <span class="staff-leave-role">(${l.role})</span>
-                          <span class="staff-leave-type-pill">${(l.leaveType || 'LEAVE').replace('_', ' ')}</span>
-                        </div>
-                        <div class="staff-leave-date-str">
-                          📅 ${dateDisplay} ${l.leavePortion && l.leavePortion !== 'FULL_DAY' ? '· ' + l.leavePortion.replace('_', ' ') : ''}
-                        </div>
-                        ${l.reason ? `<div class="staff-leave-reason-str">"${l.reason}"</div>` : ''}
-                      </div>
-                    </div>
-                    <div>
-                      ${isPastLeave ? `
-                        <span style="font-size: 0.65rem; color: #64748b; padding: 2px 6px;">Passed</span>
-                      ` : `
-                        <button type="button" class="btn-cancel-leave" data-staff-id="${l.staffId}" data-absence-id="${l.absenceId}" data-staff-name="${l.staffName.replace(/"/g, '&quot;')}">
-                          🗑️ Cancel
-                        </button>
-                      `}
-                    </div>
-                  </div>
-                `;
-      }).join('')}
-            </div>
-          `}
-        </div>
-      `;
-    }
-
-    // 3. Holidays Management Panel (Default for Salon, or Inherited for Staff)
-    const monthClosures = (this.closuresList || []).filter((c) => {
-      const s = String(c.startDate).split('T')[0];
-      const e = String(c.endDate).split('T')[0];
-      const [sy, sm] = s.split('-');
-      const [ey, em] = e.split('-');
-      return (sy == year && sm == mStr) || (ey == year && em == mStr) || (s <= `${year}-${mStr}-01` && e >= `${year}-${mStr}-28`);
-    });
-
-    const todayObj = new Date(todayISO);
-    const futureObj = new Date(todayObj.getTime() + 45 * 24 * 60 * 60 * 1000);
-    const upcomingFestivals = INDIAN_FESTIVALS_DATASET.filter((f) => {
-      const fDate = new Date(f.date);
-      return fDate >= todayObj && fDate <= futureObj;
-    }).slice(0, 4);
-
-    return `
-      <!-- Scheduled Closures List with Direct Reopen -->
-      <div class="cal-side-card">
-        <div class="cal-management-header">
-          <div class="cal-management-title">
-            <span>🌴 ${isStaffMode ? 'Salon Closures & Holidays' : 'Scheduled Closures'}</span>
-            <span class="cal-management-pill-count">${monthClosures.length} in ${currentMonthName}</span>
-          </div>
-          ${!isStaffMode ? `
-            <button type="button" class="btn btn-secondary btn-sm" id="btn-quick-add-holiday" style="font-size: 0.68rem; padding: 2px 7px; color: #fbbf24; border-color: rgba(245, 158, 11, 0.35);">
-              + Add Holiday
-            </button>
-          ` : ''}
-        </div>
-
-        ${isStaffMode ? `
-          <p style="font-size: 0.72rem; color: #94a3b8; margin: 0 0 8px 0;">
-            ${staffName} automatically inherits all salon closures and festive off-days.
-          </p>
-        ` : ''}
-
-        ${monthClosures.length === 0 ? `
-          <div style="text-align: center; padding: 16px 6px; font-size: 0.74rem; color: #94a3b8;">
-            🌴 No salon closures scheduled in ${currentMonthName}.
-          </div>
-        ` : `
-          <div style="display: flex; flex-direction: column; gap: 8px; max-height: 240px; overflow-y: auto; padding-right: 2px;">
-            ${monthClosures.map((c) => {
-      const startDateFormatted = new Date(c.startDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
-      const endDateFormatted = new Date(c.endDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
-      const isSame = startDateFormatted === endDateFormatted;
-      const dateDisplay = isSame ? startDateFormatted : `${startDateFormatted} → ${endDateFormatted}`;
-      const isEmergency = c.closureType === 'EMERGENCY_CLOSURE';
-      const isPastClosure = String(c.endDate).split('T')[0] < todayISO;
-
-      return `
-                <div style="background: rgba(255, 255, 255, 0.025); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 8px; padding: 8px 10px; display: flex; justify-content: space-between; align-items: center; gap: 6px;">
-                  <div style="min-width: 0;">
-                    <div style="font-size: 0.76rem; font-weight: 700; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                      ${isEmergency ? '🚨' : '🌴'} ${c.reason || 'Store Closure'}
-                      <span class="badge ${isEmergency ? 'badge-cancelled' : 'badge-completed'}" style="font-size: 0.58rem; margin-left: 3px;">
-                        ${isEmergency ? 'Emergency' : 'Holiday'}
-                      </span>
-                    </div>
-                    <div style="font-size: 0.68rem; color: #94a3b8;">${dateDisplay}</div>
-                  </div>
-                  ${!isStaffMode ? (isPastClosure ? `
-                    <span style="font-size: 0.65rem; color: #64748b; padding: 2px 6px;">Passed</span>
-                  ` : `
-                    <button type="button" class="btn btn-secondary btn-sm btn-delete-closure-direct" data-id="${c.id}" style="padding: 2px 7px; font-size: 0.68rem; border-color: rgba(239,68,68,0.35); color: #f87171; white-space: nowrap;">
-                      🗑️ Reopen
-                    </button>
-                  `) : ''}
-                </div>
-              `;
-    }).join('')}
-          </div>
-        `}
-      </div>
-
-      <!-- Upcoming Festivals Auto-Detect -->
-      <div class="cal-side-card">
-        <div class="cal-side-header">
-          <span style="color: #d8b4fe;">🪔 Upcoming Festivals</span>
-          <span style="font-size: 0.65rem; color: #a855f7; font-weight: 700;">AUTO-DETECT</span>
-        </div>
-
-        <div class="festivals-list-container">
-          ${upcomingFestivals.length === 0 ? `
-            <div style="font-size: 0.74rem; color: #94a3b8; text-align: center; padding: 12px 0;">
-              No major gazetted festivals in next 45 days.
-            </div>
-          ` : upcomingFestivals.map((fest) => {
-      const isClosed = (this.closuresList || []).some((c) => {
-        const s = String(c.startDate).split('T')[0];
-        const e = String(c.endDate).split('T')[0];
-        return fest.date >= s && fest.date <= e;
-      });
-      const dateFormatted = new Date(fest.date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
-
-      return `
-              <div class="festival-item-row">
-                <div class="festival-item-info">
-                  <span class="festival-item-name">${fest.icon || '🪔'} ${fest.name}</span>
-                  <span class="festival-item-date">${dateFormatted} · ${fest.type}</span>
-                </div>
-                <div>
-                  ${isClosed ? `
-                    <span class="btn-declare-festival is-already-closed">✓ Closed</span>
-                  ` : (!isStaffMode ? `
-                    <button type="button" class="btn-declare-festival btn-quick-declare-festival" data-date="${fest.date}" data-name="${fest.name.replace(/"/g, '&quot;')}">
-                      + Close Salon
-                    </button>
-                  ` : `
-                    <span style="font-size: 0.68rem; color: #a855f7;">Festival</span>
-                  `)}
-                </div>
-              </div>
-            `;
-    }).join('')}
-        </div>
-      </div>
-    `;
+    }, 0);
+    return `<div id="profile-subtab-container" style="display:flex;align-items:center;justify-content:center;min-height:360px;color:#a5b4fc;"><div style="font-size:0.88rem;font-weight:600;">Loading live salon calendar...</div></div>`;
   }
 
   async toggleStaffWeeklyOffDay(staffId, dayOfWeek) {
@@ -7217,9 +6568,7 @@ export class SalonDashboard {
       );
       await this.loadData(true);
       this.render();
-      if (document.getElementById('holiday-bottom-sheet-modal')) {
-        this.openHolidayBottomSheet(this.activeOverviewTab, 'STAFF', staffId);
-      }
+
     } catch (err) {
       alert(err.message || 'Failed to update specialist routine.');
     }
@@ -7276,11 +6625,7 @@ export class SalonDashboard {
       await this.loadData(true);
       const container = document.getElementById('profile-subtab-container');
       if (container) {
-        container.innerHTML = this.renderHolidayCalendar();
-        this.attachProfileSubtabListeners();
-      }
-      if (document.getElementById('holiday-bottom-sheet-modal')) {
-        this.openHolidayBottomSheet(this.activeOverviewTab || 'HOLIDAYS', 'SALON');
+        SalonDayOffView.mount(container, this);
       }
     } catch (err) {
       alert(err.message || 'Failed to update weekly routine.');
@@ -7299,884 +6644,104 @@ export class SalonDashboard {
       this.showToast(`Leave cancelled. ${displayName} is now active!`, 'success');
       await this.loadData(true);
       this.render();
-      if (document.getElementById('holiday-bottom-sheet-modal')) {
-        this.openHolidayBottomSheet(this.activeOverviewTab, this.selectedStaffId ? 'STAFF' : 'SALON', staffId);
-      }
+
     } catch (err) {
       alert(err.message || 'Failed to cancel specialist leave.');
     }
   }
 
-  openHolidayBottomSheet(initialTab, mode = 'SALON', staffId = null) {
-    if (initialTab) {
-      this.activeOverviewTab = initialTab;
-    }
-
-    const isStaffMode = mode === 'STAFF';
-    const targetStaffId = isStaffMode ? (staffId || this.selectedStaffId) : null;
-    const staff = targetStaffId ? (this.staffList || []).find((s) => s.id === targetStaffId) : null;
-    const staffName = staff ? staff.name : (isStaffMode ? 'Specialist' : '');
-
-    const modalContainer = document.getElementById('modal-container') || document.body;
-
-    const renderSheet = () => {
-      const month = this.calMonth !== undefined ? this.calMonth : new Date().getMonth();
-      const year = this.calYear !== undefined ? this.calYear : new Date().getFullYear();
-
-      const monthHolidays = (this.closuresList || []).filter((c) => {
-        const d = new Date(c.startDate);
-        return d.getMonth() === month && d.getFullYear() === year;
-      }).length;
-
-      const monthFestivalsCount = INDIAN_FESTIVALS_DATASET.filter((f) => {
-        const d = new Date(f.date);
-        return d.getMonth() === month && d.getFullYear() === year;
-      }).length;
-
-      const monthLeaveCount = (staff ? staff.absences || [] : this.staffAbsences || []).filter((a) => {
-        if (a.status === 'CANCELLED') return false;
-        const d = new Date(a.startDate || a.date);
-        return d.getMonth() === month && d.getFullYear() === year;
-      }).length;
-
-      const titles = isStaffMode ? {
-        LEAVES: `🏖️ ${staffName}'s Leaves`,
-        HOLIDAYS: `🌴 Salon Holidays & Closures`,
-        FESTIVALS: `✨ Gazetted Festivals & Events`,
-      } : {
-        HOLIDAYS: '🌴 Scheduled Closures & Holidays',
-        LEAVES: '👤 Specialist Leaves',
-        FESTIVALS: '✨ Gazetted Festivals & Observances',
-      };
-
-      const title = titles[this.activeOverviewTab] || (isStaffMode ? `🏖️ ${staffName}'s Leaves` : '📅 Holidays & Leaves');
-
-      let modalEl = document.getElementById('holiday-bottom-sheet-modal');
-      if (!modalEl) {
-        modalEl = document.createElement('div');
-        modalEl.id = 'holiday-bottom-sheet-modal';
-        modalEl.className = 'modal-backdrop show';
-        modalEl.style.alignItems = 'flex-end';
-        modalEl.style.padding = '0';
-        modalEl.style.zIndex = '9999';
-        modalContainer.appendChild(modalEl);
-      }
-
-      modalEl.innerHTML = `
-        <div class="modal-content holiday-bottom-sheet" id="holiday-bottom-sheet-content">
-          <div class="sheet-grab-handle" style="display: block; margin: 0 auto 10px auto; width: 44px; height: 5px; background: rgba(255, 255, 255, 0.3); border-radius: 999px;"></div>
-          
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.08);">
-            <div style="font-size: 0.95rem; font-weight: 800; color: #fff; display: flex; align-items: center; gap: 6px;">
-              <span>${title}</span>
-            </div>
-            <button type="button" class="close-btn" id="btn-close-bottom-sheet" style="width: 28px; height: 28px; font-size: 1.2rem; color: #94a3b8; background: rgba(255,255,255,0.06); border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; border: none;">&times;</button>
-          </div>
-
-          <!-- Quick Tab Switcher inside Sheet -->
-          <div class="holiday-sheet-tab-bar">
-            ${isStaffMode ? `
-              <button type="button" class="sheet-tab-btn ${this.activeOverviewTab === 'LEAVES' ? 'active' : ''}" data-sheet-tab="LEAVES" style="flex: 1;">
-                🏖️ ${staffName}'s Leaves (${monthLeaveCount})
-              </button>
-              <button type="button" class="sheet-tab-btn btn-view-leave-history" id="btn-sheet-view-history" data-staff-id="${targetStaffId}" data-staff-name="${staffName.replace(/"/g, '&quot;')}" style="flex: 1; color: #a5b4fc;">
-                📜 Full History
-              </button>
-            ` : `
-              <button type="button" class="sheet-tab-btn ${this.activeOverviewTab === 'HOLIDAYS' ? 'active' : ''}" data-sheet-tab="HOLIDAYS">
-                🌴 Holidays (${monthHolidays})
-              </button>
-              <button type="button" class="sheet-tab-btn ${this.activeOverviewTab === 'LEAVES' ? 'active' : ''}" data-sheet-tab="LEAVES">
-                👤 Leaves (${monthLeaveCount})
-              </button>
-              <button type="button" class="sheet-tab-btn ${this.activeOverviewTab === 'FESTIVALS' ? 'active' : ''}" data-sheet-tab="FESTIVALS">
-                ✨ Festivals (${monthFestivalsCount})
-              </button>
-            `}
-          </div>
-
-          <!-- Scrollable Content Body -->
-          <div class="holiday-sheet-body">
-            ${this.renderManagementPanelContent(month, year, isStaffMode ? 'STAFF' : 'SALON', targetStaffId, staffName)}
-          </div>
-        </div>
-      `;
-
-      this.attachBottomSheetListeners(modalEl, renderSheet, isStaffMode ? 'STAFF' : 'SALON', targetStaffId, staffName);
+  showCalendarCategoryInspector(category, mode = 'SALON', staffId = null, staffName = 'Specialist') {
+    const DIALOGS = {
+      CLOSED: ClosureDialog,
+      SALON_OFF: SalonWeeklyOffDialog,
+      STAFF_OFF: StaffWeeklyOffDialog,
+      STAFF_LEAVE: StaffLeaveDialog,
+      FESTIVAL: FestivalDialog,
     };
-
-    renderSheet();
-  }
-
-  closeHolidayBottomSheet() {
-    const modalEl = document.getElementById('holiday-bottom-sheet-modal');
-    if (modalEl) {
-      modalEl.remove();
+    const DialogClass = DIALOGS[category];
+    if (DialogClass) {
+      const cal = new CalendarView({ app: this, calendarFor: mode, staffId, staffName });
+      DialogClass.open({
+        app: this,
+        year: this.calYear,
+        month: this.calMonth,
+        closures: this.calendarSchedule?.salonSchedule?.closures || this.closuresList || [],
+        weeklyHours: this.calendarSchedule?.salonSchedule?.weeklyHours || this.salonWorkingHours || [],
+        staffList: this.calendarSchedule?.stylists || this.staffList || [],
+        leaves: this.calendarSchedule?.leaves || [],
+        festivals: cal.getFestivalsList(this.calYear, this.calMonth),
+        isStaffMode: mode === 'STAFF',
+        staffId,
+        staffName,
+        onRefresh: async () => {
+          await this.loadData(true);
+          this.render();
+        },
+      });
     }
   }
 
-  attachBottomSheetListeners(modalEl, renderSheet, mode = 'SALON', staffId = null, staffName = '') {
-    modalEl.querySelector('#btn-close-bottom-sheet')?.addEventListener('click', () => {
-      this.closeHolidayBottomSheet();
-    });
-
-    modalEl.addEventListener('click', (e) => {
-      if (e.target === modalEl) {
-        this.closeHolidayBottomSheet();
-      }
-    });
-
-    modalEl.querySelectorAll('.sheet-tab-btn[data-sheet-tab]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const tab = btn.getAttribute('data-sheet-tab');
-        if (tab) {
-          this.activeOverviewTab = tab;
-          renderSheet();
-        }
-      });
-    });
-
-    modalEl.querySelectorAll('.routine-day-chip[data-day]').forEach((chip) => {
-      chip.addEventListener('click', async () => {
-        const day = chip.getAttribute('data-day');
-        const chipMode = chip.getAttribute('data-mode') || mode;
-        const chipStaffId = chip.getAttribute('data-staff-id') || staffId;
-        if (day) {
-          if (chipMode === 'STAFF' && chipStaffId) {
-            await this.toggleStaffWeeklyOffDay(chipStaffId, day);
-          } else {
-            await this.toggleWeeklyOffDay(day);
-          }
-          renderSheet();
-        }
-      });
-    });
-
-    modalEl.querySelectorAll('.btn-cancel-leave[data-absence-id]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const sId = btn.getAttribute('data-staff-id') || staffId;
-        const absenceId = btn.getAttribute('data-absence-id');
-        const sName = btn.getAttribute('data-staff-name') || staffName;
-        if (sId && absenceId) {
-          await this.cancelSpecialistLeave(sId, absenceId, sName);
-          renderSheet();
-        }
-      });
-    });
-
-    modalEl.querySelector('#btn-quick-add-holiday')?.addEventListener('click', () => {
-      this.closeHolidayBottomSheet();
-      document.getElementById('btn-add-holiday-closure')?.click();
-    });
-
-    modalEl.querySelector('#btn-quick-add-staff-leave')?.addEventListener('click', () => {
-      this.closeHolidayBottomSheet();
-      const sId = mode === 'STAFF' ? (staffId || this.selectedStaffId) : null;
-      const sName = sId ? ((this.staffList || []).find((s) => s.id === sId)?.name || 'Specialist') : null;
-      this.leaveUI.showCreateLeaveModal(sId, sName, this.selectedCalDate || this.getLocalDateString());
-    });
-
-    modalEl.querySelectorAll('#btn-sheet-view-history, #btn-panel-leave-history, .btn-view-leave-history').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        this.closeHolidayBottomSheet();
-        const sId = btn.getAttribute('data-staff-id') || (mode === 'STAFF' ? (staffId || this.selectedStaffId) : null);
-        const sName = btn.getAttribute('data-staff-name') || (sId ? (this.staffList || []).find((s) => s.id === sId)?.name : null) || 'Specialist';
-        if (sId) {
-          this.leaveUI.showLeaveHistoryModal(sId, sName);
-        }
-      });
-    });
-
-    modalEl.querySelectorAll('.btn-delete-closure-direct').forEach((btn) => {
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const id = e.currentTarget.getAttribute('data-id');
-        if (confirm('Are you sure you want to cancel this closure and reopen the booking calendar for these dates?')) {
-          try {
-            await ApiClient.deleteSalonClosure(id);
-            this.showToast('Closure cancelled and calendar reopened.', 'success');
-            await this.loadData(true);
-            this.render();
-            renderSheet();
-          } catch (err) {
-            this.showToast(err.message || 'Failed to cancel closure.', 'error');
-          }
-        }
-      });
+  showDateEventsModal(dateStr, mode = 'SALON', staffId = null, staffName = 'Specialist') {
+    const cal = new CalendarView({ app: this, calendarFor: mode, staffId, staffName });
+    DateEventsDialog.open({
+      app: this,
+      dateStr,
+      mode,
+      staffId,
+      staffName,
+      scheduleData: this.calendarSchedule,
+      getFestivalForDate: (dt) => cal.getFestivalForDate(dt),
+      onRefresh: async () => {
+        await this.loadData(true);
+        this.render();
+      },
     });
   }
 
   updateCalInspector(dateStr, mode = 'SALON', staffId = null, staffName = '') {
-    if (!dateStr) return;
-    this.selectedCalDate = dateStr;
-    const inspector = document.getElementById('cal-mobile-inspector');
-    if (!inspector) return;
-
-    const todayISO = this.getLocalDateString();
-    const isPast = dateStr < todayISO;
-
-    const dateObj = new Date(dateStr + 'T00:00:00');
-    const friendlyDate = isNaN(dateObj.getTime()) ? dateStr : dateObj.toLocaleDateString('en-IN', {
-      weekday: 'short',
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-    });
-
-    const isStaffMode = mode === 'STAFF';
-    const targetStaffId = isStaffMode ? (staffId || this.selectedStaffId) : null;
-    const staff = targetStaffId ? (this.staffList || []).find((s) => s.id === targetStaffId) : null;
-    const sName = staff ? staff.name : (isStaffMode ? (staffName || 'Specialist') : '');
-
-    const existingClosure = (this.closuresList || []).find((c) => {
-      const s = String(c.startDate).split('T')[0];
-      const e = String(c.endDate).split('T')[0];
-      return dateStr >= s && dateStr <= e;
-    });
-
-    const festivalInfo = INDIAN_FESTIVALS_DATASET.find((f) => f.date === dateStr) || null;
-
-    const dayNames = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
-    const dayOfWeekIdx = new Date(dateStr + 'T00:00:00').getDay();
-    const dayOfWeekName = dayNames[dayOfWeekIdx];
-
-    const isWeeklyOff = this.isDayWeeklyOff(dayOfWeekName, isStaffMode ? 'STAFF' : 'SALON', staff);
-
-    const activeAbsences = [];
-    let stylistLeave = null;
-
-    if (isStaffMode && staff) {
-      (staff.absences || []).forEach((ab) => {
-        if (ab.status === 'ACTIVE') {
-          const s = String(ab.startDate || ab.absenceDate || '').split('T')[0];
-          const e = String(ab.endDate || ab.absenceDate || '').split('T')[0];
-          if (dateStr >= s && dateStr <= e) {
-            stylistLeave = ab;
-            activeAbsences.push({ staffName: staff.name, ...ab });
-          }
-        }
-      });
-    } else {
-      (this.staffList || []).forEach((st) => {
-        (st.absences || []).forEach((ab) => {
-          if (ab.status === 'ACTIVE') {
-            const s = String(ab.startDate || ab.absenceDate || '').split('T')[0];
-            const e = String(ab.endDate || ab.absenceDate || '').split('T')[0];
-            if (dateStr >= s && dateStr <= e) {
-              activeAbsences.push({ staffName: st.name || 'Specialist', ...ab });
-            }
-          }
-        });
-      });
-    }
-
-    // Date label
-    const dateLabelEl = document.getElementById('cal-inspector-date-label');
-    if (dateLabelEl) dateLabelEl.textContent = friendlyDate;
-
-    // Status badge
-    const badgeEl = document.getElementById('cal-inspector-status-badge');
-    if (badgeEl) {
-      if (isPast) {
-        badgeEl.className = 'cal-inspector-badge badge-past';
-        badgeEl.textContent = 'PAST DATE';
-      } else if (isStaffMode) {
-        if (stylistLeave) {
-          badgeEl.className = 'cal-inspector-badge badge-leave';
-          badgeEl.textContent = 'ON LEAVE';
-        } else if (existingClosure) {
-          badgeEl.className = 'cal-inspector-badge badge-closed';
-          badgeEl.textContent = existingClosure.closureType === 'EMERGENCY_CLOSURE' ? 'EMERGENCY OFF' : 'SALON CLOSED';
-        } else if (festivalInfo) {
-          badgeEl.className = 'cal-inspector-badge badge-festival';
-          badgeEl.textContent = 'FESTIVAL';
-        } else {
-          badgeEl.className = 'cal-inspector-badge badge-open';
-          badgeEl.textContent = 'AVAILABLE';
-        }
-      } else if (existingClosure) {
-        badgeEl.className = 'cal-inspector-badge badge-closed';
-        badgeEl.textContent = existingClosure.closureType === 'EMERGENCY_CLOSURE' ? 'EMERGENCY OFF' : 'SALON HOLIDAY';
-      } else if (festivalInfo) {
-        badgeEl.className = 'cal-inspector-badge badge-festival';
-        badgeEl.textContent = 'FESTIVAL';
-      } else if (activeAbsences.length > 0) {
-        badgeEl.className = 'cal-inspector-badge badge-leave';
-        badgeEl.textContent = `${activeAbsences.length} ON LEAVE`;
-      } else {
-        badgeEl.className = 'cal-inspector-badge badge-open';
-        badgeEl.textContent = 'AVAILABLE';
-      }
-    }
-
-    // Body items
-    const bodyEl = document.getElementById('cal-inspector-body');
-    if (bodyEl) {
-      let itemsHtml = '';
-      if (isStaffMode) {
-        if (stylistLeave) {
-          itemsHtml += `<div class="inspector-item leave"><span class="inspector-item-badge badge-leave">${Icons.calendar({ size: 14, color: '#ffffff' })}</span> <div><strong>${sName} is on Leave</strong> <span class="inspector-sub">(${(stylistLeave.leaveType || 'Leave').replace('_', ' ')}${stylistLeave.reason ? ' · ' + stylistLeave.reason : ''})</span></div></div>`;
-        }
-        if (existingClosure) {
-          itemsHtml += `<div class="inspector-item closure"><span class="inspector-item-badge badge-closed">${Icons.lock({ size: 14, color: '#ffffff' })}</span> <div><strong>Salon Closed: ${existingClosure.reason || 'Salon Holiday'}</strong> <span class="inspector-sub">(${existingClosure.closureType === 'EMERGENCY_CLOSURE' ? 'Emergency Closure' : 'Planned Salon Holiday'})</span></div></div>`;
-        }
-        if (festivalInfo) {
-          itemsHtml += `<div class="inspector-item festival"><span class="inspector-item-badge badge-festival">${Icons.sparkles({ size: 14, color: '#ffffff' })}</span> <div><strong>${festivalInfo.name}</strong> <span class="inspector-sub">(${festivalInfo.type || 'Festival'})</span></div></div>`;
-        }
-        if (!stylistLeave && !existingClosure && !festivalInfo) {
-          if (isPast) {
-            itemsHtml = `<div class="inspector-item past"><span class="inspector-item-badge badge-past">${Icons.clock({ size: 14, color: '#ffffff' })}</span> <div><strong>Regular Working Day (Passed)</strong></div></div>`;
-          } else {
-            itemsHtml = `<div class="inspector-item leave"><span class="inspector-item-badge badge-leave">${Icons.check({ size: 14, color: '#ffffff' })}</span> <div><strong>${sName} is Available</strong> <span class="inspector-sub">Available for customer appointments & walk-ins</span></div></div>`;
-          }
-        }
-      } else {
-        if (existingClosure) {
-          itemsHtml += `<div class="inspector-item closure"><span class="inspector-item-badge badge-closed">${Icons.lock({ size: 14, color: '#ffffff' })}</span> <div><strong>${existingClosure.reason || 'Salon Closed'}</strong> <span class="inspector-sub">(${existingClosure.closureType === 'EMERGENCY_CLOSURE' ? 'Emergency Closure' : 'Planned Holiday'})</span></div></div>`;
-        }
-        if (festivalInfo) {
-          itemsHtml += `<div class="inspector-item festival"><span class="inspector-item-badge badge-festival">${Icons.sparkles({ size: 14, color: '#ffffff' })}</span> <div><strong>${festivalInfo.name}</strong> <span class="inspector-sub">(${festivalInfo.type || 'Festival'})</span></div></div>`;
-        }
-        if (activeAbsences.length > 0) {
-          activeAbsences.forEach((ab) => {
-            itemsHtml += `<div class="inspector-item leave"><span class="inspector-item-badge badge-leave">${Icons.user({ size: 14, color: '#ffffff' })}</span> <div><strong>${ab.staffName}</strong> <span class="inspector-sub">(${ab.leaveType ? ab.leaveType.replace('_', ' ') : 'Leave'}${ab.leavePortion && ab.leavePortion !== 'FULL_DAY' ? ' · ' + ab.leavePortion.replace('_', ' ') : ''})</span></div></div>`;
-          });
-        }
-        if (!festivalInfo && !existingClosure && activeAbsences.length === 0) {
-          if (isPast) {
-            itemsHtml = `<div class="inspector-item past"><span class="inspector-item-badge badge-past">${Icons.clock({ size: 14, color: '#ffffff' })}</span> <div><strong>Regular Day (Passed)</strong> <span class="inspector-sub">Historical day</span></div></div>`;
-          } else {
-            itemsHtml = `<div class="inspector-item leave"><span class="inspector-item-badge badge-leave">${Icons.check({ size: 14, color: '#ffffff' })}</span> <div><strong>Salon is Open</strong> <span class="inspector-sub">Available for customer appointments & walk-ins</span></div></div>`;
-          }
-        }
-      }
-
-      bodyEl.innerHTML = itemsHtml;
-    }
-
-    // Action button
-    const actionBtn = document.getElementById('btn-inspector-action');
-    if (actionBtn) {
-      if (isPast) {
-        actionBtn.style.display = 'none';
-      } else if (isStaffMode) {
-        if (stylistLeave) {
-          actionBtn.style.display = 'block';
-          actionBtn.style.background = 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
-          actionBtn.innerHTML = '🗑️ Cancel Leave (Make Available)';
-          actionBtn.onclick = () => {
-            this.cancelSpecialistLeave(targetStaffId, stylistLeave.id, sName);
-          };
-        } else {
-          actionBtn.style.display = 'block';
-          actionBtn.style.background = 'linear-gradient(135deg, #8B3DFF 0%, #9D5CFF 100%)';
-          actionBtn.innerHTML = `➕ Apply Leave on ${friendlyDate.split(',')[0]}`;
-          actionBtn.onclick = () => {
-            this.leaveUI.showCreateLeaveModal(targetStaffId, sName, dateStr);
-          };
-        }
-      } else if (existingClosure) {
-        actionBtn.style.display = 'block';
-        actionBtn.style.background = 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
-        actionBtn.innerHTML = '🗑️ Reopen Salon (Cancel Holiday)';
-        actionBtn.onclick = () => {
-          this.showDateScheduleDrawer(dateStr, existingClosure, activeAbsences, festivalInfo);
-        };
-      } else {
-        actionBtn.style.display = 'block';
-        actionBtn.style.background = 'linear-gradient(135deg, #8B3DFF 0%, #9D5CFF 100%)';
-        const actionLabel = festivalInfo
-          ? `🌴 Close Salon for ${festivalInfo.name}`
-          : `➕ Schedule Day Off on ${friendlyDate.split(',')[0]}`;
-        actionBtn.innerHTML = actionLabel;
-        actionBtn.onclick = () => {
-          this.showDateScheduleDrawer(dateStr, null, activeAbsences, festivalInfo);
-        };
-      }
-    }
-
-    // Highlight active cell in grid
-    document.querySelectorAll('.holiday-cal-day-cell').forEach((cell) => {
-      cell.classList.toggle('is-selected', cell.getAttribute('data-date') === dateStr);
-    });
+    this.showDateEventsModal(dateStr, mode, staffId, staffName);
   }
 
   showDateScheduleDrawer(dateStr, existingClosure, existingAbsences = [], festivalInfo = null) {
-    const modalContainer = document.getElementById('modal-container');
-    if (!modalContainer) return;
-
-    const todayStr = this.getLocalDateString();
-    if (!dateStr || dateStr < todayStr) {
-      dateStr = todayStr;
-    }
-
-    const friendlyDate = new Date(dateStr + 'T00:00:00').toLocaleDateString('en-IN', {
-      weekday: 'long',
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric',
-    });
-
     if (existingClosure) {
-      const isEmergency = existingClosure.closureType === 'EMERGENCY_CLOSURE';
-      modalContainer.innerHTML = `
-        <div class="modal-backdrop show">
-          <div class="modal-content" style="max-width: 480px; text-align: center; padding: 24px;">
-            <div style="font-size: 2.8rem; margin-bottom: 8px;">${isEmergency ? '🚨' : '🌴'}</div>
-            <h3 style="color: #fff; margin-bottom: 4px; font-size: 1.2rem;">${existingClosure.reason || 'Salon Closure'}</h3>
-            <p style="color: #94a3b8; font-size: 0.84rem; margin-bottom: 16px;">
-              ${friendlyDate} · <span class="badge ${isEmergency ? 'badge-cancelled' : 'badge-completed'}" style="font-size: 0.65rem;">${isEmergency ? 'Emergency Closure' : 'Planned Holiday'}</span>
-            </p>
-
-            <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 10px; padding: 12px; font-size: 0.78rem; color: #a7f3d0; margin-bottom: 20px; text-align: left;">
-              <div style="font-weight: 700; margin-bottom: 2px;">✓ Zero-Penalty Protection Active</div>
-              <div>Customer appointment slots are blocked. Reopening will make slots available for client bookings again.</div>
-            </div>
-
-            <div style="display: flex; gap: 10px;">
-              <button type="button" class="btn btn-secondary" style="flex: 1;" id="btn-close-drawer">Close</button>
-              <button type="button" class="btn btn-primary" style="flex: 2; background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); border: none; font-weight: 700;" id="btn-reopen-salon-date">
-                🗑️ Reopen Salon (Cancel Holiday)
-              </button>
-            </div>
-          </div>
-        </div>
-      `;
-
-      document.getElementById('btn-close-drawer')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
-      document.getElementById('btn-reopen-salon-date')?.addEventListener('click', async () => {
-        try {
-          await ApiClient.deleteSalonClosure(existingClosure.id);
-          this.showToast('Salon reopened successfully!', 'success');
-          modalContainer.innerHTML = '';
-          await this.loadData(true);
-          const container = document.getElementById('profile-subtab-container');
-          if (container) {
-            container.innerHTML = this.renderProfileSubtabContent();
-            this.attachProfileSubtabListeners();
+      this.confirmModal({
+        title: 'Edit Salon Closure',
+        message: `A closure is currently recorded for ${existingClosure.reason || 'Store Holiday'}. Would you like to remove this closure to reopen the salon?`,
+        confirmText: 'Remove & Reopen',
+        confirmClass: 'btn-danger',
+        onConfirm: async () => {
+          try {
+            await ApiClient.deleteSalonClosure(existingClosure.id);
+            this.showToast('Salon reopened successfully.', 'success');
+            await this.loadData(true);
+            this.render();
+          } catch (e) {
+            alert(e.message || 'Failed to remove closure.');
           }
-        } catch (err) {
-          alert(err.message || 'Failed to reopen salon.');
-        }
+        },
       });
       return;
     }
 
-    // Schedule Day Off Drawer (Whole Salon vs Stylist Leave)
-    const defaultReason = festivalInfo ? `${festivalInfo.name} Holiday` : '';
-    const staffList = this.staffList || [];
-
-    modalContainer.innerHTML = `
-      <div class="modal-backdrop show">
-        <div class="modal-content modal-content-sheet" style="max-width: 540px; padding: 22px;">
-          <div class="sheet-grab-handle"></div>
-          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
-            <div>
-              <h3 style="font-size: 1.15rem; font-weight: 800; color: #fff; margin: 0; display: flex; align-items: center; gap: 8px;">
-                <span>🗓️ Schedule Day Off</span>
-              </h3>
-              <p style="color: #94a3b8; font-size: 0.78rem; margin: 2px 0 0 0;">${friendlyDate}</p>
-            </div>
-            <button class="close-btn" id="btn-close-drawer" style="width: 28px; height: 28px; font-size: 1.1rem;">&times;</button>
-          </div>
-
-          <!-- Festival Auto-Detect Banner -->
-          ${festivalInfo ? `
-            <div style="background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.35); border-radius: 10px; padding: 10px 12px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-              <div style="display: flex; align-items: center; gap: 8px;">
-                <span style="font-size: 1.4rem;">${festivalInfo.icon || '🪔'}</span>
-                <div>
-                  <div style="font-size: 0.84rem; font-weight: 700; color: #d8b4fe;">${festivalInfo.name}</div>
-                  <div style="font-size: 0.7rem; color: #cbd5e1;">Recognized festival / national holiday</div>
-                </div>
-              </div>
-              <span class="badge" style="background: rgba(168, 85, 247, 0.25); color: #d8b4fe; font-size: 0.65rem;">FESTIVAL</span>
-            </div>
-          ` : ''}
-
-          <!-- Segmented Tab: Salon Holiday vs Stylist Leave -->
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; background: rgba(15, 23, 42, 0.8); padding: 4px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.08); margin-bottom: 14px;">
-            <button type="button" class="btn btn-sm btn-drawer-mode active" id="tab-mode-salon" style="border: none; border-radius: 8px; font-size: 0.78rem; font-weight: 700; background: rgba(139, 61, 255, 0.3); color: #fff;">
-              🌴 Whole Salon Off
-            </button>
-            <button type="button" class="btn btn-sm btn-drawer-mode" id="tab-mode-stylist" style="border: none; border-radius: 8px; font-size: 0.78rem; font-weight: 700; background: transparent; color: #94a3b8;">
-              👤 Specialist Leave
-            </button>
-          </div>
-
-          <!-- Mode 1: Whole Salon Holiday Form -->
-          <form id="form-drawer-salon-closure" style="display: flex; flex-direction: column; gap: 12px;">
-            <!-- Festival Presets -->
-            <div>
-              <label class="form-label" style="font-size: 0.74rem; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Quick Festival Presets</label>
-              <div style="display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px;">
-                <button type="button" class="btn-cal-preset" data-reason="Diwali Festival Break" data-type="HOLIDAY">🪔 Diwali</button>
-                <button type="button" class="btn-cal-preset" data-reason="Eid Holiday" data-type="HOLIDAY">🌙 Eid</button>
-                <button type="button" class="btn-cal-preset" data-reason="Holi Celebration" data-type="HOLIDAY">🎨 Holi</button>
-                <button type="button" class="btn-cal-preset" data-reason="Christmas Holiday" data-type="HOLIDAY">🎄 Christmas</button>
-                <button type="button" class="btn-cal-preset" data-reason="Store Renovation & Maintenance" data-type="EMERGENCY_CLOSURE">🛠️ Maintenance</button>
-                <button type="button" class="btn-cal-preset" data-reason="Planned Salon Day Off" data-type="HOLIDAY">🌴 Off-Day</button>
-              </div>
-            </div>
-
-            <!-- Reason Input -->
-            <div class="form-group" style="margin: 0;">
-              <label class="form-label" for="drawer-closure-reason" style="font-size: 0.76rem; font-weight: 700;">Closure Reason / Note *</label>
-              <input type="text" class="form-control" id="drawer-closure-reason" value="${defaultReason.replace(/"/g, '&quot;')}" placeholder="e.g. Diwali Festival Break / Store Maintenance" required style="height: 38px;" />
-            </div>
-
-            <!-- Category Selector -->
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-              <label style="border: 1px solid rgba(245, 158, 11, 0.4); background: rgba(245, 158, 11, 0.08); padding: 8px 10px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 6px; font-size: 0.76rem; font-weight: 700; color: #fbbf24;">
-                <input type="radio" name="drawerClosureType" value="HOLIDAY" checked />
-                <span>🌴 Planned Holiday</span>
-              </label>
-              <label style="border: 1px solid rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.08); padding: 8px 10px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 6px; font-size: 0.76rem; font-weight: 700; color: #f87171;">
-                <input type="radio" name="drawerClosureType" value="EMERGENCY_CLOSURE" />
-                <span>🚨 Emergency Off</span>
-              </label>
-            </div>
-
-            <!-- Date Range (Prefilled with selected date, min bounded) -->
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-              <div>
-                <label class="form-label" style="font-size: 0.74rem;">From Date</label>
-                <input type="date" class="form-control" id="drawer-closure-start" value="${dateStr}" min="${todayStr}" required style="height: 36px;" />
-              </div>
-              <div>
-                <label class="form-label" style="font-size: 0.74rem;">To Date</label>
-                <input type="date" class="form-control" id="drawer-closure-end" value="${dateStr}" min="${dateStr}" required style="height: 36px;" />
-              </div>
-            </div>
-
-            <!-- Dynamic conflict / notice indicator -->
-            <div id="drawer-conflict-warning" style="display: none;"></div>
-
-            <!-- Reassurance Note -->
-            <div style="font-size: 0.72rem; color: #94a3b8; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.06); padding: 8px 10px; border-radius: 8px;">
-              🛡️ <strong>Zero-Penalty Guarantee:</strong> Overlapping client appointments receive 0 no-show penalties and an automatic WhatsApp notice.
-            </div>
-
-            <!-- Submit Button -->
-            <button type="submit" class="btn btn-primary" id="btn-submit-drawer-salon" style="width: 100%; height: 40px; font-weight: 700; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border: none;">
-              🌴 Mark Salon Closed on This Day
-            </button>
-          </form>
-
-          <!-- Mode 2: Stylist Leave Form (Hidden initially) -->
-          <form id="form-drawer-stylist-leave" style="display: none; flex-direction: column; gap: 12px;">
-            <div class="form-group" style="margin: 0;">
-              <label class="form-label" for="drawer-leave-staff-id" style="font-size: 0.76rem; font-weight: 700;">Select Specialist *</label>
-              <select class="form-control" id="drawer-leave-staff-id" required style="height: 38px;">
-                ${staffList.map((st) => `<option value="${st.id}">${st.name || 'Specialist'} (${st.role || 'Stylist'})</option>`).join('')}
-              </select>
-            </div>
-
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-              <div>
-                <label class="form-label" for="drawer-leave-date" style="font-size: 0.74rem;">Leave Date</label>
-                <input type="date" class="form-control" id="drawer-leave-date" value="${dateStr}" min="${todayStr}" required style="height: 36px;" />
-              </div>
-              <div>
-                <label class="form-label" for="drawer-leave-portion" style="font-size: 0.74rem;">Portion</label>
-                <select class="form-control" id="drawer-leave-portion" style="height: 36px;">
-                  <option value="FULL_DAY">Full Day</option>
-                  <option value="FIRST_HALF">First Half</option>
-                  <option value="SECOND_HALF">Second Half</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="form-group" style="margin: 0;">
-              <label class="form-label" for="drawer-leave-type" style="font-size: 0.74rem;">Leave Type</label>
-              <select class="form-control" id="drawer-leave-type" style="height: 36px;">
-                <option value="CASUAL_LEAVE">🌴 Casual Leave</option>
-                <option value="SICK_LEAVE">🤒 Sick Leave</option>
-                <option value="EMERGENCY_LEAVE">🚨 Emergency Leave</option>
-                <option value="UNPAID_LEAVE">📄 Unpaid Leave</option>
-              </select>
-            </div>
-
-            <div class="form-group" style="margin: 0;">
-              <label class="form-label" for="drawer-leave-reason" style="font-size: 0.76rem;">Leave Reason / Note</label>
-              <input type="text" class="form-control" id="drawer-leave-reason" placeholder="e.g. Personal family event" style="height: 38px;" />
-            </div>
-
-            <div id="drawer-stylist-conflict-warning" style="display: none;"></div>
-
-            <button type="submit" class="btn btn-primary" id="btn-submit-drawer-stylist" style="width: 100%; height: 40px; font-weight: 700; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none;">
-              👤 Record Specialist Leave
-            </button>
-          </form>
-        </div>
-      </div>
-    `;
-
-    document.getElementById('btn-close-drawer')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
-
-    // Mode Toggle
-    const btnModeSalon = document.getElementById('tab-mode-salon');
-    const btnModeStylist = document.getElementById('tab-mode-stylist');
-    const formSalon = document.getElementById('form-drawer-salon-closure');
-    const formStylist = document.getElementById('form-drawer-stylist-leave');
-
-    btnModeSalon?.addEventListener('click', () => {
-      btnModeSalon.classList.add('active');
-      btnModeSalon.style.background = 'rgba(139, 61, 255, 0.3)';
-      btnModeSalon.style.color = '#fff';
-      btnModeStylist.classList.remove('active');
-      btnModeStylist.style.background = 'transparent';
-      btnModeStylist.style.color = '#94a3b8';
-      formSalon.style.display = 'flex';
-      formStylist.style.display = 'none';
-    });
-
-    btnModeStylist?.addEventListener('click', () => {
-      btnModeStylist.classList.add('active');
-      btnModeStylist.style.background = 'rgba(139, 61, 255, 0.3)';
-      btnModeStylist.style.color = '#fff';
-      btnModeSalon.classList.remove('active');
-      btnModeSalon.style.background = 'transparent';
-      btnModeSalon.style.color = '#94a3b8';
-      formStylist.style.display = 'flex';
-      formSalon.style.display = 'none';
-      checkStylistConflict();
-    });
-
-    // Date range auto-sync and weekly off warning
-    const startInput = document.getElementById('drawer-closure-start');
-    const endInput = document.getElementById('drawer-closure-end');
-    const conflictWarning = document.getElementById('drawer-conflict-warning');
-
-    const checkConflictWarning = () => {
-      if (!conflictWarning) return;
-      const sVal = startInput?.value;
-      const eVal = endInput?.value;
-      if (!sVal || !eVal) {
-        conflictWarning.style.display = 'none';
-        return;
-      }
-
-      const dayNames = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
-      const closedDays = (this.salonWorkingHours || []).filter((h) => h.isClosed).map((h) => h.dayOfWeek);
-      const matchedOffs = new Set();
-
-      const curr = new Date(sVal + 'T00:00:00');
-      const end = new Date(eVal + 'T00:00:00');
-      while (curr <= end) {
-        const dName = dayNames[curr.getDay()];
-        if (closedDays.includes(dName)) {
-          matchedOffs.add(dName.charAt(0) + dName.slice(1).toLowerCase());
-        }
-        curr.setDate(curr.getDate() + 1);
-      }
-
-      if (matchedOffs.size > 0) {
-        conflictWarning.style.display = 'block';
-        conflictWarning.innerHTML = `
-          <div style="background: rgba(148, 163, 184, 0.1); border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 8px; padding: 7px 10px; font-size: 0.72rem; color: #cbd5e1; display: flex; align-items: center; gap: 6px;">
-            <span>💤</span>
-            <span>Range includes weekly off (${Array.from(matchedOffs).join(', ')}). Salon is already scheduled closed on those days.</span>
-          </div>
-        `;
-      } else {
-        conflictWarning.style.display = 'none';
-      }
-    };
-
-    startInput?.addEventListener('change', () => {
-      if (startInput.value) {
-        endInput.min = startInput.value;
-        if (endInput.value && endInput.value < startInput.value) {
-          endInput.value = startInput.value;
-        }
-      }
-      checkConflictWarning();
-    });
-
-    endInput?.addEventListener('change', () => {
-      if (endInput.value && startInput.value && endInput.value < startInput.value) {
-        endInput.value = startInput.value;
-      }
-      checkConflictWarning();
-    });
-
-    checkConflictWarning();
-
-    // Stylist leave warning if whole salon is already closed
-    const leaveDateInput = document.getElementById('drawer-leave-date');
-    const stylistConflictWarning = document.getElementById('drawer-stylist-conflict-warning');
-
-    const checkStylistConflict = () => {
-      if (!stylistConflictWarning) return;
-      const lDate = leaveDateInput?.value;
-      if (!lDate) {
-        stylistConflictWarning.style.display = 'none';
-        return;
-      }
-      const salonClosed = (this.closuresList || []).find((c) => {
-        const cs = String(c.startDate).split('T')[0];
-        const ce = String(c.endDate).split('T')[0];
-        return lDate >= cs && lDate <= ce;
-      });
-
-      if (salonClosed) {
-        stylistConflictWarning.style.display = 'block';
-        stylistConflictWarning.innerHTML = `
-          <div style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 8px; padding: 8px 10px; font-size: 0.72rem; color: #fbbf24; display: flex; align-items: center; gap: 6px;">
-            <span>⚠️</span>
-            <span>Salon is already closed on this date (${salonClosed.reason}). Specialists are automatically off.</span>
-          </div>
-        `;
-      } else {
-        stylistConflictWarning.style.display = 'none';
-      }
-    };
-
-    leaveDateInput?.addEventListener('change', checkStylistConflict);
-
-    // Preset button clicks
-    modalContainer.querySelectorAll('.btn-cal-preset').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const reasonInput = document.getElementById('drawer-closure-reason');
-        const reason = btn.getAttribute('data-reason');
-        const type = btn.getAttribute('data-type');
-        if (reasonInput && reason) reasonInput.value = reason;
-        if (type) {
-          const radio = modalContainer.querySelector(`input[name="drawerClosureType"][value="${type}"]`);
-          if (radio) radio.checked = true;
-        }
-      });
-    });
-
-    // Submit Whole Salon Form
-    formSalon.onsubmit = async (e) => {
-      e.preventDefault();
-      const reason = document.getElementById('drawer-closure-reason')?.value.trim();
-      const startDate = document.getElementById('drawer-closure-start')?.value;
-      const endDate = document.getElementById('drawer-closure-end')?.value;
-      const closureType = modalContainer.querySelector('input[name="drawerClosureType"]:checked')?.value || 'HOLIDAY';
-      const submitBtn = document.getElementById('btn-submit-drawer-salon');
-
-      if (!reason || !startDate || !endDate) {
-        alert('Please provide a reason and valid date range.');
-        return;
-      }
-
-      if (startDate < todayStr) {
-        alert('Cannot schedule holidays or closures for dates that have already passed.');
-        return;
-      }
-
-      if (endDate < startDate) {
-        alert('End date cannot be earlier than start date.');
-        return;
-      }
-
-      // Overlapping closure guardrail
-      const overlapping = (this.closuresList || []).find((c) => {
-        const cs = String(c.startDate).split('T')[0];
-        const ce = String(c.endDate).split('T')[0];
-        return (startDate <= ce && endDate >= cs);
-      });
-      if (overlapping) {
-        alert(`A salon closure already exists overlapping these dates: "${overlapping.reason}".`);
-        return;
-      }
-
-      if (submitBtn) {
-        submitBtn.disabled = true;
-        submitBtn.textContent = 'Saving closure...';
-      }
-
-      try {
-        await ApiClient.createSalonClosure({
-          reason,
-          startDate,
-          endDate,
-          closureType,
-        });
-        this.showToast('Salon holiday created successfully!', 'success');
-        modalContainer.innerHTML = '';
+    ScheduleDayOffDialog.open({
+      initialDate: dateStr,
+      festivalInfo,
+      salonWorkingHours: this.salonWorkingHours || [],
+      existingClosures: this.closuresList || [],
+      staffList: this.staffList || [],
+      onSuccess: async () => {
         await this.loadData(true);
         const container = document.getElementById('profile-subtab-container');
         if (container) {
-          container.innerHTML = this.renderProfileSubtabContent();
-          this.attachProfileSubtabListeners();
+          if (this.activeProfileSubtab === 'closures') {
+            SalonDayOffView.mount(container, this);
+          } else {
+            container.innerHTML = this.renderProfileSubtabContent();
+            this.attachProfileSubtabListeners();
+          }
         }
-      } catch (err) {
-        alert(err.message || 'Failed to create salon closure.');
-        if (submitBtn) {
-          submitBtn.disabled = false;
-          submitBtn.textContent = '🌴 Mark Salon Closed on This Day';
-        }
-      }
-    };
-
-    // Submit Stylist Leave Form
-    formStylist.onsubmit = async (e) => {
-      e.preventDefault();
-      const staffId = document.getElementById('drawer-leave-staff-id')?.value;
-      const leaveDate = document.getElementById('drawer-leave-date')?.value || dateStr;
-      const leaveType = document.getElementById('drawer-leave-type')?.value;
-      const leavePortion = document.getElementById('drawer-leave-portion')?.value;
-      const reason = document.getElementById('drawer-leave-reason')?.value.trim() || 'Specialist Leave';
-      const submitBtn = document.getElementById('btn-submit-drawer-stylist');
-
-      if (!staffId) {
-        alert('Please select a specialist.');
-        return;
-      }
-
-      if (leaveDate < todayStr) {
-        alert('Cannot schedule specialist leaves for dates that have already passed.');
-        return;
-      }
-
-      // Check duplicate leave for this staff
-      const staffMember = (this.staffList || []).find((st) => st.id === staffId);
-      const duplicateAbsence = staffMember?.absences?.find((ab) => {
-        if (ab.status !== 'ACTIVE') return false;
-        const abStart = String(ab.startDate).split('T')[0];
-        const abEnd = String(ab.endDate).split('T')[0];
-        return leaveDate >= abStart && leaveDate <= abEnd;
-      });
-      if (duplicateAbsence) {
-        alert(`${staffMember?.name || 'This specialist'} already has an active leave recorded on this date.`);
-        return;
-      }
-
-      if (submitBtn) {
-        submitBtn.disabled = true;
-        submitBtn.textContent = 'Recording leave...';
-      }
-
-      try {
-        await ApiClient.markStaffAbsent(staffId, {
-          startDate: leaveDate,
-          endDate: leaveDate,
-          leaveType,
-          leavePortion,
-          reason,
-        });
-        this.showToast('Specialist leave recorded successfully!', 'success');
-        modalContainer.innerHTML = '';
-        await this.loadData(true);
-        const container = document.getElementById('profile-subtab-container');
-        if (container) {
-          container.innerHTML = this.renderProfileSubtabContent();
-          this.attachProfileSubtabListeners();
-        }
-      } catch (err) {
-        alert(err.message || 'Failed to record specialist leave.');
-        if (submitBtn) {
-          submitBtn.disabled = false;
-          submitBtn.textContent = '👤 Record Specialist Leave';
-        }
-      }
-    };
+      },
+    });
   }
 
   switchProfileSubtab(subtab) {
@@ -8214,6 +6779,14 @@ export class SalonDashboard {
         this.attachProfileSubtabListeners();
       } catch (err) {
         console.error('[Dashboard] Error attaching profile subtab listeners:', err);
+      }
+
+      // If switching to closures calendar, mount isolated SalonDayOffView
+      if (subtab === 'closures') {
+        const c = document.getElementById('profile-subtab-container');
+        if (c) {
+          SalonDayOffView.mount(c, this);
+        }
       }
     }
 
@@ -8392,8 +6965,7 @@ export class SalonDashboard {
       this.showSalonScheduleModal();
     });
 
-    // Delegate to unified modular calendar listeners
-    this.attachModularCalendarListeners({ mode: 'SALON' });
+
 
     // 5. Subtab: Security Form (Password change & Live strength meter)
     const formPwd = document.getElementById('form-change-password');
@@ -8651,242 +7223,40 @@ export class SalonDashboard {
   // ATTACH EVENT LISTENERS
   // =========================================================================
 
-  refreshCalendarView(mode = 'SALON', staffId = null, staffName = '') {
-    if (mode === 'STAFF' && staffId) {
-      const subtabBody = document.querySelector('.stylist-detail-subtab-body');
-      if (subtabBody) {
-        const st = (this.staffList || []).find((s) => s.id === staffId);
-        if (st) {
-          subtabBody.innerHTML = this.renderStaffLeavesSubtab(st);
-          this.attachModularCalendarListeners({ mode: 'STAFF', staffId: st.id, staffName: st.name });
+  async loadCalendarSchedule(monthStr = null, bypassCache = false, options = {}) {
+    const year = this.calYear;
+    const month = this.calMonth;
+    const targetMonth = monthStr || `${year}-${String(month + 1).padStart(2, '0')}`;
+    const calendarFor = options.calendarFor || (options.staffId ? 'STAFF' : 'SALON');
+    const staffId = options.staffId || null;
+
+    try {
+      const res = await ApiClient.getCalendarSchedule({
+        month: targetMonth,
+        calendarFor,
+        ...(staffId ? { staffId } : {}),
+      }, bypassCache);
+      const schedule = (res && res.data !== undefined) ? res.data : res;
+      if (schedule) {
+        this.calendarSchedule = schedule;
+        if (schedule.salonSchedule?.closures) {
+          this.closuresList = schedule.salonSchedule.closures;
+        }
+        if (schedule.salonSchedule?.weeklyHours) {
+          this.salonWorkingHours = schedule.salonSchedule.weeklyHours;
         }
       }
-    } else {
-      const container = document.getElementById('profile-subtab-container');
-      if (container) {
-        container.innerHTML = this.renderHolidayCalendar();
-        this.attachProfileSubtabListeners();
-      }
+    } catch (err) {
+      console.warn('[Dashboard] loadCalendarSchedule error:', err);
     }
-  }
-
-  attachModularCalendarListeners(config = { mode: 'SALON' }) {
-    const mode = config.mode || 'SALON';
-    const staffId = config.staffId || null;
-    const staffName = config.staffName || 'Specialist';
-    const isStaffMode = mode === 'STAFF';
-
-    // Calendar month navigation
-    document.getElementById('btn-cal-prev')?.addEventListener('click', () => {
-      this.calMonth--;
-      if (this.calMonth < 0) {
-        this.calMonth = 11;
-        this.calYear--;
-      }
-      this.refreshCalendarView(mode, staffId, staffName);
-    });
-
-    document.getElementById('btn-cal-next')?.addEventListener('click', () => {
-      this.calMonth++;
-      if (this.calMonth > 11) {
-        this.calMonth = 0;
-        this.calYear++;
-      }
-      this.refreshCalendarView(mode, staffId, staffName);
-    });
-
-    document.getElementById('btn-cal-today')?.addEventListener('click', () => {
-      const now = new Date();
-      this.calYear = now.getFullYear();
-      this.calMonth = now.getMonth();
-      this.refreshCalendarView(mode, staffId, staffName);
-    });
-
-    // Overview pills in top summary bar
-    document.querySelectorAll('.cal-overview-pill[data-overview-tab], .staff-metric-pill[data-overview-tab]').forEach((pill) => {
-      pill.addEventListener('click', () => {
-        const tab = pill.getAttribute('data-overview-tab');
-        this.activeOverviewTab = tab;
-        if (window.innerWidth <= 960) {
-          this.openHolidayBottomSheet(tab, mode, staffId);
-        } else {
-          this.refreshCalendarView(mode, staffId, staffName);
-        }
-      });
-    });
-
-    // Mobile Bottom-Sheet Opener button
-    document.querySelectorAll('#btn-open-holiday-sheet, .cal-open-sheet-bar, .cal-open-sheet-btn-mobile').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        this.openHolidayBottomSheet(this.activeOverviewTab || (isStaffMode ? 'LEAVES' : 'HOLIDAYS'), mode, staffId);
-      });
-    });
-
-    // 7-Day Weekly Off routine day chips click (in Side Management Rail)
-    document.querySelectorAll('.routine-day-chip[data-day]').forEach((chip) => {
-      chip.addEventListener('click', async () => {
-        const day = chip.getAttribute('data-day');
-        if (day) {
-          if (isStaffMode && staffId) {
-            await this.toggleStaffWeeklyOffDay(staffId, day);
-          } else {
-            await this.toggleWeeklyOffDay(day);
-          }
-        }
-      });
-    });
-
-    // Cancel Specialist Leave buttons
-    document.querySelectorAll('.btn-cancel-leave[data-absence-id]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const sId = btn.getAttribute('data-staff-id') || staffId;
-        const absenceId = btn.getAttribute('data-absence-id');
-        const sName = btn.getAttribute('data-staff-name') || staffName;
-        if (sId && absenceId) {
-          this.cancelSpecialistLeave(sId, absenceId, sName);
-        }
-      });
-    });
-
-    // Quick Add / Apply buttons
-    document.querySelectorAll('#btn-apply-staff-leave, .btn-action-apply-leave').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const sId = e.currentTarget.getAttribute('data-staff-id') || staffId;
-        const sName = e.currentTarget.getAttribute('data-staff-name') || staffName;
-        this.leaveUI.showCreateLeaveModal(sId, sName, this.selectedCalDate || this.getLocalDateString());
-      });
-    });
-
-    document.getElementById('btn-quick-add-staff-leave')?.addEventListener('click', (e) => {
-      const sId = e.currentTarget.getAttribute('data-staff-id') || staffId;
-      const sName = e.currentTarget.getAttribute('data-staff-name') || staffName;
-      this.leaveUI.showCreateLeaveModal(sId, sName, this.selectedCalDate || this.getLocalDateString());
-    });
-
-    // Leave History modal openers
-    document.querySelectorAll('#btn-view-leave-history, #btn-panel-leave-history, .btn-view-leave-history').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const sId = btn.getAttribute('data-staff-id') || staffId;
-        const sName = btn.getAttribute('data-staff-name') || staffName;
-        if (sId) {
-          this.leaveUI.showLeaveHistoryModal(sId, sName);
-        }
-      });
-    });
-
-    document.getElementById('btn-quick-add-holiday')?.addEventListener('click', () => {
-      document.getElementById('btn-add-holiday-closure')?.click();
-    });
-
-    // Add holiday / day off button (top-right of calendar panel in SALON mode)
-    document.getElementById('btn-add-holiday-closure')?.addEventListener('click', () => {
-      const todayStr = this.getLocalDateString();
-      let targetDate = this.selectedCalDate || todayStr;
-      if (targetDate < todayStr) targetDate = todayStr;
-
-      const existingClosure = (this.closuresList || []).find((c) => {
-        const s = String(c.startDate).split('T')[0];
-        const e = String(c.endDate).split('T')[0];
-        return targetDate >= s && targetDate <= e;
-      });
-      const festivalInfo = INDIAN_FESTIVALS_DATASET.find((f) => f.date === targetDate) || null;
-      this.showDateScheduleDrawer(targetDate, existingClosure, [], festivalInfo);
-    });
-
-    // Initialize day inspector for current selected date or today
-    this.updateCalInspector(this.selectedCalDate || this.getLocalDateString(), mode, staffId, staffName);
-
-    // Interactive date cells in calendar
-    document.querySelectorAll('.holiday-cal-day-cell[data-date]').forEach((cell) => {
-      cell.addEventListener('click', () => {
-        const dateStr = cell.getAttribute('data-date');
-        if (!dateStr) return;
-        this.updateCalInspector(dateStr, mode, staffId, staffName);
-      });
-    });
-
-    // Quick declare festival buttons
-    document.querySelectorAll('.btn-quick-declare-festival').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const dateStr = btn.getAttribute('data-date');
-        const festName = btn.getAttribute('data-name');
-        const festivalInfo = INDIAN_FESTIVALS_DATASET.find((f) => f.date === dateStr) || {
-          name: festName,
-          icon: '🪔',
-          type: 'FESTIVAL',
-        };
-        const existingClosure = (this.closuresList || []).find((c) => {
-          const s = String(c.startDate).split('T')[0];
-          const e = String(c.endDate).split('T')[0];
-          return dateStr >= s && dateStr <= e;
-        });
-        this.showDateScheduleDrawer(dateStr, existingClosure, [], festivalInfo);
-      });
-    });
-
-    // Direct delete / reopen buttons in side panel
-    document.querySelectorAll('.btn-delete-closure-direct').forEach((btn) => {
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const id = e.currentTarget.getAttribute('data-id');
-        if (confirm('Are you sure you want to cancel this closure and reopen the booking calendar for these dates?')) {
-          try {
-            await ApiClient.deleteSalonClosure(id);
-            this.showToast('Closure cancelled and calendar reopened.', 'success');
-            await this.loadData(true);
-            this.refreshCalendarView(mode, staffId, staffName);
-          } catch (err) {
-            this.showToast(err.message || 'Failed to cancel closure.', 'error');
-          }
-        }
-      });
-    });
   }
 
   attachStaffSubtabSpecificListeners(root, st, subtab) {
     const container = root || this.container || document;
 
     if (subtab === 'leaves' || !subtab) {
-      this.attachModularCalendarListeners({
-        mode: 'STAFF',
-        staffId: st.id,
-        staffName: st.name,
-      });
-
-      // Quick apply leave direct listener
-      container.querySelectorAll('#btn-apply-staff-leave, .btn-action-apply-leave, #btn-quick-add-staff-leave').forEach((btn) => {
-        btn.onclick = (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          this.leaveUI.showCreateLeaveModal(st.id, st.name, this.selectedCalDate || this.getLocalDateString());
-        };
-      });
-
-      // Leave History direct listener
-      container.querySelectorAll('#btn-view-leave-history, #btn-panel-leave-history, .btn-view-leave-history').forEach((btn) => {
-        btn.onclick = (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          this.leaveUI.showLeaveHistoryModal(st.id, st.name);
-        };
-      });
-
-      // Cancel leave direct listeners
-      container.querySelectorAll('.btn-cancel-leave').forEach((btn) => {
-        btn.onclick = (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          const absenceId = btn.getAttribute('data-absence-id');
-          if (absenceId) {
-            this.cancelSpecialistLeave(st.id, absenceId, st.name);
-          }
-        };
-      });
+      // CalendarView lifecycle manages all staff leave interactions autonomously
+      return;
     } else if (subtab === 'hours') {
       // 1. Attach roster and routine breaks listeners
       this.attachStaffRosterListeners();
@@ -10782,7 +9152,16 @@ export class SalonDashboard {
   }
 
   showMarkAbsentModal(staffId, staffName) {
-    this.leaveUI.showCreateLeaveModal(staffId, staffName);
+    StaffApplyLeaveDialog.open({
+      staffId: staffId || null,
+      staffName: staffName || null,
+      showModeSwitch: !staffId,
+      salonWorkingHours: this.salonWorkingHours || [],
+      staffList: this.staffList || [],
+      onSuccess: async () => {
+        await this.loadData(true);
+      },
+    });
   }
 
   showLeaveHistoryModal(staffId, staffName) {
@@ -11771,308 +10150,21 @@ export class SalonDashboard {
     }
   }
 
-  async openSalonClosuresModal() {
-    const modalContainer = document.getElementById('modal-container');
-    modalContainer.innerHTML = `
-      <div class="modal-backdrop show">
-        <div class="modal-content modal-content-lg" style="max-height: 90vh; overflow-y: auto; padding: 24px; max-width: 780px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-            <div>
-              <h3 style="font-size: 1.35rem; font-weight: 800; color: #fff; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
-                <span>🚨 Store Closures & Holiday Calendar</span>
-              </h3>
-              <p style="color: var(--text-secondary); font-size: 0.82rem; margin: 0;">
-                Schedule planned festival holidays or trigger instant zero-penalty emergency store closures.
-              </p>
-            </div>
-            <button class="close-btn" id="btn-close-closures-modal">&times;</button>
-          </div>
-
-          <!-- Top Action Bar -->
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); padding: 12px 16px; border-radius: var(--radius-sm);">
-            <div style="font-size: 0.85rem; font-weight: 700; color: #fff;">
-              Salon Closures List
-            </div>
-            <button class="btn btn-primary btn-sm" id="btn-show-add-closure-form" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); font-weight: 700; border: none; box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);">
-              + Schedule Closure / Holiday
-            </button>
-          </div>
-
-          <!-- Add Closure Form Container (Hidden by default) -->
-          <div id="container-add-closure-form" style="display: none; background: rgba(239, 68, 68, 0.05); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: var(--radius-sm); padding: 16px; margin-bottom: 20px;">
-            <h4 style="font-size: 1rem; font-weight: 700; color: #f87171; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between;">
-              <span>🗓️ New Store Closure Specification</span>
-              <button type="button" class="btn btn-secondary btn-sm" id="btn-cancel-add-closure" style="padding: 2px 8px; font-size: 0.75rem;">✕ Close Form</button>
-            </h4>
-
-            <form id="form-create-closure">
-              <div style="display: flex; flex-direction: column; gap: 14px;">
-                <!-- Closure Type Selector -->
-                <div>
-                  <label class="form-label" style="font-size: 0.8rem; font-weight: 700; color: #fff; margin-bottom: 6px;">Closure Category *</label>
-                  <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
-                    <label style="display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--border-subtle); padding: 10px; border-radius: var(--radius-sm); cursor: pointer; background: var(--bg-input); font-size: 0.8rem;" class="type-pill">
-                      <div style="display: flex; align-items: center; gap: 6px; font-weight: 700; color: #fff;">
-                        <input type="radio" name="closureType" value="HOLIDAY" checked /> 🌴 Planned Holiday
-                      </div>
-                      <span style="font-size: 0.72rem; color: var(--text-muted);">Diwali, Eid, National Holidays</span>
-                    </label>
-
-                    <label style="display: flex; flex-direction: column; gap: 4px; border: 1px solid rgba(239,68,68,0.4); padding: 10px; border-radius: var(--radius-sm); cursor: pointer; background: rgba(239,68,68,0.08); font-size: 0.8rem;" class="type-pill">
-                      <div style="display: flex; align-items: center; gap: 6px; font-weight: 700; color: #f87171;">
-                        <input type="radio" name="closureType" value="EMERGENCY_CLOSURE" /> 🚨 Emergency Closure
-                      </div>
-                      <span style="font-size: 0.72rem; color: var(--text-muted);">Power Cut, Maintenance, Emergency</span>
-                    </label>
-
-                    <label style="display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--border-subtle); padding: 10px; border-radius: var(--radius-sm); cursor: pointer; background: var(--bg-input); font-size: 0.8rem;" class="type-pill">
-                      <div style="display: flex; align-items: center; gap: 6px; font-weight: 700; color: #fff;">
-                        <input type="radio" name="closureType" value="PARTIAL_DAY" /> ⏳ Partial-Day Hours
-                      </div>
-                      <span style="font-size: 0.72rem; color: var(--text-muted);">Closing early or opening late</span>
-                    </label>
-                  </div>
-                </div>
-
-                <!-- Date Range -->
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                  <div>
-                    <label class="form-label" style="font-size: 0.78rem; font-weight: 700; color: #fff;">Start Date *</label>
-                    <input type="date" class="form-control" id="closure-start-date" required value="${new Date().toISOString().split('T')[0]}" />
-                  </div>
-                  <div>
-                    <label class="form-label" style="font-size: 0.78rem; font-weight: 700; color: #fff;">End Date *</label>
-                    <input type="date" class="form-control" id="closure-end-date" required value="${new Date().toISOString().split('T')[0]}" />
-                  </div>
-                </div>
-
-                <!-- Partial Day Hours (Only shown if PARTIAL_DAY selected) -->
-                <div id="row-partial-day-hours" style="display: none; grid-template-columns: 1fr 1fr; gap: 12px; background: rgba(255,255,255,0.02); border: 1px dashed var(--border-subtle); padding: 10px; border-radius: var(--radius-sm);">
-                  <div>
-                    <label class="form-label" style="font-size: 0.78rem; font-weight: 700; color: #fbbf24;">Closed From Time *</label>
-                    <input type="time" class="form-control" id="closure-start-time" value="14:00" />
-                  </div>
-                  <div>
-                    <label class="form-label" style="font-size: 0.78rem; font-weight: 700; color: #fbbf24;">Closed Until Time *</label>
-                    <input type="time" class="form-control" id="closure-end-time" value="19:00" />
-                  </div>
-                </div>
-
-                <!-- Reason -->
-                <div>
-                  <label class="form-label" style="font-size: 0.78rem; font-weight: 700; color: #fff;">Closure Reason / Note *</label>
-                  <input type="text" class="form-control" id="closure-reason" placeholder="e.g. Festival Holiday / Sudden Power Cut & Maintenance" required />
-                </div>
-
-                <!-- Emergency Banner Warning -->
-                <div id="closure-emergency-notice" style="display: none; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); padding: 10px 12px; border-radius: var(--radius-sm); font-size: 0.78rem; color: #f87171; line-height: 1.4;">
-                  ⚡ <strong>0-Penalty Emergency Guarantee:</strong> Creating an Emergency Closure will instantly cancel all overlapping <code>CONFIRMED</code>, <code>CHECKED_IN</code>, and <code>PENDING</code> appointments. Affected clients receive zero no-show penalty strikes and are notified via emergency WhatsApp apology messages.
-                </div>
-
-                <!-- Submit Button -->
-                <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px;">
-                  <button type="submit" class="btn btn-primary" id="btn-submit-create-closure" style="background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%); font-weight: 700; width: 100%;">
-                    🚀 Create Store Closure & Block Booking Calendar
-                  </button>
-                </div>
-              </div>
-            </form>
-          </div>
-
-          <!-- Loading Spinner / Content Area -->
-          <div id="closures-loading" style="text-align: center; padding: 40px; color: var(--text-muted);">
-            ⏳ Loading Store Closures from Database...
-          </div>
-
-          <div id="closures-list-container" style="display: none;">
-            <!-- Populated dynamically -->
-          </div>
-        </div>
-      </div>
-    `;
-
-    const closeBtn = document.getElementById('btn-close-closures-modal');
-    closeBtn?.addEventListener('click', () => (modalContainer.innerHTML = ''));
-
-    const toggleFormBtn = document.getElementById('btn-show-add-closure-form');
-    const formContainer = document.getElementById('container-add-closure-form');
-    const cancelFormBtn = document.getElementById('btn-cancel-add-closure');
-
-    toggleFormBtn?.addEventListener('click', () => {
-      formContainer.style.display = formContainer.style.display === 'none' ? 'block' : 'none';
-    });
-
-    cancelFormBtn?.addEventListener('click', () => {
-      formContainer.style.display = 'none';
-    });
-
-    // Handle Closure Type Radio Switch
-    const radioTypes = document.querySelectorAll('input[name="closureType"]');
-    const partialHoursRow = document.getElementById('row-partial-day-hours');
-    const emergencyNotice = document.getElementById('closure-emergency-notice');
-
-    radioTypes.forEach((radio) => {
-      radio.addEventListener('change', (e) => {
-        const val = e.target.value;
-        if (val === 'PARTIAL_DAY') {
-          partialHoursRow.style.display = 'grid';
-        } else {
-          partialHoursRow.style.display = 'none';
+  openSalonClosuresModal(dateStr = null) {
+    SalonClosuresModal.open({
+      initialDate: dateStr || this.getLocalDateString(),
+      salonWorkingHours: this.salonWorkingHours || [],
+      existingClosures: this.closuresList || [],
+      staffList: this.staffList || [],
+      onSuccess: async () => {
+        await this.loadData(true);
+        const container = document.getElementById('profile-subtab-container');
+        if (container) {
+          container.innerHTML = this.renderProfileSubtabContent();
+          this.attachProfileSubtabListeners();
         }
-
-        if (val === 'EMERGENCY_CLOSURE') {
-          emergencyNotice.style.display = 'block';
-        } else {
-          emergencyNotice.style.display = 'none';
-        }
-      });
+      },
     });
-
-    // Function to render closures list
-    const fetchAndRenderClosures = async () => {
-      const loadingDiv = document.getElementById('closures-loading');
-      const listDiv = document.getElementById('closures-list-container');
-      if (loadingDiv) loadingDiv.style.display = 'block';
-      if (listDiv) listDiv.style.display = 'none';
-
-      try {
-        const closures = await ApiClient.getSalonClosures(true);
-        if (loadingDiv) loadingDiv.style.display = 'none';
-        if (listDiv) listDiv.style.display = 'block';
-
-        if (!closures || closures.length === 0) {
-          listDiv.innerHTML = `
-            <div style="text-align: center; padding: 30px; background: rgba(255,255,255,0.02); border: 1px dashed var(--border-subtle); border-radius: var(--radius-sm); color: var(--text-muted);">
-              🌴 No store closures or holidays currently configured.<br>
-              <span style="font-size: 0.78rem;">Click <strong>"+ Schedule Closure / Holiday"</strong> to block operating dates.</span>
-            </div>
-          `;
-          return;
-        }
-
-        listDiv.innerHTML = `
-          <div style="display: flex; flex-direction: column; gap: 12px;">
-            ${closures.map((c) => {
-          const startDateFormatted = new Date(c.startDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-          const endDateFormatted = new Date(c.endDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-          const isSameDate = startDateFormatted === endDateFormatted;
-          const dateDisplay = isSameDate ? startDateFormatted : `${startDateFormatted} → ${endDateFormatted}`;
-
-          let typeBadge = '';
-          if (c.closureType === 'HOLIDAY') {
-            typeBadge = `<span class="badge" style="background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3); font-size: 0.7rem; font-weight: 800;">🌴 PLANNED HOLIDAY</span>`;
-          } else if (c.closureType === 'EMERGENCY_CLOSURE') {
-            typeBadge = `<span class="badge" style="background: rgba(239,68,68,0.2); color: #f87171; border: 1px solid rgba(239,68,68,0.4); font-size: 0.7rem; font-weight: 800;">🚨 EMERGENCY CLOSURE</span>`;
-          } else {
-            typeBadge = `<span class="badge" style="background: rgba(245,158,11,0.15); color: #fbbf24; border: 1px solid rgba(245,158,11,0.3); font-size: 0.7rem; font-weight: 800;">⏳ PARTIAL-DAY (${c.startTime || '00:00'} - ${c.endTime || '23:59'})</span>`;
-          }
-
-          return `
-                <div style="background: var(--bg-input); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 14px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
-                  <div style="flex: 1; min-width: 240px;">
-                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
-                      ${typeBadge}
-                      <span style="font-size: 0.88rem; font-weight: 700; color: #fff;">${dateDisplay}</span>
-                    </div>
-                    <div style="font-size: 0.82rem; color: var(--text-secondary); line-height: 1.4;">
-                      Reason: <strong style="color: #fff;">${c.reason}</strong>
-                    </div>
-                    ${c.cancelledAppointmentsCount > 0 ? `
-                      <div style="font-size: 0.75rem; color: #f87171; margin-top: 4px; font-weight: 600;">
-                        ⚠️ Auto-cancelled ${c.cancelledAppointmentsCount} appointment(s) with 0 customer penalty.
-                      </div>
-                    ` : ''}
-                  </div>
-                  <div>
-                    <button class="btn btn-secondary btn-sm btn-delete-closure" data-id="${c.id}" style="border-color: rgba(239,68,68,0.4); color: #f87171; font-size: 0.78rem;">
-                      🗑️ Reopen / Delete
-                    </button>
-                  </div>
-                </div>
-              `;
-        }).join('')}
-          </div>
-        `;
-
-        // Bind delete buttons
-        listDiv.querySelectorAll('.btn-delete-closure').forEach((btn) => {
-          btn.addEventListener('click', async (e) => {
-            const id = e.currentTarget.getAttribute('data-id');
-            if (confirm('Are you sure you want to delete this store closure and reopen the booking calendar for these dates?')) {
-              try {
-                await ApiClient.deleteSalonClosure(id);
-                fetchAndRenderClosures();
-              } catch (err) {
-                alert(err.message || 'Failed to delete store closure.');
-              }
-            }
-          });
-        });
-      } catch (err) {
-        if (loadingDiv) loadingDiv.style.display = 'none';
-        if (listDiv) {
-          listDiv.style.display = 'block';
-          listDiv.innerHTML = `
-            <div style="color: #f87171; padding: 14px; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: var(--radius-sm); font-size: 0.85rem;">
-              Failed to load store closures: ${err.message || 'Server error'}
-            </div>
-          `;
-        }
-      }
-    };
-
-    // Form Submit Handler
-    document.getElementById('form-create-closure')?.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const submitBtn = document.getElementById('btn-submit-create-closure');
-      const closureType = document.querySelector('input[name="closureType"]:checked')?.value || 'HOLIDAY';
-      const startDate = document.getElementById('closure-start-date').value;
-      const endDate = document.getElementById('closure-end-date').value;
-      const startTime = document.getElementById('closure-start-time').value;
-      const endTime = document.getElementById('closure-end-time').value;
-      const reason = document.getElementById('closure-reason').value.trim();
-
-      if (!startDate || !endDate || !reason) {
-        alert('Please fill in all required fields.');
-        return;
-      }
-
-      if (endDate < startDate) {
-        alert('End date cannot be earlier than start date.');
-        return;
-      }
-
-      const payload = {
-        closureType,
-        startDate,
-        endDate,
-        reason,
-        autoCancelAppointments: true
-      };
-
-      if (closureType === 'PARTIAL_DAY') {
-        payload.startTime = startTime;
-        payload.endTime = endTime;
-      }
-
-      submitBtn.textContent = 'Enforcing Store Closure...';
-      submitBtn.setAttribute('disabled', 'true');
-
-      try {
-        await ApiClient.createSalonClosure(payload);
-        formContainer.style.display = 'none';
-        submitBtn.textContent = '🚀 Create Store Closure & Block Booking Calendar';
-        submitBtn.removeAttribute('disabled');
-        fetchAndRenderClosures();
-      } catch (err) {
-        alert(err.message || 'Failed to create store closure.');
-        submitBtn.textContent = '🚀 Create Store Closure & Block Booking Calendar';
-        submitBtn.removeAttribute('disabled');
-      }
-    });
-
-    // Initial Load
-    fetchAndRenderClosures();
   }
 
   async showEditStaffHoursModal(staffId, staffName) {

@@ -92,8 +92,9 @@ export class LeaveEdgeCaseEngine {
     params: {
       startDateStr: string;
       endDateStr: string;
-      customStartTime?: string;
-      customEndTime?: string;
+      isPartialDay?: boolean;
+      startTime?: string;
+      endTime?: string;
     },
   ): Promise<EdgeCaseValidationResult> {
     const { stylist, salon, timezone } = await this.validateStylistAndSalon(salonId, stylistId);
@@ -110,46 +111,129 @@ export class LeaveEdgeCaseEngine {
       throw new BadRequestException('Leave end date cannot be earlier than start date.');
     }
 
-    // 3. Validate Custom Hours (if applicable)
-    if (params.customStartTime && params.customEndTime) {
-      const [sh, sm] = params.customStartTime.split(':').map((v) => parseInt(v, 10));
-      const [eh, em] = params.customEndTime.split(':').map((v) => parseInt(v, 10));
-      const sMin = sh * 60 + sm;
-      const eMin = eh * 60 + em;
-      if (sMin >= eMin) {
-        throw new BadRequestException('Custom start time must be strictly before custom end time.');
+    // 3. Weekly Off and Operating Shift Invariants
+    const isSingleDay = startDt.hasSame(endDt, 'day');
+    const startDayOfWeek = this.getDayOfWeekEnum(startDt);
+    const endDayOfWeek = this.getDayOfWeekEnum(endDt);
+
+    const startShift = stylist.workingHours?.find((w: any) => w.dayOfWeek === startDayOfWeek);
+    const endShift = isSingleDay ? startShift : stylist.workingHours?.find((w: any) => w.dayOfWeek === endDayOfWeek);
+
+    // Rule: Single-day leave cannot be scheduled on an existing weekly off
+    if (isSingleDay) {
+      if (startShift && !startShift.isWorking) {
+        const dayLabel = startDayOfWeek.charAt(0) + startDayOfWeek.slice(1).toLowerCase();
+        throw new BadRequestException(
+          `${stylist.name || 'Specialist'} already has a scheduled weekly off on this day (${dayLabel}). Single-day leave cannot be recorded on an off day.`,
+        );
+      }
+    } else {
+      // Multi-Day Range: Cannot START on a weekly off (specialist already off)
+      if (startShift && !startShift.isWorking) {
+        const dayLabel = startDayOfWeek.charAt(0) + startDayOfWeek.slice(1).toLowerCase();
+        throw new BadRequestException(
+          `Cannot start leave on ${dayLabel} because ${stylist.name || 'specialist'} is already on weekly off. Please select their first working day as the start date.`,
+        );
+      }
+      // Nor can it END on a weekly off (specialist already off)
+      if (endShift && !endShift.isWorking) {
+        const dayLabel = endDayOfWeek.charAt(0) + endDayOfWeek.slice(1).toLowerCase();
+        throw new BadRequestException(
+          `Cannot end leave on ${dayLabel} because ${stylist.name || 'specialist'} is already on weekly off. Please select their last working day as the end date.`,
+        );
       }
     }
 
-    // 4. Duplicate / Overlapping Leave Collision Check
+    // 4. Validate Partial Hours Window and Shift Containment (if applicable)
+    const finalStart = params.startTime;
+    const finalEnd = params.endTime;
+    const isPartial = Boolean(params.isPartialDay || (finalStart && finalEnd));
+
+    if (isPartial && finalStart && finalEnd) {
+      if (!isSingleDay) {
+        throw new BadRequestException('Partial-day leave can only be scheduled for a single date.');
+      }
+
+      if (startShift && !startShift.isWorking) {
+        throw new BadRequestException(`Cannot schedule partial leave on a scheduled weekly off day (${startDayOfWeek}).`);
+      }
+
+      const sMin = TimeUtility.parseTimeStringToMinutes(finalStart);
+      const eMin = TimeUtility.parseTimeStringToMinutes(finalEnd);
+
+      if (sMin >= eMin) {
+        throw new BadRequestException('Leave start time must be strictly before leave end time.');
+      }
+
+      if (eMin - sMin < 15) {
+        throw new BadRequestException('Partial-day leave must be at least 15 minutes in duration.');
+      }
+
+      if (startShift && startShift.startTime && startShift.endTime) {
+        const shiftStartMin = TimeUtility.parseTimeStringToMinutes(startShift.startTime);
+        const shiftEndMin = TimeUtility.parseTimeStringToMinutes(startShift.endTime);
+
+        if (sMin < shiftStartMin) {
+          throw new BadRequestException(
+            `Leave start time (${TimeUtility.formatTime12h(finalStart)}) cannot be before specialist shift start (${TimeUtility.formatTime12h(startShift.startTime)}).`,
+          );
+        }
+
+        if (eMin > shiftEndMin) {
+          throw new BadRequestException(
+            `Leave end time (${TimeUtility.formatTime12h(finalEnd)}) cannot be after specialist shift end (${TimeUtility.formatTime12h(startShift.endTime)}).`,
+          );
+        }
+      }
+    }
+
+    // 4. Duplicate / Overlapping Leave Collision Check (Precision Time Interval Parity)
     const startDbDate = TimeUtility.toDbDate(startDt.toISODate()!);
     const endDbDate = TimeUtility.toDbDate(endDt.toISODate()!);
 
-    const overlappingLeave = await this.prisma.stylistAbsence.findFirst({
+    const overlappingLeaves = await this.prisma.stylistAbsence.findMany({
       where: {
         salonId,
         stylistId,
         status: AbsenceStatus.ACTIVE,
-        OR: [
-          {
-            AND: [
-              { startDate: { lte: endDbDate } },
-              { endDate: { gte: startDbDate } },
-            ],
-          },
-          {
-            absenceDate: { gte: startDbDate, lte: endDbDate },
-          },
-        ],
+        startDate: { lte: endDbDate },
+        endDate: { gte: startDbDate },
       },
     });
 
-    if (overlappingLeave) {
-      const s = (overlappingLeave.startDate || overlappingLeave.absenceDate)?.toISOString().split('T')[0];
-      const e = (overlappingLeave.endDate || overlappingLeave.absenceDate)?.toISOString().split('T')[0];
-      throw new BadRequestException(
-        `Specialist already has an active leave scheduled from ${s} to ${e}. Use 'Extend Date' if you wish to lengthen an existing leave.`,
-      );
+    if (overlappingLeaves.length > 0) {
+      for (const existing of overlappingLeaves) {
+        const existingIsPartial = Boolean(existing.isPartialDay);
+        const existingStart = existing.startTime;
+        const existingEnd = existing.endTime;
+
+        // If either is a full-day leave, collision is absolute
+        if (!isPartial || !existingIsPartial || !finalStart || !finalEnd || !existingStart || !existingEnd) {
+          const s = existing.startDate.toISOString().split('T')[0];
+          const e = existing.endDate.toISOString().split('T')[0];
+          throw new BadRequestException(
+            `Specialist already has an active leave scheduled from ${s} to ${e} (${existing.reason || 'Leave'}).`,
+          );
+        }
+
+        // If both are partial on the same single date, verify non-overlapping time windows
+        const [exSh, exSm] = existingStart.split(':').map(Number);
+        const [exEh, exEm] = existingEnd.split(':').map(Number);
+        const exStartMin = exSh * 60 + exSm;
+        const exEndMin = exEh * 60 + exEm;
+
+        const [sh, sm] = finalStart.split(':').map(Number);
+        const [eh, em] = finalEnd.split(':').map(Number);
+        const newStartMin = sh * 60 + sm;
+        const newEndMin = eh * 60 + em;
+
+        // Overlap occurs if NOT (newEnd <= exStart || newStart >= exEnd)
+        if (!(newEndMin <= exStartMin || newStartMin >= exEndMin)) {
+          throw new BadRequestException(
+            `Partial leave hours (${finalStart} - ${finalEnd}) overlap with an existing leave on this date (${existingStart} - ${existingEnd}: "${existing.reason || 'Scheduled leave'}").`,
+          );
+        }
+      }
     }
 
     // 5. Check Salon Closures (Holidays / Emergency Closures)
@@ -161,7 +245,6 @@ export class LeaveEdgeCaseEngine {
       },
     });
 
-    const isSingleDay = startDt.hasSame(endDt, 'day');
     const validDates: DateTime[] = [];
     const skippedClosedDates: string[] = [];
 
@@ -191,16 +274,7 @@ export class LeaveEdgeCaseEngine {
       throw new BadRequestException('All selected dates fall on salon closures/holidays.');
     }
 
-    // 6. Stylist Weekly Off Check for Single Day
-    if (isSingleDay) {
-      const dayOfWeek = this.getDayOfWeekEnum(startDt);
-      const shift = stylist.workingHours.find((w: any) => w.dayOfWeek === dayOfWeek);
-      if (shift && !shift.isWorking) {
-        throw new BadRequestException(
-          `Specialist already has a scheduled weekly off on this day (${dayOfWeek}).`,
-        );
-      }
-    }
+
 
     return {
       timezone,

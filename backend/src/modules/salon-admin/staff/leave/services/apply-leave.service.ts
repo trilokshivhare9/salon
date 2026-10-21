@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../../../database/prisma.service';
 import { TimeUtility } from '../../../../../common/utils/time.utility';
-import { AbsenceStatus, LeaveType, LeavePortion } from '@prisma/client';
+import { AbsenceStatus, LeaveType } from '@prisma/client';
 import { ApplyLeaveDto } from '../dto/apply-leave.dto';
 import { LeaveEdgeCaseEngine } from '../engines/leave-edge-case.engine';
 import { AppointmentsService } from '../../../appointments/appointments.service';
@@ -29,17 +29,21 @@ export class ApplyLeaveService {
     const startDateStr = dto.startDate || dto.date;
     const endDateStr = dto.endDate || dto.date || startDateStr;
 
+    const isPartial = Boolean(dto.isPartialDay);
+    const sTime = isPartial ? (dto.startTime || null) : null;
+    const eTime = isPartial ? (dto.endTime || null) : null;
+
     // 1. Run Complete Edge-Case Validation (Closures, Duplicate Overlaps, Shift Boundaries)
     const { stylist, startDateParsed, endDateParsed } =
       await this.edgeCaseEngine.validateLeaveApplication(salonId, stylistId, {
         startDateStr: startDateStr!,
         endDateStr: endDateStr!,
-        customStartTime: dto.customStartTime,
-        customEndTime: dto.customEndTime,
+        isPartialDay: isPartial,
+        startTime: sTime || undefined,
+        endTime: eTime || undefined,
       });
 
     const leaveType = dto.leaveType || LeaveType.SICK_LEAVE;
-    const leavePortion = dto.leavePortion || LeavePortion.FULL_DAY;
     const startDateObj = TimeUtility.toDbDate(startDateParsed.toISODate()!);
     const endDateObj = TimeUtility.toDbDate(endDateParsed.toISODate()!);
 
@@ -50,11 +54,10 @@ export class ApplyLeaveService {
         stylistId,
         startDate: startDateObj,
         endDate: endDateObj,
-        absenceDate: startDateObj,
+        isPartialDay: isPartial,
+        startTime: sTime,
+        endTime: eTime,
         leaveType,
-        leavePortion,
-        customStartTime: dto.customStartTime || null,
-        customEndTime: dto.customEndTime || null,
         reason: dto.reason || null,
         notes: dto.notes || null,
         status: AbsenceStatus.ACTIVE,
@@ -73,9 +76,9 @@ export class ApplyLeaveService {
       dateRange: {
         startDate: startDateObj,
         endDate: endDateObj,
-        startTime: dto.customStartTime,
-        endTime: dto.customEndTime,
-        isPartialDay: leavePortion !== LeavePortion.FULL_DAY,
+        startTime: sTime || undefined,
+        endTime: eTime || undefined,
+        isPartialDay: isPartial,
       },
       isClosedOrOff: true,
       reason: `Staff Leave: ${dto.reason || 'Staff absence'}`,
