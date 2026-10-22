@@ -134,6 +134,7 @@ export class AppointmentModifierService {
       clientEtaStatus: effectiveEtaStatus,
       proposedStartAt: effectiveProposedStartAt,
       expiresAt: effectiveExpiresAt,
+      bookingType: appointment.bookingType,
     });
 
     // Build single atomic update payload
@@ -211,6 +212,7 @@ export class AppointmentModifierService {
         clientEtaStatus: true,
         proposedStartAt: true,
         expiresAt: true,
+        bookingType: true,
       },
     });
 

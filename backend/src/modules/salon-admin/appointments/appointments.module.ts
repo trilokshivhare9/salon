@@ -9,6 +9,7 @@ import { AppointmentStatusService } from './status/appointment-status.service';
 import { AppointmentAddonService } from './addons/appointment-addon.service';
 import { AppointmentModifierService } from './modifier/appointment-modifier.service';
 import { AppointmentNextActionService } from './next-action/appointment-next-action.service';
+import { AppointmentQueueService } from './queue/queue.service';
 import { AppointmentsController } from './appointments.controller';
 import { AvailabilityModule } from '../availability/availability.module';
 import { WhatsAppModule } from '../../channels/whatsapp/whatsapp.module';
@@ -25,6 +26,7 @@ import { ScheduleConflictResolutionEngine } from './conflicts/schedule-conflict-
     AppointmentNextActionService,
     AppointmentStatusService,
     AppointmentAddonService,
+    AppointmentQueueService,
     RemindersService,
     AppointmentEventsService,
     CancellationService,
@@ -37,6 +39,7 @@ import { ScheduleConflictResolutionEngine } from './conflicts/schedule-conflict-
     AppointmentModifierService,
     AppointmentStatusService,
     AppointmentAddonService,
+    AppointmentQueueService,
     RemindersService,
     AppointmentEventsService,
     CancellationService,

@@ -434,7 +434,7 @@ export class WhatsAppSenderService {
                 errorMessage: JSON.stringify(resJson),
               },
             })
-            .catch(() => {});
+            .catch(() => { });
         });
         return false;
       }
@@ -453,7 +453,7 @@ export class WhatsAppSenderService {
               metaMessageId: metaMsgId,
             },
           })
-          .catch(() => {});
+          .catch(() => { });
       });
 
       return true;

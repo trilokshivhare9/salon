@@ -27,6 +27,8 @@ import { AppointmentStatus, AdminRole } from '@prisma/client';
 import { Observable, interval, merge } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { RemindersService } from './reminders/reminders.service';
+import { AppointmentQueueService } from './queue/queue.service';
+import { GetQueueQueryDto } from './queue/dto/get-queue.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('appointments')
@@ -34,6 +36,7 @@ export class AppointmentsController {
   constructor(
     private readonly appointmentsService: AppointmentsService,
     private readonly remindersService: RemindersService,
+    private readonly queueService: AppointmentQueueService,
   ) { }
 
   @Public()
@@ -87,6 +90,14 @@ export class AppointmentsController {
       status,
       customerId,
     });
+  }
+
+  @Get('queue')
+  async getQueue(
+    @CurrentSalonId() salonId: string,
+    @Query() query: GetQueueQueryDto,
+  ) {
+    return this.queueService.getQueue(salonId, query);
   }
 
   @Get(':id')
@@ -165,5 +176,14 @@ export class AppointmentsController {
       user.id,
       proposedStylistId,
     );
+  }
+
+  @Post(':id/addons')
+  async addAddon(
+    @CurrentSalonId() salonId: string,
+    @Param('id') appointmentId: string,
+    @Body('serviceId') serviceId: string,
+  ) {
+    return this.appointmentsService.addServiceToAppointment(salonId, appointmentId, serviceId);
   }
 }

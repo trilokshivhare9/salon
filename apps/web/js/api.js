@@ -496,6 +496,18 @@ export class ApiClient {
     return this.request(endpoint, {}, (bypassCache || dateStr) ? 0 : 5000);
   }
 
+  static async getQueue(params = {}, bypassCache = true) {
+    const cleanParams = {};
+    for (const [key, val] of Object.entries(params)) {
+      if (val !== undefined && val !== null && val !== '') {
+        cleanParams[key] = val;
+      }
+    }
+    const query = new URLSearchParams(cleanParams).toString();
+    const endpoint = query ? `/appointments/queue?${query}` : '/appointments/queue';
+    return this.request(endpoint, {}, bypassCache ? 0 : 5000);
+  }
+
   static async getAppointments(filters = {}) {
     const query = new URLSearchParams(filters).toString();
     return this.request(`/appointments?${query}`, {}, 15000);
@@ -548,6 +560,15 @@ export class ApiClient {
     return this.request(`/appointments/${id}/propose-reschedule`, {
       method: 'PATCH',
       body: JSON.stringify(payload),
+    });
+  }
+
+  static async addAddonService(id, serviceId) {
+    this.invalidateCache('/reports');
+    this.invalidateCache('/appointments');
+    return this.request(`/appointments/${id}/addons`, {
+      method: 'POST',
+      body: JSON.stringify({ serviceId }),
     });
   }
 

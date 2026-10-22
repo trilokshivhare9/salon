@@ -197,26 +197,47 @@ export class AppointmentStatusService {
           });
 
           for (const comp of competing) {
-            await this.applyStatusChange(salonId, comp.id, {
-              status: AppointmentStatus.REJECTED,
-              cancellationReason: 'COMPETING_BOOKING_ACCEPTED',
-              skipTransitionValidation: true,
-            });
             if (comp.salonUser?.user?.phone) {
-              const compMsg = `❌ *SLOT NO LONGER AVAILABLE*\n\nHi *${comp.salonUser.user.name || 'Customer'}*, another booking was just confirmed for this slot. Please choose another time or browse our service catalog.`;
+              const compPhone = comp.salonUser.user.phone;
+              const compMsg = `❌ *SLOT NO LONGER AVAILABLE*\n\nHi *${comp.salonUser.user.name || 'Customer'}*, another client was just confirmed for this slot. Please tap below to view upcoming openings:`;
               await this.whatsappService.sendMetaMessage(
-                comp.salonUser.user.phone,
+                compPhone,
                 {
                   bodyText: compMsg,
                   interactiveType: 'button',
-                  buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
+                  buttons: [
+                    { id: 'btn_book', title: '📅 View Slots' },
+                    { id: 'btn_start', title: '🏠 Main Menu' },
+                  ],
                 },
                 phoneNumberId,
                 salonId,
               ).catch((err) => {
                 this.logger.error(`Failed to send WhatsApp slot taken notification: ${err?.message || err}`);
               });
+
+              await this.prisma.conversation.updateMany({
+                where: {
+                  salonId,
+                  customerPhone: { in: [compPhone, compPhone.replace('+', ''), `+${compPhone.replace('+', '')}`] },
+                },
+                data: {
+                  state: 'START',
+                  activeAppointmentId: null,
+                  selectedServiceId: null,
+                  selectedStaffId: null,
+                  selectedDate: null,
+                  selectedStartTime: null,
+                },
+              }).catch(() => { });
             }
+
+            // Cleanly delete competing unconfirmed appointment from database
+            await this.prisma.appointment.delete({
+              where: { id: comp.id },
+            }).catch((err) => {
+              this.logger.error(`Failed to purge competing quick booking ${comp.id}: ${err?.message}`);
+            });
           }
         } else if (dto.status === AppointmentStatus.REJECTED || dto.status === AppointmentStatus.CANCELLED) {
           const declineMsg = `❌ *QUICK BOOKING DECLINED*\n\nHi *${userName}*, *${salon.name}* is currently unable to accept this quick booking request. Please speak to salon reception or book another slot.`;
@@ -225,12 +246,22 @@ export class AppointmentStatusService {
             {
               bodyText: declineMsg,
               interactiveType: 'button',
-              buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
+              buttons: [
+                { id: 'btn_book', title: '📅 View Slots' },
+                { id: 'btn_start', title: '🏠 Main Menu' },
+              ],
             },
             phoneNumberId,
             salonId,
           ).catch((err) => {
             this.logger.error(`Failed to send WhatsApp quick booking declined notification: ${err?.message || err}`);
+          });
+
+          // Cleanly delete declined unconfirmed quick booking from database
+          await this.prisma.appointment.delete({
+            where: { id: appointment.id },
+          }).catch((err) => {
+            this.logger.error(`Failed to delete declined quick booking ${appointment.id}: ${err?.message}`);
           });
         }
 

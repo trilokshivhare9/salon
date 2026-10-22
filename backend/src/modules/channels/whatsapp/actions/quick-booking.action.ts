@@ -121,15 +121,9 @@ export class QuickBookingAction {
     });
 
     if (pendingRequest) {
-      await this.appointmentsService.cancelBooking(salonId, pendingRequest.id, {
-        source: 'CUSTOMER_WHATSAPP',
-        fault: 'CLIENT',
-        noPenalty: true,
-        reason: 'CANCELLED_BY_CLIENT_BEFORE_ACCEPTANCE',
-        cancelledBy: CancelledBy.USER,
-        skipWhatsAppNotify: true,
-        skipMoveUp: true,
-      });
+      await this.prisma.appointment.delete({
+        where: { id: pendingRequest.id },
+      }).catch((e) => this.logger.error(`Error deleting cancelled pending quick booking: ${e?.message}`));
     }
 
     await this.session.updateConversationState(

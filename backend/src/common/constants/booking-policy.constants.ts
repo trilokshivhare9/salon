@@ -29,6 +29,7 @@ export const BOOKING_POLICY = {
 export enum AppointmentActionType {
   REMINDER_2H = 'REMINDER_2H',
   CUTOFF_60M = 'CUTOFF_60M',
+  CUTOFF_5M = 'CUTOFF_5M',
   ARRIVAL_15M = 'ARRIVAL_15M',
   CUTOFF_10M = 'CUTOFF_10M',
   AUTO_COMPLETE = 'AUTO_COMPLETE',
@@ -42,6 +43,7 @@ export enum AppointmentActionType {
 export const APPOINTMENT_ACTION_TIMING_MINS: Record<AppointmentActionType, number | null> = {
   [AppointmentActionType.REMINDER_2H]: 120, // 2 hours before startAt
   [AppointmentActionType.CUTOFF_60M]: 60,   // 60 minutes before startAt
+  [AppointmentActionType.CUTOFF_5M]: 5,     // 5 minutes operator approval cutoff
   [AppointmentActionType.ARRIVAL_15M]: 15,  // 15 minutes before startAt
   [AppointmentActionType.CUTOFF_10M]: 10,   // 10 minutes response cutoff after arrival reminder
   [AppointmentActionType.AUTO_COMPLETE]: 0, // When appointment duration ends (at endAt)

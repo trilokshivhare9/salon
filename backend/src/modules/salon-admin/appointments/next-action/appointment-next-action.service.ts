@@ -9,6 +9,7 @@ export interface NextActionInput {
   status: AppointmentStatus;
   startAt: Date;
   endAt: Date;
+  bookingType?: string | null;
   reminder2hSentAt?: Date | null;
   reminder10mSentAt?: Date | null;
   clientEtaStatus?: ClientEtaStatus | null;
@@ -66,6 +67,11 @@ export class AppointmentNextActionService {
       }
 
       case AppointmentStatus.CONFIRMED: {
+        // Quick booking walk-in is immediate -> directly schedule AUTO_COMPLETE at endAt
+        if (input.bookingType === 'QUICK') {
+          return { nextActionAt: new Date(endMs), nextActionType: AppointmentActionType.AUTO_COMPLETE };
+        }
+
         // If client already marked ON_THE_WAY or ARRIVED, no arrival alert needed -> directly schedule AUTO_COMPLETE
         if (
           input.clientEtaStatus === ClientEtaStatus.ON_THE_WAY ||
@@ -113,9 +119,9 @@ export class AppointmentNextActionService {
         const fiveMinFromNow = now + 5 * 60 * 1000;
         const cutoffTime = Math.min(fiveMinFromNow, startMs);
         if (now >= cutoffTime) {
-          return { nextActionAt: new Date(now), nextActionType: AppointmentActionType.CUTOFF_60M };
+          return { nextActionAt: new Date(now), nextActionType: AppointmentActionType.CUTOFF_5M };
         }
-        return { nextActionAt: new Date(cutoffTime), nextActionType: AppointmentActionType.CUTOFF_60M };
+        return { nextActionAt: new Date(cutoffTime), nextActionType: AppointmentActionType.CUTOFF_5M };
       }
 
       case AppointmentStatus.PENDING_RESCHEDULE: {

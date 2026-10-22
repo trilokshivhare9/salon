@@ -363,18 +363,12 @@ export class RealtimeNotifier {
             });
           }
 
-          // Deterministic async sync: await loadData before refreshing open quick requests modal
-          if (window.salonDashboard && typeof window.salonDashboard.loadData === 'function') {
-            window.salonDashboard.loadData(true).then(() => {
-              if (isQuickRequest && document.getElementById('modal-quick-requests')) {
-                window.salonDashboard?.openQuickRequestsModal?.();
-              }
-              if (window.salonDashboard?.updateQuickRequestsBadge) {
-                window.salonDashboard.updateQuickRequestsBadge();
-              }
-            }).catch((err) => {
-              console.warn('[Realtime] loadData error on NEW_BOOKING:', err);
-            });
+          // Refresh open quick requests modal or badge without heavy full reload
+          if (isQuickRequest && document.getElementById('modal-quick-requests')) {
+            window.salonDashboard?.openQuickRequestsModal?.();
+          }
+          if (window.salonDashboard?.updateQuickRequestsBadge) {
+            window.salonDashboard.updateQuickRequestsBadge();
           }
 
         } else if (

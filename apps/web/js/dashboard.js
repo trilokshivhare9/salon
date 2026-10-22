@@ -1,6 +1,7 @@
 import { ApiClient, formatTime12h } from './api.js';
 import * as IndianFestivals from '@aryanjsx/indian-festivals';
 import { RealtimeNotifier } from './realtime.js';
+import { QueueSyncManager } from './queue/queue-sync.js';
 import { SoundManager } from './sound.js';
 import { Icons } from './icons.js';
 import { LeaveManagementUI } from './leave-management.js';
@@ -57,27 +58,30 @@ export function getApptServices(appt) {
     return appt.services.map((s, idx) => {
       const name = s.serviceNameSnapshot || s.service?.name || s.name || 'Service';
       const durationMinutes = s.durationMinutes || s.service?.durationMinutes || 0;
-      const isAddon = idx > 0 || Boolean(s.service?.isAddon || s.isAddon);
-      return { name, durationMinutes, isAddon, raw: s };
+      const price = s.price !== undefined && s.price !== null
+        ? Number(s.price)
+        : (s.service?.price !== undefined && s.service?.price !== null ? Number(s.service.price) : null);
+      const isAddon = (s.orderIndex !== undefined && s.orderIndex > 0) || idx > 0 || Boolean(s.service?.isAddon || s.isAddon);
+      return { name, durationMinutes, price, isAddon, raw: s };
     });
   }
 
-  // 2) If serviceNameSnapshot contains comma-separated values (e.g. "Face, Hair Cut")
-  if (appt.serviceNameSnapshot && typeof appt.serviceNameSnapshot === 'string' && appt.serviceNameSnapshot.includes(',')) {
-    const names = appt.serviceNameSnapshot.split(',').map((n) => n.trim()).filter(Boolean);
+  // 2) If serviceNameSnapshot contains comma or plus separated values (e.g. "Hair Cut, Beard Trim" or "Hair Cut + Beard")
+  if (appt.serviceNameSnapshot && typeof appt.serviceNameSnapshot === 'string' && (appt.serviceNameSnapshot.includes(',') || appt.serviceNameSnapshot.includes('+'))) {
+    const rawParts = appt.serviceNameSnapshot.split(/[,+]/).map((n) => n.trim()).filter(Boolean);
     const totalDur = appt.durationMinutes || 0;
     const primaryDur = appt.service?.durationMinutes || 0;
-    return names.map((name, idx) => {
+    return rawParts.map((name, idx) => {
       const isAddon = idx > 0;
       let durationMinutes = 0;
       if (idx === 0) {
-        durationMinutes = primaryDur || (names.length === 1 ? totalDur : 0);
-      } else if (idx === names.length - 1 && primaryDur > 0 && totalDur > primaryDur) {
+        durationMinutes = primaryDur || (rawParts.length === 1 ? totalDur : 0);
+      } else if (idx === rawParts.length - 1 && primaryDur > 0 && totalDur > primaryDur) {
         durationMinutes = totalDur - primaryDur;
       } else if (totalDur > primaryDur && primaryDur > 0) {
-        durationMinutes = Math.round((totalDur - primaryDur) / (names.length - 1));
+        durationMinutes = Math.round((totalDur - primaryDur) / (rawParts.length - 1));
       }
-      return { name, durationMinutes, isAddon };
+      return { name, durationMinutes, price: null, isAddon };
     });
   }
 
@@ -88,7 +92,7 @@ export function getApptServices(appt) {
 
     // Check if appt.serviceNameSnapshot has add-on names not equal to mainName
     if (appt.serviceNameSnapshot && typeof appt.serviceNameSnapshot === 'string' && appt.serviceNameSnapshot !== mainName) {
-      const parts = appt.serviceNameSnapshot.split(',').map((n) => n.trim()).filter(Boolean);
+      const parts = appt.serviceNameSnapshot.split(/[,+]/).map((n) => n.trim()).filter(Boolean);
       const addonParts = parts.filter((p) => p !== mainName);
       if (addonParts.length > 0) {
         const totalDur = appt.durationMinutes || 0;
@@ -96,20 +100,20 @@ export function getApptServices(appt) {
         const remainingDur = Math.max(0, totalDur - primaryDur);
         const addonDur = Math.round(remainingDur / addonParts.length);
 
-        const list = [{ name: mainName, durationMinutes: primaryDur || mainDur, isAddon: false }];
+        const list = [{ name: mainName, durationMinutes: primaryDur || mainDur, price: null, isAddon: false }];
         addonParts.forEach((aName) => {
-          list.push({ name: aName, durationMinutes: addonDur, isAddon: true });
+          list.push({ name: aName, durationMinutes: addonDur, price: null, isAddon: true });
         });
         return list;
       }
     }
 
-    return [{ name: mainName, durationMinutes: mainDur, isAddon: false }];
+    return [{ name: mainName, durationMinutes: mainDur, price: null, isAddon: false }];
   }
 
   // 4) If serviceNameSnapshot is a single string
   if (appt.serviceNameSnapshot && typeof appt.serviceNameSnapshot === 'string') {
-    return [{ name: appt.serviceNameSnapshot.trim(), durationMinutes: appt.durationMinutes || 0, isAddon: false }];
+    return [{ name: appt.serviceNameSnapshot.trim(), durationMinutes: appt.durationMinutes || 0, price: null, isAddon: false }];
   }
 
   return [];
@@ -158,7 +162,6 @@ export class SalonDashboard {
     this.previousTab = 'queue';
     this.selectedDate = this.getLocalDateString();
     this.leaveUI = new LeaveManagementUI(this);
-    this.queueFilter = 'ALL';
     this.summaryData = {
       statusCounts: { total: 0, confirmed: 0, checkedIn: 0, inService: 0, completed: 0, cancelled: 0, noShow: 0 },
       todayAppointments: [],
@@ -166,6 +169,31 @@ export class SalonDashboard {
       timezone: 'Asia/Kolkata',
       whatsappQuota: { limit: 1000, used: 0, remaining: 1000, percentUsed: 0, resetsOn: '1st of next month' },
     };
+    this.queueFilter = 'ALL';
+    this.queueDrawerFilters = {
+      stylistId: '',
+      bookingType: '',
+      status: '',
+      categoryId: '',
+    };
+    this.calNavDate = null;
+    this.queueSummary = null;
+    this.queueSync = new QueueSyncManager({
+      selectedDate: this.selectedDate,
+      statusFilter: this.queueFilter,
+      onStateChange: ({ items, summary }) => {
+        if (this.summaryData && items) {
+          this.summaryData.todayAppointments = items;
+        }
+        if (summary) {
+          this.queueSummary = summary;
+        }
+        if (this.activeTab === 'queue' || this.activeTab === 'dashboard') {
+          this.refreshActiveTab();
+        }
+        this.updateQuickRequestsBadge();
+      },
+    });
     this.staffList = [];
     this.servicesList = [];
     this.categoriesList = [];
@@ -276,7 +304,6 @@ export class SalonDashboard {
               <div>
                 <div style="font-weight: 700; color: #f8fafc; font-size: 1rem; display: flex; align-items: center; gap: 8px;">
                   <span>${clientName}</span>
-                  <span style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; font-size: 0.72rem; padding: 2px 8px; border-radius: 6px; font-weight: 800;">⚡ QUICK BOOK</span>
                 </div>
                 <div style="color: #94a3b8; font-size: 0.82rem; margin-top: 2px;">📞 ${clientPhone}</div>
               </div>
@@ -442,15 +469,34 @@ export class SalonDashboard {
         }
         this.realtime = new RealtimeNotifier(this.salonProfile.id, async (payload) => {
           if (payload?.type === 'PING') return;
-          // Live sync from SSE stream (appointments, staff, services)
+
+          // 1. In-Memory Zero-Latency Queue Event Dispatch
+          const syncResult = this.queueSync.handleRealtimeEvent(payload);
+          if (syncResult && syncResult.handled && syncResult.isCurrentDate) {
+            // Handled completely in memory without redundant HTTP requests!
+            this.updateQuickRequestsBadge();
+            return;
+          }
+
+          // 2. Staff or Services updates
+          const isStaffOrService = payload?.type === 'STAFF_UPDATED' || payload?.type === 'SERVICE_UPDATED';
+          if (isStaffOrService) {
+            if (payload?.type === 'STAFF_UPDATED') {
+              this.staffList = await ApiClient.getStaff(true).catch(() => this.staffList);
+            }
+            if (payload?.type === 'SERVICE_UPDATED') {
+              this.servicesList = await ApiClient.getServices(true).catch(() => this.servicesList);
+            }
+            if (this.activeTab === 'staff' || this.activeTab === 'services') {
+              this.render();
+            }
+            return;
+          }
+
+          // 3. Fallback for other events
           await this.loadData(true);
           this.updateQuickRequestsBadge();
-          const isStaffOrService = payload?.type === 'STAFF_UPDATED' || payload?.type === 'SERVICE_UPDATED';
-          if (isStaffOrService || this.activeTab === 'staff' || this.activeTab === 'services') {
-            this.render();
-          } else {
-            this.refreshActiveTab();
-          }
+          this.refreshActiveTab();
         });
       }
     } catch (err) {
@@ -596,7 +642,8 @@ export class SalonDashboard {
 
     if (fullReload) {
       try {
-        const [summary, staff, services, profile, categories, calendarScheduleRes, workingHours, salonBreaks] = await Promise.all([
+        this.queueSync.setDate(this.selectedDate);
+        const [summary, staff, services, profile, categories, calendarScheduleRes, workingHours, salonBreaks, queueRes] = await Promise.all([
           ApiClient.getDashboardSummary(this.selectedDate, true).catch((err) => {
             console.warn('[Dashboard] Summary fetch error:', err);
             return fallbackSummary;
@@ -631,9 +678,16 @@ export class SalonDashboard {
             console.warn('[Dashboard] Salon breaks fetch error:', err);
             return this.salonBreaks || [];
           }),
+          this.queueSync.fetchQueue(true).catch((err) => {
+            console.warn('[Dashboard] Queue fetch error:', err);
+            return null;
+          }),
         ]);
 
         this.summaryData = summary || fallbackSummary;
+        if (Array.isArray(this.queueSync.items)) {
+          this.summaryData.todayAppointments = this.queueSync.items;
+        }
         this.staffList = Array.isArray(staff) ? staff : [];
         this.servicesList = Array.isArray(services) ? services : [];
         this.categoriesList = Array.isArray(categories) ? categories : [];
@@ -660,14 +714,20 @@ export class SalonDashboard {
           this.salonBreaksByDay = {};
         }
 
-
       } catch (err) {
         console.warn('[Dashboard] loadData batch error:', err);
       }
     } else {
       try {
-        const summary = await ApiClient.getDashboardSummary(this.selectedDate, true);
+        this.queueSync.setDate(this.selectedDate);
+        const [summary, queueRes] = await Promise.all([
+          ApiClient.getDashboardSummary(this.selectedDate, true).catch(() => fallbackSummary),
+          this.queueSync.fetchQueue(true).catch(() => null),
+        ]);
         this.summaryData = summary || fallbackSummary;
+        if (Array.isArray(this.queueSync.items)) {
+          this.summaryData.todayAppointments = this.queueSync.items;
+        }
       } catch (err) {
         console.warn('[Dashboard] date switch error:', err);
       }
@@ -1291,121 +1351,438 @@ export class SalonDashboard {
     `;
   }
 
+  renderCalendarPopoverContent() {
+    const todayISO = this.getLocalDateString();
+    const tmrwISO = this.addDaysToDateString(todayISO, 1);
+    const dayAfterISO = this.addDaysToDateString(todayISO, 2);
+
+    if (!this.calNavDate) {
+      const [sy, sm] = (this.selectedDate || todayISO).split('-').map(Number);
+      this.calNavDate = new Date(sy, sm - 1, 1);
+    }
+    const navYear = this.calNavDate.getFullYear();
+    const navMonth = this.calNavDate.getMonth();
+
+    const monthTitle = this.calNavDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    const firstDayIndex = new Date(navYear, navMonth, 1).getDay();
+    const daysInMonth = new Date(navYear, navMonth + 1, 0).getDate();
+    const weekdays = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+
+    let cellsHtml = '';
+    for (let i = 0; i < firstDayIndex; i++) {
+      cellsHtml += `<div class="q-cal-day-cell empty"></div>`;
+    }
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateIso = `${navYear}-${String(navMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const isSelected = dateIso === this.selectedDate;
+      const isToday = dateIso === todayISO;
+
+      let cls = 'q-cal-day-cell';
+      if (isSelected) cls += ' is-selected';
+      if (isToday) cls += ' is-today';
+
+      cellsHtml += `
+        <div class="${cls}" data-date="${dateIso}">
+          <span>${day}</span>
+        </div>
+      `;
+    }
+
+    return `
+      <div class="q-cal-quick-row">
+        <button class="q-cal-quick-btn ${this.selectedDate === todayISO ? 'active' : ''}" data-date="${todayISO}">Today</button>
+        <button class="q-cal-quick-btn ${this.selectedDate === tmrwISO ? 'active' : ''}" data-date="${tmrwISO}">Tomorrow</button>
+        <button class="q-cal-quick-btn ${this.selectedDate === dayAfterISO ? 'active' : ''}" data-date="${dayAfterISO}">+2 Days</button>
+      </div>
+
+      <div class="q-cal-header">
+        <button class="q-cal-nav-btn" id="btn-qcal-prev" title="Previous Month">
+          ${Icons.chevronLeft({ size: 14 })}
+        </button>
+        <span class="q-cal-month-title">${monthTitle}</span>
+        <button class="q-cal-nav-btn" id="btn-qcal-next" title="Next Month">
+          ${Icons.chevronRight({ size: 14 })}
+        </button>
+      </div>
+
+      <div class="q-cal-weekdays">
+        ${weekdays.map((w) => `<div>${w}</div>`).join('')}
+      </div>
+
+      <div class="q-cal-days-grid">
+        ${cellsHtml}
+      </div>
+    `;
+  }
+
+  renderQueueDrawerContent(activeCount) {
+    const filters = this.queueDrawerFilters || {};
+    return `
+      <div class="queue-drawer-header">
+        <div class="queue-drawer-title-row">
+          <span class="queue-drawer-icon">${Icons.sliders({ size: 16 })}</span>
+          <div>
+            <div class="queue-drawer-title">Filter Queue</div>
+            <div class="queue-drawer-subtitle">${activeCount > 0 ? `${activeCount} filter(s) active` : 'Showing all appointments'}</div>
+          </div>
+        </div>
+        <button class="queue-drawer-close" id="btn-close-queue-drawer" title="Close Drawer">
+          ${Icons.x({ size: 15 })}
+        </button>
+      </div>
+
+      <div class="queue-drawer-body">
+        <!-- Specialists -->
+        <div class="qd-section">
+          <div class="qd-section-label">
+            <span>Specialist</span>
+            ${filters.stylistId ? `<span class="qd-section-badge">Active</span>` : ''}
+          </div>
+          <div class="qd-chips" data-filter-group="stylistId">
+            <div class="qd-chip ${!filters.stylistId ? 'active' : ''}" data-val="">
+              <span class="qd-chip-avatar all">✦</span>
+              <span>All Specialists</span>
+            </div>
+            ${this.staffList.map((st) => {
+              const initials = (st.name || 'S').trim().split(/\s+/).map((n) => n[0]).slice(0, 2).join('').toUpperCase();
+              return `
+                <div class="qd-chip ${filters.stylistId === st.id ? 'active' : ''}" data-val="${st.id}">
+                  <span class="qd-chip-avatar">${initials}</span>
+                  <span>${st.name}</span>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+
+        <!-- Booking Type -->
+        <div class="qd-section">
+          <div class="qd-section-label">
+            <span>Booking Channel / Type</span>
+            ${filters.bookingType ? `<span class="qd-section-badge">Active</span>` : ''}
+          </div>
+          <div class="qd-chips" data-filter-group="bookingType">
+            <div class="qd-chip ${!filters.bookingType ? 'active' : ''}" data-val="">
+              <span>All Types</span>
+            </div>
+            <div class="qd-chip ${filters.bookingType === 'QUICK' ? 'active' : ''}" data-val="QUICK">
+              <span>⚡</span> <span>Quick Booking</span>
+            </div>
+            <div class="qd-chip ${filters.bookingType === 'NORMAL' ? 'active' : ''}" data-val="NORMAL">
+              <span>📅</span> <span>Normal Booking</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Pipeline Status -->
+        <div class="qd-section">
+          <div class="qd-section-label">
+            <span>Appointment Status</span>
+            ${filters.status ? `<span class="qd-section-badge">Active</span>` : ''}
+          </div>
+          <div class="qd-chips" data-filter-group="status">
+            <div class="qd-chip ${!filters.status ? 'active' : ''}" data-val="">
+              <span class="qd-status-dot all"></span>
+              <span>All Statuses</span>
+            </div>
+            <div class="qd-chip ${filters.status === 'PENDING_ACCEPTANCE' ? 'active' : ''}" data-val="PENDING_ACCEPTANCE">
+              <span class="qd-status-dot pending"></span>
+              <span>Pending Approval</span>
+            </div>
+            <div class="qd-chip ${filters.status === 'CONFIRMED' ? 'active' : ''}" data-val="CONFIRMED">
+              <span class="qd-status-dot confirmed"></span>
+              <span>Confirmed</span>
+            </div>
+            <div class="qd-chip ${filters.status === 'BOOKED' ? 'active' : ''}" data-val="BOOKED">
+              <span class="qd-status-dot booked"></span>
+              <span>Booked</span>
+            </div>
+            <div class="qd-chip ${filters.status === 'ON_THE_WAY' ? 'active' : ''}" data-val="ON_THE_WAY">
+              <span class="qd-status-dot ontheway"></span>
+              <span>On The Way</span>
+            </div>
+            <div class="qd-chip ${filters.status === 'CHECKED_IN' ? 'active' : ''}" data-val="CHECKED_IN">
+              <span class="qd-status-dot checkedin"></span>
+              <span>Checked In</span>
+            </div>
+            <div class="qd-chip ${filters.status === 'IN_SERVICE' ? 'active' : ''}" data-val="IN_SERVICE">
+              <span class="qd-status-dot inchair"></span>
+              <span>In Chair</span>
+            </div>
+            <div class="qd-chip ${filters.status === 'COMPLETED' ? 'active' : ''}" data-val="COMPLETED">
+              <span class="qd-status-dot completed"></span>
+              <span>Completed</span>
+            </div>
+            <div class="qd-chip ${filters.status === 'CANCELLED' ? 'active' : ''}" data-val="CANCELLED">
+              <span class="qd-status-dot cancelled"></span>
+              <span>Cancelled</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Service Category -->
+        ${this.categoriesList && this.categoriesList.length > 0 ? `
+          <div class="qd-section">
+            <div class="qd-section-label">
+              <span>Service Category</span>
+              ${filters.categoryId ? `<span class="qd-section-badge">Active</span>` : ''}
+            </div>
+            <div class="qd-chips" data-filter-group="categoryId">
+              <div class="qd-chip ${!filters.categoryId ? 'active' : ''}" data-val="">
+                <span>All Categories</span>
+              </div>
+              ${this.categoriesList.map((cat) => `
+                <div class="qd-chip ${filters.categoryId === cat.id ? 'active' : ''}" data-val="${cat.id}">
+                  <span>🏷️</span>
+                  <span>${cat.name}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        ` : ''}
+      </div>
+
+      <div class="queue-drawer-footer">
+        <button class="qd-btn-reset" id="btn-reset-queue-filters">
+          Reset All
+        </button>
+        <button class="qd-btn-apply" id="btn-apply-queue-filters">
+          Apply Filters
+        </button>
+      </div>
+    `;
+  }
+
+  wireCalendarPopoverEvents(calPopover, handleDateChange) {
+    if (!calPopover) return;
+    calPopover.querySelectorAll('[data-date]').forEach((el) => {
+      el.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const d = e.currentTarget.getAttribute('data-date');
+        if (d) {
+          calPopover.classList.remove('is-open');
+          if (this._handlePopoverDocClick) {
+            document.removeEventListener('click', this._handlePopoverDocClick);
+            this._handlePopoverDocClick = null;
+          }
+          handleDateChange(d);
+        }
+      });
+    });
+
+    calPopover.querySelector('#btn-qcal-prev')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!this.calNavDate) {
+        const [sy, sm] = (this.selectedDate || this.getLocalDateString()).split('-').map(Number);
+        this.calNavDate = new Date(sy, sm - 1, 1);
+      }
+      this.calNavDate.setMonth(this.calNavDate.getMonth() - 1);
+      calPopover.innerHTML = this.renderCalendarPopoverContent();
+      this.wireCalendarPopoverEvents(calPopover, handleDateChange);
+    });
+
+    calPopover.querySelector('#btn-qcal-next')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!this.calNavDate) {
+        const [sy, sm] = (this.selectedDate || this.getLocalDateString()).split('-').map(Number);
+        this.calNavDate = new Date(sy, sm - 1, 1);
+      }
+      this.calNavDate.setMonth(this.calNavDate.getMonth() + 1);
+      calPopover.innerHTML = this.renderCalendarPopoverContent();
+      this.wireCalendarPopoverEvents(calPopover, handleDateChange);
+    });
+  }
+
+  async handleQueueDateChange(newDate) {
+    if (!newDate || newDate === this.selectedDate) return;
+    this.selectedDate = newDate;
+    this.queueSync.setDate(newDate);
+
+    // Sync calNavDate to the newly selected date's month
+    const [ny, nm] = newDate.split('-').map(Number);
+    this.calNavDate = new Date(ny, nm - 1, 1);
+
+    // Optimistic date label update for instant 0ms visual feedback
+    const dateDisplay = document.getElementById('date-label-display');
+    if (dateDisplay) {
+      const [sy, sm, sd] = newDate.split('-').map(Number);
+      const selDate = new Date(sy, sm - 1, sd);
+      const [ty, tm, td] = this.getLocalDateString().split('-').map(Number);
+      const todayDate = new Date(ty, tm - 1, td);
+      const diffDays = Math.round((selDate - todayDate) / (1000 * 60 * 60 * 24));
+      let datePrefix = '';
+      if (diffDays === 0) datePrefix = 'Today, ';
+      else if (diffDays === 1) datePrefix = 'Tomorrow, ';
+      else if (diffDays === -1) datePrefix = 'Yesterday, ';
+      else datePrefix = selDate.toLocaleDateString('en-US', { weekday: 'short' }) + ', ';
+      dateDisplay.textContent = datePrefix + selDate.toLocaleDateString('en-US', { day: '2-digit', month: 'short' });
+    }
+
+    // Close any open popover and clean document listeners
+    const calPopover = document.getElementById('q-calendar-popover');
+    if (calPopover) {
+      calPopover.classList.remove('is-open');
+    }
+    if (this._handlePopoverDocClick) {
+      document.removeEventListener('click', this._handlePopoverDocClick);
+      this._handlePopoverDocClick = null;
+    }
+
+    // Subtle card stream dimming instead of jarring page bounce
+    const streamEl = document.querySelector('.q-stream');
+    if (streamEl) {
+      streamEl.style.opacity = '0.45';
+      streamEl.style.pointerEvents = 'none';
+      streamEl.style.transition = 'opacity 0.15s ease';
+    }
+
+    try {
+      await this.loadData(false);
+    } finally {
+      this.refreshActiveTab();
+    }
+  }
+
+  toggleCalendarPopover(event) {
+    if (event) {
+      if (typeof event.preventDefault === 'function') event.preventDefault();
+      if (typeof event.stopPropagation === 'function') event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
+    }
+    const popover = document.getElementById('q-calendar-popover');
+    const btn = document.getElementById('btn-toggle-cal-popover') || (event ? event.currentTarget : null);
+    if (!popover || !btn) return;
+
+    const isOpen = popover.classList.contains('is-open');
+    if (isOpen) {
+      popover.classList.remove('is-open');
+      if (this._handlePopoverDocClick) {
+        document.removeEventListener('click', this._handlePopoverDocClick);
+        this._handlePopoverDocClick = null;
+      }
+      return;
+    }
+
+    // Close any other open popovers
+    document.querySelectorAll('.q-calendar-popover.is-open').forEach((p) => p.classList.remove('is-open'));
+
+    // Synchronize navigation month to currently selected date
+    const [sy, sm] = (this.selectedDate || this.getLocalDateString()).split('-').map(Number);
+    this.calNavDate = new Date(sy, sm - 1, 1);
+
+    // Re-render fresh calendar content for current selected date
+    popover.innerHTML = this.renderCalendarPopoverContent();
+    this.wireCalendarPopoverEvents(popover, (d) => this.handleQueueDateChange(d));
+
+    // Dynamic viewport positioning: attach directly below button, clamped inside screen
+    const rect = btn.getBoundingClientRect();
+    popover.style.position = 'fixed';
+    popover.style.top = `${Math.min(window.innerHeight - 380, rect.bottom + 8)}px`;
+    popover.style.left = `${Math.max(10, Math.min(window.innerWidth - 325, rect.left))}px`;
+    popover.style.zIndex = '999999';
+
+    popover.classList.add('is-open');
+
+    // Attach document outside-click handler
+    if (this._handlePopoverDocClick) {
+      document.removeEventListener('click', this._handlePopoverDocClick);
+      this._handlePopoverDocClick = null;
+    }
+    this._handlePopoverDocClick = (e) => {
+      const activePopover = document.getElementById('q-calendar-popover');
+      const activeBtn = document.getElementById('btn-toggle-cal-popover');
+      if (activePopover && activePopover.classList.contains('is-open')) {
+        if (!activePopover.contains(e.target) && !activeBtn?.contains(e.target)) {
+          activePopover.classList.remove('is-open');
+          if (this._handlePopoverDocClick) {
+            document.removeEventListener('click', this._handlePopoverDocClick);
+            this._handlePopoverDocClick = null;
+          }
+        }
+      }
+    };
+    setTimeout(() => {
+      if (this._handlePopoverDocClick) {
+        document.addEventListener('click', this._handlePopoverDocClick);
+      }
+    }, 10);
+  }
+
   // =========================================================================
   // TAB 3: PURPOSE-DRIVEN OPERATOR CHAIR QUEUE (COMPACT & SORTED)
   // =========================================================================
   renderQueueTab() {
     try {
       const summary = this.summaryData || {};
-      const statusCounts = summary.statusCounts || {
-        total: 0,
-        booked: 0,
-        confirmed: 0,
-        checkedIn: 0,
-        onTheWay: 0,
-        inService: 0,
-        seatedInChair: 0,
-        completed: 0,
-        cancelled: 0,
-        noShow: 0,
-        rejected: 0,
-        pendingAcceptance: 0,
-        pendingReschedule: 0,
-      };
-      const todayAppointments = Array.isArray(summary.todayAppointments)
-        ? summary.todayAppointments
-        : [];
+      const todayISO = this.getLocalDateString();
+      const targetDateIso = this.selectedDate || todayISO;
 
-      // Architecture-Level Tiered Queue Prioritization Engine:
-      // Tier 0: PENDING_ACCEPTANCE (Quick booking requests needing immediate operator action)
-      // Tier 1: IN_SERVICE / SEATED_IN_CHAIR (Occupying chair right now)
-      // Tier 2: CHECKED_IN / ARRIVED (Physically present in salon, awaiting chair)
-      // Tier 3: ON_THE_WAY / En-Route (Client traveling to salon)
-      // Tier 4: BOOKED / CONFIRMED (Upcoming today: chronological earliest slot first)
-      // Tier 5: BOOKED / CONFIRMED Overdue (startAt has passed > 15m without check-in)
-      // Tier 6: PENDING_RESCHEDULE (Awaiting customer action)
-      // Tier 7: COMPLETED (Finished visits, sunk to bottom)
-      // Tier 8: CANCELLED / NO_SHOW / REJECTED (Freed chair capacity, sunk to bottom)
-      const nowMs = Date.now();
-
-      const evaluateQueueItem = (appt) => {
-        const status = appt.status || 'BOOKED';
-        const startMs = new Date(appt.startTime || appt.startAt || 0).getTime() || 0;
-        const isEnRoute = appt.clientEtaStatus === 'ON_THE_WAY' || status === 'ON_THE_WAY';
-        const isLobby = status === 'CHECKED_IN' || appt.clientEtaStatus === 'ARRIVED';
-        const isInChair = status === 'IN_SERVICE' || status === 'SEATED_IN_CHAIR';
-
-        if (status === 'PENDING_ACCEPTANCE') return { tier: 0, isUpcoming: true, isOverdue: false };
-        if (isInChair) return { tier: 1, isUpcoming: false, isOverdue: false, isInChair: true };
-        if (isLobby) return { tier: 2, isUpcoming: false, isOverdue: false, isLobby: true };
-        if (isEnRoute) return { tier: 3, isUpcoming: true, isOverdue: false, isEnRoute: true };
-        if (status === 'CONFIRMED' || status === 'BOOKED') {
-          // If start time was more than 15 minutes ago, classify as Overdue/Late
-          const isOverdue = startMs > 0 && startMs < (nowMs - 15 * 60 * 1000);
-          if (isOverdue) {
-            return { tier: 5, isUpcoming: false, isOverdue: true };
-          }
-          return { tier: 4, isUpcoming: true, isOverdue: false };
-        }
-        if (status === 'PENDING_RESCHEDULE') return { tier: 6, isUpcoming: true, isOverdue: false };
-        if (status === 'COMPLETED') return { tier: 7, isUpcoming: false, isOverdue: false };
-        if (status === 'CANCELLED' || status === 'REJECTED') {
-          return { tier: 8, isUpcoming: false, isOverdue: false };
-        }
-        return { tier: 9, isUpcoming: false, isOverdue: false };
+      const isApptOnSelectedDate = (appt) => {
+        const raw = appt.startTime || appt.startAt || appt.proposedStartAt;
+        if (!raw) return true;
+        const d = new Date(raw);
+        if (isNaN(d.getTime())) return true;
+        const tz = summary.timezone || 'Asia/Kolkata';
+        const apptDateIso = d.toLocaleDateString('en-CA', { timeZone: tz });
+        return apptDateIso === targetDateIso;
       };
 
-      const sortedAppointments = [...todayAppointments].sort((a, b) => {
-        const itemA = evaluateQueueItem(a);
-        const itemB = evaluateQueueItem(b);
+      const queueItems = (this.queueSync && Array.isArray(this.queueSync.items))
+        ? this.queueSync.items
+        : (Array.isArray(summary.todayAppointments) ? summary.todayAppointments : []);
+      const todayAppointments = queueItems.filter(isApptOnSelectedDate);
 
-        // Tier separation: Lower tier numbers ALWAYS precede higher tiers
-        if (itemA.tier !== itemB.tier) {
-          return itemA.tier - itemB.tier;
-        }
-
-        // Secondary sorting within same tier:
-        // For active/upcoming tiers (0-6): Earliest scheduled start time first
-        if (itemA.tier <= 6) {
-          const timeA = new Date(a.startTime || a.startAt || 0).getTime() || 0;
-          const timeB = new Date(b.startTime || b.startAt || 0).getTime() || 0;
-          return timeA - timeB;
-        }
-
-        // For terminal tiers (7-8: Completed, Cancelled, No-Show):
-        // Reverse-chronological: Most recently updated/concluded first
-        const timeA = new Date(a.updatedAt || a.startTime || a.startAt || 0).getTime() || 0;
-        const timeB = new Date(b.updatedAt || b.startTime || b.startAt || 0).getTime() || 0;
-        return timeB - timeA;
-      });
-
-      // Filter appointments based on operator selection
-      let filteredAppointments = sortedAppointments;
+      // Filter appointments based on operator selection & side drawer
+      let filteredAppointments = todayAppointments;
       if (this.queueFilter === 'WAITING') {
-        filteredAppointments = sortedAppointments.filter((a) =>
+        filteredAppointments = todayAppointments.filter((a) =>
           ['BOOKED', 'CONFIRMED', 'CHECKED_IN', 'ON_THE_WAY', 'PENDING_ACCEPTANCE', 'PENDING_RESCHEDULE'].includes(a.status)
         );
       } else if (this.queueFilter === 'IN_CHAIR') {
-        filteredAppointments = sortedAppointments.filter((a) => a.status === 'IN_SERVICE' || a.status === 'SEATED_IN_CHAIR');
+        filteredAppointments = todayAppointments.filter((a) => a.status === 'IN_SERVICE' || a.status === 'SEATED_IN_CHAIR');
       } else if (this.queueFilter === 'COMPLETED') {
-        filteredAppointments = sortedAppointments.filter((a) => a.status === 'COMPLETED');
+        filteredAppointments = todayAppointments.filter((a) => a.status === 'COMPLETED');
       } else if (this.queueFilter === 'CANCELLED') {
-        filteredAppointments = sortedAppointments.filter((a) => ['CANCELLED', 'REJECTED'].includes(a.status));
+        filteredAppointments = todayAppointments.filter((a) => ['CANCELLED', 'REJECTED'].includes(a.status));
       }
 
-      const waitingCount =
-        (statusCounts.booked || 0) +
-        (statusCounts.confirmed || 0) +
-        (statusCounts.checkedIn || 0) +
-        (statusCounts.onTheWay || 0) +
-        (statusCounts.pendingAcceptance || 0) +
-        (statusCounts.pendingReschedule || 0);
-      const inChairCount = (statusCounts.inService || 0) + (statusCounts.seatedInChair || 0);
-      const completedCount = statusCounts.completed || 0;
-      const cancelledCount = (statusCounts.cancelled || 0) + (statusCounts.noShow || 0) + (statusCounts.rejected || 0);
+      // Drawer Filter Refinements
+      const qd = this.queueDrawerFilters || {};
+      if (qd.stylistId) {
+        filteredAppointments = filteredAppointments.filter((a) =>
+          (a.stylistId === qd.stylistId || a.staffId === qd.stylistId)
+        );
+      }
+      if (qd.bookingType) {
+        filteredAppointments = filteredAppointments.filter((a) =>
+          (a.bookingType === qd.bookingType)
+        );
+      }
+      if (qd.status) {
+        filteredAppointments = filteredAppointments.filter((a) =>
+          (a.status === qd.status)
+        );
+      }
+      if (qd.categoryId) {
+        filteredAppointments = filteredAppointments.filter((a) => {
+          const svcs = getApptServices(a);
+          return svcs.some((s) => s.categoryId === qd.categoryId) || a.service?.categoryId === qd.categoryId;
+        });
+      }
+      const activeFilterCount = Object.values(qd).filter(Boolean).length;
 
-      const todayISO = this.getLocalDateString();
-      const [sy, sm, sd] = (this.selectedDate || todayISO).split('-').map(Number);
+      // Summary counts strictly computed for selected date
+      const waitingCount = todayAppointments.filter((a) =>
+        ['BOOKED', 'CONFIRMED', 'CHECKED_IN', 'ON_THE_WAY', 'PENDING_ACCEPTANCE', 'PENDING_RESCHEDULE'].includes(a.status)
+      ).length;
+      const inChairCount = todayAppointments.filter((a) => a.status === 'IN_SERVICE' || a.status === 'SEATED_IN_CHAIR').length;
+      const completedCount = todayAppointments.filter((a) => a.status === 'COMPLETED').length;
+      const cancelledCount = todayAppointments.filter((a) => ['CANCELLED', 'REJECTED', 'NO_SHOW'].includes(a.status)).length;
+
+      const [sy, sm, sd] = targetDateIso.split('-').map(Number);
       const selDate = new Date(sy, sm - 1, sd);
       const [ty, tm, td] = todayISO.split('-').map(Number);
       const todayDate = new Date(ty, tm - 1, td);
@@ -1413,8 +1790,11 @@ export class SalonDashboard {
 
       let datePrefix = '';
       if (diffDays === 0) datePrefix = 'Today, ';
-      else if (diffDays === 1) datePrefix = 'Tom, ';
-      else if (diffDays === -1) datePrefix = 'Yest, ';
+      else if (diffDays === 1) datePrefix = 'Tomorrow, ';
+      else if (diffDays === -1) datePrefix = 'Yesterday, ';
+      else {
+        datePrefix = selDate.toLocaleDateString('en-US', { weekday: 'short' }) + ', ';
+      }
 
       const formattedDateLabel = datePrefix + selDate.toLocaleDateString('en-US', { day: '2-digit', month: 'short' });
 
@@ -1461,28 +1841,27 @@ export class SalonDashboard {
         }
 
         const source = (appt.source || 'WEB').toUpperCase();
+        let label = 'Online';
+        let cls = 'web';
+        let iconHtml = Icons.globe ? Icons.globe({ size: 10, color: '#A855F7' }) : '🌐';
+
         if (source === 'WHATSAPP') {
-          return `
-            <span class="qc__meta-source qc__meta-source--wa" title="Booked via WhatsApp Assistant">
-              ${Icons.whatsapp({ size: 12, color: '#25D366' })}
-              <span>${timeLabel ? `Booked ${timeLabel} · WhatsApp` : 'WhatsApp Booking'}</span>
-            </span>
-          `;
+          label = 'WhatsApp';
+          cls = 'wa';
+          iconHtml = Icons.whatsapp({ size: 10, color: '#25D366' });
         } else if (source === 'WALK_IN') {
-          return `
-            <span class="qc__meta-source qc__meta-source--walkin" title="Direct Walk-In Client">
-              ${Icons.zap({ size: 12, color: '#f59e0b' })}
-              <span>${timeLabel ? `Walk-In ${timeLabel}` : 'Direct Walk-In'}</span>
-            </span>
-          `;
-        } else {
-          return `
-            <span class="qc__meta-source qc__meta-source--web" title="Booked via Online Web Portal">
-              ${Icons.globe({ size: 12, color: '#A855F7' })}
-              <span>${timeLabel ? `Booked ${timeLabel} · Online` : 'Online Booking'}</span>
-            </span>
-          `;
+          label = 'Walk-In';
+          cls = 'walkin';
+          iconHtml = Icons.zap({ size: 10, color: '#f59e0b' });
         }
+
+        const tagHtml = `
+          <span class="qc__origin-tag qc__origin-tag--${cls}" title="Booked via ${label}">
+            ${iconHtml}
+            <span>${label}</span>
+          </span>
+        `;
+        return { label, cls, iconHtml, timeLabel, tagHtml };
       };
 
       // Format Scheduled Service Time Range Window (12-Hour AM/PM)
@@ -1493,25 +1872,25 @@ export class SalonDashboard {
 
         const servicesList = getApptServices(appt);
 
-        let totalDurationMins = appt.durationMinutes || 0;
-        if (!totalDurationMins && servicesList.length > 0) {
-          totalDurationMins = servicesList.reduce((sum, s) => sum + (s.durationMinutes || 0), 0);
+        let totalDurationMins = 0;
+        if (servicesList.length > 0) {
+          totalDurationMins = servicesList.reduce((sum, s) => sum + (Number(s.durationMinutes) || 0), 0);
         }
-        if (!totalDurationMins) totalDurationMins = 30;
+        if (!totalDurationMins || totalDurationMins === 0) {
+          totalDurationMins = appt.durationMinutes || 30;
+        }
 
         let durationDisplayStr = `${totalDurationMins}m`;
-
-        if (servicesList.length > 1) {
-          const individualDurations = servicesList
-            .map((s) => s.durationMinutes || 0)
-            .filter((d) => d > 0);
-          if (individualDurations.length === servicesList.length) {
-            durationDisplayStr = `${individualDurations.join(' + ')} min`;
-          }
+        if (totalDurationMins >= 60) {
+          const h = Math.floor(totalDurationMins / 60);
+          const m = totalDurationMins % 60;
+          durationDisplayStr = m > 0 ? `${h}h ${m}m` : `${h}h`;
         }
 
         const rawEnd = appt.endTime || appt.endAt;
-        const endDt = rawEnd ? new Date(rawEnd) : new Date(startDt.getTime() + totalDurationMins * 60000);
+        const endDt = (servicesList.length > 0 && totalDurationMins > 0)
+          ? new Date(startDt.getTime() + totalDurationMins * 60000)
+          : (rawEnd ? new Date(rawEnd) : new Date(startDt.getTime() + totalDurationMins * 60000));
         const endTimeStr = formatTime12h(endDt) || '--:--';
         return { startTimeStr, endTimeStr, timeRangeStr: `${startTimeStr} – ${endTimeStr}`, durationMins: totalDurationMins, durationDisplayStr };
       };
@@ -1539,52 +1918,373 @@ export class SalonDashboard {
         return { timeStr, relativeAgo, reason };
       };
 
+      // Format Human Friendly Status Title
+      const formatFriendlyStatus = (status) => {
+        switch (status) {
+          case 'PENDING_ACCEPTANCE': return 'Pending Approval';
+          case 'BOOKED': return 'Booked';
+          case 'CONFIRMED': return 'Confirmed';
+          case 'ON_THE_WAY': return 'On The Way';
+          case 'CHECKED_IN': return 'Checked In';
+          case 'SEATED_IN_CHAIR':
+          case 'IN_SERVICE': return 'In Chair';
+          case 'PENDING_RESCHEDULE': return 'Reschedule Proposed';
+          case 'COMPLETED': return 'Completed';
+          case 'CANCELLED': return 'Cancelled';
+          case 'REJECTED': return 'Declined';
+          default: return (status || 'CONFIRMED').replace(/_/g, ' ');
+        }
+      };
+
+      // Operational Evaluation for Queue Items (Overdue slot detection)
+      const evaluateQueueItem = (appt) => {
+        const status = appt.status || 'BOOKED';
+        const startMs = new Date(appt.startTime || appt.startAt || 0).getTime() || 0;
+        const isEnRoute = appt.clientEtaStatus === 'ON_THE_WAY' || status === 'ON_THE_WAY';
+        const isLobby = status === 'CHECKED_IN' || appt.clientEtaStatus === 'ARRIVED';
+        const isInChair = status === 'IN_SERVICE' || status === 'SEATED_IN_CHAIR';
+
+        if (status === 'PENDING_ACCEPTANCE') return { tier: 0, isUpcoming: true, isOverdue: false };
+        if (isInChair) return { tier: 1, isUpcoming: false, isOverdue: false, isInChair: true };
+        if (isLobby) return { tier: 2, isUpcoming: false, isOverdue: false, isLobby: true };
+        if (isEnRoute) return { tier: 3, isUpcoming: true, isOverdue: false, isEnRoute: true };
+
+        if (status === 'CONFIRMED' || status === 'BOOKED') {
+          const isOverdue = startMs > 0 && (Date.now() - startMs > 15 * 60 * 1000);
+          return {
+            tier: isOverdue ? 5 : 4,
+            isUpcoming: !isOverdue,
+            isOverdue,
+          };
+        }
+        if (status === 'PENDING_RESCHEDULE') return { tier: 6, isUpcoming: true, isOverdue: false };
+        if (status === 'COMPLETED') return { tier: 7, isUpcoming: false, isOverdue: false };
+        if (status === 'CANCELLED' || status === 'NO_SHOW' || status === 'REJECTED') {
+          return { tier: 8, isUpcoming: false, isOverdue: false };
+        }
+        return { tier: 9, isUpcoming: false, isOverdue: false };
+      };
+
+      // Format remaining time countdown in decreasing order: e.g. "1 min 24 sec", "25 min 10 sec", "1 hr 15 min 20 sec"
+      const formatTimeReductionCountdown = (diffMs) => {
+        if (diffMs <= 0) {
+          return `0 min 0 sec`;
+        }
+
+        const totalSecs = Math.floor(diffMs / 1000);
+        const hours = Math.floor(totalSecs / 3600);
+        const mins = Math.floor((totalSecs % 3600) / 60);
+        const secs = totalSecs % 60;
+
+        if (hours > 0) {
+          return `${hours} hr ${mins} min ${secs} sec`;
+        }
+        if (mins > 0) {
+          return `${mins} min ${secs} sec`;
+        }
+        return `${secs} sec`;
+      };
+
+      // Resolve Next Action & Reverse Countdown directly from booking table schema (nextActionType, nextActionAt)
+      const getApptActionAndClock = (appt) => {
+        const status = appt.status || 'BOOKED';
+        const now = Date.now();
+        const rawStart = appt.startTime || appt.startAt;
+        const startDt = rawStart ? new Date(rawStart) : new Date();
+        const servicesList = getApptServices(appt);
+        let totalDur = servicesList.reduce((sum, s) => sum + (Number(s.durationMinutes) || 0), 0);
+        if (!totalDur || totalDur === 0) totalDur = appt.durationMinutes || 30;
+        const endDt = new Date(startDt.getTime() + totalDur * 60000);
+        const endMs = endDt.getTime();
+        const startMs = startDt.getTime();
+
+        // 1. Fetch exact fields from booking table
+        let nextActionType = appt.nextActionType || null;
+        let nextActionAt = appt.nextActionAt ? new Date(appt.nextActionAt) : null;
+
+        // 2. Fallback if not yet saved in DB row (mirrors AppointmentNextActionService)
+        if (!nextActionType || !nextActionAt || isNaN(nextActionAt.getTime())) {
+          if (status === 'COMPLETED' || status === 'CANCELLED' || status === 'REJECTED') {
+            nextActionType = 'NONE';
+            nextActionAt = null;
+          } else if (status === 'SEATED_IN_CHAIR' || status === 'IN_SERVICE' || status === 'CHECKED_IN' || status === 'ON_THE_WAY') {
+            nextActionType = 'AUTO_COMPLETE';
+            nextActionAt = endDt;
+          } else if (status === 'CONFIRMED') {
+            const arrivalLeadMs = 15 * 60 * 1000;
+            if (appt.reminder10mSentAt) {
+              nextActionType = 'CUTOFF_10M';
+              nextActionAt = new Date(new Date(appt.reminder10mSentAt).getTime() + 10 * 60 * 1000);
+            } else if (now >= startMs - arrivalLeadMs) {
+              nextActionType = 'AUTO_COMPLETE';
+              nextActionAt = endDt;
+            } else {
+              nextActionType = 'ARRIVAL_15M';
+              nextActionAt = new Date(startMs - arrivalLeadMs);
+            }
+          } else if (status === 'BOOKED') {
+            const reminder2hLeadMs = 120 * 60 * 1000;
+            const cutoff60mLeadMs = 60 * 60 * 1000;
+            if (!appt.reminder2hSentAt && now < startMs - reminder2hLeadMs) {
+              nextActionType = 'REMINDER_2H';
+              nextActionAt = new Date(startMs - reminder2hLeadMs);
+            } else {
+              nextActionType = 'CUTOFF_60M';
+              nextActionAt = new Date(startMs - cutoff60mLeadMs);
+            }
+          } else if (status === 'PENDING_ACCEPTANCE') {
+            nextActionType = 'CUTOFF_5M';
+            nextActionAt = new Date(Math.min(now + 5 * 60 * 1000, startMs));
+          } else if (status === 'PENDING_RESCHEDULE') {
+            nextActionType = 'PROPOSAL_EXPIRY';
+            nextActionAt = appt.expiresAt ? new Date(appt.expiresAt) : new Date(now + 60 * 60 * 1000);
+          }
+        }
+
+        // 3. Human-friendly labels for each action type from booking policy
+        let badgeLabel = 'NEXT ACTION';
+        let titleLabel = 'Automated Action';
+        let badgeClass = 'default';
+
+        switch (nextActionType) {
+          case 'REMINDER_2H':
+            badgeLabel = '2H REMINDER';
+            titleLabel = 'WhatsApp 2h Confirmation';
+            badgeClass = 'reminder';
+            break;
+          case 'CUTOFF_5M':
+            badgeLabel = '5M APPROVAL';
+            titleLabel = 'Auto-Purge Cutoff';
+            badgeClass = 'cutoff';
+            break;
+          case 'CUTOFF_60M':
+            badgeLabel = status === 'PENDING_ACCEPTANCE' ? '5M APPROVAL' : '60M CUTOFF';
+            titleLabel = status === 'PENDING_ACCEPTANCE' ? 'Auto-Purge Cutoff' : 'Unconfirmed Auto-Cancel';
+            badgeClass = 'cutoff';
+            break;
+          case 'ARRIVAL_15M':
+            badgeLabel = '15M ALERT';
+            titleLabel = 'WhatsApp 15m Arrival Prompt';
+            badgeClass = 'arrival';
+            break;
+          case 'CUTOFF_10M':
+            badgeLabel = '10M CUTOFF';
+            titleLabel = 'No-Response Auto-Cancel';
+            badgeClass = 'cutoff';
+            break;
+          case 'AUTO_COMPLETE':
+            badgeLabel = 'AUTO COMPLETE';
+            titleLabel = 'Finish Visit & Free Chair';
+            badgeClass = 'autocomplete';
+            break;
+          case 'PROPOSAL_EXPIRY':
+            badgeLabel = 'EXPIRY';
+            titleLabel = 'Reschedule Proposal Cutoff';
+            badgeClass = 'cutoff';
+            break;
+          case 'NONE':
+          default:
+            badgeLabel = 'FINISHED';
+            titleLabel = 'Visit Concluded';
+            badgeClass = 'none';
+            break;
+        }
+
+        const targetMs = nextActionAt ? nextActionAt.getTime() : 0;
+        const timeStr = nextActionAt ? formatTime12h(nextActionAt) : '';
+
+        let clockHtml = '';
+        if (targetMs > 0) {
+          const diffMs = targetMs - now;
+          if (diffMs > 0) {
+            const initialText = formatTimeReductionCountdown(diffMs);
+            clockHtml = `
+              <span class="qc__normal-time">
+                <span class="qc__clock-timer" data-countdown-target="${targetMs}" data-time-str="${timeStr}">⏳ ${initialText}</span>
+              </span>
+            `;
+          } else {
+            clockHtml = timeStr ? `<span class="qc__normal-time">⏰ ${timeStr}</span>` : '';
+          }
+        } else {
+          clockHtml = timeStr ? `<span class="qc__normal-time">⏰ ${timeStr}</span>` : '';
+        }
+
+        return {
+          nextActionType,
+          badgeLabel,
+          badgeClass,
+          titleLabel,
+          timeStr,
+          clockHtml,
+          targetMs,
+        };
+      };
+
+      // Visual Booking Lifecycle Pipeline (Compact Segmented Progress Bar inspired by Working Hours)
+      const renderBookingLifecycle = (appt) => {
+        const status = appt.status || 'BOOKED';
+
+        // Terminal Cancelled State
+        if (status === 'CANCELLED') {
+          const cancelInfo = formatCancellationDetails(appt);
+          return `
+            <div class="qc__lifecycle-alert qc__lifecycle-alert--cancel">
+              <div class="qc__alert-top">
+                ${Icons.xCircle({ size: 12, color: '#fb7185' })}
+                <span class="qc__alert-title">Cancelled · Chair Released</span>
+                ${cancelInfo.timeStr ? `<span class="qc__alert-tag">${cancelInfo.timeStr}</span>` : ''}
+              </div>
+              <div class="qc__alert-sub"><strong>Reason:</strong> ${cancelInfo.reason}</div>
+            </div>
+          `;
+        }
+
+        // Terminal Declined State
+        if (status === 'REJECTED') {
+          const cancelInfo = formatCancellationDetails(appt);
+          return `
+            <div class="qc__lifecycle-alert qc__lifecycle-alert--cancel">
+              <div class="qc__alert-top">
+                ${Icons.xCircle({ size: 12, color: '#fb7185' })}
+                <span class="qc__alert-title">Declined · Chair Released</span>
+                <span class="qc__alert-tag">FREED</span>
+              </div>
+              <div class="qc__alert-sub"><strong>Reason:</strong> ${cancelInfo.reason || 'Salon at peak capacity'}</div>
+            </div>
+          `;
+        }
+
+        // Pending Reschedule Proposal
+        if (status === 'PENDING_RESCHEDULE') {
+          const propStart = appt.proposedStartAt ? new Date(appt.proposedStartAt) : null;
+          const propEnd = appt.proposedEndAt ? new Date(appt.proposedEndAt) : null;
+          const propSlot = propStart ? `${formatTime12h(propStart)} – ${formatTime12h(propEnd || propStart)}` : 'Proposed Slot';
+          return `
+            <div class="qc__lifecycle-alert qc__lifecycle-alert--warn">
+              <div class="qc__alert-top">
+                ${Icons.clock({ size: 12, color: '#fbbf24' })}
+                <span class="qc__alert-title">Reschedule Proposal Pending</span>
+                <span class="qc__alert-tag">${propSlot}</span>
+              </div>
+              <div class="qc__alert-sub">Waiting client confirmation on WhatsApp</div>
+            </div>
+          `;
+        }
+
+        // Standard 6-Step Pipeline
+        const steps = [
+          { key: 'BOOKED', label: status === 'PENDING_ACCEPTANCE' ? 'Requested' : 'Booked', num: 1 },
+          { key: 'CONFIRMED', label: 'Confirmed', num: 2 },
+          { key: 'ON_THE_WAY', label: 'On Way', num: 3 },
+          { key: 'CHECKED_IN', label: 'Checked In', num: 4 },
+          { key: 'SEATED_IN_CHAIR', label: 'In Chair', num: 5 },
+          { key: 'COMPLETED', label: 'Done', num: 6 },
+        ];
+
+        let currentIdx = 0;
+        let activeColor = '#3b82f6';
+        let stageLabel = 'Requested';
+
+        if (status === 'PENDING_ACCEPTANCE') {
+          currentIdx = 0;
+          activeColor = '#f59e0b';
+          stageLabel = 'Pending Approval';
+        } else if (status === 'BOOKED') {
+          currentIdx = 0;
+          activeColor = '#3b82f6';
+          stageLabel = 'Booked';
+        } else if (status === 'CONFIRMED') {
+          currentIdx = 1;
+          activeColor = '#0ea5e9';
+          stageLabel = 'Confirmed';
+        } else if (status === 'ON_THE_WAY') {
+          currentIdx = 2;
+          activeColor = '#10b981';
+          stageLabel = 'Client On Way';
+        } else if (status === 'CHECKED_IN') {
+          currentIdx = 3;
+          activeColor = '#f59e0b';
+          stageLabel = 'Checked In';
+        } else if (status === 'SEATED_IN_CHAIR' || status === 'IN_SERVICE') {
+          currentIdx = 4;
+          activeColor = '#a855f7';
+          stageLabel = 'In Chair';
+        } else if (status === 'COMPLETED') {
+          currentIdx = 5;
+          activeColor = '#10b981';
+          stageLabel = 'Completed';
+        }
+
+        const actionInfo = getApptActionAndClock(appt);
+
+        return `
+          <div class="qc__pipeline">
+            <!-- Next Action & Remaining Time Strip -->
+            <div class="qc__action-countdown-bar">
+              <div class="qc__next-action">
+                <span class="qc__next-action-label">Next Action:</span>
+                <span class="qc__action-tag qc__action-tag--${actionInfo.badgeClass}">${actionInfo.badgeLabel}</span>
+              </div>
+              <div class="qc__reverse-clock">
+                ${actionInfo.clockHtml}
+              </div>
+            </div>
+
+            <div class="qc__pipeline-top">
+              <div class="qc__pipeline-current">
+                <span class="qc__pipeline-dot" style="background: ${activeColor}; box-shadow: 0 0 6px ${activeColor};"></span>
+                <span class="qc__pipeline-step-badge">Stage ${currentIdx + 1}/6</span>
+                <span class="qc__pipeline-label" style="color: ${activeColor};">${stageLabel}</span>
+              </div>
+              <div class="qc__pipeline-next">
+                ${currentIdx < 5 ? `<span class="qc__pipeline-next-text">Next: <strong>${steps[currentIdx + 1].label}</strong></span>` : `<span class="qc__pipeline-next-text" style="color: #34d399;">✓ Complete</span>`}
+              </div>
+            </div>
+            <div class="qc__pipeline-track" title="Step ${currentIdx + 1} of 6: ${stageLabel}">
+              ${steps.map((st, i) => {
+                const isDone = i < currentIdx;
+                const isCurrent = i === currentIdx;
+                const cls = isDone ? 'is-done' : (isCurrent ? 'is-current' : 'is-upcoming');
+                const bg = isDone ? '#10b981' : (isCurrent ? activeColor : 'rgba(255, 255, 255, 0.08)');
+                const shadow = isCurrent ? `box-shadow: 0 0 6px ${activeColor};` : '';
+                return `<div class="qc__pipeline-seg ${cls}" style="background: ${bg}; ${shadow}" title="${st.num}. ${st.label} ${isCurrent ? '(Current)' : (isDone ? '(Done)' : '')}"></div>`;
+              }).join('')}
+            </div>
+          </div>
+        `;
+      };
+
       return `
-        <!-- Date Bar -->
+        <!-- Date & Actions Bar (Minimal & Functional Day-Off Navigation Style) -->
         <div class="q-date-bar">
-          <div class="q-date-nav">
-            <button class="q-date-arrow" id="btn-date-prev" title="Previous Day">
-              ${Icons.chevronLeft({ size: 16 })}
-            </button>
-            <div class="q-date-badge" title="Tap to select date">
-              <span class="q-date-icon">${Icons.calendar({ size: 15, color: '#a5b4fc' })}</span>
+          <!-- Left: Date Selector Badge with Popover Trigger -->
+          <div class="q-calendar-wrapper">
+            <button type="button" class="q-date-display-btn" id="btn-toggle-cal-popover" onclick="window.salonDashboard?.toggleCalendarPopover(event)" title="Tap to choose date or jump days">
+              <span class="q-date-icon">${Icons.calendar({ size: 16, color: '#a5b4fc' })}</span>
               <span class="q-date-text" id="date-label-display">${formattedDateLabel}</span>
-              <input type="date" class="q-date-hidden" id="dashboard-date-picker" value="${this.selectedDate}" />
-            </div>
-            <button class="q-date-arrow" id="btn-date-next" title="Next Day">
-              ${Icons.chevronRight({ size: 16 })}
+              <span class="q-date-chevron">${Icons.chevronDown({ size: 13, color: '#94a3b8' })}</span>
             </button>
-            ${diffDays !== 0 ? `<button class="q-today-btn" id="btn-date-today">Today</button>` : ''}
+            <div class="q-calendar-popover" id="q-calendar-popover">
+              ${this.renderCalendarPopoverContent()}
+            </div>
           </div>
 
-          <div class="q-live-sync">
-            <div class="q-live-pill">
-              <span class="q-live-dot"></span>
-              <span class="q-live-label">Live</span>
-            </div>
-            <button class="q-sync-btn" id="btn-refresh-queue" title="Sync Queue">
-              ${Icons.refreshCw({ size: 14 })}
+          <!-- Right: Actions Group (Today, Prev, Next, Filters) -->
+          <div class="q-actions-group">
+            ${diffDays !== 0 ? `<button type="button" class="q-today-pill" id="btn-date-today" onclick="window.salonDashboard?.handleQueueDateChange(window.salonDashboard?.getLocalDateString())" title="Jump to Today">Today</button>` : ''}
+            <button type="button" class="q-nav-arrow" id="btn-date-prev" onclick="window.salonDashboard?.handleQueueDateChange(window.salonDashboard?.addDaysToDateString(window.salonDashboard?.selectedDate, -1))" title="Previous Day" aria-label="Previous Day">
+              ${Icons.chevronLeft({ size: 15 })}
+            </button>
+            <button type="button" class="q-nav-arrow" id="btn-date-next" onclick="window.salonDashboard?.handleQueueDateChange(window.salonDashboard?.addDaysToDateString(window.salonDashboard?.selectedDate, 1))" title="Next Day" aria-label="Next Day">
+              ${Icons.chevronRight({ size: 15 })}
+            </button>
+            <button type="button" class="q-filter-btn ${activeFilterCount > 0 ? 'is-active' : ''}" id="btn-open-queue-drawer" title="Filter Queue">
+              ${Icons.sliders({ size: 14 })}
+              <span>Filters</span>
+              ${activeFilterCount > 0 ? `<span class="q-filter-badge" id="queue-filter-badge">${activeFilterCount}</span>` : ''}
             </button>
           </div>
-        </div>
-
-        <!-- Filter Chips -->
-        <div class="q-filters">
-          <button class="q-chip ${this.queueFilter === 'ALL' ? 'active' : ''}" data-filter="ALL">
-            All <span class="q-chip-count">${todayAppointments.length}</span>
-          </button>
-          <button class="q-chip ${this.queueFilter === 'WAITING' ? 'active' : ''}" data-filter="WAITING">
-            Waiting <span class="q-chip-count">${waitingCount}</span>
-          </button>
-          <button class="q-chip ${this.queueFilter === 'IN_CHAIR' ? 'active' : ''}" data-filter="IN_CHAIR">
-            In Chair <span class="q-chip-count">${inChairCount}</span>
-          </button>
-          <button class="q-chip ${this.queueFilter === 'COMPLETED' ? 'active' : ''}" data-filter="COMPLETED">
-            Done <span class="q-chip-count">${completedCount}</span>
-          </button>
-          <button class="q-chip ${this.queueFilter === 'CANCELLED' ? 'active' : ''}" data-filter="CANCELLED">
-            Cancelled <span class="q-chip-count">${cancelledCount}</span>
-          </button>
         </div>
 
         <!-- Queue Cards Stream -->
@@ -1610,7 +2310,7 @@ export class SalonDashboard {
               </div>
             </div>
           ` : filteredAppointments.map((appt) => {
-        const customer = appt.customer || appt.user || {};
+        const customer = appt.customer || appt.user || (appt.salonUser ? appt.salonUser.user : {}) || {};
         const staff = appt.staff || appt.stylist || {};
         const service = appt.service || {};
         const customerName = customer.name || 'Walk-In Client';
@@ -1619,10 +2319,16 @@ export class SalonDashboard {
         const serviceId = service.id || appt.serviceId || '';
         const apptSvcs = getApptServices(appt);
         const serviceName = apptSvcs.map((s) => s.name).join(' + ') || appt.serviceNameSnapshot || service.name || 'Service';
-        const price = appt.price ?? service.price ?? 0;
+        let computedPrice = 0;
+        if (apptSvcs.length > 0) {
+          computedPrice = apptSvcs.reduce((sum, s) => sum + (Number(s.price) || 0), 0);
+        }
+        if (!computedPrice || computedPrice === 0) {
+          computedPrice = Number(appt.price ?? service.price ?? 0);
+        }
+        const originInfo = formatBookingOrigin(appt);
 
         const timeRange = formatServiceTimeRange(appt);
-        const cancelDetails = formatCancellationDetails(appt);
         const cleanPhone = (customer.phone || '').replace(/[^0-9+]/g, '');
         const rawPhoneForWa = cleanPhone.replace('+', '');
         const initials = getInitials(customerName);
@@ -1630,6 +2336,7 @@ export class SalonDashboard {
         const isDone = appt.status === 'COMPLETED';
         const isCancelled = ['CANCELLED', 'REJECTED'].includes(appt.status);
         const statusKey = (appt.status || 'CONFIRMED').toLowerCase();
+        const friendlyStatus = formatFriendlyStatus(appt.status);
         const queueItemEval = evaluateQueueItem(appt);
         const isOverdue = queueItemEval.isOverdue;
 
@@ -1639,242 +2346,202 @@ export class SalonDashboard {
         const remainingMins = Math.max(0, (service.durationMinutes || appt.durationMinutes || 30) - elapsedMins);
 
         return `
-              <div class="qc ${isDone ? 'qc--done' : ''} ${isCancelled ? 'qc--cancelled' : ''}">
-                <div class="qc__accent qc__accent--${statusKey}" style="background: ${this.getStatusColor(appt.status)};"></div>
+          <div class="qc ${isDone ? 'qc--done' : ''} ${isCancelled ? 'qc--cancelled' : ''}">
+            <div class="qc__accent qc__accent--${statusKey}"></div>
 
-                <div class="qc__body">
-                  <!-- Row 1: Time Window, Origin Telemetry, Status & Price -->
-                  <div class="qc__row1">
-                    <div class="qc__time-block">
-                      <div class="qc__time-primary">
-                        <span class="qc__time">${timeRange.timeRangeStr}</span>
-                        <span class="qc__duration-pill">${timeRange.durationDisplayStr}</span>
-                      </div>
-                      <div class="qc__booking-meta">
-                        ${formatBookingOrigin(appt)}
-                      </div>
-                    </div>
-                    <div class="qc__status-wrap">
-                      <span class="qc__status qc__status--${statusKey}">${(appt.status || 'CONFIRMED').replace('_', ' ')}</span>
-                      <span class="qc__price">₹${price}</span>
-                    </div>
-                  </div>
-
-                  <!-- If Cancelled: Luxury High-Visibility Cancellation Alert Box -->
-                  ${isCancelled ? `
-                    <div class="qc__cancellation-card">
-                      <div class="qc__cancellation-header">
-                        <span class="qc__cancellation-icon">${Icons.xCircle({ size: 14, color: '#fb7185' })}</span>
-                        <span class="qc__cancellation-time">Cancelled at ${cancelDetails.timeStr}${cancelDetails.relativeAgo ? ` (${cancelDetails.relativeAgo})` : ''}</span>
-                        <span class="qc__cancellation-badge">CHAIR FREED</span>
-                      </div>
-                      <div class="qc__cancellation-reason">
-                        <strong>Reason:</strong> ${cancelDetails.reason}
-                      </div>
-                    </div>
-                  ` : ''}
-
-                  <!-- Row 2: Client Name, Phone, Assigned Barber + Quick Contact -->
-                  <div class="qc__row2">
-                    <div class="qc__client-info">
-                      <div class="qc__avatar qc__avatar--${avatarCls}">
-                        ${initials}
-                      </div>
-                      <div class="qc__client-text">
-                        <div class="qc__name">${customerName}</div>
-                        <div class="qc__phone">${formatPhone(cleanPhone)}</div>
-                        <div class="qc__barber">Specialist: <strong>${staffName}</strong></div>
-                      </div>
-                    </div>
-                    <div class="qc__contacts">
-                      ${cleanPhone ? `
-                        <a href="tel:${cleanPhone}" class="qc__contact-btn qc__contact-btn--call" title="Direct Call">
-                          ${Icons.phone({ size: 16 })}
-                        </a>
-                        <a href="https://wa.me/${rawPhoneForWa}" target="_blank" class="qc__contact-btn qc__contact-btn--wa" title="WhatsApp Message">
-                          ${Icons.whatsapp({ size: 16 })}
-                        </a>
-                      ` : ''}
-                    </div>
-                  </div>
-
-                  <!-- Row 3: Service Tag + Live Status Badges + Live 10m Countdown -->
-                  <div class="qc__row3" style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
-                    ${(() => {
-            const servicesList = getApptServices(appt);
-            if (servicesList.length === 0) {
-              return `
-                          <span class="qc__tag qc__tag--service">
-                            ${Icons.scissors({ size: 13, color: '#94a3b8' })}
-                            <span>Service</span>
-                          </span>
-                        `;
-            }
-            return servicesList.map((s) => {
-              const isAddon = s.isAddon;
-              return `
-                          <span class="qc__tag qc__tag--service ${isAddon ? 'qc__tag--addon' : ''}" style="${isAddon ? 'background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); font-weight: 700;' : ''}">
-                            ${Icons.scissors({ size: 13, color: isAddon ? '#fbbf24' : '#94a3b8' })}
-                            <span>${s.name}${isAddon ? ' (Add-on)' : ''}</span>
-                          </span>
-                        `;
-            }).join('');
-          })()}
-                    ${appt.status === 'IN_SERVICE' || appt.status === 'SEATED_IN_CHAIR' ? `
-                      <span class="qc__tag qc__tag--inchair">
-                        <span class="qc__pulse-dot"></span>
-                        <span>In Chair · ~${remainingMins}m left</span>
-                      </span>
-                    ` : ''}
-
-                    ${isOverdue && !isDone && !isCancelled ? `
-                      <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); font-size: 0.72rem; padding: 4px 8px; border-radius: 6px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
-                        ⚠️ Scheduled Slot Passed
-                      </span>
-                    ` : ''}
-
-                    <!-- Customer WhatsApp Action Badges -->
-                    ${appt.status === 'BOOKED' ? `
-                      <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.35); font-size: 0.72rem; padding: 4px 8px; border-radius: 6px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
-                        ${Icons.calendar({ size: 13, color: '#60a5fa' })}
-                        <span>📅 Booked</span>
-                      </span>
-                    ` : ''}
-
-                    ${appt.status === 'PENDING_RESCHEDULE' ? `
-                      <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); font-size: 0.72rem; padding: 4px 8px; border-radius: 6px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
-                        ${Icons.calendar({ size: 13, color: '#fbbf24' })}
-                        <span>📅 Pending Reschedule Approval</span>
-                      </span>
-                    ` : ''}
-
-                    ${appt.clientEtaStatus === 'ON_THE_WAY' ? `
-                      <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); font-size: 0.72rem; padding: 4px 8px; border-radius: 6px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
-                        🚗 Client On the Way
-                      </span>
-                    ` : ''}
-
-                    ${appt.clientEtaStatus === 'RUNNING_LATE_10M' || appt.clientEtaStatus === 'RUNNING_LATE_20M' ? `
-                      <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); font-size: 0.72rem; padding: 4px 8px; border-radius: 6px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
-                        ⏰ Client Running Late${appt.clientEtaStatus === 'RUNNING_LATE_20M' ? ' (20m)' : ' (10m)'}
-                      </span>
-                    ` : ''}
-
-                    ${appt.customerActionStatus === 'WAITING_RESPONSE' || (appt.reminder10mSentAt && !appt.customerActionStatus && appt.status === 'CONFIRMED') ? `
-                      <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); font-size: 0.72rem; padding: 4px 8px; border-radius: 6px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
-                        ${Icons.clock({ size: 13, color: '#fbbf24' })}
-                        <span>⏳ Waiting Response</span>
-                      </span>
-                    ` : ''}
-
-                    ${appt.customerActionStatus === 'CANCELLED' ? `
-                      <span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); font-size: 0.72rem; padding: 4px 8px; border-radius: 6px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
-                        ${Icons.xCircle({ size: 13, color: '#f87171' })}
-                        <span>❌ Canceled via WhatsApp</span>
-                      </span>
-                    ` : ''}
-
-                    <!-- 10-Minute Arrival Ticking Countdown Timer -->
-                    ${appt.reminder10mSentAt ? (() => {
-            const elapsedMs = Date.now() - new Date(appt.reminder10mSentAt).getTime();
-            const remainingMs = (10 * 60 * 1000) - elapsedMs;
-            if (remainingMs > 0) {
-              const m = Math.floor(remainingMs / 60000);
-              const s = Math.floor((remainingMs % 60000) / 1000);
-              return `
-                          <span class="badge qc__timer-badge" data-reminder-sent="${appt.reminder10mSentAt}" style="background: rgba(139, 61, 255, 0.15); color: #A855F7; border: 1px solid rgba(139, 61, 255, 0.35); font-size: 0.72rem; padding: 4px 8px; border-radius: 6px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
-                            ${Icons.clock({ size: 13, color: '#A855F7' })}
-                            <span>Arrival Window: <strong class="qc__timer-countdown">${m}:${s.toString().padStart(2, '0')}</strong> left</span>
-                          </span>
-                        `;
-            } else {
-              const graceMins = Math.floor(Math.abs(remainingMs) / 60000);
-              return `
-                          <span class="badge qc__timer-badge" data-reminder-sent="${appt.reminder10mSentAt}" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); font-size: 0.72rem; padding: 4px 8px; border-radius: 6px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
-                            ${Icons.alertTriangle ? Icons.alertTriangle({ size: 13, color: '#f87171' }) : '⚠️'}
-                            <span>⚠️ Grace Period (+<strong class="qc__grace-countdown">${graceMins}m</strong>)</span>
-                          </span>
-                        `;
-            }
-          })() : ''}
-                  </div>
-
-                  <!-- Row 4: Action Bar -->
-                  <div class="qc__row4">
-                    ${appt.status === 'PENDING_ACCEPTANCE' ? `
-                      <div class="qc__cta-wrap" style="display: flex; gap: 8px; width: 100%;">
-                        <button class="qc__cta btn-status" data-id="${appt.id}" data-status="CHECKED_IN" style="background: #10b981; color: #fff; flex: 1;">
-                          ${Icons.check({ size: 16, color: '#fff' })}
-                          <span>Accept & Check In</span>
-                        </button>
-                        <button class="qc__cta btn-status" data-id="${appt.id}" data-status="CANCELLED" style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); flex: 1;">
-                          ${Icons.x({ size: 16, color: '#f87171' })}
-                          <span>Decline</span>
-                        </button>
-                      </div>
-                    ` : ''}
-
-                    ${appt.status === 'CONFIRMED' || appt.status === 'BOOKED' ? `
-                      <div class="qc__cta-wrap">
-                        <button class="qc__cta qc__cta--checkin btn-status" data-id="${appt.id}" data-status="CHECKED_IN">
-                          ${Icons.checkCircle2({ size: 16, color: '#c7d2fe' })}
-                          <span>📍 Check In Client</span>
-                        </button>
-                      </div>
-                      <div class="qc__sec-actions">
-                        <button class="qc__sec-btn btn-open-reschedule" data-id="${appt.id}" data-service="${serviceId}" data-staff="${staffId}" data-name="${customerName}" title="Reschedule">
-                          ${Icons.calendar({ size: 15 })}
-                        </button>
-                        <button class="qc__sec-btn qc__sec-btn--danger btn-open-cancel" data-id="${appt.id}" data-name="${customerName}" title="Cancel">
-                          ${Icons.x({ size: 15 })}
-                        </button>
-                      </div>
-                    ` : ''}
-
-                    ${appt.status === 'CHECKED_IN' ? `
-                      <div class="qc__cta-wrap">
-                        <button class="qc__cta qc__cta--seat btn-status" data-id="${appt.id}" data-status="SEATED_IN_CHAIR">
-                          ${Icons.armchair({ size: 16, color: '#fff' })}
-                          <span>💺 Seat in Chair</span>
-                        </button>
-                      </div>
-                      <div class="qc__sec-actions">
-                        <button class="qc__sec-btn btn-open-reschedule" data-id="${appt.id}" data-service="${serviceId}" data-staff="${staffId}" data-name="${customerName}" title="Reschedule">
-                          ${Icons.calendar({ size: 15 })}
-                        </button>
-                        <button class="qc__sec-btn qc__sec-btn--danger btn-open-cancel" data-id="${appt.id}" data-name="${customerName}" title="Cancel">
-                          ${Icons.x({ size: 15 })}
-                        </button>
-                      </div>
-                    ` : ''}
-
-                    ${appt.status === 'IN_SERVICE' || appt.status === 'SEATED_IN_CHAIR' ? `
-                      <div class="qc__cta-wrap">
-                        <button class="qc__cta qc__cta--finish btn-status" data-id="${appt.id}" data-status="COMPLETED">
-                          ${Icons.check({ size: 16, color: '#fff' })}
-                          <span>✅ Complete & Free Chair</span>
-                        </button>
-                      </div>
-                    ` : ''}
-
-                    ${appt.status === 'PENDING_RESCHEDULE' ? `
-                      <div class="qc__cta-wrap">
-                        <button class="qc__cta" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); cursor: default; width: 100%;" disabled>
-                          ${Icons.clock({ size: 16, color: '#fbbf24' })}
-                          <span>Waiting Customer WhatsApp Approval</span>
-                        </button>
-                      </div>
-                    ` : ''}
-
-                    ${isDone ? `<div class="qc__terminal qc__terminal--done" style="display: flex; align-items: center; justify-content: center; gap: 6px;">${Icons.checkCircle2({ size: 14, color: '#34d399' })} Service Completed</div>` : ''}
-                    ${isCancelled ? `<div class="qc__terminal qc__terminal--cancel" style="display: flex; align-items: center; justify-content: center; gap: 6px;">${Icons.x({ size: 14, color: '#fb7185' })} Booking Cancelled · Chair Released</div>` : ''}
+            <div class="qc__content">
+              <!-- Row 1: Header (Time & Duration on Left, Prominent Status Badge on Right - Proper Status) -->
+              <div class="qc__header">
+                <div class="qc__header-left">
+                  <span class="qc__clock-icon">⏰</span>
+                  <span class="qc__time">${timeRange.timeRangeStr}</span>
+                  <span class="qc__duration">${timeRange.durationDisplayStr}</span>
+                </div>
+                <div class="qc__header-right">
+                  <div class="qc__status-badge qc__status-badge--${statusKey}">
+                    <span class="qc__status-dot">●</span>
+                    <span class="qc__status-text">${friendlyStatus.toUpperCase()}</span>
                   </div>
                 </div>
               </div>
-            `;
+
+              <!-- Row 2: Party Row (Client on Left, Price & Specialist on Right - Clean Balanced Space) -->
+              <div class="qc__party-row">
+                <div class="qc__party-client">
+                  <div class="qc__client-name-line">
+                    <span class="qc__client-name" title="${customerName}">${customerName}</span>
+                    ${cleanPhone ? `
+                      <div class="qc__contacts">
+                        <a href="tel:${cleanPhone}" class="qc__contact-btn qc__contact-btn--call" title="Call ${customerName}">
+                          ${Icons.phone({ size: 10 })}
+                        </a>
+                        <a href="https://wa.me/${rawPhoneForWa}" target="_blank" class="qc__contact-btn qc__contact-btn--wa" title="WhatsApp Chat">
+                          ${Icons.whatsapp({ size: 10 })}
+                        </a>
+                      </div>
+                    ` : ''}
+                  </div>
+                  <div class="qc__client-sub">
+                    ${cleanPhone ? `<span class="qc__phone">${formatPhone(cleanPhone)}</span>` : '<span class="qc__no-phone">No Phone</span>'}
+                    ${originInfo.timeLabel ? `<span class="qc__dot-sep">•</span><span class="qc__time-ago">${originInfo.timeLabel}</span>` : ''}
+                  </div>
+                </div>
+                <div class="qc__party-right">
+                  <span class="qc__price">₹${computedPrice}</span>
+                  <div class="qc__party-stylist">
+                    <span class="qc__stylist-label">SPECIALIST</span>
+                    <span class="qc__stylist-name" title="${staffName}">${staffName}</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Row 3: Services Roster (Natural wrapping, zero truncation) -->
+              <div class="qc__services-box">
+                <div class="qc__services-top">
+                  <span class="qc__services-label">SERVICES (${apptSvcs.length || 1})</span>
+                  ${(!isDone && !isCancelled && appt.status !== 'PENDING_ACCEPTANCE' && appt.status !== 'PENDING_RESCHEDULE') ? `
+                    <button type="button" class="qc__add-svc-btn btn-open-add-addon" data-id="${appt.id}" data-name="${customerName}" title="Add extra service or add-on">
+                      + Add Service
+                    </button>
+                  ` : ''}
+                </div>
+                <div class="qc__services-items">
+                  ${(() => {
+                    if (apptSvcs.length === 0) {
+                      return `
+                        <div class="qc__svc-row">
+                          <span class="qc__svc-bullet">✂</span>
+                          <span class="qc__svc-name">${serviceName}</span>
+                          <div class="qc__svc-meta">
+                            <span class="qc__svc-dur">${timeRange.durationDisplayStr}</span>
+                            <span class="qc__svc-amt">₹${computedPrice}</span>
+                          </div>
+                        </div>
+                      `;
+                    }
+                    return apptSvcs.map((s) => `
+                      <div class="qc__svc-row ${s.isAddon ? 'qc__svc-row--addon' : ''}">
+                        <span class="qc__svc-bullet ${s.isAddon ? 'qc__svc-bullet--plus' : ''}">${s.isAddon ? '+' : '✂'}</span>
+                        <span class="qc__svc-name">${s.name}</span>
+                        <div class="qc__svc-meta">
+                          <span class="qc__svc-dur">${s.durationMinutes ? `${s.durationMinutes}m` : ''}</span>
+                          <span class="qc__svc-amt ${s.isAddon ? 'qc__svc-amt--addon' : ''}">${s.isAddon ? (s.price !== null && s.price !== undefined ? `+₹${s.price}` : 'Incl.') : `₹${s.price ?? computedPrice}`}</span>
+                        </div>
+                      </div>
+                    `).join('');
+                  })()}
+                </div>
+              </div>
+
+              <!-- Row 3.5: Contextual Note (Overdue / Late) -->
+              ${(() => {
+                if (isOverdue && !isDone && !isCancelled) {
+                  return `<div class="qc__note qc__note--warn">⚠️ Slot Passed · Client not checked in</div>`;
+                }
+                if (appt.clientEtaStatus === 'ON_THE_WAY' && appt.status !== 'ON_THE_WAY') {
+                  return `<div class="qc__note qc__note--green">🚗 Client On The Way</div>`;
+                }
+                if (appt.clientEtaStatus === 'RUNNING_LATE_10M' || appt.clientEtaStatus === 'RUNNING_LATE_20M') {
+                  return `<div class="qc__note qc__note--warn">⏰ Client Running Late (${appt.clientEtaStatus === 'RUNNING_LATE_20M' ? '20m' : '10m'})</div>`;
+                }
+                return '';
+              })()}
+
+              <!-- Row 4: Lifecycle Progress Bar (Requested by user) -->
+              ${renderBookingLifecycle(appt)}
+
+              <!-- Row 5: Action Bar (Ergonomic 32px Buttons) -->
+              <div class="qc__actions">
+                ${appt.status === 'PENDING_ACCEPTANCE' ? `
+                  <div class="qc__actions-group qc__actions-group--split">
+                    <button class="qc__btn qc__btn--accept btn-status" data-id="${appt.id}" data-status="CHECKED_IN">
+                      ${Icons.check({ size: 14, color: '#fff', strokeWidth: 2.5 })}
+                      <span>Accept & Check In</span>
+                    </button>
+                    <button class="qc__btn qc__btn--decline btn-status" data-id="${appt.id}" data-status="REJECTED">
+                      ${Icons.x({ size: 14, color: '#fb7185' })}
+                      <span>Decline</span>
+                    </button>
+                  </div>
+                ` : ''}
+
+                ${appt.status === 'CONFIRMED' || appt.status === 'BOOKED' || appt.status === 'ON_THE_WAY' ? `
+                  <div class="qc__actions-group">
+                    <button class="qc__btn qc__btn--primary btn-status" data-id="${appt.id}" data-status="CHECKED_IN">
+                      ${Icons.userCheck ? Icons.userCheck({ size: 14, color: '#fff' }) : Icons.check({ size: 14, color: '#fff' })}
+                      <span>Check In Client</span>
+                    </button>
+                    <button class="qc__icon-btn btn-open-reschedule" data-id="${appt.id}" data-service="${serviceId}" data-staff="${staffId}" data-name="${customerName}" title="Reschedule">
+                      ${Icons.calendar({ size: 13 })}
+                    </button>
+                    <button class="qc__icon-btn qc__icon-btn--danger btn-open-cancel" data-id="${appt.id}" data-name="${customerName}" title="Cancel">
+                      ${Icons.x({ size: 13 })}
+                    </button>
+                  </div>
+                ` : ''}
+
+                ${appt.status === 'CHECKED_IN' ? `
+                  <div class="qc__actions-group">
+                    <button class="qc__btn qc__btn--seat btn-status" data-id="${appt.id}" data-status="SEATED_IN_CHAIR">
+                      ${Icons.armchair({ size: 14, color: '#fff' })}
+                      <span>Seat in Chair</span>
+                    </button>
+                    <button class="qc__icon-btn btn-open-reschedule" data-id="${appt.id}" data-service="${serviceId}" data-staff="${staffId}" data-name="${customerName}" title="Reschedule">
+                      ${Icons.calendar({ size: 13 })}
+                    </button>
+                    <button class="qc__icon-btn qc__icon-btn--danger btn-open-cancel" data-id="${appt.id}" data-name="${customerName}" title="Cancel">
+                      ${Icons.x({ size: 13 })}
+                    </button>
+                  </div>
+                ` : ''}
+
+                ${appt.status === 'IN_SERVICE' || appt.status === 'SEATED_IN_CHAIR' ? `
+                  <div class="qc__actions-group">
+                    <button class="qc__btn qc__btn--finish btn-status" data-id="${appt.id}" data-status="COMPLETED">
+                      ${Icons.checkCircle2({ size: 14, color: '#fff' })}
+                      <span>Complete Visit & Free Chair</span>
+                    </button>
+                  </div>
+                ` : ''}
+
+                ${appt.status === 'PENDING_RESCHEDULE' ? `
+                  <div class="qc__actions-group">
+                    <button class="qc__btn qc__btn--disabled" disabled>
+                      ${Icons.clock({ size: 13, color: '#fbbf24' })}
+                      <span>Waiting Customer Approval</span>
+                    </button>
+                    <button class="qc__icon-btn qc__icon-btn--danger btn-open-cancel" data-id="${appt.id}" data-name="${customerName}" title="Cancel Booking">
+                      ${Icons.x({ size: 13 })}
+                    </button>
+                  </div>
+                ` : ''}
+
+                ${isDone ? `
+                  <div class="qc__terminal-pill qc__terminal-pill--done">
+                    ${Icons.checkCircle2({ size: 13, color: '#34d399' })}
+                    <span>Visit Completed · Chair Ready</span>
+                  </div>
+                ` : ''}
+
+                ${isCancelled ? `
+                  <div class="qc__terminal-pill qc__terminal-pill--cancel">
+                    ${Icons.xCircle({ size: 13, color: '#fb7185' })}
+                    <span>Booking Closed · Chair Released</span>
+                  </div>
+                ` : ''}
+              </div>
+            </div>
+          </div>
+        `;
       }).join('')}
 
         </div>
+
+        <!-- Right Side Filter Drawer Panel & Backdrop -->
+        <div class="queue-drawer-backdrop" id="queue-drawer-backdrop"></div>
+        <aside class="queue-drawer" id="queue-drawer" aria-label="Queue Filter Drawer">
+          ${this.renderQueueDrawerContent(activeFilterCount)}
+        </aside>
 
       `;
     } catch (err) {
@@ -7983,120 +8650,44 @@ export class SalonDashboard {
     const openQuickRequestsModal = () => this.openQuickRequestsModal();
     document.getElementById('btn-header-quick-requests')?.addEventListener('click', openQuickRequestsModal);
 
-    // Queue Filter Pills
-    this.container.querySelectorAll('.q-chip').forEach((pill) => {
-      pill.addEventListener('click', (e) => {
-        const filter = e.currentTarget.getAttribute('data-filter');
-        if (filter) {
-          this.queueFilter = filter;
-          this.render();
-        }
-      });
-    });
-
-    // Date Navigation Controls (Prev, Next, Today) with Smooth State Management
-    const handleDateChange = async (newDate) => {
-      if (!newDate) return;
-      this.selectedDate = newDate;
-      const syncBtn = document.getElementById('btn-refresh-queue');
-      syncBtn?.classList.add('syncing');
-      try {
-        await this.loadData(true);
-      } finally {
-        this.render();
-      }
-    };
-
-    document.getElementById('btn-date-prev')?.addEventListener('click', () => {
-      const prevDate = this.addDaysToDateString(this.selectedDate, -1);
-      handleDateChange(prevDate);
-    });
-
-    document.getElementById('btn-date-next')?.addEventListener('click', () => {
-      const nextDate = this.addDaysToDateString(this.selectedDate, 1);
-      handleDateChange(nextDate);
-    });
-
-    document.getElementById('btn-date-today')?.addEventListener('click', () => {
-      handleDateChange(this.getLocalDateString());
-    });
-
-    // Date Picker Trigger on Badge Click
-    const datePicker = document.getElementById('dashboard-date-picker');
-    const dateBadge = this.container.querySelector('.q-date-badge');
-    dateBadge?.addEventListener('click', (e) => {
-      if (e.target !== datePicker) {
-        try {
-          if (typeof datePicker?.showPicker === 'function') {
-            datePicker.showPicker();
-          } else {
-            datePicker?.click();
-          }
-        } catch (err) {
-          datePicker?.focus();
-        }
-      }
-    });
-
-    datePicker?.addEventListener('change', (e) => {
-      if (e.target.value) {
-        handleDateChange(e.target.value);
-      }
-    });
-
-    // Refresh queue
-    const handleQueueSync = async () => {
-      const syncBtn = document.getElementById('btn-refresh-queue');
-      syncBtn?.classList.add('syncing');
-      try {
-        await this.loadData(true);
-      } finally {
-        this.render();
-      }
-    };
-    document.getElementById('btn-refresh-queue')?.addEventListener('click', handleQueueSync);
-    document.getElementById('btn-empty-sync')?.addEventListener('click', handleQueueSync);
-
-
-    // Universal Pull-to-Refresh Gestures (Works on all screens)
+    // Universal Pull-to-Refresh Gestures (Touch & Desktop Mouse Drag)
     const ptrWrapper = document.getElementById('ptr-wrapper');
     const ptrIcon = document.getElementById('ptr-icon');
     const ptrText = document.getElementById('ptr-text');
-    let startTouchY = 0;
+    let startY = 0;
     let currentPullDist = 0;
     let isPulling = false;
 
-    window.addEventListener('touchstart', (e) => {
-      if (window.scrollY <= 8 && e.touches.length === 1 && ptrWrapper) {
-        startTouchY = e.touches[0].screenY;
+    const startPull = (clientY) => {
+      if (window.scrollY <= 10 && ptrWrapper) {
+        startY = clientY;
         isPulling = true;
       }
-    }, { passive: true });
+    };
 
-    window.addEventListener('touchmove', (e) => {
-      if (!isPulling || !ptrWrapper || window.scrollY > 8) return;
-      const touchY = e.touches[0].screenY;
-      const diff = touchY - startTouchY;
+    const updatePull = (clientY) => {
+      if (!isPulling || !ptrWrapper || window.scrollY > 10) return;
+      const diff = clientY - startY;
       if (diff > 0) {
         currentPullDist = Math.min(65, diff * 0.45);
         ptrWrapper.classList.add('ptr-pulling');
         ptrWrapper.style.height = `${currentPullDist}px`;
         if (currentPullDist > 45) {
           if (ptrIcon) ptrIcon.style.transform = 'rotate(180deg)';
-          if (ptrText) ptrText.textContent = 'Release to sync...';
+          if (ptrText) ptrText.textContent = 'Release to refresh';
         } else {
           if (ptrIcon) ptrIcon.style.transform = 'rotate(0deg)';
           if (ptrText) ptrText.textContent = 'Pull to refresh';
         }
       }
-    }, { passive: true });
+    };
 
-    window.addEventListener('touchend', async () => {
+    const endPull = async () => {
       if (!isPulling || !ptrWrapper) return;
       isPulling = false;
       if (currentPullDist > 45) {
         ptrWrapper.classList.add('ptr-spinning');
-        if (ptrText) ptrText.textContent = 'Syncing store...';
+        if (ptrText) ptrText.textContent = 'Refreshing queue...';
         try {
           await this.loadData(true);
         } catch (err) {
@@ -8113,7 +8704,34 @@ export class SalonDashboard {
         ptrWrapper.classList.remove('ptr-pulling');
       }
       currentPullDist = 0;
+    };
+
+    window.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 1) startPull(e.touches[0].screenY);
     }, { passive: true });
+
+    window.addEventListener('touchmove', (e) => {
+      if (e.touches.length === 1) updatePull(e.touches[0].screenY);
+    }, { passive: true });
+
+    window.addEventListener('touchend', endPull, { passive: true });
+
+    window.addEventListener('mousedown', (e) => {
+      if (e.button === 0) {
+        const target = e.target;
+        if (target.closest('#main-content') || target.closest('.q-stream') || target.closest('.q-date-bar')) {
+          startPull(e.clientY);
+        }
+      }
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (isPulling) updatePull(e.clientY);
+    });
+
+    window.addEventListener('mouseup', () => {
+      if (isPulling) endPull();
+    });
 
 
     // Copy Invite Link
@@ -8415,6 +9033,117 @@ export class SalonDashboard {
     }
   }
 
+  setupQueueTabListeners(tabContent) {
+    if (!tabContent) return;
+
+    // Queue Filter Pills (All, Waiting, In Chair, Done, Cancelled)
+    tabContent.querySelectorAll('.q-chip').forEach((pill) => {
+      pill.addEventListener('click', (e) => {
+        const filter = e.currentTarget.getAttribute('data-filter');
+        if (filter) {
+          this.queueFilter = filter;
+          this.render();
+        }
+      });
+    });
+
+    // Date Navigation Controls (Prev, Next, Today)
+    const prevBtn = tabContent.querySelector('#btn-date-prev');
+    if (prevBtn) {
+      prevBtn.onclick = (e) => {
+        e.preventDefault();
+        this.handleQueueDateChange(this.addDaysToDateString(this.selectedDate, -1));
+      };
+    }
+
+    const nextBtn = tabContent.querySelector('#btn-date-next');
+    if (nextBtn) {
+      nextBtn.onclick = (e) => {
+        e.preventDefault();
+        this.handleQueueDateChange(this.addDaysToDateString(this.selectedDate, 1));
+      };
+    }
+
+    const todayBtn = tabContent.querySelector('#btn-date-today');
+    if (todayBtn) {
+      todayBtn.onclick = (e) => {
+        e.preventDefault();
+        this.handleQueueDateChange(this.getLocalDateString());
+      };
+    }
+
+    // Interactive Calendar Popover Trigger - Single Canonical Controller
+    const calPopover = tabContent.querySelector('#q-calendar-popover') || document.getElementById('q-calendar-popover');
+    const calToggleBtn = tabContent.querySelector('#btn-toggle-cal-popover') || document.getElementById('btn-toggle-cal-popover');
+
+    if (calToggleBtn) {
+      calToggleBtn.onclick = (e) => this.toggleCalendarPopover(e);
+    }
+
+    if (calPopover) {
+      this.wireCalendarPopoverEvents(calPopover, (d) => this.handleQueueDateChange(d));
+    }
+
+    // Ensure clean state for outside-click listener on tab re-render
+    if (this._handlePopoverDocClick) {
+      document.removeEventListener('click', this._handlePopoverDocClick);
+      this._handlePopoverDocClick = null;
+    }
+
+    // Right-Side Filter Drawer Controls
+    const filterDrawer = tabContent.querySelector('#queue-drawer') || document.getElementById('queue-drawer');
+    const drawerBackdrop = tabContent.querySelector('#queue-drawer-backdrop') || document.getElementById('queue-drawer-backdrop');
+
+    const openQueueDrawer = () => {
+      filterDrawer?.classList.add('is-open');
+      drawerBackdrop?.classList.add('is-open');
+      document.body.style.overflow = 'hidden';
+    };
+
+    const closeQueueDrawer = () => {
+      filterDrawer?.classList.remove('is-open');
+      drawerBackdrop?.classList.remove('is-open');
+      document.body.style.overflow = '';
+    };
+
+    tabContent.querySelector('#btn-open-queue-drawer')?.addEventListener('click', openQueueDrawer);
+    document.getElementById('btn-open-queue-drawer')?.addEventListener('click', openQueueDrawer);
+    filterDrawer?.querySelector('#btn-close-queue-drawer')?.addEventListener('click', closeQueueDrawer);
+    drawerBackdrop?.addEventListener('click', closeQueueDrawer);
+
+    // Drawer Chips Selection
+    filterDrawer?.querySelectorAll('.qd-chips').forEach((groupEl) => {
+      groupEl.querySelectorAll('.qd-chip').forEach((chip) => {
+        chip.addEventListener('click', () => {
+          groupEl.querySelectorAll('.qd-chip').forEach((c) => c.classList.remove('active'));
+          chip.classList.add('active');
+        });
+      });
+    });
+
+    // Apply Drawer Filters
+    filterDrawer?.querySelector('#btn-apply-queue-filters')?.addEventListener('click', () => {
+      const newFilters = { stylistId: '', bookingType: '', status: '', categoryId: '' };
+      filterDrawer.querySelectorAll('.qd-chips').forEach((groupEl) => {
+        const groupKey = groupEl.getAttribute('data-filter-group');
+        const activeChip = groupEl.querySelector('.qd-chip.active');
+        if (activeChip && groupKey) {
+          newFilters[groupKey] = activeChip.getAttribute('data-val') || '';
+        }
+      });
+      this.queueDrawerFilters = newFilters;
+      closeQueueDrawer();
+      this.render();
+    });
+
+    // Reset Drawer Filters
+    filterDrawer?.querySelector('#btn-reset-queue-filters')?.addEventListener('click', () => {
+      this.queueDrawerFilters = { stylistId: '', bookingType: '', status: '', categoryId: '' };
+      closeQueueDrawer();
+      this.render();
+    });
+  }
+
   /**
    * PERFORMANCE: Re-attach only event listeners inside #tab-content.
    * Called during targeted SSE re-renders to avoid re-binding global header/nav listeners.
@@ -8449,73 +9178,8 @@ export class SalonDashboard {
       this.switchTab('staff');
     });
 
-
-    // Queue Filter Pills
-    tabContent.querySelectorAll('.q-chip').forEach((pill) => {
-      pill.addEventListener('click', (e) => {
-        const filter = e.currentTarget.getAttribute('data-filter');
-        if (filter) {
-          this.queueFilter = filter;
-          this.render();
-        }
-      });
-    });
-
-    // Date Navigation Controls (Prev, Next, Today, Date Picker)
-    const handleDateChange = async (newDate) => {
-      if (!newDate) return;
-      this.selectedDate = newDate;
-      const syncBtn = document.getElementById('btn-refresh-queue');
-      syncBtn?.classList.add('syncing');
-      try {
-        await this.loadData(true);
-      } finally {
-        this.render();
-      }
-    };
-
-    document.getElementById('btn-date-prev')?.addEventListener('click', () => {
-      const prevDate = this.addDaysToDateString(this.selectedDate, -1);
-      handleDateChange(prevDate);
-    });
-
-    document.getElementById('btn-date-next')?.addEventListener('click', () => {
-      const nextDate = this.addDaysToDateString(this.selectedDate, 1);
-      handleDateChange(nextDate);
-    });
-
-    document.getElementById('btn-date-today')?.addEventListener('click', () => {
-      handleDateChange(this.getLocalDateString());
-    });
-
-    const datePicker = document.getElementById('dashboard-date-picker');
-    const dateBadge = tabContent.querySelector('.q-date-badge');
-    dateBadge?.addEventListener('click', (e) => {
-      if (e.target !== datePicker) {
-        try {
-          if (typeof datePicker?.showPicker === 'function') {
-            datePicker.showPicker();
-          } else {
-            datePicker?.click();
-          }
-        } catch (err) {
-          datePicker?.focus();
-        }
-      }
-    });
-
-    datePicker?.addEventListener('change', (e) => {
-      if (e.target.value) {
-        handleDateChange(e.target.value);
-      }
-    });
-
-    // Refresh queue
-    document.getElementById('btn-refresh-queue')?.addEventListener('click', async () => {
-      const syncBtn = document.getElementById('btn-refresh-queue');
-      syncBtn?.classList.add('syncing');
-      try { await this.loadData(true); } finally { this.render(); }
-    });
+    // Queue Screen Interactive Listeners (Date Popover, Filter Drawer, Chips)
+    this.setupQueueTabListeners(tabContent);
 
     // Status Updates
     tabContent.querySelectorAll('.btn-status').forEach((btn) => {
@@ -8541,6 +9205,15 @@ export class SalonDashboard {
         const staffId = e.currentTarget.getAttribute('data-staff');
         const clientName = e.currentTarget.getAttribute('data-name');
         this.showRescheduleModal(id, serviceId, staffId, clientName);
+      });
+    });
+
+    // Add Service / Add-on Button
+    tabContent.querySelectorAll('.btn-open-add-addon').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const clientName = e.currentTarget.getAttribute('data-name');
+        this.showAddAddonModal(id, clientName);
       });
     });
 
@@ -8870,9 +9543,111 @@ export class SalonDashboard {
     });
   }
 
+  showAddAddonModal(appointmentId, clientName) {
+    const modalContainer = document.getElementById('modal-container');
+    if (!modalContainer) return;
+    const services = Array.isArray(this.servicesList) ? this.servicesList.filter((s) => s.status !== 'INACTIVE') : [];
+
+    modalContainer.innerHTML = `
+      <div class="modal-backdrop show">
+        <div class="modal-content" style="max-width: 480px; width: 100%; border: 1px solid rgba(245, 158, 11, 0.35); box-shadow: 0 20px 40px rgba(0,0,0,0.6);">
+          <div class="modal-header" style="border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 1.2rem;">✨</span>
+              <h3 style="margin: 0; font-size: 1.05rem; font-weight: 700; color: #f8fafc;">Add Service / Add-on</h3>
+            </div>
+            <button class="close-btn" id="btn-close-modal">&times;</button>
+          </div>
+          <p style="color: #94a3b8; font-size: 0.82rem; margin: 12px 0 16px 0;">
+            Add an extra service or add-on to <strong>${clientName}</strong>'s active visit. Duration and total billing will update automatically.
+          </p>
+
+          <div style="margin-bottom: 12px;">
+            <input type="text" id="addon-search-inp" class="form-control" placeholder="Search service menu..." style="background: rgba(15, 23, 42, 0.6); font-size: 0.82rem; border-color: rgba(255,255,255,0.1);" />
+          </div>
+
+          <div id="addon-services-list" style="max-height: 280px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px;">
+            ${services.length === 0 ? `
+              <div style="text-align: center; color: #94a3b8; padding: 24px;">No services found in menu.</div>
+            ` : services.map((s) => `
+              <div class="addon-item" data-name="${s.name.toLowerCase()}" style="display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; transition: all 0.15s ease;">
+                <div>
+                  <div style="font-weight: 700; color: #f8fafc; font-size: 0.86rem;">${s.name}</div>
+                  <div style="font-size: 0.72rem; color: #94a3b8; margin-top: 2px;">
+                    ⏱️ ${s.durationMinutes} mins · <span style="color: #34d399; font-weight: 700;">₹${s.price}</span>
+                  </div>
+                </div>
+                <button class="btn btn-primary btn-sm btn-select-addon" data-appt-id="${appointmentId}" data-service-id="${s.id}" data-service-name="${s.name}" style="padding: 5px 12px; font-size: 0.75rem; font-weight: 700; border-radius: 6px; background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.5); color: #fbbf24; cursor: pointer;">
+                  + Add
+                </button>
+              </div>
+            `).join('')}
+          </div>
+
+          <div id="addon-error" style="color: #f87171; font-size: 0.82rem; margin-top: 12px; display: none; padding: 8px; background: rgba(239, 68, 68, 0.1); border-radius: 6px;"></div>
+
+          <div class="modal-footer" style="margin-top: 16px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 12px; display: flex; justify-content: flex-end;">
+            <button class="btn btn-secondary btn-sm" id="btn-cancel-addon">Close</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const close = () => { modalContainer.innerHTML = ''; };
+    document.getElementById('btn-close-modal')?.addEventListener('click', close);
+    document.getElementById('btn-cancel-addon')?.addEventListener('click', close);
+
+    const searchInp = document.getElementById('addon-search-inp');
+    searchInp?.addEventListener('input', (e) => {
+      const q = (e.target.value || '').toLowerCase().trim();
+      modalContainer.querySelectorAll('.addon-item').forEach((el) => {
+        const name = el.getAttribute('data-name') || '';
+        el.style.display = name.includes(q) ? 'flex' : 'none';
+      });
+    });
+
+    modalContainer.querySelectorAll('.btn-select-addon').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        const apptId = e.currentTarget.getAttribute('data-appt-id');
+        const svcId = e.currentTarget.getAttribute('data-service-id');
+        const svcName = e.currentTarget.getAttribute('data-service-name');
+        const errDiv = document.getElementById('addon-error');
+        if (errDiv) errDiv.style.display = 'none';
+
+        e.currentTarget.textContent = 'Adding...';
+        e.currentTarget.disabled = true;
+
+        try {
+          const res = await ApiClient.addAddonService(apptId, svcId);
+          if (res?.conflict) {
+            if (errDiv) {
+              errDiv.textContent = `Cannot add ${svcName}: Time slot conflicts with ${res.conflictBooking?.name || 'another booking or salon operating hours'}.`;
+              errDiv.style.display = 'block';
+            }
+            e.currentTarget.textContent = '+ Add';
+            e.currentTarget.disabled = false;
+            return;
+          }
+
+          close();
+          await this.loadData();
+          this.render();
+        } catch (err) {
+          if (errDiv) {
+            errDiv.textContent = err?.message || 'Could not add service.';
+            errDiv.style.display = 'block';
+          }
+          e.currentTarget.textContent = '+ Add';
+          e.currentTarget.disabled = false;
+        }
+      });
+    });
+  }
+
   startLiveTimerTicks() {
     if (this.timerInterval) clearInterval(this.timerInterval);
     this.timerInterval = setInterval(() => {
+      // 1) Existing Reminder Badges
       const badges = document.querySelectorAll('.qc__timer-badge[data-reminder-sent]');
       badges.forEach((badge) => {
         const sentAt = badge.getAttribute('data-reminder-sent');
@@ -8893,6 +9668,33 @@ export class SalonDashboard {
           if (graceEl) {
             graceEl.textContent = `${graceMins}m`;
           }
+        }
+      });
+
+      // 2) Live Reverse Countdown Clocks on Cards (Normal time styling, decreasing order)
+      const clockTimers = document.querySelectorAll('.qc__clock-timer[data-countdown-target]');
+      clockTimers.forEach((timerEl) => {
+        const targetMs = Number(timerEl.getAttribute('data-countdown-target'));
+        if (!targetMs || isNaN(targetMs)) return;
+        const now = Date.now();
+        const diffMs = targetMs - now;
+
+        if (diffMs > 0) {
+          const totalSecs = Math.floor(diffMs / 1000);
+          const hours = Math.floor(totalSecs / 3600);
+          const mins = Math.floor((totalSecs % 3600) / 60);
+          const secs = totalSecs % 60;
+
+          if (hours > 0) {
+            timerEl.textContent = `⏳ ${hours} hr ${mins} min ${secs} sec`;
+          } else if (mins > 0) {
+            timerEl.textContent = `⏳ ${mins} min ${secs} sec`;
+          } else {
+            timerEl.textContent = `⏳ ${secs} sec`;
+          }
+        } else {
+          const timeStr = timerEl.getAttribute('data-time-str') || '';
+          timerEl.textContent = timeStr ? `⏰ ${timeStr}` : '';
         }
       });
     }, 1000);
