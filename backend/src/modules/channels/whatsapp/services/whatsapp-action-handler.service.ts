@@ -426,27 +426,18 @@ export class WhatsAppActionHandlerService {
       return this.checkinAction.handle(ctx);
     }
 
-    // B. Cancellation Actions
+    // B. Cancellation Actions (Unified Domain Routing)
     if (
       input === WhatsAppButtonId.CANCEL_PENDING_QUICK ||
-      (!activeAppointment && pendingAppointment && (normalizedInput === 'cancel' || normalizedInput === 'cancel request'))
-    ) {
-      return this.quickBookingAction.cancelPendingQuickBook(ctx);
-    }
-
-    if (
       [WhatsAppButtonId.CANCEL_APPT, WhatsAppButtonId.REMIND_CANCEL, WhatsAppButtonId.ETA_CANCEL].includes(input as any) ||
       normalizedInput === 'cancel' ||
       normalizedInput === 'cancel appointment' ||
+      normalizedInput === 'cancel request' ||
       (conversation.state === ConversationState.CONFIRM_CANCEL &&
         [WhatsAppButtonId.CANCEL_YES, WhatsAppButtonId.CANCEL_NO, 'yes', 'no', 'keep', '1', '2'].some((kw) =>
           normalizedInput.includes(kw),
         ))
     ) {
-      // If customer has only a pending request awaiting salon approval, cancel with zero penalty
-      if (!activeAppointment && pendingAppointment) {
-        return this.quickBookingAction.cancelPendingQuickBook(ctx);
-      }
       return this.appointmentAction.handleCancellation(ctx);
     }
 

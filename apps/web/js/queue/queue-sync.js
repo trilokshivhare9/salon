@@ -86,8 +86,9 @@ export class QueueSyncManager {
     const { type, data } = event;
     if (!data || !data.id) return { handled: false };
 
+    const idx = this.items.findIndex((a) => a.id === data.id);
     const eventDateStr = (data.startAt || data.startTime || '').split('T')[0];
-    const isCurrentDate = !eventDateStr || eventDateStr === this.selectedDate;
+    const isCurrentDate = idx !== -1 || !eventDateStr || eventDateStr === this.selectedDate;
 
     // 1. If event is for a different operational date, do not disrupt current view
     if (!isCurrentDate) {
@@ -106,7 +107,6 @@ export class QueueSyncManager {
       case 'STATUS_UPDATED':
       case 'APPOINTMENT_UPDATED':
       case 'RESCHEDULED': {
-        const idx = this.items.findIndex((a) => a.id === data.id);
         if (idx !== -1) {
           // Unified model allows direct object merge
           this.items[idx] = { ...this.items[idx], ...data };
@@ -121,7 +121,7 @@ export class QueueSyncManager {
       }
 
       case 'NEW_BOOKING': {
-        const exists = this.items.some((a) => a.id === data.id);
+        const exists = idx !== -1 || this.items.some((a) => a.id === data.id);
         if (!exists) {
           if (this.page === 1) {
             this.items.unshift(data);
@@ -136,10 +136,22 @@ export class QueueSyncManager {
 
       case 'BOOKING_CANCELLED':
       case 'CANCELLED': {
-        const idx = this.items.findIndex((a) => a.id === data.id);
         if (idx !== -1) {
           this.items[idx] = { ...this.items[idx], ...data, status: 'CANCELLED' };
           this.sortItemsInPlace();
+          this.recalculateSummary();
+          mutated = true;
+        }
+        break;
+      }
+
+      case 'BOOKING_DELETED':
+      case 'APPOINTMENT_DELETED': {
+        if (idx !== -1) {
+          this.items.splice(idx, 1);
+          if (this.pagination.totalItems > 0) {
+            this.pagination.totalItems--;
+          }
           this.recalculateSummary();
           mutated = true;
         }
