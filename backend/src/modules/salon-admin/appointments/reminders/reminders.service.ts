@@ -46,6 +46,10 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
    * Ensures zero lost alarms even if the backend server or Redis restarted.
    */
   async hydrateRedisSchedule(): Promise<number> {
+    if (!this.redisService || !this.redisService.isReady()) {
+      this.logger.warn('[Redis Hydration] Redis is not ready yet; hydration skipped.');
+      return 0;
+    }
     try {
       const activeAppts = await this.prisma.appointment.findMany({
         where: {
@@ -93,6 +97,9 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
     // Run every 15 seconds against Redis Sorted Set
     this.timer = setInterval(async () => {
       try {
+        if (!this.redisService || !this.redisService.isReady()) {
+          return;
+        }
         await this.processReminders();
       } catch (err: any) {
         this.logger.error(`Error in reminder Redis tick: ${err.message}`, err.stack);
@@ -482,6 +489,13 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
       where: { id: appointment.id },
     }).catch((err: any) => {
       this.logger.error(`Failed to delete expired quick booking ${appointment.id}: ${err?.message}`);
+    });
+
+    this.appointmentsService.emitSalonEvent(salon.id, 'BOOKING_CANCELLED', {
+      id: appointment.id,
+      status: AppointmentStatus.CANCELLED,
+      startTime: appointment.startAt,
+      cancellationReason: 'Quick booking expired before start time',
     });
   }
 }

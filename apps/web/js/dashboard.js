@@ -20,6 +20,7 @@ import { ScheduleDayOffDialog, SalonClosuresModal } from './modules/salon-settin
 import { StaffApplyLeaveDialog } from './modules/staff/index.js';
 import { SalonDayOffView } from './modules/salon-settings/salon-day-off-view.js';
 import { PersonalProfileView } from './modules/salon-settings/personal-profile-view.js';
+import { BookingQrView } from './modules/salon-settings/booking-qr-view.js';
 import {
   SERVICE_DURATION_OPTIONS,
   renderServiceDurationOptions,
@@ -472,7 +473,7 @@ export class SalonDashboard {
 
           // 1. In-Memory Zero-Latency Queue Event Dispatch
           const syncResult = this.queueSync.handleRealtimeEvent(payload);
-          if (syncResult && syncResult.handled && syncResult.isCurrentDate) {
+          if (syncResult && syncResult.handled && syncResult.mutated && syncResult.isCurrentDate) {
             // Handled completely in memory without redundant HTTP requests!
             this.updateQuickRequestsBadge();
             return;
@@ -6876,134 +6877,10 @@ export class SalonDashboard {
     const todayClosure = this.getTodayClosure();
     const isClosedToday = !!todayClosure;
 
-    // SECTION 2: CLIENT BOOKING & RECEPTION QR
+    // SECTION 2: CLIENT BOOKING & RECEPTION QR (Modular BookingQrView)
     if (subtab === 'booking-qr' || subtab === 'storefront') {
-      const cleanLocation = (() => {
-        const raw = profile.address || profile.city || 'Indore, India';
-        const parts = raw.split(',').map(s => s.trim()).filter(Boolean);
-        return [...new Set(parts)].join(', ');
-      })();
-
-      const qrImgUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(bookingUrl)}`;
-      const whatsappShareUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(`Book your appointment with ${profile.name || 'our salon'} online: ${bookingUrl}`)}`;
-
       return `
-        <div class="settings-panel-card">
-          <div class="settings-panel-header" style="margin-bottom: 12px; padding-bottom: 10px;">
-            <div class="settings-header-left">
-              <div class="settings-header-icon" style="background: rgba(139, 61, 255, 0.15); color: #A855F7;">
-                ${Icons.qrCode ? Icons.qrCode({ size: 20 }) : Icons.link({ size: 20 })}
-              </div>
-              <div>
-                <h3 class="settings-panel-title">Online Booking & Reception QR</h3>
-                <p class="settings-panel-subtitle">Instant counter walk-in QR badge, direct booking link, and printable acrylic standee.</p>
-              </div>
-            </div>
-            <span class="badge ${isClosedToday ? 'badge-cancelled' : 'badge-completed'}" style="font-size: 0.68rem; padding: 3px 8px; border-radius: 6px;">
-              ${isClosedToday ? `🔴 Closed (${todayClosure.closureType})` : '🟢 Live & Accepting Appointments'}
-            </span>
-          </div>
-
-          <div class="settings-panel-body" style="gap: 14px;">
-            <!-- Reception Counter Walk-In QR Card -->
-            <div class="settings-qr-counter-card">
-              <div class="settings-qr-counter-header">
-                <div class="settings-qr-counter-kicker">
-                  ${Icons.qrCode ? Icons.qrCode({ size: 14, color: '#A855F7' }) : '📱'}
-                  <span>Reception Counter Walk-In QR Badge</span>
-                </div>
-                <span class="settings-qr-counter-hint">⚡ 30-Second Fast Queue Entry</span>
-              </div>
-
-              <div class="settings-qr-counter-body">
-                <div class="settings-qr-box">
-                  <img class="settings-qr-img" src="${qrImgUrl}" alt="Customer Booking QR" />
-                  <span class="settings-qr-scan-badge">SCAN TO BOOK</span>
-                </div>
-
-                <div class="settings-qr-details">
-                  <div class="settings-qr-label">Direct Customer Booking Link</div>
-                  <div class="settings-qr-url-row">
-                    ${Icons.link({ size: 14, color: '#A855F7' })}
-                    <span class="settings-qr-url-text">${bookingUrl}</span>
-                    <button type="button" class="btn btn-secondary btn-sm" id="btn-copy-booking-qr" style="height: 32px; padding: 0 10px; font-size: 0.76rem; border-radius: 6px; flex-shrink: 0;">
-                      ${Icons.copy({ size: 12 })}
-                      <span>Copy</span>
-                    </button>
-                  </div>
-
-                  <div class="settings-qr-actions-row">
-                    <a href="${bookingUrl}" target="_blank" class="btn btn-secondary btn-sm" style="text-decoration: none; padding: 0 12px; font-size: 0.76rem; height: 36px; border-radius: 8px; background: rgba(139, 61, 255, 0.15); border-color: rgba(139, 61, 255, 0.35); color: #c7d2fe;">
-                      ${Icons.externalLink({ size: 13 })}
-                      <span>Open Page</span>
-                    </a>
-                    <a href="${whatsappShareUrl}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" style="text-decoration: none; padding: 0 12px; font-size: 0.76rem; height: 36px; border-radius: 8px; color: #25D366; background: rgba(37, 211, 102, 0.1); border-color: rgba(37, 211, 102, 0.3);">
-                      ${Icons.whatsapp ? Icons.whatsapp({ size: 13 }) : '💬'}
-                      <span>WhatsApp Share</span>
-                    </a>
-                    <button type="button" class="btn btn-primary btn-sm" id="btn-download-standee" style="padding: 0 14px; font-size: 0.76rem; height: 36px; border-radius: 8px; font-weight: 700; background: linear-gradient(135deg, #8B3DFF 0%, #9D5CFF 100%);">
-                      ${Icons.qrCode ? Icons.qrCode({ size: 13 }) : '🖨️'}
-                      <span>Print Acrylic Standee</span>
-                    </button>
-                  </div>
-
-                  <p class="settings-qr-footer-note">
-                    💡 <strong>Reception Tip:</strong> Place your acrylic standee at the front counter or styling mirror so walk-in clients can scan and join the live chair queue in 30 seconds.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <!-- Live Storefront Details Card -->
-            <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 12px; padding: 12px 14px;">
-              <div style="font-size: 0.72rem; font-weight: 800; color: #34d399; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                <span>Verified Store Identity</span>
-                <span style="font-size: 0.65rem; color: #94a3b8; font-weight: 500;">Public Profile</span>
-              </div>
-
-              <div class="settings-info-card" style="background: transparent; border: none; padding: 0;">
-                <div class="settings-info-row" style="padding: 8px 0;">
-                  <span class="settings-info-label">Salon Brand</span>
-                  <span class="settings-info-value" style="color: #f8fafc; font-weight: 700;">${profile.name || 'Salon Command'}</span>
-                </div>
-                <div class="settings-info-row" style="padding: 8px 0;">
-                  <span class="settings-info-label">Store Handle</span>
-                  <span class="settings-info-value" style="font-family: monospace; color: #a5b4fc; font-weight: 600;">@${slug}</span>
-                </div>
-                <div class="settings-info-row" style="padding: 8px 0;">
-                  <span class="settings-info-label">Store Location</span>
-                  <span class="settings-info-value" style="color: #cbd5e1; max-width: 60%; text-align: right;">${cleanLocation}</span>
-                </div>
-                <div class="settings-info-row" style="padding: 8px 0;">
-                  <span class="settings-info-label">Contact / WhatsApp</span>
-                  <span class="settings-info-value" style="color: #cbd5e1;">${profile.phone || '+91'}</span>
-                </div>
-                <div class="settings-info-row" style="padding: 8px 0;">
-                  <span class="settings-info-label">Storefront Status</span>
-                  <span class="settings-info-value" style="color: ${isClosedToday ? '#f87171' : '#34d399'}; font-weight: 600;">
-                    ${isClosedToday ? `🔴 Closed (${todayClosure.closureType})` : '🟢 Live & Accepting Appointments'}
-                  </span>
-                </div>
-              </div>
-
-              <!-- Quick Highlights -->
-              <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.05); text-align: center;">
-                <div style="background: rgba(255, 255, 255, 0.03); padding: 6px 4px; border-radius: 8px;">
-                  <div style="font-size: 0.85rem; font-weight: 800; color: #fff;">${servicesCount}</div>
-                  <div style="font-size: 0.62rem; color: #94a3b8; text-transform: uppercase;">Services</div>
-                </div>
-                <div style="background: rgba(255, 255, 255, 0.03); padding: 6px 4px; border-radius: 8px;">
-                  <div style="font-size: 0.85rem; font-weight: 800; color: #fff;">${staffCount}</div>
-                  <div style="font-size: 0.62rem; color: #94a3b8; text-transform: uppercase;">Stylists</div>
-                </div>
-                <div style="background: rgba(255, 255, 255, 0.03); padding: 6px 4px; border-radius: 8px;">
-                  <div style="font-size: 0.85rem; font-weight: 800; color: #34d399;">30s</div>
-                  <div style="font-size: 0.62rem; color: #94a3b8; text-transform: uppercase;">Fast Queue</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        <div id="booking-qr-mount-point" class="booking-qr-view-root"></div>
       `;
     }
 
@@ -7626,22 +7503,20 @@ export class SalonDashboard {
       PersonalProfileView.init(ppMount, this);
     }
 
-    // 4. Subtab: Client Booking & QR Link
+    // 4. Subtab: Client Booking & QR Link (Modular BookingQrView)
+    const qrMount = document.getElementById('booking-qr-mount-point');
+    if (qrMount) {
+      BookingQrView.init(qrMount, this);
+    }
+
     const copyLinkHandler = () => {
-      const slug = this.salonProfile?.slug || 'the-grand-royal-barber-1';
+      const slug = this.salonProfile?.slug || 'salon';
       const url = `${window.location.origin}/#book/${slug}`;
       navigator.clipboard.writeText(url);
-      this.showToast('Booking link copied to clipboard!', 'success');
+      this.showToast('Web booking link copied to clipboard!', 'success');
     };
     document.getElementById('btn-copy-invite')?.addEventListener('click', copyLinkHandler);
     document.getElementById('btn-copy-invite-subtab')?.addEventListener('click', copyLinkHandler);
-    document.getElementById('btn-copy-booking-qr')?.addEventListener('click', copyLinkHandler);
-    document.getElementById('btn-download-standee')?.addEventListener('click', () => {
-      this.showStandeePrintModal();
-    });
-    document.getElementById('btn-open-qr')?.addEventListener('click', () => {
-      this.showQRCodeModal();
-    });
 
     // 4b. Subtab: Hours & Closures listeners
     if (this.activeProfileSubtab === 'hours' || this.activeProfileSubtab === 'operations') {
@@ -8173,7 +8048,10 @@ export class SalonDashboard {
 
       const matchesQuery = !q || name.includes(q) || cat.toLowerCase().includes(q);
       const matchesCat = activeCat === 'ALL' || cat === activeCat;
-      const matchesGender = activeGender === 'ALL' || gender === activeGender;
+      const matchesGender =
+        activeGender === 'ALL' ||
+        gender === activeGender ||
+        (gender === 'UNISEX' && (activeGender === 'MALE' || activeGender === 'FEMALE' || activeGender === 'KIDS'));
       let matchesStaff = true;
       if (activeStaff === 'ASSIGNED') matchesStaff = staffCount > 0;
       else if (activeStaff === 'UNASSIGNED') matchesStaff = staffCount === 0;
@@ -8374,7 +8252,10 @@ export class SalonDashboard {
 
         const matchesQuery = !q || name.includes(q) || cat.toLowerCase().includes(q);
         const matchesCat = activeCat === 'ALL' || cat === activeCat;
-        const matchesGender = activeGender === 'ALL' || gender === activeGender;
+        const matchesGender =
+          activeGender === 'ALL' ||
+          gender === activeGender ||
+          (gender === 'UNISEX' && (activeGender === 'MALE' || activeGender === 'FEMALE' || activeGender === 'KIDS'));
         let matchesStaff = true;
         if (activeStaff === 'ASSIGNED') matchesStaff = staffCount > 0;
         else if (activeStaff === 'UNASSIGNED') matchesStaff = staffCount === 0;
@@ -12718,271 +12599,11 @@ export class SalonDashboard {
   }
 
   showQRCodeModal() {
-    const modalContainer = document.getElementById('modal-container');
-    const slug = this.salonProfile?.slug || 'glamour-studio';
-    const salonPhone = this.salonProfile?.phone?.replace(/[^\d]/g, '') || '917999817743';
-    const whatsappUrl = `https://wa.me/${salonPhone}?text=Hi`;
-
-    modalContainer.innerHTML = `
-      <div class="modal-backdrop show">
-        <div class="modal-content" style="text-align: center; max-width: 420px;">
-          <div class="modal-header">
-            <h3 style="display: flex; align-items: center; gap: 8px;">
-              <span style="color: #25D366;">💬</span> WhatsApp Booking QR
-            </h3>
-            <button class="close-btn" id="btn-close-modal">&times;</button>
-          </div>
-
-          <p style="font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 16px;">
-            Scan this QR code to immediately launch the automated <strong>WhatsApp Booking Bot</strong>.
-          </p>
-
-          <div style="background: #fff; padding: 16px; border-radius: var(--radius-md); display: inline-block; margin-bottom: 18px; box-shadow: 0 8px 30px rgba(37,211,102,0.25); border: 2px solid #25D366;">
-            <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(whatsappUrl)}" alt="WhatsApp Booking QR Code" style="display: block; width: 200px; height: 200px;" />
-          </div>
-
-          <div style="background: rgba(37,211,102,0.08); padding: 12px; border-radius: var(--radius-sm); border: 1px solid rgba(37,211,102,0.25); margin-bottom: 20px; text-align: left;">
-            <div style="font-size: 0.72rem; color: #25D366; font-weight: 800; letter-spacing: 0.04em;">DIRECT WHATSAPP CHAT LINK</div>
-            <div style="font-size: 0.85rem; font-family: monospace; color: #e2e8f0; word-break: break-all; margin-top: 4px;">${whatsappUrl}</div>
-          </div>
-
-          <div style="display: flex; gap: 10px;">
-            <button class="btn btn-secondary" style="flex: 1;" id="btn-copy-wa-link">📋 Copy Link</button>
-            <a href="${whatsappUrl}" target="_blank" class="btn btn-primary" style="flex: 1; background: #25D366; border-color: #25D366; color: #fff; font-weight: 700;">Open WhatsApp 💬</a>
-          </div>
-        </div>
-      </div>
-    `;
-
-    document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
-
-    document.getElementById('btn-copy-wa-link')?.addEventListener('click', () => {
-      navigator.clipboard.writeText(whatsappUrl);
-      alert('Copied WhatsApp booking link to clipboard!\n' + whatsappUrl);
-    });
+    BookingQrView.showQuickQrModal(this);
   }
 
   showStandeePrintModal() {
-    const modalContainer = document.getElementById('modal-container');
-    const profile = this.salonProfile || {};
-    const salonName = profile.name || 'Salon Command';
-    const slug = profile.slug || 'the-grand-royal-barber-1';
-    const bookingUrl = `${window.location.origin}/#book/${slug}`;
-    const qrImgUrl = `https://api.qrserver.com/v1/create-qr-code/?size=360x360&data=${encodeURIComponent(bookingUrl)}`;
-    const city = profile.city || (profile.address ? profile.address.split(',')[0].trim() : 'Indore');
-
-    modalContainer.innerHTML = `
-      <div class="modal-backdrop show" style="z-index: 99999;">
-        <div class="modal-content" style="max-width: 520px; text-align: center; padding: 24px; border-radius: 16px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
-            <div style="text-align: left;">
-              <h3 style="margin: 0; font-size: 1.15rem; font-weight: 800; color: #fff; display: flex; align-items: center; gap: 8px;">
-                <span>🖨️ Acrylic Reception Standee</span>
-              </h3>
-              <p style="margin: 2px 0 0 0; font-size: 0.76rem; color: #94a3b8;">
-                A5 Desk Counter Standee with live scannable booking QR.
-              </p>
-            </div>
-            <button class="close-btn" id="btn-close-standee-modal" style="width: 30px; height: 30px; font-size: 1.1rem;">&times;</button>
-          </div>
-
-          <!-- Standee Realistic Visual Preview -->
-          <div id="standee-print-preview" style="background: #ffffff; color: #0f172a; border-radius: 16px; padding: 28px 24px; box-shadow: 0 16px 40px rgba(0,0,0,0.5); border: 2px solid rgba(255,255,255,0.2); margin-bottom: 18px; text-align: center;">
-            <div style="font-size: 0.72rem; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; color: #8B3DFF; margin-bottom: 6px;">
-              WELCOME TO
-            </div>
-            <div style="font-size: 1.5rem; font-weight: 900; letter-spacing: -0.02em; color: #0f172a; margin-bottom: 4px; font-family: var(--font-heading, sans-serif);">
-              ${salonName}
-            </div>
-            <div style="font-size: 0.8rem; color: #64748b; font-weight: 600; margin-bottom: 16px;">
-              Scan QR to Book & Join Live Chair Queue
-            </div>
-
-            <!-- Standee QR Box -->
-            <div style="display: inline-block; padding: 14px; background: #f8fafc; border-radius: 16px; border: 2px solid #e2e8f0; box-shadow: 0 4px 14px rgba(0,0,0,0.06); margin-bottom: 14px;">
-              <img src="${qrImgUrl}" alt="Booking QR" style="width: 190px; height: 190px; display: block; border-radius: 8px;" />
-            </div>
-
-            <!-- Fast Steps -->
-            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 14px; text-align: center;">
-              <div style="background: #f1f5f9; padding: 6px 4px; border-radius: 8px;">
-                <div style="font-size: 0.7rem; font-weight: 800; color: #0f172a;">1. SCAN</div>
-                <div style="font-size: 0.62rem; color: #64748b;">With phone camera</div>
-              </div>
-              <div style="background: #f1f5f9; padding: 6px 4px; border-radius: 8px;">
-                <div style="font-size: 0.7rem; font-weight: 800; color: #0f172a;">2. CHOOSE</div>
-                <div style="font-size: 0.62rem; color: #64748b;">Stylist & Service</div>
-              </div>
-              <div style="background: #f1f5f9; padding: 6px 4px; border-radius: 8px;">
-                <div style="font-size: 0.7rem; font-weight: 800; color: #10b981;">3. JOIN</div>
-                <div style="font-size: 0.62rem; color: #64748b;">Live queue ticket</div>
-              </div>
-            </div>
-
-            <div style="font-family: monospace; font-size: 0.74rem; font-weight: 700; color: #6D28D9; word-break: break-all;">
-              ${bookingUrl}
-            </div>
-            <div style="font-size: 0.65rem; color: #94a3b8; margin-top: 4px;">
-              Powered by Salon Command · ${city}
-            </div>
-          </div>
-
-          <!-- Standee Modal Actions -->
-          <div style="display: flex; gap: 10px;">
-            <button type="button" class="btn btn-secondary" id="btn-cancel-standee" style="flex: 1;">Close</button>
-            <button type="button" class="btn btn-primary" id="btn-trigger-print-standee" style="flex: 2; background: linear-gradient(135deg, #8B3DFF 0%, #9D5CFF 100%); font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 8px;">
-              ${Icons.check ? Icons.check({ size: 16 }) : '🖨️'}
-              <span>Print / Save PDF (A5 Standee)</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    `;
-
-    document.getElementById('btn-close-standee-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
-    document.getElementById('btn-cancel-standee')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
-
-    document.getElementById('btn-trigger-print-standee')?.addEventListener('click', () => {
-      const printWin = window.open('', '_blank', 'width=650,height=850');
-      if (!printWin) {
-        alert('Popup blocked! Please allow popups for this site to print the standee.');
-        return;
-      }
-      printWin.document.write(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>Reception Standee - ${salonName.replace(/"/g, '&quot;')}</title>
-          <style>
-            @page {
-              size: A5 portrait;
-              margin: 12mm;
-            }
-            * { box-sizing: border-box; }
-            body {
-              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-              background: #ffffff;
-              color: #0f172a;
-              margin: 0;
-              padding: 24px 20px;
-              display: flex;
-              flex-direction: column;
-              align-items: center;
-              justify-content: center;
-              text-align: center;
-              min-height: 90vh;
-            }
-            .standee-card {
-              border: 3px solid #0f172a;
-              border-radius: 20px;
-              padding: 36px 28px;
-              width: 100%;
-              max-width: 440px;
-              box-shadow: none;
-            }
-            .kicker {
-              font-size: 11px;
-              font-weight: 800;
-              letter-spacing: 2px;
-              text-transform: uppercase;
-              color: #9D5CFF;
-              margin-bottom: 8px;
-            }
-            .title {
-              font-size: 26px;
-              font-weight: 900;
-              letter-spacing: -0.5px;
-              margin-bottom: 6px;
-            }
-            .subtitle {
-              font-size: 13px;
-              color: #475569;
-              font-weight: 600;
-              margin-bottom: 22px;
-            }
-            .qr-box {
-              display: inline-block;
-              padding: 16px;
-              border: 2px solid #e2e8f0;
-              border-radius: 16px;
-              margin-bottom: 20px;
-            }
-            .qr-img {
-              width: 210px;
-              height: 210px;
-              display: block;
-            }
-            .steps-row {
-              display: grid;
-              grid-template-columns: repeat(3, 1fr);
-              gap: 8px;
-              margin-bottom: 18px;
-            }
-            .step-box {
-              background: #f8fafc;
-              border: 1px solid #e2e8f0;
-              border-radius: 8px;
-              padding: 8px 4px;
-            }
-            .step-num {
-              font-size: 11px;
-              font-weight: 800;
-            }
-            .step-desc {
-              font-size: 9px;
-              color: #64748b;
-            }
-            .url-box {
-              font-family: monospace;
-              font-size: 12px;
-              font-weight: 700;
-              color: #6D28D9;
-              word-break: break-all;
-            }
-            .footer-note {
-              font-size: 10px;
-              color: #94a3b8;
-              margin-top: 8px;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="standee-card">
-            <div class="kicker">WELCOME TO</div>
-            <div class="title">${salonName}</div>
-            <div class="subtitle">Scan to Book & Join Live Chair Queue</div>
-            <div class="qr-box">
-              <img class="qr-img" src="${qrImgUrl}" alt="Booking QR" />
-            </div>
-            <div class="steps-row">
-              <div class="step-box">
-                <div class="step-num">1. SCAN</div>
-                <div class="step-desc">With Phone Camera</div>
-              </div>
-              <div class="step-box">
-                <div class="step-num">2. SELECT</div>
-                <div class="step-desc">Stylist & Service</div>
-              </div>
-              <div class="step-box">
-                <div class="step-num">3. JOIN</div>
-                <div class="step-desc">Live Queue Ticket</div>
-              </div>
-            </div>
-            <div class="url-box">${bookingUrl}</div>
-            <div class="footer-note">Powered by Salon Command · ${city}</div>
-          </div>
-          <script>
-            window.onload = function() {
-              setTimeout(function() {
-                window.print();
-              }, 300);
-            };
-          </script>
-        </body>
-        </html>
-      `);
-      printWin.document.close();
-    });
+    BookingQrView.showStandeeModal(this);
   }
 
   async showCustomerHistoryModal(customerId, customerName) {

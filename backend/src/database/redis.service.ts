@@ -11,26 +11,47 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   constructor(private readonly configService: ConfigService) {}
 
   onModuleInit() {
-    const host = this.configService.get<string>('REDIS_HOST', '127.0.0.1');
-    const port = Number(this.configService.get<number>('REDIS_PORT', 6379));
-    const password = this.configService.get<string>('REDIS_PASSWORD') || undefined;
+    const redisUrl =
+      this.configService.get<string>('REDIS_URL') || process.env.REDIS_URL;
 
-    this.client = new Redis({
-      host,
-      port,
-      password,
-      lazyConnect: false,
-      retryStrategy: (times) => Math.min(times * 200, 3000),
-      maxRetriesPerRequest: 3,
-    });
+    if (redisUrl) {
+      this.logger.log('Initializing Redis client with REDIS_URL...');
+      this.client = new Redis(redisUrl, {
+        lazyConnect: false,
+        retryStrategy: (times) => Math.min(times * 200, 3000),
+        maxRetriesPerRequest: 3,
+        tls: redisUrl.startsWith('rediss://') ? { rejectUnauthorized: false } : undefined,
+      });
 
-    this.client.on('connect', () => {
-      this.logger.log(`⚡ Connected to Redis at ${host}:${port}`);
-    });
+      this.client.on('connect', () => {
+        this.logger.log('⚡ Connected to Redis via REDIS_URL');
+      });
+    } else {
+      const host = this.configService.get<string>('REDIS_HOST', '127.0.0.1');
+      const port = Number(this.configService.get<number>('REDIS_PORT', 6379));
+      const password = this.configService.get<string>('REDIS_PASSWORD') || undefined;
+
+      this.client = new Redis({
+        host,
+        port,
+        password,
+        lazyConnect: false,
+        retryStrategy: (times) => Math.min(times * 200, 3000),
+        maxRetriesPerRequest: 3,
+      });
+
+      this.client.on('connect', () => {
+        this.logger.log(`⚡ Connected to Redis at ${host}:${port}`);
+      });
+    }
 
     this.client.on('error', (err) => {
       this.logger.error(`❌ Redis connection error: ${err.message}`);
     });
+  }
+
+  public isReady(): boolean {
+    return this.client && this.client.status === 'ready';
   }
 
   async onModuleDestroy() {

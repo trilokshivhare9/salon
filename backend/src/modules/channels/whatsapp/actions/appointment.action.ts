@@ -55,17 +55,40 @@ export class AppointmentAction {
     const { input, normalizedInput, cleanNumber, phoneNumberId, salonId, conversation, activeAppointment, pendingAppointment } = ctx;
     this.logger.log(`[AppointmentAction] handleCancellation input="${input}" user=${cleanNumber}`);
 
-    // If customer has only an unaccepted pending request, cancel directly with ZERO penalty / strikes
-    if (!activeAppointment && pendingAppointment) {
-      await this.cancellationService.cancelBooking(salonId, pendingAppointment.id, {
-        source: 'CUSTOMER_WHATSAPP',
-        fault: 'CLIENT',
-        noPenalty: true,
-        reason: 'CANCELLED_BY_CLIENT_BEFORE_ACCEPTANCE',
-        cancelledBy: CancelledBy.USER,
-        skipWhatsAppNotify: true,
-        skipMoveUp: true,
-      });
+    // If customer has a pending quick booking request or clicked CANCEL_PENDING_QUICK, cancel directly with ZERO penalty
+    const isPendingCancel =
+      input === WhatsAppButtonId.CANCEL_PENDING_QUICK ||
+      (!activeAppointment && pendingAppointment);
+
+    if (isPendingCancel) {
+      let apptToCancel = pendingAppointment;
+      if (!apptToCancel) {
+        apptToCancel = await this.prisma.appointment.findFirst({
+          where: {
+            salonId,
+            salonUser: {
+              user: {
+                phone: { in: [cleanNumber, `+${cleanNumber}`, cleanNumber.replace(/^\+/, '')] },
+              },
+            },
+            status: AppointmentStatus.PENDING_ACCEPTANCE,
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+      }
+
+      if (apptToCancel) {
+        await this.cancellationService.cancelBooking(salonId, apptToCancel.id, {
+          source: 'CUSTOMER_WHATSAPP',
+          fault: 'CLIENT',
+          noPenalty: true,
+          reason: 'CANCELLED_BY_CLIENT_BEFORE_ACCEPTANCE',
+          cancelledBy: CancelledBy.USER,
+          skipWhatsAppNotify: true,
+          skipMoveUp: true,
+        });
+      }
+
       await this.session.updateConversationState(
         conversation.id,
         ConversationState.START,

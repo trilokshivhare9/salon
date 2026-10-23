@@ -6,7 +6,7 @@ import { WhatsAppSenderService, WhatsAppButtonId } from '../services/whatsapp-se
 import { WhatsAppTemplateService } from '../services/whatsapp-template.service';
 import { WhatsAppSessionService } from '../services/whatsapp-session.service';
 import { WhatsAppService } from '../whatsapp.service';
-import { ConversationState, AppointmentStatus, BookingSource, CancelledBy } from '@prisma/client';
+import { ConversationState, AppointmentStatus, BookingSource } from '@prisma/client';
 import { DateTime } from 'luxon';
 import { TimeUtility } from '../../../../common/utils/time.utility';
 import { ActionContext, ActionResult } from './shared/action-context';
@@ -98,44 +98,6 @@ export class QuickBookingAction {
     const categoryMenu = this.templates.buildQuickBookCategoryMenu(salon.serviceCategories || []);
     await this.sendMessage(cleanNumber, categoryMenu, phoneNumberId, salonId);
     return { replyMessage: categoryMenu.bodyText, state: ConversationState.SELECT_CATEGORY };
-  }
-
-  /**
-   * Cancels a pending quick booking request on customer's demand with ZERO penalty
-   */
-  async cancelPendingQuickBook(ctx: ActionContext): Promise<ActionResult> {
-    const { cleanNumber, phoneNumberId, salonId, conversation } = ctx;
-    this.logger.log(`[QuickBookingAction] Cancelling pending request for user=${cleanNumber}`);
-
-    const pendingRequest = await this.prisma.appointment.findFirst({
-      where: {
-        salonId,
-        salonUser: {
-          user: {
-            phone: { in: [cleanNumber, `+${cleanNumber}`, cleanNumber.replace(/^\+/, '')] },
-          },
-        },
-        status: AppointmentStatus.PENDING_ACCEPTANCE,
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    if (pendingRequest) {
-      await this.prisma.appointment.delete({
-        where: { id: pendingRequest.id },
-      }).catch((e) => this.logger.error(`Error deleting cancelled pending quick booking: ${e?.message}`));
-    }
-
-    await this.session.updateConversationState(
-      conversation.id,
-      ConversationState.START,
-      null,
-      ActionUtils.getClearDraftData(),
-    );
-
-    const reply = this.templates.buildPendingRequestCancelledReply();
-    await this.sendMessage(cleanNumber, reply, phoneNumberId, salonId);
-    return { replyMessage: reply.bodyText, state: ConversationState.START };
   }
 
   /**
