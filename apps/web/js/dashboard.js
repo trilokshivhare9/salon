@@ -21,6 +21,7 @@ import { StaffApplyLeaveDialog } from './modules/staff/index.js';
 import { SalonDayOffView } from './modules/salon-settings/salon-day-off-view.js';
 import { PersonalProfileView } from './modules/salon-settings/personal-profile-view.js';
 import { BookingQrView } from './modules/salon-settings/booking-qr-view.js';
+import { ServicesAiScannerModal } from './modules/services-ai/services-ai-scanner.js';
 import {
   SERVICE_DURATION_OPTIONS,
   renderServiceDurationOptions,
@@ -209,6 +210,8 @@ export class SalonDashboard {
     this.activeStaffSubtab = 'leaves';
     this.calendarSchedule = null;
     this.staffManager = new StaffManager(this);
+    this.aiScanner = new ServicesAiScannerModal(this);
+    this.aiScanner.init();
   }
 
   /**
@@ -6205,31 +6208,49 @@ export class SalonDashboard {
             </div>
           </div>
 
-          <!-- 1. Header Bar: Title & Count (Left) + Primary Action: Add Service (Right) -->
+          <!-- 1. Header Bar: Title & Count (Left) + Actions: AI Scan & Add Service (Right) -->
           <div class="service-operations-bar">
             <div class="service-hub-title-wrap">
               <span class="service-hub-icon">✂️</span>
               <h3 class="service-hub-title">Services & Pricing</h3>
               <span class="service-hub-count" id="svc-total-count">${services.length}</span>
             </div>
-            <button type="button" class="service-hub-btn btn-primary" id="btn-add-service" title="Add Service">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="12" y1="5" x2="12" y2="19"></line>
-                <line x1="5" y1="12" x2="19" y2="12"></line>
-              </svg>
-              <span>Add Service</span>
-            </button>
+            <div class="service-hub-actions" style="display: flex; align-items: center; gap: 8px;">
+              <button type="button" class="btn-scan-camera" id="btn-scan-menu-ai" title="Scan Rate Card with AI">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                  <circle cx="12" cy="13" r="4"></circle>
+                </svg>
+                <span>Scan Menu</span>
+              </button>
+              <button type="button" class="service-hub-btn btn-primary" id="btn-add-service" title="Add Service">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                <span>Add Service</span>
+              </button>
+            </div>
           </div>
 
           ${services.length === 0 ? `
             <div style="text-align: center; padding: 40px 20px; background: rgba(255,255,255,0.02); border-radius: var(--radius-md); border: 1px dashed rgba(255,255,255,0.1);">
               <div style="font-size: 2rem; margin-bottom: 8px;">✂️</div>
               <h4 style="color: #fff; margin-bottom: 4px; font-weight: 700; font-size: 0.95rem;">No Services Added Yet</h4>
-              <p style="color: var(--text-secondary); font-size: 0.8rem; margin-bottom: 14px;">Create your service offerings with pricing and duration intervals.</p>
-              <button type="button" class="service-hub-btn btn-primary" id="btn-empty-add-service" style="margin: 0 auto;">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                <span>Add First Service</span>
-              </button>
+              <p style="color: var(--text-secondary); font-size: 0.8rem; margin-bottom: 16px;">Scan your physical menu card with AI to add all services instantly, or add manually.</p>
+              <div style="display: flex; justify-content: center; gap: 10px; flex-wrap: wrap;">
+                <button type="button" class="btn-scan-camera" id="btn-empty-scan-menu-ai" style="padding: 10px 18px; font-size: 0.9rem;">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                    <circle cx="12" cy="13" r="4"></circle>
+                  </svg>
+                  <span>Scan Menu Card with AI</span>
+                </button>
+                <button type="button" class="service-hub-btn btn-primary" id="btn-empty-add-service" style="padding: 10px 18px; font-size: 0.9rem;">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                  <span>Add Manually</span>
+                </button>
+              </div>
             </div>
           ` : `
             <!-- 2. Search & Filter Bar: Live Search (Left) + Filter Trigger Button (Right) -->
@@ -8488,6 +8509,13 @@ export class SalonDashboard {
 
     // Global Event Delegation for Add Service Triggers
     this.container?.addEventListener('click', (e) => {
+      const scanBtn = e.target.closest('#btn-scan-menu-ai, #btn-empty-scan-menu-ai, .btn-trigger-ai-scan');
+      if (scanBtn) {
+        e.preventDefault();
+        this.aiScanner?.openCapturePrompt();
+        return;
+      }
+
       const addSvcBtn = e.target.closest('#btn-add-service, #btn-quick-add-service, #btn-empty-add-service, .btn-trigger-add-service');
       if (addSvcBtn) {
         e.preventDefault();

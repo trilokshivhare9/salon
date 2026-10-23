@@ -156,3 +156,15 @@
   * Route WhatsApp selections directly to `AvailabilityService` and `AppointmentService`.
   * Dispatch instant booking confirmation message via WhatsApp.
 * **Definition of Done:** Customer texting "Hi" to the salon's WhatsApp number can complete an appointment reservation end-to-end.
+
+---
+
+### Phase 9: Smart Move-Up & Dynamic Slot Re-allocation
+* **Documentation**: See [`docs/scheduling/SMART_MOVE_UP_FEATURE.md`](scheduling/SMART_MOVE_UP_FEATURE.md) for full technical specification.
+* **Tasks:**
+  * Add `isSmartMoveUpEnabled` to `Salon` model in Prisma.
+  * Trigger automated WhatsApp notifications to later confirmed same-day clients when an earlier slot is cancelled.
+  * Implement 1-click `move_up_accept` in WhatsApp Gateway with atomic concurrency lock.
+  * Automatically shift appointment boundaries and emit real-time SSE updates to Live Queue.
+* **Definition of Done:** When a 2:00 PM slot is cancelled, a 5:00 PM customer receives an automated WhatsApp alert and shifts earlier with 1 tap.
+

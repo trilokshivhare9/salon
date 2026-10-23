@@ -1031,6 +1031,25 @@ export class ApiClient {
     return res;
   }
 
+  static async scanMenuCardWithAi(imageBase64, mimeType = 'image/jpeg') {
+    return this.request('/services/ai-scan', {
+      method: 'POST',
+      body: JSON.stringify({ imageBase64, mimeType }),
+    });
+  }
+
+  static async bulkImportServices(services) {
+    this.invalidateCache('/services');
+    this.invalidateCache('/reports');
+    const res = await this.request('/services/bulk-import', {
+      method: 'POST',
+      body: JSON.stringify({ services }),
+    });
+    this.invalidateCache('/services');
+    this.invalidateCache('/reports');
+    return res;
+  }
+
   static async getSalonProfile(bypassCache = false) {
     return this.request('/salons/profile', {}, bypassCache ? 0 : 300000);
   }
