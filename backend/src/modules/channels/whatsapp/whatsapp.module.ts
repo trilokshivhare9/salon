@@ -9,6 +9,7 @@ import { WhatsAppSenderService } from './services/whatsapp-sender.service';
 import { WhatsAppTemplateService } from './services/whatsapp-template.service';
 import { WhatsAppSessionService } from './services/whatsapp-session.service';
 import { WhatsAppActionHandlerService } from './services/whatsapp-action-handler.service';
+import { TimeSlotWindowEngine } from './services/time-slot-window.engine';
 import { CatalogCacheService } from './actions/shared/catalog-cache.service';
 import { CheckinAction } from './actions/checkin.action';
 import { AppointmentAction } from './actions/appointment.action';
@@ -25,6 +26,7 @@ import { BookingAction } from './actions/booking.action';
     WhatsAppSenderService,
     WhatsAppTemplateService,
     WhatsAppSessionService,
+    TimeSlotWindowEngine,
     CatalogCacheService,
     CheckinAction,
     AppointmentAction,
@@ -39,6 +41,7 @@ import { BookingAction } from './actions/booking.action';
     WhatsAppSenderService,
     WhatsAppTemplateService,
     WhatsAppSessionService,
+    TimeSlotWindowEngine,
     CatalogCacheService,
     CheckinAction,
     AppointmentAction,

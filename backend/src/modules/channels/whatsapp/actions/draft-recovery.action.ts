@@ -7,6 +7,7 @@ import { WhatsAppSessionService } from '../services/whatsapp-session.service';
 import { WhatsAppService } from '../whatsapp.service';
 import { ConversationState, AppointmentStatus } from '@prisma/client';
 import { TimeUtility } from '../../../../common/utils/time.utility';
+import { SlotWindowType } from '../services/time-slot-window.engine';
 import { ActionContext, ActionResult } from './shared/action-context';
 import { ActionUtils } from './shared/action-utils';
 
@@ -140,8 +141,75 @@ export class DraftRecoveryAction {
       const formattedTime = ActionUtils.formatTime12h(timeStr);
       const slotDateTime = TimeUtility.toJSDate(datePart, timeStr, tz);
       const minutesUntilSlot = (slotDateTime.getTime() - Date.now()) / (1000 * 60);
-      const isUrgentWithin15Min = minutesUntilSlot >= 0 && minutesUntilSlot < 15;
 
+      // Pillar 4: Invariant Check - Validate slot is still in future AND still available in database!
+      let isSlotStillAvailable = minutesUntilSlot > 0;
+      if (isSlotStillAvailable) {
+        const dateStr = TimeUtility.formatDateToISO(datePart, tz);
+        const availability = await this.availabilityService.getAvailableSlots(
+          salon.id,
+          conversation.selectedServiceId,
+          dateStr,
+          conversation.selectedStaffId || undefined,
+        );
+        isSlotStillAvailable = (availability.availableSlots || []).some(
+          (s: any) => s.startTime === timeStr,
+        );
+      }
+
+      if (!isSlotStillAvailable) {
+        this.logger.warn(
+          `[DraftRecoveryAction] Saved draft slot ${timeStr} on ${formattedDate} is in past or taken. Demoting to SELECT_TIME.`,
+        );
+
+        // Evict toxic slot in DB
+        await this.session.updateConversationState(
+          conversation.id,
+          ConversationState.SELECT_TIME,
+          undefined,
+          { selectedStartTime: null },
+        );
+
+        const dateStr = TimeUtility.formatDateToISO(datePart, tz);
+        const nowDt = TimeUtility.now(tz);
+        const isToday = dateStr === nowDt.toISODate();
+        const nowMinutes = nowDt.hour * 60 + nowDt.minute;
+        const availability = await this.availabilityService.getAvailableSlots(
+          salon.id,
+          conversation.selectedServiceId,
+          dateStr,
+          conversation.selectedStaffId || undefined,
+        );
+
+        if (availability.availableSlots && availability.availableSlots.length > 0) {
+          const slotRows = availability.availableSlots.map((s: any) => ({
+            timeStr: s.startTime,
+            displayTime: ActionUtils.formatTime12h(s.startTime),
+          }));
+          const slotMenu = this.templates.buildTimeSlotMenu(slotRows, false, SlotWindowType.EARLIEST, {
+            isToday,
+            nowMinutes,
+            salonName: salon.name,
+          });
+          slotMenu.bodyText = `👋 Welcome back! Your previous slot for *${selectedService?.name || 'Service'}* at *${formattedTime}* has passed or was booked. Please select a new time:`;
+          await this.sendMessage(cleanNumber, slotMenu, phoneNumberId, salonId);
+          return { replyMessage: slotMenu.bodyText, state: ConversationState.SELECT_TIME };
+        } else {
+          // No slots left on that date -> demote to SELECT_DATE
+          const openDates = await this.availabilityService.findAvailableDates(
+            salon.id,
+            conversation.selectedServiceId,
+            conversation.selectedStaffId || undefined,
+            7,
+          );
+          const dateMenu = this.templates.buildDateSelectionMenu(openDates);
+          dateMenu.bodyText = `👋 Welcome back! All slots for *${selectedService?.name || 'Service'}* on *${formattedDate}* are now taken. Please choose another date:`;
+          await this.sendMessage(cleanNumber, dateMenu, phoneNumberId, salonId);
+          return { replyMessage: dateMenu.bodyText, state: ConversationState.SELECT_DATE };
+        }
+      }
+
+      const isUrgentWithin15Min = minutesUntilSlot >= 0 && minutesUntilSlot < 15;
       const confirmPrompt = this.templates.buildBookingConfirmationPrompt({
         serviceName: selectedService?.name || 'Service',
         staffName: selectedStaff?.name || 'Any Specialist',
@@ -158,6 +226,9 @@ export class DraftRecoveryAction {
     // Step 2. If at Select Time step and date is selected
     if (conversation.selectedDate && conversation.selectedServiceId) {
       const dateStr = TimeUtility.formatDateToISO(conversation.selectedDate, tz);
+      const nowDt = TimeUtility.now(tz);
+      const isToday = dateStr === nowDt.toISODate();
+      const nowMinutes = nowDt.hour * 60 + nowDt.minute;
       const availability = await this.availabilityService.getAvailableSlots(
         salon.id,
         conversation.selectedServiceId,
@@ -169,7 +240,11 @@ export class DraftRecoveryAction {
           timeStr: s.startTime,
           displayTime: ActionUtils.formatTime12h(s.startTime),
         }));
-        const slotMenu = this.templates.buildTimeSlotMenu(slotRows);
+        const slotMenu = this.templates.buildTimeSlotMenu(slotRows, false, SlotWindowType.EARLIEST, {
+          isToday,
+          nowMinutes,
+          salonName: salon.name,
+        });
         await this.sendMessage(cleanNumber, slotMenu, phoneNumberId, salonId);
         return { replyMessage: slotMenu.bodyText, state: ConversationState.SELECT_TIME };
       }

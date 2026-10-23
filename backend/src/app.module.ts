@@ -19,6 +19,10 @@ import { AppointmentsModule } from './modules/salon-admin/appointments/appointme
 import { CustomersModule } from './modules/salon-admin/customers/customers.module';
 import { ReportsModule } from './modules/salon-admin/reports/reports.module';
 import { QuickBookingModule } from './modules/salon-admin/quick-booking/quick-booking.module';
+import { BreaksModule } from './modules/salon-admin/breaks/breaks.module';
+import { WorkingHoursModule } from './modules/salon-admin/working-hours/working-hours.module';
+import { ClosuresModule } from './modules/salon-admin/closures/closures.module';
+import { PersonalProfileModule } from './modules/salon-admin/personal-profile/personal-profile.module';
 
 // Customer Channels
 import { WhatsAppModule } from './modules/channels/whatsapp/whatsapp.module';
@@ -57,6 +61,10 @@ import { CorrelationIdMiddleware } from './common/middleware/correlation-id.midd
     CustomersModule,
     ReportsModule,
     QuickBookingModule,
+    BreaksModule,
+    WorkingHoursModule,
+    ClosuresModule,
+    PersonalProfileModule,
 
     // Customer Channels
     WhatsAppModule,

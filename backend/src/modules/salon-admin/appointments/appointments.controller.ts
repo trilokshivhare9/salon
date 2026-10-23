@@ -6,6 +6,7 @@ import {
   Body,
   Param,
   Query,
+  Headers,
   UseGuards,
   Sse,
   MessageEvent,
@@ -23,9 +24,11 @@ import { CurrentSalonId } from '../../../common/decorators/tenant.decorator';
 import { CurrentUser, AuthenticatedUser } from '../../../common/decorators/current-user.decorator';
 import { Public } from '../../../common/decorators/public.decorator';
 import { AppointmentStatus, AdminRole } from '@prisma/client';
-import { Observable } from 'rxjs';
+import { Observable, interval, merge } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { RemindersService } from './reminders/reminders.service';
+import { AppointmentQueueService } from './queue/queue.service';
+import { GetQueueQueryDto } from './queue/dto/get-queue.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('appointments')
@@ -33,6 +36,7 @@ export class AppointmentsController {
   constructor(
     private readonly appointmentsService: AppointmentsService,
     private readonly remindersService: RemindersService,
+    private readonly queueService: AppointmentQueueService,
   ) { }
 
   @Public()
@@ -45,12 +49,26 @@ export class AppointmentsController {
   @Sse('stream/:salonId')
   stream(
     @Param('salonId') salonId: string,
+    @Headers('last-event-id') lastEventIdHeader?: string,
+    @Query('lastEventId') lastEventIdQuery?: string,
   ): Observable<MessageEvent> {
-    return this.appointmentsService.getSalonEvents(salonId).pipe(
+    const lastEventId = lastEventIdHeader || lastEventIdQuery;
+    const events$ = this.appointmentsService.getSalonEvents(salonId, lastEventId).pipe(
       map((event) => ({
+        id: String(event.id || ''),
         data: event,
-      })),
+      } as MessageEvent)),
     );
+
+    // 20-second heartbeat keep-alive ping prevents reverse proxies and carrier NAT from silently terminating the socket
+    const heartbeat$ = interval(20000).pipe(
+      map(() => ({
+        id: 'ping',
+        data: { type: 'PING', timestamp: new Date().toISOString() },
+      } as MessageEvent)),
+    );
+
+    return merge(events$, heartbeat$);
   }
 
   @Get()
@@ -72,6 +90,14 @@ export class AppointmentsController {
       status,
       customerId,
     });
+  }
+
+  @Get('queue')
+  async getQueue(
+    @CurrentSalonId() salonId: string,
+    @Query() query: GetQueueQueryDto,
+  ) {
+    return this.queueService.getQueue(salonId, query);
   }
 
   @Get(':id')
@@ -140,6 +166,7 @@ export class AppointmentsController {
     @Param('id') appointmentId: string,
     @Body('newStartAt') newStartAt: string,
     @Body('newEndAt') newEndAt: string,
+    @Body('proposedStylistId') proposedStylistId?: string,
   ) {
     return this.appointmentsService.proposeAdminReschedule(
       salonId,
@@ -147,6 +174,16 @@ export class AppointmentsController {
       new Date(newStartAt),
       new Date(newEndAt),
       user.id,
+      proposedStylistId,
     );
+  }
+
+  @Post(':id/addons')
+  async addAddon(
+    @CurrentSalonId() salonId: string,
+    @Param('id') appointmentId: string,
+    @Body('serviceId') serviceId: string,
+  ) {
+    return this.appointmentsService.addServiceToAppointment(salonId, appointmentId, serviceId);
   }
 }

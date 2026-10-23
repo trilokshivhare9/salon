@@ -11,8 +11,10 @@ import { WhatsAppService } from '../whatsapp.service';
 import { ConversationState, AppointmentStatus, CancelledBy } from '@prisma/client';
 import { DateTime } from 'luxon';
 import { TimeUtility } from '../../../../common/utils/time.utility';
+import { BOOKING_POLICY } from '../../../../common/constants/booking-policy.constants';
 import { ActionContext, ActionResult } from './shared/action-context';
 import { ActionUtils } from './shared/action-utils';
+import { SlotWindowType } from '../services/time-slot-window.engine';
 
 @Injectable()
 export class AppointmentAction {
@@ -32,7 +34,7 @@ export class AppointmentAction {
     private readonly rescheduleService: RescheduleService,
     @Inject(forwardRef(() => WhatsAppService))
     @Optional() private readonly whatsAppService?: WhatsAppService,
-  ) {}
+  ) { }
 
   private async sendMessage(
     toPhone: string,
@@ -55,15 +57,14 @@ export class AppointmentAction {
 
     // If customer has only an unaccepted pending request, cancel directly with ZERO penalty / strikes
     if (!activeAppointment && pendingAppointment) {
-      await this.prisma.appointment.update({
-        where: { id: pendingAppointment.id },
-        data: {
-          status: AppointmentStatus.CANCELLED,
-          cancellationReason: 'CANCELLED_BY_CLIENT_BEFORE_ACCEPTANCE',
-          cancelledAt: new Date(),
-          cancelledBy: CancelledBy.USER,
-          penaltyApplied: false,
-        },
+      await this.cancellationService.cancelBooking(salonId, pendingAppointment.id, {
+        source: 'CUSTOMER_WHATSAPP',
+        fault: 'CLIENT',
+        noPenalty: true,
+        reason: 'CANCELLED_BY_CLIENT_BEFORE_ACCEPTANCE',
+        cancelledBy: CancelledBy.USER,
+        skipWhatsAppNotify: true,
+        skipMoveUp: true,
       });
       await this.session.updateConversationState(
         conversation.id,
@@ -180,16 +181,17 @@ export class AppointmentAction {
         return { replyMessage: payload.bodyText, state: conversation.state };
       }
 
+      const horizon = salon.maxAdvanceDays || BOOKING_POLICY.MAX_ADVANCE_BOOKING_DAYS;
       const openDates = await this.availabilityService.findAvailableDates(
         salonId,
         apptToReschedule.serviceId,
         apptToReschedule.stylistId,
-        2,
+        horizon,
         apptToReschedule.id,
       );
 
       if (openDates.length === 0) {
-        const reply = `⚠️ No available slots found in the next 7 days to reschedule. Please contact the salon directly at *${salon.phone || 'our desk'}*.`;
+        const reply = `⚠️ No available slots found in the next ${horizon} days to reschedule. Please contact the salon directly at *${salon.phone || 'our desk'}*.`;
         await this.sendMessage(
           cleanNumber,
           {
@@ -273,7 +275,63 @@ export class AppointmentAction {
         displayTime: ActionUtils.formatTime12h(s.startTime),
       }));
 
-      const slotMenu = this.templates.buildTimeSlotMenu(slotRows, true);
+      const nowDt = TimeUtility.now(tz);
+      const isToday = dateStr === nowDt.toISODate();
+      const nowMinutes = nowDt.hour * 60 + nowDt.minute;
+
+      const slotMenu = this.templates.buildTimeSlotMenu(slotRows, true, SlotWindowType.EARLIEST, {
+        isToday,
+        nowMinutes,
+      });
+      await this.sendMessage(cleanNumber, slotMenu, phoneNumberId, salonId);
+      return { replyMessage: slotMenu.bodyText, state: ConversationState.SELECT_RESCHEDULE_TIME };
+    }
+
+    // Step 2.5: Reschedule Slot Window Navigation (Afternoon / Evening / Earliest)
+    if (input.startsWith('rwindow_')) {
+      const targetWindow = input.replace('rwindow_', '') as SlotWindowType;
+      const appt = activeAppointment;
+
+      if (!appt || !conversation.selectedDate) {
+        const reply = `⚠️ Reschedule session expired or invalid. Please start again.`;
+        await this.sendMessage(
+          cleanNumber,
+          {
+            bodyText: reply,
+            interactiveType: 'button',
+            buttons: [{ id: WhatsAppButtonId.START, title: '🏠 Main Menu' }],
+          },
+          phoneNumberId,
+          salonId,
+        );
+        return { replyMessage: reply, state: ConversationState.START };
+      }
+
+      const dateStr = TimeUtility.toDateString(conversation.selectedDate);
+      const serviceId = appt.serviceId || appt.service?.id;
+      const staffId = appt.stylistId || undefined;
+
+      const availability = await this.availabilityService.getAvailableSlots(
+        salonId,
+        serviceId,
+        dateStr,
+        staffId,
+        appt.id,
+      );
+
+      const slotRows = (availability.availableSlots || []).map((s) => ({
+        timeStr: s.startTime,
+        displayTime: ActionUtils.formatTime12h(s.startTime),
+      }));
+
+      const nowDt = TimeUtility.now(tz);
+      const isToday = dateStr === nowDt.toISODate();
+      const nowMinutes = nowDt.hour * 60 + nowDt.minute;
+
+      const slotMenu = this.templates.buildTimeSlotMenu(slotRows, true, targetWindow, {
+        isToday,
+        nowMinutes,
+      });
       await this.sendMessage(cleanNumber, slotMenu, phoneNumberId, salonId);
       return { replyMessage: slotMenu.bodyText, state: ConversationState.SELECT_RESCHEDULE_TIME };
     }
@@ -300,25 +358,69 @@ export class AppointmentAction {
 
       const dateStr = TimeUtility.toDateString(conversation.selectedDate);
 
-      await this.rescheduleService.rescheduleAppointment(
-        salonId,
-        appt.id,
-        {
-          newDate: dateStr,
-          newStartTime,
-          stylistId: appt.stylistId || undefined,
-        },
-        undefined,
-        this.appointmentsService,
-      );
+      try {
+        await this.rescheduleService.rescheduleAppointment(
+          salonId,
+          appt.id,
+          {
+            newDate: dateStr,
+            newStartTime,
+            stylistId: appt.stylistId || undefined,
+          },
+          undefined,
+          this.appointmentsService,
+        );
 
-      await this.session.updateConversationState(conversation.id, ConversationState.START, appt.id);
-      const successReply = this.templates.buildRescheduleSuccessReply(
-        dateStr,
-        ActionUtils.formatTime12h(newStartTime),
-      );
-      await this.sendMessage(cleanNumber, successReply, phoneNumberId, salonId);
-      return { replyMessage: successReply.bodyText, state: ConversationState.START };
+        await this.session.updateConversationState(conversation.id, ConversationState.START, appt.id);
+        const successReply = this.templates.buildRescheduleSuccessReply(
+          dateStr,
+          ActionUtils.formatTime12h(newStartTime),
+        );
+        await this.sendMessage(cleanNumber, successReply, phoneNumberId, salonId);
+        return { replyMessage: successReply.bodyText, state: ConversationState.START };
+      } catch (err: any) {
+        this.logger.warn(`[AppointmentAction] Reschedule failed for appt=${appt.id}: ${err?.message}`);
+
+        // Pillar 5: Reschedule Slot Conflict Resiliency
+        // Fetch remaining slots for the chosen reschedule date
+        const availability = await this.availabilityService.getAvailableSlots(
+          salonId,
+          appt.serviceId,
+          dateStr,
+          appt.stylistId || undefined,
+          appt.id,
+        );
+
+        if (availability.availableSlots && availability.availableSlots.length > 0) {
+          const slotRows = availability.availableSlots.map((s) => ({
+            timeStr: s.startTime,
+            displayTime: ActionUtils.formatTime12h(s.startTime),
+          }));
+          const nowDt = TimeUtility.now(tz);
+          const isToday = dateStr === nowDt.toISODate();
+          const nowMinutes = nowDt.hour * 60 + nowDt.minute;
+
+          const slotMenu = this.templates.buildTimeSlotMenu(slotRows, true, SlotWindowType.EARLIEST, {
+            isToday,
+            nowMinutes,
+          });
+          slotMenu.bodyText = `⚠️ *Slot Unavailable*\n\nThe slot at *${ActionUtils.formatTime12h(newStartTime)}* was just booked or is no longer available. Please select another time for your reschedule on *${dateStr}*:`;
+          await this.sendMessage(cleanNumber, slotMenu, phoneNumberId, salonId);
+          return { replyMessage: slotMenu.bodyText, state: ConversationState.SELECT_RESCHEDULE_TIME };
+        } else {
+          const altDates = await this.availabilityService.findAvailableDates(
+            salonId,
+            appt.serviceId,
+            appt.stylistId,
+            2,
+            appt.id,
+          );
+          const dateMenu = this.templates.buildDateSelectionMenu(altDates, true);
+          dateMenu.bodyText = `⚠️ No more slots available on *${dateStr}*. Please select another date for your reschedule:`;
+          await this.sendMessage(cleanNumber, dateMenu, phoneNumberId, salonId);
+          return { replyMessage: dateMenu.bodyText, state: ConversationState.SELECT_RESCHEDULE_DATE };
+        }
+      }
     }
 
     return { replyMessage: '', state: conversation.state };
@@ -338,7 +440,13 @@ export class AppointmentAction {
         include: { service: true, stylist: true },
       });
 
-      if (!appt || appt.status !== AppointmentStatus.PENDING_RESCHEDULE || !appt.proposedStartAt || !appt.proposedEndAt) {
+      if (
+        !appt ||
+        appt.status !== AppointmentStatus.PENDING_RESCHEDULE ||
+        !appt.proposedStartAt ||
+        !appt.proposedEndAt ||
+        (appt.expiresAt && new Date() > appt.expiresAt)
+      ) {
         const staleReply = this.templates.buildRescheduleStaleExpiredReply();
         await this.sendMessage(cleanNumber, staleReply, phoneNumberId, salonId);
         return { replyMessage: staleReply.bodyText, state: ConversationState.START };
@@ -346,25 +454,36 @@ export class AppointmentAction {
 
       const newStart = appt.proposedStartAt;
       const newEnd = appt.proposedEndAt;
+      const newStylistId = (appt as any).proposedStylistId || appt.stylistId;
 
-      await this.prisma.appointment.update({
-        where: { id: apptId },
-        data: {
-          startAt: newStart,
-          endAt: newEnd,
-          appointmentDate: TimeUtility.toDbDate(newStart),
-          status: AppointmentStatus.CONFIRMED,
-          proposedStartAt: null,
-          proposedEndAt: null,
-          proposedByAdminId: null,
-          notes: `${appt.notes || ''} [Rescheduled by salon admin and accepted by customer.]`.trim(),
-        },
+      await this.appointmentsService.getModifierService().modifyStatus(salonId, apptId, {
+        startAt: newStart,
+        endAt: newEnd,
+        appointmentDate: TimeUtility.toDbDate(newStart),
+        stylistId: newStylistId,
+        status: AppointmentStatus.CONFIRMED,
+        proposedStartAt: null,
+        proposedEndAt: null,
+        proposedStylistId: null,
+        proposedByAdminId: null,
+        expiresAt: null,
+        notes: `${appt.notes || ''} [Rescheduled by salon admin and accepted by customer.]`.trim(),
+        skipTransitionValidation: true,
       });
+
+      let finalStylistName = appt.stylist?.name || 'Stylist';
+      if ((appt as any).proposedStylistId && (appt as any).proposedStylistId !== appt.stylistId) {
+        const peer = await this.prisma.stylist.findUnique({
+          where: { id: (appt as any).proposedStylistId },
+          select: { name: true },
+        });
+        if (peer?.name) finalStylistName = peer.name;
+      }
 
       const newTimeStr = TimeUtility.formatTime12h(newStart, tz);
       const replyPayload = this.templates.buildRescheduleAcceptedReply({
         salonName: salon.name,
-        stylistName: appt.stylist?.name || 'Stylist',
+        stylistName: finalStylistName,
         newTimeStr,
       });
 
@@ -387,32 +506,17 @@ export class AppointmentAction {
         return { replyMessage: staleReply.bodyText, state: ConversationState.START };
       }
 
-      const updated = await this.prisma.appointment.update({
-        where: { id: apptId },
-        data: {
-          status: AppointmentStatus.CANCELLED,
-          cancellationReason: 'DECLINED_SALON_RESCHEDULE',
-          cancelledAt: new Date(),
-          cancelledBy: CancelledBy.USER,
-          penaltyApplied: false,
-          proposedStartAt: null,
-          proposedEndAt: null,
-          proposedByAdminId: null,
-          notes: `${appt.notes || ''} [Salon reschedule declined by customer. Cancelled without penalty.]`.trim(),
-        },
-        include: { service: true, stylist: true, salonUser: { include: { user: true } } },
+      const res = await this.cancellationService.cancelBooking(salonId, apptId, {
+        source: 'CUSTOMER_WHATSAPP',
+        fault: 'CLIENT',
+        noPenalty: true,
+        reason: 'DECLINED_SALON_RESCHEDULE',
+        cancelledBy: CancelledBy.USER,
+        skipWhatsAppNotify: true,
       });
 
       const replyPayload = this.templates.buildRescheduleDeclinedReply();
       await this.sendMessage(cleanNumber, replyPayload, phoneNumberId, salonId);
-
-      this.appointmentsService?.emitSalonEvent(salonId, 'STATUS_UPDATED', updated);
-      this.appointmentsService?.emitSalonEvent(salonId, 'APPOINTMENT_UPDATED', updated);
-      this.appointmentsService?.emitSalonEvent(salonId, 'BOOKING_CANCELLED', updated);
-
-      if (this.cancellationService && typeof (this.cancellationService as any).triggerSmartMoveUpBroadcast === 'function') {
-        await (this.cancellationService as any).triggerSmartMoveUpBroadcast(updated).catch(() => {});
-      }
 
       return { replyMessage: replyPayload.bodyText, state: ConversationState.START };
     }

@@ -41,11 +41,7 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
     const cached = this.salonTimezoneCache.get(salonId);
     if (cached) return cached;
 
-    const salon = await this.prisma.salon.findUnique({
-      where: { id: salonId },
-      select: { timezone: true },
-    });
-    const tz = salon?.timezone || 'Asia/Kolkata';
+    const tz = await TimeUtility.getSalonTimezone(this.prisma, salonId);
     this.salonTimezoneCache.set(salonId, tz);
     return tz;
   }
@@ -178,16 +174,12 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
             { proposedStartAt: { gte: dayStart, lte: dayEnd } },
           ],
         },
-        include: {
-          salonUser: {
-            include: {
-              user: true,
-            },
-          },
-          stylist: true,
-          service: true,
+        select: {
+          id: true,
+          status: true,
+          price: true,
+          source: true,
         },
-        orderBy: { startAt: 'asc' },
       }),
 
       // 2. Counts
@@ -219,7 +211,6 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
       completed: 0,
       cancelled: 0,
       rejected: 0,
-      noShow: 0,
       pendingAcceptance: 0,
       pendingReschedule: 0,
     };
@@ -264,13 +255,7 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
       },
       whatsappQuota,
       salon: salonInfo,
-      todayAppointments: todayAppointments.map((appt: any) => ({
-        ...appt,
-        customer: appt.salonUser?.user,
-        staff: appt.stylist,
-        startTime: appt.startAt,
-        endTime: appt.endAt,
-      })),
+      todayAppointments: [],
     };
   }
 }

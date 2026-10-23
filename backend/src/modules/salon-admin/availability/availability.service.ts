@@ -8,7 +8,9 @@ import { DateTime } from 'luxon';
 import { DayOfWeek, AppointmentStatus } from '@prisma/client';
 import { AvailabilityEngineService, MinuteInterval } from './availability-engine.service';
 import { TimeUtility } from '../../../common/utils/time.utility';
+import { BOOKING_POLICY } from '../../../common/constants/booking-policy.constants';
 import { SlotSqueezePolicy } from './policies/slot-squeeze.policy';
+import { StylistStatusEngine, StylistOperationalStatus } from '../staff/engines/stylist-status.engine';
 
 export type AvailabilityStatus =
   | 'AVAILABLE'
@@ -37,6 +39,16 @@ export interface AvailabilityResult {
   availableSlots: AvailableSlotResponse[];
   status: AvailabilityStatus;
   statusReason?: string;
+}
+
+export interface QuickBookingOperatingStatus {
+  isOpen: boolean;
+  reason?: 'SALON_CLOSED_TODAY' | 'PAST_OPERATING_HOURS' | 'INSUFFICIENT_TIME_REMAINING' | 'FULLY_BOOKED_TODAY';
+  closingTime?: string;
+  closingTimeFormatted?: string;
+  nextOpenDate?: string;
+  nextOpeningTimeFormatted?: string;
+  salonTimezone: string;
 }
 
 @Injectable()
@@ -90,6 +102,7 @@ export class AvailabilityService {
     private prisma: PrismaService,
     private engine: AvailabilityEngineService,
     private squeezePolicy: SlotSqueezePolicy,
+    private statusEngine?: StylistStatusEngine,
   ) { }
 
   private parseTimeStringToMinutes(timeStr: string): number {
@@ -149,7 +162,7 @@ export class AvailabilityService {
       throw new NotFoundException('Salon is inactive or not found.');
     }
 
-    const timezone = salon.timezone || 'Asia/Kolkata';
+    const timezone = salon.timezone || TimeUtility.DEFAULT_TIMEZONE;
 
     // Parse date in salon local timezone
     const requestedDate = DateTime.fromISO(dateStr, { zone: timezone }).startOf('day');
@@ -173,7 +186,8 @@ export class AvailabilityService {
     }
 
     // Maximum advance days check
-    const maxDateAllowed = todayInSalonZone.plus({ days: salon.maxAdvanceDays });
+    const maxDays = salon.maxAdvanceDays || BOOKING_POLICY.MAX_ADVANCE_BOOKING_DAYS;
+    const maxDateAllowed = todayInSalonZone.plus({ days: maxDays });
     if (requestedDate > maxDateAllowed) {
       return {
         date: dateStr,
@@ -181,7 +195,7 @@ export class AvailabilityService {
         serviceDurationMinutes: 0,
         availableSlots: [],
         status: 'MAX_ADVANCE_EXCEEDED',
-        statusReason: `Bookings can only be made up to ${salon.maxAdvanceDays} days in advance.`,
+        statusReason: `Bookings can only be made up to ${maxDays} days in advance.`,
       };
     }
 
@@ -248,6 +262,9 @@ export class AvailabilityService {
           workingHours: {
             where: { dayOfWeek },
           },
+          breaks: {
+            where: { dayOfWeek },
+          },
         },
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       }),
@@ -255,15 +272,8 @@ export class AvailabilityService {
         where: {
           salonId,
           status: 'ACTIVE',
-          OR: [
-            {
-              startDate: { lte: targetDateObj },
-              endDate: { gte: targetDateObj },
-            },
-            {
-              absenceDate: targetDateObj,
-            },
-          ],
+          startDate: { lte: targetDateObj },
+          endDate: { gte: targetDateObj },
         },
       }),
     ]);
@@ -336,7 +346,7 @@ export class AvailabilityService {
         },
         ...(excludeAppointmentId ? { id: { not: excludeAppointmentId } } : {}),
       },
-      select: { stylistId: true, proposedStartAt: true, proposedEndAt: true },
+      select: { stylistId: true, proposedStylistId: true, proposedStartAt: true, proposedEndAt: true },
     });
 
     const appointmentsByStylist = new Map<string, { start: number; end: number }[]>();
@@ -353,15 +363,16 @@ export class AvailabilityService {
     }
 
     for (const prop of pendingProposals) {
-      if (!prop.stylistId || !prop.proposedStartAt || !prop.proposedEndAt) continue;
-      if (!appointmentsByStylist.has(prop.stylistId)) {
-        appointmentsByStylist.set(prop.stylistId, []);
+      const targetStylistId = prop.proposedStylistId || prop.stylistId;
+      if (!targetStylistId || !prop.proposedStartAt || !prop.proposedEndAt) continue;
+      if (!appointmentsByStylist.has(targetStylistId)) {
+        appointmentsByStylist.set(targetStylistId, []);
       }
       const propStartDt = DateTime.fromJSDate(prop.proposedStartAt).setZone(timezone);
       const propEndDt = DateTime.fromJSDate(prop.proposedEndAt).setZone(timezone);
       const startMin = propStartDt.hour * 60 + propStartDt.minute;
       const endMin = propEndDt.hour * 60 + propEndDt.minute;
-      appointmentsByStylist.get(prop.stylistId)!.push({ start: startMin, end: endMin });
+      appointmentsByStylist.get(targetStylistId)!.push({ start: startMin, end: endMin });
     }
 
     // 5. Continuous Free-Interval Calculation per Stylist via AvailabilityEngineService
@@ -401,10 +412,21 @@ export class AvailabilityService {
       const effectiveClose = shiftWindow.effectiveCloseMinutes;
       const busyIntervals: MinuteInterval[] = [...shiftWindow.effectiveBreaks];
 
+      // Add store-wide partial closure interval if active today
+      if (activeClosure && activeClosure.isPartialDay && activeClosure.startTime && activeClosure.endTime) {
+        const cOpen = this.parseTimeStringToMinutes(activeClosure.startTime);
+        const cClose = this.parseTimeStringToMinutes(activeClosure.endTime);
+        const clampedStart = Math.max(effectiveOpen, cOpen);
+        const clampedEnd = Math.min(effectiveClose, cClose);
+        if (clampedStart < clampedEnd) {
+          busyIntervals.push({ start: clampedStart, end: clampedEnd });
+        }
+      }
+
       // Check active leaves for this stylist on targetDateObj
       const activeAbsence = activeAbsences.find((ab) => ab.stylistId === stylist.id);
       if (activeAbsence) {
-        if (!activeAbsence.leavePortion || activeAbsence.leavePortion === 'FULL_DAY') {
+        if (!activeAbsence.isPartialDay) {
           continue; // Entire day unavailable
         }
         const leaveBlocks = this.engine.getLeaveBlockedIntervals(
@@ -545,13 +567,15 @@ export class AvailabilityService {
 
   /**
    * Dedicated Domain Method: Queries active stylists qualified/assigned to perform the specified service(s).
+   * Enriches stylists with their real-time operational status and customer-friendly text.
    */
   async getQualifiedStylists(
     salonId: string,
     serviceIdOrIds: string | string[],
-  ) {
+    options?: { targetDate?: string; enrichStatus?: boolean },
+  ): Promise<any[]> {
     const serviceIds = Array.isArray(serviceIdOrIds) ? serviceIdOrIds : [serviceIdOrIds];
-    return this.prisma.stylist.findMany({
+    const stylists = await this.prisma.stylist.findMany({
       where: {
         salonId,
         status: 'ACTIVE',
@@ -559,9 +583,29 @@ export class AvailabilityService {
       },
       include: {
         services: true,
+        workingHours: true,
       },
       orderBy: [{ name: 'asc' }, { createdAt: 'asc' }],
     });
+
+    if (options?.enrichStatus === false || !this.statusEngine) {
+      return stylists;
+    }
+
+    try {
+      const salon = await this.getCachedSalon(salonId);
+      const timezone = salon?.timezone || TimeUtility.DEFAULT_TIMEZONE;
+
+      const statusMap = await this.statusEngine.resolveSalonStaffStatuses(salonId, {
+        targetDate: options?.targetDate,
+        stylists,
+        timezone,
+      });
+
+      return stylists.map((st) => this.statusEngine!.attachCustomerFacingStatus(st, statusMap.get(st.id)));
+    } catch {
+      return stylists;
+    }
   }
 
   /**
@@ -571,7 +615,7 @@ export class AvailabilityService {
     salonId: string,
     serviceIdOrIds: string | string[],
     staffId?: string | null,
-    limit: number = 2,
+    limit: number = BOOKING_POLICY.MAX_ADVANCE_BOOKING_DAYS,
     excludeApptId?: string,
   ): Promise<{ dateStr: string; displayLabel: string }[]> {
     const salon = await this.prisma.salon.findUnique({
@@ -579,12 +623,12 @@ export class AvailabilityService {
       select: { timezone: true, maxAdvanceDays: true },
     });
     const timezone = salon?.timezone || TimeUtility.DEFAULT_TIMEZONE;
-    const maxAdvance = salon?.maxAdvanceDays || 30;
+    const maxAdvance = salon?.maxAdvanceDays || BOOKING_POLICY.MAX_ADVANCE_BOOKING_DAYS;
 
     const results: { dateStr: string; displayLabel: string }[] = [];
     const now = TimeUtility.now(timezone);
     const startDt = now.startOf('day');
-    const scanDays = Math.min(14, maxAdvance);
+    const scanDays = Math.min(maxAdvance, BOOKING_POLICY.MAX_ADVANCE_BOOKING_DAYS);
 
     // Parallel Batched Scanning: Scan candidate days in concurrent waves of 3 days
     // Drops latency from 13.85 seconds (sequential waterfall) down to ~1.0 second
@@ -679,6 +723,134 @@ export class AvailabilityService {
     }
 
     return null;
+  }
+
+  /**
+   * Evaluates if Quick Booking (same-day in-salon express walk-in) can be fulfilled right now.
+   * Performs high-speed $O(1)$ memory checks for closures, working hours, and capacity feasibility.
+   */
+  async getQuickBookingOperatingStatus(
+    salonId: string,
+    tzOverride?: string,
+  ): Promise<QuickBookingOperatingStatus> {
+    const salon = await this.getCachedSalon(salonId);
+    if (!salon || salon.status !== 'ACTIVE') {
+      return { isOpen: false, reason: 'SALON_CLOSED_TODAY', salonTimezone: tzOverride || TimeUtility.DEFAULT_TIMEZONE };
+    }
+
+    const timezone = tzOverride || salon.timezone || TimeUtility.DEFAULT_TIMEZONE;
+    const nowInSalonZone = DateTime.now().setZone(timezone);
+    const todayStr = nowInSalonZone.toISODate();
+    const targetDateObj = TimeUtility.toDbDate(todayStr);
+
+    // Determine tomorrow's opening time for friendly customer redirection
+    const tomorrow = nowInSalonZone.plus({ days: 1 });
+    const tomorrowDay = this.getDayOfWeekEnum(tomorrow);
+    const tomorrowHours = await this.getCachedSalonWorkingHours(salonId, tomorrowDay);
+    const nextOpeningTimeFormatted =
+      tomorrowHours && !tomorrowHours.isClosed
+        ? TimeUtility.formatTime12h(tomorrowHours.startTime)
+        : '09:00 AM';
+
+    // 1. Check Full-Day Salon Closures
+    const activeClosure = await this.prisma.salonClosure.findFirst({
+      where: {
+        salonId,
+        startDate: { lte: targetDateObj },
+        endDate: { gte: targetDateObj },
+      },
+    });
+
+    if (activeClosure && !activeClosure.isPartialDay) {
+      return {
+        isOpen: false,
+        reason: 'SALON_CLOSED_TODAY',
+        nextOpenDate: tomorrow.toISODate() || undefined,
+        nextOpeningTimeFormatted,
+        salonTimezone: timezone,
+      };
+    }
+
+    // 2. Check Salon Working Hours for Today
+    const dayOfWeek = this.getDayOfWeekEnum(nowInSalonZone);
+    const workingHours = await this.getCachedSalonWorkingHours(salonId, dayOfWeek);
+
+    if (!workingHours || workingHours.isClosed) {
+      return {
+        isOpen: false,
+        reason: 'SALON_CLOSED_TODAY',
+        nextOpenDate: tomorrow.toISODate() || undefined,
+        nextOpeningTimeFormatted,
+        salonTimezone: timezone,
+      };
+    }
+
+    // 3. Check Current Time vs Salon Closing Time
+    const closeMinutes = this.parseTimeStringToMinutes(workingHours.endTime);
+    const currentMinutes = nowInSalonZone.hour * 60 + nowInSalonZone.minute;
+    const closingTimeFormatted = TimeUtility.formatTime12h(workingHours.endTime);
+
+    if (currentMinutes >= closeMinutes) {
+      return {
+        isOpen: false,
+        reason: 'PAST_OPERATING_HOURS',
+        closingTime: workingHours.endTime,
+        closingTimeFormatted,
+        nextOpenDate: tomorrow.toISODate() || undefined,
+        nextOpeningTimeFormatted,
+        salonTimezone: timezone,
+      };
+    }
+
+    // 4. Check Minimum Service Buffer (Fastest Active Service in Salon)
+    const shortestService = await this.prisma.service.findFirst({
+      where: { salonId, status: 'ACTIVE' },
+      orderBy: { durationMinutes: 'asc' },
+      select: { id: true, durationMinutes: true },
+    });
+
+    const minDuration = shortestService?.durationMinutes || 15;
+    if (currentMinutes + minDuration > closeMinutes) {
+      return {
+        isOpen: false,
+        reason: 'INSUFFICIENT_TIME_REMAINING',
+        closingTime: workingHours.endTime,
+        closingTimeFormatted,
+        nextOpenDate: tomorrow.toISODate() || undefined,
+        nextOpeningTimeFormatted,
+        salonTimezone: timezone,
+      };
+    }
+
+    // 5. Shortest-Service Slot Feasibility Guard (Capacity Exhaustion Check)
+    if (shortestService) {
+      const shortestSlot = await this.findEarliestAvailableSlotToday(salonId, shortestService.id);
+      if (!shortestSlot) {
+        return {
+          isOpen: false,
+          reason: 'FULLY_BOOKED_TODAY',
+          closingTime: workingHours.endTime,
+          closingTimeFormatted,
+          nextOpenDate: tomorrow.toISODate() || undefined,
+          nextOpeningTimeFormatted,
+          salonTimezone: timezone,
+        };
+      }
+    }
+
+    return {
+      isOpen: true,
+      closingTime: workingHours.endTime,
+      closingTimeFormatted,
+      nextOpenDate: tomorrow.toISODate() || undefined,
+      nextOpeningTimeFormatted,
+      salonTimezone: timezone,
+    };
+  }
+
+  async isQuickBookingOperationalToday(salonId: string, tzOverride?: string): Promise<boolean> {
+    const status = await this.getQuickBookingOperatingStatus(salonId, tzOverride);
+    return status.isOpen;
   }
 }
 

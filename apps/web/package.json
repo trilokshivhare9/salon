@@ -10,5 +10,8 @@
   },
   "devDependencies": {
     "vite": "^5.2.11"
+  },
+  "dependencies": {
+    "@aryanjsx/indian-festivals": "^1.0.1"
   }
 }

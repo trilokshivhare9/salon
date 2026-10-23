@@ -103,11 +103,14 @@ export class WhatsAppSessionService {
         case ConversationState.SELECT_DATE:
           return input.startsWith('date_');
         case ConversationState.SELECT_TIME:
-          return input.startsWith('slot_');
+          return input.startsWith('slot_') || input.startsWith('window_') || input === 'btn_change_time' || input === 'btn_change_date' || input === 'cat_back';
         case ConversationState.SELECT_ADDON:
           return input.startsWith('addon_');
         case ConversationState.CONFIRMATION:
-          return ['btn_confirm_yes', 'btn_confirm_no', 'btn_confirm', 'btn_confirm_quick', 'quick_book_confirm'].includes(input) || input.startsWith('slot_');
+          return (
+            ['btn_confirm_yes', 'btn_confirm_no', 'btn_confirm', 'btn_confirm_quick', 'quick_book_confirm', 'btn_change_time', 'btn_change_date'].includes(input) ||
+            input.startsWith('slot_')
+          );
         case ConversationState.QUICK_BOOK_CONFIRM:
           return ['btn_confirm_quick', 'quick_book_confirm', 'confirm'].includes(input) || input === 'btn_services' || input === 'btn_start';
         default:
@@ -125,7 +128,7 @@ export class WhatsAppSessionService {
         case ConversationState.SELECT_RESCHEDULE_DATE:
           return input.startsWith('rdate_');
         case ConversationState.SELECT_RESCHEDULE_TIME:
-          return input.startsWith('rslot_');
+          return input.startsWith('rslot_') || input.startsWith('rwindow_');
         default:
           if (conversationState === ConversationState.ACTIVE_HUB) return true;
           return false;
@@ -139,6 +142,8 @@ export class WhatsAppSessionService {
         input.startsWith('rdate_') ||
         input.startsWith('slot_') ||
         input.startsWith('rslot_') ||
+        input.startsWith('window_') ||
+        input.startsWith('rwindow_') ||
         input.startsWith('svc_') ||
         input.startsWith('staff_') ||
         ['btn_confirm_yes', 'btn_confirm', 'btn_cancel_yes', 'btn_eta_arrived', 'btn_eta_late_15'].includes(input);

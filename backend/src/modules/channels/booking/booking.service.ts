@@ -4,6 +4,7 @@ import { AvailabilityService } from '../../salon-admin/availability/availability
 import { AppointmentsService } from '../../salon-admin/appointments/appointments.service';
 import { CreateAppointmentDto } from '../../salon-admin/appointments/dto/create-appointment.dto';
 import { BookingSource } from '@prisma/client';
+import { resolveSalonDirectionsUrl } from '../../../common/utils/location.utility';
 
 @Injectable()
 export class BookingService {
@@ -27,6 +28,10 @@ export class BookingService {
         city: true,
         state: true,
         country: true,
+        latitude: true,
+        longitude: true,
+        googleMapsUrl: true,
+        locationType: true,
         timezone: true,
         description: true,
         status: true,
@@ -70,8 +75,11 @@ export class BookingService {
       throw new NotFoundException('Salon not found or inactive.');
     }
 
+    const directionsUrl = resolveSalonDirectionsUrl(salon);
+
     return {
       ...salon,
+      directionsUrl,
       allowSpecificStaff: salon.allowSpecificStylist,
       staff: salon.stylists,
     };

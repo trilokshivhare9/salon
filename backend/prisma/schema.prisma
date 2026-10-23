@@ -183,40 +183,6 @@ enum LeaveType {
   OTHER
 }
 
-enum LeavePortion {
-  FULL_DAY
-  FIRST_HALF
-  SECOND_HALF
-  CUSTOM_HOURS
-}
-
-enum LeaveProcessingStatus {
-  PENDING
-  PROCESSING
-  COMPLETED
-  FAILED
-}
-
-enum ReassignmentOutcome {
-  PENDING
-  AUTO_ASSIGNED
-  CUSTOMER_ACCEPTED
-  CUSTOMER_DECLINED
-  CUSTOMER_RESCHEDULED
-  CUSTOMER_CANCELLED
-  NO_REPLACEMENT
-  ADMIN_RESOLVED
-  EXPIRED
-}
-
-enum CustomerResponse {
-  ACCEPTED
-  DECLINED
-  RESCHEDULED
-  CANCELLED
-  NO_RESPONSE
-}
-
 // -----------------------------------------------------------------------------
 // 1. ADMINS (Super Admin & Salon Owners)
 // -----------------------------------------------------------------------------
@@ -239,6 +205,7 @@ model Admin {
   sessions            UserSession[]
   createdAbsences     StylistAbsence[] @relation("AdminCreatedAbsences")
   createdClosures     SalonClosure[]   @relation("AdminCreatedClosures")
+  passwordResets      AdminPasswordReset[]
 
   @@index([email])
   @@index([salonId])
@@ -270,6 +237,26 @@ model UserSession {
 }
 
 // -----------------------------------------------------------------------------
+// 1C. ADMIN PASSWORD RESETS (Email OTP Security & Brute-Force Guards)
+// -----------------------------------------------------------------------------
+model AdminPasswordReset {
+  id           String    @id @default(uuid())
+  adminId      String    @map("admin_id")
+  otpHash      String    @map("otp_hash")
+  attempts     Int       @default(0)
+  isUsed       Boolean   @default(false)
+  expiresAt    DateTime  @map("expires_at")
+  ipAddress    String?   @map("ip_address")
+  userAgent    String?   @map("user_agent")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  admin Admin @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([adminId, isUsed, expiresAt])
+  @@map("admin_password_resets")
+}
+
+// -----------------------------------------------------------------------------
 // 2. SALONS
 // -----------------------------------------------------------------------------
 model Salon {
@@ -284,6 +271,10 @@ model Salon {
   city                 String?
   state                String?
   country              String      @default("IN")
+  latitude             Float?      @map("latitude")
+  longitude            Float?      @map("longitude")
+  googleMapsUrl        String?     @map("google_maps_url")
+  locationType         String?     @default("MANUAL") @map("location_type")
   timezone             String      @default("Asia/Kolkata")
   description          String?
   status               SalonStatus @default(ACTIVE)
@@ -293,7 +284,7 @@ model Salon {
   defaultEndTime       String      @default("21:00") @map("default_end_time")
 
   // Booking settings
-  maxAdvanceDays       Int         @default(30) @map("max_advance_days")
+  maxAdvanceDays       Int         @default(3) @map("max_advance_days")
   cancelWindowHours    Int         @default(2) @map("cancel_window_hours")
   allowSpecificStylist Boolean     @default(true) @map("allow_specific_stylist")
 
@@ -306,6 +297,7 @@ model Salon {
   serviceCategories    ServiceCategory[]
   services             Service[]
   workingHours         SalonWorkingHours[]
+  stylistWorkingHours  StylistWorkingHours[]
   salonUsers           SalonUser[]
   appointments         Appointment[]
   conversations        Conversation[]
@@ -317,6 +309,8 @@ model Salon {
   stylistAbsences      StylistAbsence[]
   salonClosures        SalonClosure[]
   quickCode            SalonQuickCode?
+  salonBreaks          SalonBreak[]
+  stylistBreaks        StylistBreak[]
 
   @@index([createdByAdminId])
   @@index([slug])
@@ -404,6 +398,7 @@ model Stylist {
   workingHours         StylistWorkingHours[]
   appointments         Appointment[]
   absences             StylistAbsence[]
+  breaks               StylistBreak[]
 
   @@unique([salonId, id])
   @@index([salonId, status])
@@ -435,36 +430,77 @@ model SalonWorkingHours {
   isClosed       Boolean   @default(false) @map("is_closed")
   startTime      String    @map("start_time")       // "09:00"
   endTime        String    @map("end_time")         // "21:00"
-  breaks         Json?     @default("[]")
-  breakStartTime String?   @map("break_start_time") // "13:00" (legacy compatibility)
-  breakEndTime   String?   @map("break_end_time")   // "14:00" (legacy compatibility)
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
   salon          Salon     @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  stylistHours   StylistWorkingHours[]
 
   @@unique([salonId, dayOfWeek])
   @@map("salon_working_hours")
 }
 
 model StylistWorkingHours {
-  id               String    @id @default(uuid())
-  stylistId        String    @map("stylist_id")
-  dayOfWeek        DayOfWeek @map("day_of_week")
-  isWorking        Boolean   @default(true) @map("is_working")
-  startTime        String    @map("start_time")       // "10:00"
-  endTime          String    @map("end_time")         // "18:00"
-  hasBreakOverride Boolean   @default(false) @map("has_break_override")
-  breaks           Json?     @default("[]")
-  breakStartTime   String?   @map("break_start_time") // "13:00" (legacy compatibility)
-  breakEndTime     String?   @map("break_end_time")   // "14:00" (legacy compatibility)
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
+  id                   String             @id @default(uuid())
+  salonId              String             @map("salon_id")
+  stylistId            String             @map("stylist_id")
+  salonWorkingHoursId  String?            @map("salon_working_hours_id")
+  dayOfWeek            DayOfWeek          @map("day_of_week")
+  isWorking            Boolean            @default(true) @map("is_working")
+  isCustomized         Boolean            @default(false) @map("is_customized")
+  startTime            String             @map("start_time")       // "10:00"
+  endTime              String             @map("end_time")         // "18:00"
+  createdAt            DateTime           @default(now()) @map("created_at")
+  updatedAt            DateTime           @updatedAt @map("updated_at")
 
-  stylist          Stylist   @relation(fields: [stylistId], references: [id], onDelete: Cascade)
+  salon                Salon              @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  stylist              Stylist            @relation(fields: [stylistId], references: [id], onDelete: Cascade)
+  salonWorkingHours    SalonWorkingHours? @relation(fields: [salonWorkingHoursId], references: [id], onDelete: SetNull)
 
   @@unique([stylistId, dayOfWeek])
+  @@index([salonId, stylistId, dayOfWeek])
+  @@index([salonWorkingHoursId])
   @@map("stylist_working_hours")
+}
+
+model SalonBreak {
+  id           String         @id @default(uuid())
+  salonId      String         @map("salon_id")
+  dayOfWeek    DayOfWeek      @map("day_of_week")
+  title        String         @db.VarChar(100)
+  startTime    String         @map("start_time") @db.VarChar(5) // "13:00"
+  endTime      String         @map("end_time") @db.VarChar(5)   // "14:00"
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+
+  salon        Salon          @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  stylistBreaks StylistBreak[]
+
+  @@unique([salonId, dayOfWeek, startTime, endTime])
+  @@index([salonId, dayOfWeek])
+  @@map("salon_breaks")
+}
+
+model StylistBreak {
+  id           String         @id @default(uuid())
+  salonId      String         @map("salon_id")
+  stylistId    String         @map("stylist_id")
+  salonBreakId String?        @map("salon_break_id")
+  dayOfWeek    DayOfWeek      @map("day_of_week")
+  title        String         @db.VarChar(100)
+  startTime    String         @map("start_time") @db.VarChar(5) // "12:30"
+  endTime      String         @map("end_time") @db.VarChar(5)   // "13:30"
+  isCustomized Boolean        @default(false) @map("is_customized")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+
+  salon        Salon          @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  stylist      Stylist        @relation(fields: [stylistId], references: [id], onDelete: Cascade)
+  salonBreak   SalonBreak?    @relation(fields: [salonBreakId], references: [id], onDelete: SetNull)
+
+  @@index([salonId, stylistId, dayOfWeek])
+  @@index([salonBreakId])
+  @@map("stylist_breaks")
 }
 
 // -----------------------------------------------------------------------------
@@ -548,11 +584,16 @@ model Appointment {
   proposedStartAt     DateTime?         @map("proposed_start_at") @db.Timestamptz
   proposedEndAt       DateTime?         @map("proposed_end_at") @db.Timestamptz
   proposedByAdminId   String?           @map("proposed_by_admin_id")
+  proposedStylistId   String?           @map("proposed_stylist_id")
 
   reminder2hSentAt    DateTime?         @map("reminder_2h_sent_at") @db.Timestamptz
   reminder10mSentAt   DateTime?         @map("reminder_10m_sent_at") @db.Timestamptz
   lateFollowUpSentAt  DateTime?         @map("late_follow_up_sent_at") @db.Timestamptz
   clientEtaStatus     ClientEtaStatus?  @map("client_eta_status")
+
+  // Operational Scheduler Columns (For Redis-based Reminder Engine)
+  nextActionAt        DateTime?         @map("next_action_at") @db.Timestamptz
+  nextActionType      String?           @map("next_action_type")
 
   createdAt           DateTime          @default(now()) @map("created_at")
   updatedAt           DateTime          @updatedAt @map("updated_at")
@@ -564,7 +605,6 @@ model Appointment {
   services            AppointmentService[]
   createdByAdmin      Admin?            @relation("AdminCreatedAppointments", fields: [createdByAdminId], references: [id], onDelete: SetNull)
   notifications       Notification[]
-  reassignments       BookingReassignment[]
 
   @@unique([salonId, id])
   @@index([salonId, appointmentDate])
@@ -572,6 +612,7 @@ model Appointment {
   @@index([stylistId, startAt, endAt])
   @@index([salonId, salonUserId, appointmentDate])
   @@index([salonId, status])
+  @@index([nextActionAt])
   @@map("appointments")
 }
 
@@ -799,23 +840,18 @@ model StylistAbsence {
 
   startDate             DateTime              @default(now()) @map("start_date") @db.Date
   endDate               DateTime              @default(now()) @map("end_date") @db.Date
-  absenceDate           DateTime?             @map("absence_date") @db.Date
+
+  isPartialDay          Boolean               @default(false) @map("is_partial_day")
+  startTime             String?               @map("start_time")
+  endTime               String?               @map("end_time")
 
   leaveType             LeaveType             @default(SICK_LEAVE) @map("leave_type")
-  leavePortion          LeavePortion          @default(FULL_DAY) @map("leave_portion")
-  customStartTime       String?               @map("custom_start_time")
-  customEndTime         String?               @map("custom_end_time")
 
   reason                String?
   notes                 String?
   status                AbsenceStatus         @default(ACTIVE)
-  processingStatus      LeaveProcessingStatus @default(COMPLETED) @map("processing_status")
 
   createdByAdminId      String?               @map("created_by_admin_id")
-
-  affectedBookingsCount Int                   @default(0) @map("affected_bookings_count")
-  reassignedCount       Int                   @default(0) @map("reassigned_count")
-  unresolvableCount     Int                   @default(0) @map("unresolvable_count")
 
   createdAt             DateTime              @default(now()) @map("created_at")
   updatedAt             DateTime              @updatedAt @map("updated_at")
@@ -823,54 +859,20 @@ model StylistAbsence {
   salon                 Salon                 @relation(fields: [salonId], references: [id], onDelete: Cascade)
   stylist               Stylist               @relation(fields: [stylistId], references: [id], onDelete: Cascade)
   createdByAdmin        Admin?                @relation("AdminCreatedAbsences", fields: [createdByAdminId], references: [id], onDelete: SetNull)
-  reassignments         BookingReassignment[]
 
   @@index([salonId, startDate, endDate])
   @@index([stylistId, startDate, endDate])
   @@map("stylist_absences")
 }
 
-model BookingReassignment {
-  id                    String              @id @default(uuid())
-  salonId               String              @map("salon_id")
-  appointmentId         String              @map("appointment_id")
-  absenceId             String              @map("absence_id")
-
-  originalStylistId     String              @map("original_stylist_id")
-  newStylistId          String?             @map("new_stylist_id")
-
-  originalStartAt       DateTime            @map("original_start_at") @db.Timestamptz
-  originalEndAt         DateTime            @map("original_end_at") @db.Timestamptz
-  newStartAt            DateTime?           @map("new_start_at") @db.Timestamptz
-  newEndAt              DateTime?           @map("new_end_at") @db.Timestamptz
-
-  outcome               ReassignmentOutcome @default(PENDING)
-  customerResponse      CustomerResponse?   @map("customer_response")
-
-  processedAt           DateTime?           @map("processed_at") @db.Timestamptz
-  customerRespondedAt   DateTime?           @map("customer_responded_at") @db.Timestamptz
-  notificationSentAt    DateTime?           @map("notification_sent_at") @db.Timestamptz
-  notificationFailed    Boolean             @default(false) @map("notification_failed")
-
-  createdAt             DateTime            @default(now()) @map("created_at")
-  updatedAt             DateTime            @updatedAt @map("updated_at")
-
-  absence               StylistAbsence      @relation(fields: [absenceId], references: [id], onDelete: Cascade)
-  appointment           Appointment         @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
-
-  @@unique([appointmentId, absenceId])
-  @@index([salonId, absenceId])
-  @@index([appointmentId])
-  @@map("booking_reassignments")
-}
-
 // -----------------------------------------------------------------------------
 // SALON CLOSURE & HOLIDAY MANAGEMENT
 // -----------------------------------------------------------------------------
 enum SalonClosureType {
-  HOLIDAY             // Advance planned holiday (Festivals, Public Holidays)
+  HOLIDAY             // Advance planned holiday (Public Holidays, Store Anniversary)
+  FESTIVAL            // Festival holiday (Diwali, Eid, Christmas, Holi, New Year, etc.)
   EMERGENCY_CLOSURE   // Last-minute emergency store closure (Power outage, Maintenance)
-  PARTIAL_DAY         // Partial day store closure (e.g. closing early at 4 PM)
+  OTHER               // Private events, renovations, staff training
 }
 
 model SalonClosure {
@@ -887,8 +889,6 @@ model SalonClosure {
 
   reason                String?
   notes                 String?
-  affectedBookingsCount Int              @default(0) @map("affected_bookings_count")
-  cancelledCount        Int              @default(0) @map("cancelled_count")
 
   createdByAdminId      String?          @map("created_by_admin_id")
 
@@ -901,4 +901,5 @@ model SalonClosure {
   @@index([salonId, startDate, endDate])
   @@map("salon_closures")
 }
+
 

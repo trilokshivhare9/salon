@@ -47,6 +47,23 @@ export const Icons = {
     <circle cx="12" cy="7" r="4"/>
   `, opts),
 
+  userCheck: (opts) => svg(`
+    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+    <circle cx="9" cy="7" r="4"/>
+    <polyline points="16 11 18 13 22 9"/>
+  `, opts),
+
+  navigation: (opts) => svg(`
+    <polygon points="3 11 22 2 13 21 11 13 3 11"/>
+  `, opts),
+
+  car: (opts) => svg(`
+    <path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.5 2.8C2.1 10.8 2 11 2 11.2V16c0 .6.4 1 1 1h2"/>
+    <circle cx="7" cy="17" r="2"/>
+    <path d="M9 17h6"/>
+    <circle cx="17" cy="17" r="2"/>
+  `, opts),
+
   queue: (opts) => svg(`
     <rect width="18" height="18" x="3" y="3" rx="2"/>
     <path d="M3 9h18"/>
@@ -150,6 +167,22 @@ export const Icons = {
     <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
   `, opts),
 
+  filter: (opts) => svg(`
+    <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
+  `, opts),
+
+  sliders: (opts) => svg(`
+    <line x1="4" y1="21" x2="4" y2="14"/>
+    <line x1="4" y1="10" x2="4" y2="3"/>
+    <line x1="12" y1="21" x2="12" y2="12"/>
+    <line x1="12" y1="8" x2="12" y2="3"/>
+    <line x1="20" y1="21" x2="20" y2="16"/>
+    <line x1="20" y1="12" x2="20" y2="3"/>
+    <line x1="1" y1="14" x2="7" y2="14"/>
+    <line x1="9" y1="8" x2="15" y2="8"/>
+    <line x1="17" y1="16" x2="23" y2="16"/>
+  `, opts),
+
   calendar: (opts) => svg(`
     <path d="M8 2v4"/>
     <path d="M16 2v4"/>
@@ -175,6 +208,10 @@ export const Icons = {
 
   chevronRight: (opts) => svg(`
     <path d="m9 18 6-6-6-6"/>
+  `, opts),
+
+  chevronDown: (opts) => svg(`
+    <polyline points="6 9 12 15 18 9"/>
   `, opts),
 
   arrowRight: (opts) => svg(`
@@ -277,6 +314,35 @@ export const Icons = {
     <circle cx="12" cy="12" r="10"/>
     <line x1="12" y1="8" x2="12" y2="12"/>
     <line x1="12" y1="16" x2="12.01" y2="16"/>
+  `, opts),
+
+  mail: (opts) => svg(`
+    <rect width="20" height="16" x="2" y="4" rx="2"/>
+    <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+  `, opts),
+
+  logOut: (opts) => svg(`
+    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+    <polyline points="16 17 21 12 16 7"/>
+    <line x1="21" y1="12" x2="9" y2="12"/>
+  `, opts),
+
+  history: (opts) => svg(`
+    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+    <path d="M3 3v5h5"/>
+    <polyline points="12 7 12 12 15 15"/>
+  `, opts),
+
+  sliders: (opts) => svg(`
+    <line x1="4" x2="4" y1="21" y2="14"/>
+    <line x1="4" x2="4" y1="10" y2="3"/>
+    <line x1="12" x2="12" y1="21" y2="12"/>
+    <line x1="12" x2="12" y1="8" y2="3"/>
+    <line x1="20" x2="20" y1="21" y2="16"/>
+    <line x1="20" x2="20" y1="12" y2="3"/>
+    <line x1="2" x2="6" y1="14" y2="14"/>
+    <line x1="10" x2="14" y1="8" y2="8"/>
+    <line x1="18" x2="22" y1="16" y2="16"/>
   `, opts),
 };
 

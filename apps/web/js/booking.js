@@ -39,7 +39,7 @@ export class BookingWizard {
   renderLoading() {
     this.container.innerHTML = `
       <div style="text-align: center; padding: 60px;">
-        <div style="font-size: 1.5rem; font-family: var(--font-heading); color: #818cf8;">Loading Salon Booking Portal...</div>
+        <div style="font-size: 1.5rem; font-family: var(--font-heading); color: #A855F7;">Loading Salon Booking Portal...</div>
       </div>
     `;
   }
@@ -52,8 +52,16 @@ export class BookingWizard {
         <div class="salon-hero">
           <h1 class="gradient-text">${salon.name}</h1>
           <p>${salon.description || 'Welcome to our online appointment booking portal.'}</p>
-          <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 6px;">
-            📍 ${salon.address || salon.city || 'India'} &nbsp;•&nbsp; 📞 ${salon.phone}
+          <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 6px; display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap;">
+            <span>📍 ${salon.address || salon.city || 'India'}</span>
+            <span>•</span>
+            <span>📞 ${salon.phone}</span>
+            ${salon.directionsUrl ? `
+              <span>•</span>
+              <a href="${salon.directionsUrl}" target="_blank" rel="noopener noreferrer" style="color: #a5b4fc; text-decoration: underline; font-weight: 600; display: inline-flex; align-items: center; gap: 3px;">
+                🚗 Directions ↗
+              </a>
+            ` : ''}
           </div>
         </div>
 
@@ -104,7 +112,7 @@ export class BookingWizard {
               <div style="font-weight: 700; font-size: 1.05rem;">${s.name}</div>
               <div style="color: var(--text-muted); font-size: 0.85rem; margin-top: 4px;">${s.description || ''}</div>
               <div style="display: flex; gap: 12px; margin-top: 8px; font-size: 0.85rem;">
-                <span style="color: #818cf8;">⏱️ ${s.durationMinutes} mins</span>
+                <span style="color: #A855F7;">⏱️ ${s.durationMinutes} mins</span>
                 <span class="badge" style="background: rgba(255,255,255,0.05); color: #cbd5e1;">${s.category || 'General'}</span>
               </div>
             </div>
@@ -169,10 +177,11 @@ export class BookingWizard {
   }
 
   renderStep3DateTime() {
-    // Generate next 10 dates
+    // Generate dates based on centralized booking policy (default: 3 days)
+    const maxDays = this.salon?.maxAdvanceDays || 3;
     const dates = [];
     const today = new Date();
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < maxDays; i++) {
       const d = new Date();
       d.setDate(today.getDate() + i);
       const isoStr = d.toISOString().split('T')[0];
@@ -224,7 +233,7 @@ export class BookingWizard {
       <h3 style="margin-bottom: 6px;">4. Customer Information</h3>
       <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 20px;">Enter your contact information for instant booking confirmation.</p>
 
-      <div style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: var(--radius-md); padding: 16px; margin-bottom: 20px;">
+      <div style="background: rgba(139, 61, 255, 0.08); border: 1px solid rgba(139, 61, 255, 0.2); border-radius: var(--radius-md); padding: 16px; margin-bottom: 20px;">
         <div style="font-size: 0.85rem; color: var(--text-secondary); text-transform: uppercase; font-weight: 700; margin-bottom: 8px;">Booking Summary</div>
         <div style="font-size: 1.1rem; font-weight: 700; color: #fff;">${selectedService.name} (₹${selectedService.price})</div>
         <div style="font-size: 0.9rem; color: var(--text-secondary); margin-top: 4px;">
@@ -287,7 +296,7 @@ export class BookingWizard {
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
             <div>
               <div style="font-size: 0.85rem; color: var(--text-muted);">Date & Time</div>
-              <div style="font-weight: 600; color: #818cf8;">${appt.date.split('T')[0]} at ${formatTime12h(appt.startTime)}</div>
+              <div style="font-weight: 600; color: #A855F7;">${appt.date.split('T')[0]} at ${formatTime12h(appt.startTime)}</div>
             </div>
             <div>
               <div style="font-size: 0.85rem; color: var(--text-muted);">Specialist</div>
@@ -297,7 +306,12 @@ export class BookingWizard {
 
           <div>
             <div style="font-size: 0.85rem; color: var(--text-muted);">Location</div>
-            <div style="font-size: 0.9rem; color: var(--text-secondary);">${appt.salon.name}, ${appt.salon.address || ''}</div>
+            <div style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 8px;">${appt.salon.name}, ${appt.salon.address || ''}</div>
+            ${appt.salon?.directionsUrl || this.state.salon?.directionsUrl ? `
+              <a href="${appt.salon?.directionsUrl || this.state.salon?.directionsUrl}" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-primary" style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.82rem; padding: 8px 16px; text-decoration: none; border-radius: 8px; margin-top: 4px;">
+                🚗 Open Google Directions ↗
+              </a>
+            ` : ''}
           </div>
         </div>
 

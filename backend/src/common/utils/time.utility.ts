@@ -1,5 +1,6 @@
 import { DateTime } from 'luxon';
 import { DayOfWeek } from '@prisma/client';
+import { BOOKING_POLICY } from '../constants/booking-policy.constants';
 
 /**
  * Universal Salon Time & Date Utility
@@ -7,6 +8,32 @@ import { DayOfWeek } from '@prisma/client';
  */
 export class TimeUtility {
   public static readonly DEFAULT_TIMEZONE = 'Asia/Kolkata';
+  public static readonly DEFAULT_MAX_ADVANCE_DAYS = BOOKING_POLICY.MAX_ADVANCE_BOOKING_DAYS;
+
+  /**
+   * Resolves the operational timezone for a salon from database or falls back to DEFAULT_TIMEZONE.
+   * Centralized single source of truth across all modules.
+   */
+  public static async getSalonTimezone(prisma: any, salonId: string): Promise<string> {
+    if (!prisma || !salonId) return this.DEFAULT_TIMEZONE;
+    try {
+      const salon = await prisma.salon.findUnique({
+        where: { id: salonId },
+        select: { timezone: true },
+      });
+      return salon?.timezone || this.DEFAULT_TIMEZONE;
+    } catch {
+      return this.DEFAULT_TIMEZONE;
+    }
+  }
+
+  /**
+   * Resolves timezone string with fallback to universal platform default.
+   */
+  public static resolveTimezone(timezone?: string | null): string {
+    return timezone && timezone.trim().length > 0 ? timezone.trim() : this.DEFAULT_TIMEZONE;
+  }
+
 
   /**
    * Returns current Luxon DateTime in the given timezone (defaults to Asia/Kolkata).
@@ -208,6 +235,43 @@ export class TimeUtility {
     return DateTime.fromISO(baseDateStr, { zone })
       .set({ hour: h || 0, minute: m || 0, second: 0, millisecond: 0 })
       .toJSDate();
+  }
+
+  /**
+   * Resolves evaluation DateTime and start/end Date boundaries for any target date in salon timezone.
+   * If targetDate is undefined, uses current salon time and today's full boundaries.
+   */
+  public static getDayBoundaries(
+    targetDate?: string | Date | DateTime,
+    timezone?: string,
+  ): { evalDt: DateTime; startOfDay: Date; endOfDay: Date } {
+    const zone = timezone || this.DEFAULT_TIMEZONE;
+    const now = this.now(zone);
+
+    let evalDt: DateTime;
+    if (!targetDate) {
+      evalDt = now;
+    } else if (typeof targetDate === 'string') {
+      const parsed = DateTime.fromISO(targetDate, { zone });
+      if (targetDate.includes('T')) {
+        evalDt = parsed;
+      } else {
+        evalDt = parsed.set({
+          hour: now.hour,
+          minute: now.minute,
+        });
+      }
+    } else if (targetDate instanceof Date) {
+      evalDt = DateTime.fromJSDate(targetDate, { zone });
+    } else {
+      evalDt = targetDate.setZone(zone);
+    }
+
+    return {
+      evalDt,
+      startOfDay: evalDt.startOf('day').toJSDate(),
+      endOfDay: evalDt.endOf('day').toJSDate(),
+    };
   }
 
   /**

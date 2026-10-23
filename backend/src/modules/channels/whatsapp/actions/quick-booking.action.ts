@@ -73,6 +73,24 @@ export class QuickBookingAction {
       return { replyMessage: conflictPrompt.bodyText, state: conversation.state };
     }
 
+    // PILLAR 1: Fail-Fast Gatekeeper - Verify Salon is operational right now for Quick Booking
+    const operatingStatus = await this.availabilityService.getQuickBookingOperatingStatus(salonId, tz);
+    if (!operatingStatus.isOpen) {
+      this.logger.log(
+        `[QuickBookingAction] Quick booking gatekeeper blocked entry for salon=${salonId} reason=${operatingStatus.reason}`,
+      );
+      // Clean up any stale draft data and maintain clean START state
+      await this.session.updateConversationState(
+        conversation.id,
+        ConversationState.START,
+        null,
+        ActionUtils.getClearDraftData(),
+      );
+      const closedReply = this.templates.buildQuickBookClosedReply(salon.name, operatingStatus);
+      await this.sendMessage(cleanNumber, closedReply, phoneNumberId, salonId);
+      return { replyMessage: closedReply.bodyText, state: ConversationState.START };
+    }
+
     await this.session.updateConversationState(conversation.id, ConversationState.SELECT_CATEGORY, undefined, {
       quickCodeVerifiedAt: new Date(),
     });
@@ -103,16 +121,9 @@ export class QuickBookingAction {
     });
 
     if (pendingRequest) {
-      await this.prisma.appointment.update({
+      await this.prisma.appointment.delete({
         where: { id: pendingRequest.id },
-        data: {
-          status: AppointmentStatus.CANCELLED,
-          cancellationReason: 'CANCELLED_BY_CLIENT_BEFORE_ACCEPTANCE',
-          cancelledAt: new Date(),
-          cancelledBy: CancelledBy.USER,
-          penaltyApplied: false,
-        },
-      });
+      }).catch((e) => this.logger.error(`Error deleting cancelled pending quick booking: ${e?.message}`));
     }
 
     await this.session.updateConversationState(

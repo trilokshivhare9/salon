@@ -22,6 +22,7 @@ import {
 } from '@prisma/client';
 import { DateTime } from 'luxon';
 import { TimeUtility } from '../../../../common/utils/time.utility';
+import { AppointmentModifierService } from '../modifier/appointment-modifier.service';
 import {
   VALID_STATUS_TRANSITIONS,
   appointmentInclude,
@@ -35,8 +36,10 @@ export class CancellationService {
   constructor(
     private prisma: PrismaService,
     private eventsService: AppointmentEventsService,
+    @Inject(forwardRef(() => AppointmentModifierService))
+    private modifierService: AppointmentModifierService,
     @Inject(forwardRef(() => WhatsAppService))
-    private whatsappService: WhatsAppService,
+    @Optional() private whatsappService?: WhatsAppService,
     @Inject(forwardRef(() => WhatsAppTemplateService))
     @Optional() private templates?: WhatsAppTemplateService,
   ) {
@@ -148,38 +151,37 @@ export class CancellationService {
       context.source === 'ADMIN_DASHBOARD' || Boolean(context.adminId) || context.source === 'SALON_REJECTED'
         ? CancelledBy.SALON
         : context.source.startsWith('SYSTEM_')
-        ? CancelledBy.SYSTEM
-        : CancelledBy.USER
+          ? CancelledBy.SYSTEM
+          : CancelledBy.USER
     );
 
     const reasonNote = this.buildCancelNote(appointment, context);
-    const updated = await this.prisma.appointment.update({
-      where: { id: appointmentId },
-      data: {
-        status: targetStatus,
-        notes: reasonNote,
-        cancellationReason: context.reason || context.reasonCategory || 'CLIENT_CANCELLED',
-        cancelledAt: new Date(),
-        cancelledBy,
-        penaltyApplied: penaltyResult.penaltyApplied,
-        proposedStartAt: null,
-        proposedEndAt: null,
-        proposedByAdminId: null,
-      },
-      include: appointmentInclude,
+
+    // 5. Update appointment via Centralized AppointmentModifierService
+    // modifyStatus exclusively handles: DB status update, nextAction calculation, Redis alarm clear, and STATUS_UPDATED event
+    const formatted = await this.modifierService.modifyStatus(salonId, appointmentId, {
+      status: targetStatus,
+      notes: reasonNote,
+      cancellationReason: context.reason || context.reasonCategory || 'CLIENT_CANCELLED',
+      cancelledAt: new Date(),
+      cancelledBy,
+      penaltyApplied: penaltyResult.penaltyApplied,
+      proposedStartAt: null,
+      proposedEndAt: null,
+      proposedStylistId: null,
+      proposedByAdminId: null,
+      skipTransitionValidation: true,
+      existingAppointment: appointment,
     });
 
-    const formatted = formatAppointment(updated);
-
-    // 6. Emit SSE events
-    this.eventsService.emitSalonEvent(salonId, 'STATUS_UPDATED', formatted);
+    // 6. Emit SSE event specific to cancellation
     this.eventsService.emitSalonEvent(salonId, 'BOOKING_CANCELLED', formatted);
 
     // 7. WhatsApp notification (unless caller handles its own)
     if (!context.skipWhatsAppNotify) {
       await this.sendCancelWhatsAppNotification(
         salonId,
-        updated,
+        formatted,
         context,
         penaltyResult,
       );
@@ -262,17 +264,7 @@ export class CancellationService {
       context.applyPenalty === true;
 
     if (!isExplicitAdminPenalty) {
-      // 3. Quick Booking Check: Quick book requests never incur cancellation penalty strikes
-      if (appointment.source === BookingSource.QUICK_BOOK) {
-        return {
-          penaltyApplied: false,
-          penaltyCount: currentCount,
-          remainingStrikes: currentRemainingStrikes,
-          isBlocked: currentlyBlocked,
-        };
-      }
-
-      // 4. Universal 90-Minute Rule:
+      // Universal 90-Minute Rule:
       // Any booking cancel where remaining time is < 90 min -> mark penalty.
       // If remaining time >= 90 min -> no penalty.
       const nowMs = Date.now();
@@ -355,11 +347,7 @@ export class CancellationService {
         break;
 
       case 'SYSTEM_AUTO_CUTOFF':
-        if (
-          context.reason === 'UNRESPONSIVE_RESCHEDULE_PROPOSAL_EXPIRED_60M' ||
-          context.reason === 'UNRESPONSIVE_RESCHEDULE_PROPOSAL_EXPIRED_30M' ||
-          context.reason === 'UNRESPONSIVE_RESCHEDULE_PROPOSAL_EXPIRED'
-        ) {
+        if (context.reason?.startsWith('UNRESPONSIVE_RESCHEDULE_PROPOSAL_EXPIRED')) {
           const proposedTime = appointment.proposedStartAt
             ? TimeUtility.formatTime12h(appointment.proposedStartAt, tz)
             : timeStr;
@@ -425,7 +413,7 @@ export class CancellationService {
       payload,
       phoneNumberId,
       salonId,
-    ).catch(() => {});
+    ).catch(() => { });
   }
 
   /**
@@ -510,13 +498,6 @@ Would you like to move your *${currentSlotTimeStr}* appointment earlier to *${fr
   }
 
   async getAppointmentById(salonId: string, id: string) {
-    const appointment = await this.prisma.appointment.findFirst({
-      where: { id, salonId },
-      include: appointmentInclude,
-    });
-    if (!appointment) {
-      throw new NotFoundException('Appointment not found.');
-    }
-    return appointment;
+    return this.modifierService.getAppointment(salonId, id);
   }
 }

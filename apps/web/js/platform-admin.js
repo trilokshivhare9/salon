@@ -1,4 +1,5 @@
-import { ApiClient } from './api.js';
+import { ApiClient, PlatformAuth } from './api.js';
+import { LocationPicker } from './location-picker.js';
 
 export class PlatformAdminPortal {
   constructor(containerId, currentUser = null) {
@@ -27,8 +28,8 @@ export class PlatformAdminPortal {
         </div>
       `;
       document.getElementById('btn-admin-login')?.addEventListener('click', async () => {
-        await ApiClient.logout();
-        window.location.hash = '#super-admin';
+        await PlatformAuth.logout();
+        window.location.hash = '#superadmin-login';
         window.location.reload();
       });
     }
@@ -37,7 +38,7 @@ export class PlatformAdminPortal {
   renderLoading() {
     this.container.innerHTML = `
       <div style="min-height: 80vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 40px;">
-        <div class="brand-icon-box" style="width: 52px; height: 52px; font-size: 1.6rem; margin-bottom: 16px; background: linear-gradient(135deg, rgba(236,72,153,0.3), rgba(99,102,241,0.3));">⚡</div>
+        <div class="brand-icon-box" style="width: 52px; height: 52px; font-size: 1.6rem; margin-bottom: 16px; background: linear-gradient(135deg, rgba(236,72,153,0.3), rgba(139, 61, 255,0.3));">⚡</div>
         <div style="font-size: 1.3rem; font-family: var(--font-heading); color: var(--accent); font-weight: 700;">Loading Multi-Tenant Control Engine...</div>
         <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 4px;">Auditing tenant database shards & platform volume</p>
       </div>
@@ -52,7 +53,7 @@ export class PlatformAdminPortal {
       <header class="portal-header" style="border-bottom-color: rgba(236,72,153,0.25);">
         <div class="portal-header-content">
           <div style="display: flex; align-items: center; gap: 14px;">
-            <div class="brand-icon-box" style="background: linear-gradient(135deg, rgba(236,72,153,0.3), rgba(99,102,241,0.3)); border-color: rgba(236,72,153,0.4);">⚡</div>
+            <div class="brand-icon-box" style="background: linear-gradient(135deg, rgba(236,72,153,0.3), rgba(139, 61, 255,0.3)); border-color: rgba(236,72,153,0.4);">⚡</div>
             <div>
               <div style="display: flex; align-items: center; gap: 8px;">
                 <span style="font-family: var(--font-heading); font-size: 1.15rem; font-weight: 800; color: #fff;">SalonFlow Multi-Tenant Engine</span>
@@ -118,7 +119,7 @@ export class PlatformAdminPortal {
         </div>
         <div class="stat-card">
           <div class="stat-label">LIFETIME PLATFORM BOOKINGS</div>
-          <div class="stat-value" style="color: #818cf8;">${stats.totalAppointments}</div>
+          <div class="stat-value" style="color: #A855F7;">${stats.totalAppointments}</div>
           <div class="stat-sub">Total bookings processed</div>
         </div>
         <div class="stat-card">
@@ -136,7 +137,7 @@ export class PlatformAdminPortal {
             <p style="color: var(--text-secondary); font-size: 0.85rem;">Manage tenant lifecycle, inspect real staff/service counts, and toggle active status.</p>
           </div>
           <div style="display: flex; gap: 8px;">
-            <button class="btn btn-secondary btn-sm" id="btn-manage-master-categories" style="background: rgba(99,102,241,0.15); border-color: rgba(99,102,241,0.3); color: #a5b4fc;">🏷️ Master Categories</button>
+            <button class="btn btn-secondary btn-sm" id="btn-manage-master-categories" style="background: rgba(139, 61, 255,0.15); border-color: rgba(139, 61, 255,0.3); color: #a5b4fc;">🏷️ Master Categories</button>
             <button class="btn btn-secondary btn-sm" id="btn-refresh-platform">🔄 Refresh List</button>
           </div>
         </div>
@@ -250,7 +251,7 @@ export class PlatformAdminPortal {
           </div>
           <div class="stat-card">
             <div class="stat-label">TOTAL RECORDED ERRORS</div>
-            <div class="stat-value" style="color: #818cf8;">${meta.total || 0}</div>
+            <div class="stat-value" style="color: #A855F7;">${meta.total || 0}</div>
             <div class="stat-sub">Historical system log records</div>
           </div>
         </div>
@@ -422,7 +423,7 @@ export class PlatformAdminPortal {
                 <div style="font-size: 0.72rem; color: #a5b4fc; font-weight: 800; text-transform: uppercase; margin-bottom: 8px;">🌐 HTTP & REQUEST CONTEXT</div>
                 <div style="font-size: 0.82rem; color: var(--text-secondary); line-height: 1.6;">
                   <div><strong>Method:</strong> <span style="color: #fff; font-weight: 700;">${log.httpMethod}</span></div>
-                  <div><strong>Endpoint:</strong> <code style="color: #818cf8;">${log.endpoint}</code></div>
+                  <div><strong>Endpoint:</strong> <code style="color: #A855F7;">${log.endpoint}</code></div>
                   <div><strong>Status Code:</strong> <span style="color: ${log.statusCode >= 500 ? '#ef4444' : '#f59e0b'}; font-weight: 700;">${log.statusCode}</span></div>
                   <div><strong>Correlation ID:</strong> <code>${log.correlationId || 'N/A'}</code></div>
                 </div>
@@ -443,7 +444,7 @@ export class PlatformAdminPortal {
 
             <!-- Code Origin Context -->
             ${log.originFile ? `
-              <div style="background: rgba(99,102,241,0.1); border: 1px solid rgba(99,102,241,0.3); border-radius: 10px; padding: 12px; margin-bottom: 20px; font-size: 0.82rem;">
+              <div style="background: rgba(139, 61, 255,0.1); border: 1px solid rgba(139, 61, 255,0.3); border-radius: 10px; padding: 12px; margin-bottom: 20px; font-size: 0.82rem;">
                 <div style="font-size: 0.72rem; color: #a5b4fc; font-weight: 800; text-transform: uppercase; margin-bottom: 4px;">📍 CODE ORIGIN LOCATION</div>
                 <code style="color: #e0e7ff; word-break: break-all;">${log.originFile}</code>
               </div>
@@ -557,8 +558,8 @@ export class PlatformAdminPortal {
 
     // Logout
     document.getElementById('btn-super-logout')?.addEventListener('click', async () => {
-      await ApiClient.logout();
-      window.location.hash = '#login';
+      await PlatformAuth.logout();
+      window.location.hash = '#superadmin-login';
       window.location.reload();
     });
   }
@@ -581,8 +582,8 @@ export class PlatformAdminPortal {
         </div>
       `;
       document.getElementById('btn-admin-login')?.addEventListener('click', async () => {
-        await ApiClient.logout();
-        window.location.hash = '#super-admin';
+        await PlatformAuth.logout();
+        window.location.hash = '#superadmin-login';
         window.location.reload();
       });
     }
@@ -591,7 +592,7 @@ export class PlatformAdminPortal {
   renderLoading() {
     this.container.innerHTML = `
       <div style="min-height: 80vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 40px;">
-        <div class="brand-icon-box" style="width: 52px; height: 52px; font-size: 1.6rem; margin-bottom: 16px; background: linear-gradient(135deg, rgba(236,72,153,0.3), rgba(99,102,241,0.3));">⚡</div>
+        <div class="brand-icon-box" style="width: 52px; height: 52px; font-size: 1.6rem; margin-bottom: 16px; background: linear-gradient(135deg, rgba(236,72,153,0.3), rgba(139, 61, 255,0.3));">⚡</div>
         <div style="font-size: 1.3rem; font-family: var(--font-heading); color: var(--accent); font-weight: 700;">Loading Multi-Tenant Control Engine...</div>
         <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 4px;">Auditing tenant database shards & platform volume</p>
       </div>
@@ -606,7 +607,7 @@ export class PlatformAdminPortal {
       <header class="portal-header" style="border-bottom-color: rgba(236,72,153,0.25);">
         <div class="portal-header-content">
           <div style="display: flex; align-items: center; gap: 14px;">
-            <div class="brand-icon-box" style="background: linear-gradient(135deg, rgba(236,72,153,0.3), rgba(99,102,241,0.3)); border-color: rgba(236,72,153,0.4);">⚡</div>
+            <div class="brand-icon-box" style="background: linear-gradient(135deg, rgba(236,72,153,0.3), rgba(139, 61, 255,0.3)); border-color: rgba(236,72,153,0.4);">⚡</div>
             <div>
               <div style="display: flex; align-items: center; gap: 8px;">
                 <span style="font-family: var(--font-heading); font-size: 1.15rem; font-weight: 800; color: #fff;">SalonFlow Multi-Tenant Engine</span>
@@ -645,7 +646,7 @@ export class PlatformAdminPortal {
           </div>
           <div class="stat-card">
             <div class="stat-label">LIFETIME PLATFORM BOOKINGS</div>
-            <div class="stat-value" style="color: #818cf8;">${stats.totalAppointments}</div>
+            <div class="stat-value" style="color: #A855F7;">${stats.totalAppointments}</div>
             <div class="stat-sub">Total bookings processed</div>
           </div>
           <div class="stat-card">
@@ -663,7 +664,7 @@ export class PlatformAdminPortal {
               <p style="color: var(--text-secondary); font-size: 0.85rem;">Manage tenant lifecycle, inspect real staff/service counts, and toggle active status.</p>
             </div>
             <div style="display: flex; gap: 8px;">
-              <button class="btn btn-secondary btn-sm" id="btn-manage-master-categories" style="background: rgba(99,102,241,0.15); border-color: rgba(99,102,241,0.3); color: #a5b4fc;">🏷️ Master Categories</button>
+              <button class="btn btn-secondary btn-sm" id="btn-manage-master-categories" style="background: rgba(139, 61, 255,0.15); border-color: rgba(139, 61, 255,0.3); color: #a5b4fc;">🏷️ Master Categories</button>
               <button class="btn btn-secondary btn-sm" id="btn-refresh-platform">🔄 Refresh List</button>
             </div>
           </div>
@@ -683,7 +684,7 @@ export class PlatformAdminPortal {
                     <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px;">
                       <div>
                         <div style="font-weight: 800; font-size: 1.15rem; color: #fff;">${s.name}</div>
-                        <div style="font-size: 0.8rem; color: #818cf8; font-family: monospace;">/#book/${s.slug}</div>
+                        <div style="font-size: 0.8rem; color: #A855F7; font-family: monospace;">/#book/${s.slug}</div>
                       </div>
                       <span class="badge ${isOperational ? 'badge-completed' : 'badge-cancelled'}" style="font-size: 0.65rem; ${!hasMinCatalog ? 'background: rgba(245,158,11,0.15); border-color: rgba(245,158,11,0.4); color: #f59e0b;' : ''}">
                         ${isOperational ? '● ACTIVE' : (!hasMinCatalog ? '⚪ INACTIVE (Setup Req)' : '⚪ INACTIVE (Paused)')}
@@ -768,7 +769,7 @@ export class PlatformAdminPortal {
         <div class="modal-content" style="max-width: 580px; max-height: 90vh; overflow-y: auto;">
           <div class="modal-header">
             <div style="display: flex; align-items: center; gap: 10px;">
-              <div class="brand-icon-box" style="width: 38px; height: 38px; font-size: 1.2rem; background: linear-gradient(135deg, rgba(236,72,153,0.3), rgba(99,102,241,0.3));">⚡</div>
+              <div class="brand-icon-box" style="width: 38px; height: 38px; font-size: 1.2rem; background: linear-gradient(135deg, rgba(236,72,153,0.3), rgba(139, 61, 255,0.3));">⚡</div>
               <div>
                 <h3 style="font-size: 1.25rem; font-weight: 800; color: #fff;">Create New Salon</h3>
                 <p style="font-size: 0.78rem; color: var(--text-muted);">Starts clean as Deactivated until owner adds staff & services</p>
@@ -803,7 +804,7 @@ export class PlatformAdminPortal {
               <label for="prov-whatsapp-phone-id">Meta WhatsApp Phone Number ID *</label>
               <div style="display: flex; gap: 8px; align-items: stretch;">
                 <input type="text" class="form-control" id="prov-whatsapp-phone-id" placeholder="Enter 15-17 digit Phone Number ID (e.g. 109876543210987)" style="flex: 1; min-width: 0;" required />
-                <button type="button" id="btn-verify-meta-phone" class="btn btn-secondary btn-sm" style="flex-shrink: 0; white-space: nowrap; font-size: 0.8rem; padding: 8px 14px; background: rgba(99,102,241,0.18); border: 1px solid rgba(99,102,241,0.4); color: #a5b4fc; cursor: pointer; border-radius: var(--radius-sm); font-weight: 600;">
+                <button type="button" id="btn-verify-meta-phone" class="btn btn-secondary btn-sm" style="flex-shrink: 0; white-space: nowrap; font-size: 0.8rem; padding: 8px 14px; background: rgba(139, 61, 255,0.18); border: 1px solid rgba(139, 61, 255,0.4); color: #a5b4fc; cursor: pointer; border-radius: var(--radius-sm); font-weight: 600;">
                   🔍 Verify & Fetch Phone
                 </button>
               </div>
@@ -851,21 +852,15 @@ export class PlatformAdminPortal {
               <!-- STEP 1: Basic Salon & Owner Info -->
               <div id="prov-step-1" class="prov-wizard-step" style="display: block;">
                 <!-- Operating Hours Summary Header -->
-                <div style="background: rgba(99,102,241,0.08); border: 1px solid rgba(99,102,241,0.25); border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 16px; font-size: 0.82rem; color: var(--text-secondary); display: flex; align-items: center; justify-content: space-between;">
+                <div style="background: rgba(139, 61, 255,0.08); border: 1px solid rgba(139, 61, 255,0.25); border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 16px; font-size: 0.82rem; color: var(--text-secondary); display: flex; align-items: center; justify-content: space-between;">
                   <div>
                     <strong style="color: #fff;">🗓️ Step 1 of 3: Basic Salon Info & Credentials</strong>
                     <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px;">Enter owner details and Meta Phone ID. Step 2 configures the 7-day weekly operating schedule.</div>
                   </div>
                 </div>
 
-                <!-- Shop Address / Landmark -->
-                <div class="form-group" style="margin-bottom: 16px;">
-                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                    <label style="margin-bottom: 0;">Shop Address / Landmark</label>
-                    <span style="font-size: 0.72rem; color: var(--text-muted);">(Optional)</span>
-                  </div>
-                  <input type="text" class="form-control" id="prov-address" placeholder="e.g. Shop 12, Main Market, Near Rajwada" />
-                </div>
+                <!-- 4-in-1 Zero-Cost Location & GPS Directions Component -->
+                <div id="prov-location-picker-container"></div>
 
                 <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px;">
                   <button type="button" class="btn btn-secondary" id="btn-cancel-super-modal">Cancel</button>
@@ -991,6 +986,24 @@ export class PlatformAdminPortal {
     document.getElementById('btn-close-super-modal')?.addEventListener('click', () => { modalContainer.innerHTML = ''; });
     document.getElementById('btn-cancel-super-modal')?.addEventListener('click', () => { modalContainer.innerHTML = ''; });
 
+    // Mount Zero-Cost 4-in-1 Location & GPS Direction Engine
+    const locationPicker = new LocationPicker('prov-location-picker-container', {
+      getCity: () => document.getElementById('prov-city')?.value?.trim() || '',
+      onChange: (locData) => {
+        if (locData.city) {
+          const cityEl = document.getElementById('prov-city');
+          if (cityEl && !cityEl.value) cityEl.value = locData.city;
+        }
+      },
+    });
+
+    // Auto-update location picker scope when city input changes
+    document.getElementById('prov-city')?.addEventListener('input', () => {
+      if (locationPicker.activeMode === 'search') {
+        locationPicker.render();
+      }
+    });
+
     // Initial 7-Day Schedule Data Model (Defaults: Mon, Wed-Sun 09:00-19:00 with 13:00-14:00 Lunch Break; Tue CLOSED)
     const dayNames = [
       { key: 'MONDAY', label: 'Monday', defaultOpen: true },
@@ -1018,54 +1031,66 @@ export class PlatformAdminPortal {
       if (!container) return;
 
       container.innerHTML = provScheduleState.map((day, idx) => `
-        <div style="background: rgba(255,255,255,0.025); border: 1px solid ${day.isClosed ? 'rgba(239,68,68,0.2)' : 'var(--border-subtle)'}; border-radius: var(--radius-sm); padding: 12px 14px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: ${day.isClosed ? '0' : '10px'};">
-            <div style="display: flex; align-items: center; gap: 10px;">
-              <strong style="color: #fff; font-size: 0.95rem; font-family: var(--font-heading); min-width: 90px;">${day.label}</strong>
-              <span class="badge" style="background: ${day.isClosed ? 'rgba(239,68,68,0.15)' : 'rgba(16,185,129,0.15)'}; color: ${day.isClosed ? '#f87171' : '#34d399'}; border: 1px solid ${day.isClosed ? 'rgba(239,68,68,0.3)' : 'rgba(16,185,129,0.3)'}; font-size: 0.68rem; font-weight: 800;">
-                ${day.isClosed ? 'CLOSED' : 'OPEN'}
-              </span>
+        <div class="day-sched-card ${day.isClosed ? 'is-closed' : ''}">
+          <div class="day-sched-header">
+            <div class="day-sched-title-wrap">
+              <strong class="day-sched-name">${day.label}</strong>
+              ${day.isClosed ? '<span class="day-sched-closed-tag">Closed</span>' : ''}
             </div>
-            <button type="button" class="btn btn-secondary btn-sm btn-prov-toggle-day" data-idx="${idx}" style="font-size: 0.75rem; padding: 4px 10px; background: ${day.isClosed ? 'rgba(16,185,129,0.18)' : 'rgba(239,68,68,0.18)'}; color: ${day.isClosed ? '#34d399' : '#f87171'}; border: 1px solid ${day.isClosed ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'};">
-              ${day.isClosed ? 'Set to OPEN' : 'Set to CLOSED'}
+            <button type="button" class="btn-prov-toggle-day day-sched-toggle-btn ${day.isClosed ? 'is-closed' : 'is-open'}" data-idx="${idx}" title="${day.isClosed ? 'Click to open this day' : 'Click to close this day'}">
+              <span class="day-sched-toggle-dot"></span>
+              <span>${day.isClosed ? 'Closed' : 'Open'}</span>
             </button>
           </div>
 
           ${!day.isClosed ? `
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
-              <div>
-                <label style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 2px;">Opening Time</label>
-                <input type="time" class="form-control prov-day-start" data-idx="${idx}" value="${day.startTime}" style="padding: 6px 10px; font-size: 0.85rem;" />
+            <div class="day-sched-times-grid">
+              <div class="day-sched-time-col">
+                <label class="day-sched-lbl">Opens</label>
+                <input type="time" class="day-sched-time-inp prov-day-start" data-idx="${idx}" value="${day.startTime}" aria-label="${day.label} Open Time" />
               </div>
-              <div>
-                <label style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 2px;">Closing Time</label>
-                <input type="time" class="form-control prov-day-end" data-idx="${idx}" value="${day.endTime}" style="padding: 6px 10px; font-size: 0.85rem;" />
+              <div class="day-sched-time-col">
+                <label class="day-sched-lbl">Closes</label>
+                <input type="time" class="day-sched-time-inp prov-day-end" data-idx="${idx}" value="${day.endTime}" aria-label="${day.label} Close Time" />
               </div>
             </div>
 
-            <div style="border-top: 1px dashed var(--border-subtle); padding-top: 8px;">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                <span style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600;">Breaks (${day.breaks.length})</span>
-                <button type="button" class="btn btn-secondary btn-sm btn-prov-add-break" data-idx="${idx}" style="font-size: 0.7rem; padding: 2px 8px;">
-                  + Add Break
+            <div class="day-sched-breaks-bar">
+              <div class="day-sched-breaks-title-wrap">
+                <span class="day-sched-breaks-title">Breaks</span>
+                ${day.breaks.length > 0 ? `<span class="day-sched-badge-count">${day.breaks.length}</span>` : ''}
+              </div>
+              <div class="day-sched-break-btns">
+                <button type="button" class="day-sched-sm-btn btn-prov-add-break" data-idx="${idx}" title="Add custom break">
+                  + Break
                 </button>
               </div>
-
-              ${day.breaks.length === 0 ? `
-                <div style="font-size: 0.74rem; color: #34d399; font-weight: 600; display: flex; align-items: center; gap: 6px; padding: 4px 0;">
-                  <span>⚡ Continuous Operations</span>
-                  <span style="color: var(--text-muted); font-weight: normal; font-size: 0.7rem;">(No lunch/midday breaks scheduled)</span>
-                </div>
-              ` : day.breaks.map((b, bIdx) => `
-                <div style="display: flex; gap: 6px; align-items: center; margin-bottom: 6px;">
-                  <input type="text" class="form-control prov-break-title" data-idx="${idx}" data-bidx="${bIdx}" value="${b.title || 'Break'}" placeholder="Title" style="flex: 1; padding: 4px 8px; font-size: 0.78rem;" />
-                  <input type="time" class="form-control prov-break-start" data-idx="${idx}" data-bidx="${bIdx}" value="${b.startTime}" style="width: 100px; padding: 4px 6px; font-size: 0.78rem;" />
-                  <span style="color: var(--text-muted); font-size: 0.75rem;">-</span>
-                  <input type="time" class="form-control prov-break-end" data-idx="${idx}" data-bidx="${bIdx}" value="${b.endTime}" style="width: 100px; padding: 4px 6px; font-size: 0.78rem;" />
-                  <button type="button" class="btn btn-secondary btn-sm btn-prov-del-break" data-idx="${idx}" data-bidx="${bIdx}" style="padding: 2px 6px; color: #f87171; font-size: 0.75rem;">✕</button>
-                </div>
-              `).join('')}
             </div>
+
+            ${day.breaks.length === 0 ? `
+              <div class="day-sched-continuous-banner">
+                <span class="day-sched-green-dot"></span>
+                <span>Continuous operations (no breaks)</span>
+              </div>
+            ` : `
+              <div class="day-sched-breaks-container">
+                ${day.breaks.map((b, bIdx) => `
+                  <div class="day-sched-break-box">
+                    <div class="day-sched-break-row1">
+                      <input type="text" class="day-sched-break-name-inp prov-break-title" data-idx="${idx}" data-bidx="${bIdx}" value="${b.title || 'Break'}" placeholder="Break Title" />
+                      <button type="button" class="day-sched-break-trash btn-prov-del-break" data-idx="${idx}" data-bidx="${bIdx}" title="Remove Break" aria-label="Remove Break">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                      </button>
+                    </div>
+                    <div class="day-sched-break-row2">
+                      <input type="time" class="day-sched-time-inp prov-break-start" data-idx="${idx}" data-bidx="${bIdx}" value="${b.startTime}" aria-label="Break Start Time" />
+                      <span class="day-sched-to-sep">to</span>
+                      <input type="time" class="day-sched-time-inp prov-break-end" data-idx="${idx}" data-bidx="${bIdx}" value="${b.endTime}" aria-label="Break End Time" />
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            `}
           ` : ''}
         </div>
       `).join('');
@@ -1157,17 +1182,19 @@ export class PlatformAdminPortal {
       const summaryDiv = document.getElementById('prov-review-summary-container');
       if (!summaryDiv) return;
 
-      const name = document.getElementById('prov-name').value.trim();
-      const ownerName = document.getElementById('prov-owner-name').value.trim();
-      const email = document.getElementById('prov-email').value.trim();
-      const phone = document.getElementById('prov-phone').value.trim();
-      const city = document.getElementById('prov-city').value.trim();
+      const locData = locationPicker ? locationPicker.getValue() : {};
 
       summaryDiv.innerHTML = `
         <div style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.6; margin-bottom: 14px;">
-          <div>🏢 Salon Name: <strong style="color: #fff;">${name}</strong> (${city})</div>
+          <div>🏢 Salon Name: <strong style="color: #fff;">${name}</strong> (${city || locData.city || 'City'})</div>
           <div>👤 Owner: <strong style="color: #fff;">${ownerName}</strong> (${email})</div>
           <div>📞 WhatsApp Phone: <code>${phone}</code></div>
+          <div>📍 Address: <strong style="color: #fff;">${locData.address || 'Standard Address'}</strong></div>
+          ${locData.directionsUrl ? `
+            <div style="margin-top: 4px;">
+              🚗 Navigation Route: <a href="${locData.directionsUrl}" target="_blank" rel="noopener noreferrer" style="color: #a5b4fc; text-decoration: underline;">Test Google Directions ↗</a>
+            </div>
+          ` : ''}
         </div>
 
         <div style="font-size: 0.8rem; font-weight: 700; color: #fff; margin-bottom: 6px; text-transform: uppercase;">
@@ -1357,8 +1384,8 @@ export class PlatformAdminPortal {
       isMetaPhoneVerified = false;
       verifiedMetaData = null;
       btnVerifyMeta.textContent = '🔍 Verify & Fetch Phone';
-      btnVerifyMeta.style.background = 'rgba(99,102,241,0.18)';
-      btnVerifyMeta.style.borderColor = 'rgba(99,102,241,0.4)';
+      btnVerifyMeta.style.background = 'rgba(139, 61, 255,0.18)';
+      btnVerifyMeta.style.borderColor = 'rgba(139, 61, 255,0.4)';
       btnVerifyMeta.style.color = '#a5b4fc';
       waVerifyResult.style.display = 'none';
       phoneInput.value = '';
@@ -1424,8 +1451,8 @@ export class PlatformAdminPortal {
         isMetaPhoneVerified = false;
         verifiedMetaData = null;
         btnVerifyMeta.textContent = '🔍 Verify & Fetch Phone';
-        btnVerifyMeta.style.background = 'rgba(99,102,241,0.18)';
-        btnVerifyMeta.style.borderColor = 'rgba(99,102,241,0.4)';
+        btnVerifyMeta.style.background = 'rgba(139, 61, 255,0.18)';
+        btnVerifyMeta.style.borderColor = 'rgba(139, 61, 255,0.4)';
         btnVerifyMeta.style.color = '#a5b4fc';
 
         waVerifyResult.innerHTML = `
@@ -1493,14 +1520,20 @@ export class PlatformAdminPortal {
       // Pick general open/close times from Monday or default 09:00 - 19:00
       const monState = provScheduleState.find((d) => d.dayOfWeek === 'MONDAY') || provScheduleState[0];
 
+      const locData = locationPicker ? locationPicker.getValue() : {};
+
       const payload = {
         name: document.getElementById('prov-name').value.trim(),
         ownerName: document.getElementById('prov-owner-name').value.trim(),
         email: document.getElementById('prov-email').value.trim(),
         password: document.getElementById('prov-password').value,
         phone: rawPhone,
-        city: document.getElementById('prov-city').value.trim(),
-        address: document.getElementById('prov-address')?.value?.trim() || undefined,
+        city: (locData.city || document.getElementById('prov-city').value || '').trim(),
+        address: (locData.address || document.getElementById('prov-address')?.value || '').trim() || undefined,
+        latitude: locData.latitude,
+        longitude: locData.longitude,
+        googleMapsUrl: locData.googleMapsUrl,
+        locationType: locData.locationType,
         whatsappPhoneNumberId: rawWaId,
         timezone: 'Asia/Kolkata',
         openTime: monState.isClosed ? '09:00' : monState.startTime,
@@ -1525,7 +1558,21 @@ export class PlatformAdminPortal {
         payload.schedule = hoursPayload;
 
         // Step B: Atomically provision salon and custom operating schedule in 1 request
-        const createdSalon = await ApiClient.createSalonPlatform(payload);
+        let createdSalon;
+        try {
+          createdSalon = await ApiClient.createSalonPlatform(payload);
+        } catch (apiErr) {
+          if (apiErr?.message && (apiErr.message.includes('latitude should not exist') || apiErr.message.includes('should not exist'))) {
+            const fallbackPayload = { ...payload };
+            delete fallbackPayload.latitude;
+            delete fallbackPayload.longitude;
+            delete fallbackPayload.googleMapsUrl;
+            delete fallbackPayload.locationType;
+            createdSalon = await ApiClient.createSalonPlatform(fallbackPayload);
+          } else {
+            throw apiErr;
+          }
+        }
 
         this.showProvisionSuccessModal(createdSalon, payload.password);
         this.data = await ApiClient.getAllSalonsPlatform();
@@ -1565,7 +1612,7 @@ export class PlatformAdminPortal {
               <label for="link-phone-id-input" style="margin-bottom: 6px;">WhatsApp Phone Number or Phone ID *</label>
               <div style="display: flex; gap: 8px; align-items: stretch;">
                 <input type="text" class="form-control" id="link-phone-id-input" placeholder="e.g. +91 98XXXXXX00 or 109876543210987" style="flex: 1; min-width: 0;" required />
-                <button type="button" id="btn-verify-link-meta" class="btn btn-secondary btn-sm" style="flex-shrink: 0; white-space: nowrap; font-size: 0.8rem; padding: 8px 14px; background: rgba(99,102,241,0.18); border: 1px solid rgba(99,102,241,0.4); color: #a5b4fc; cursor: pointer;">
+                <button type="button" id="btn-verify-link-meta" class="btn btn-secondary btn-sm" style="flex-shrink: 0; white-space: nowrap; font-size: 0.8rem; padding: 8px 14px; background: rgba(139, 61, 255,0.18); border: 1px solid rgba(139, 61, 255,0.4); color: #a5b4fc; cursor: pointer;">
                   Verify
                 </button>
               </div>
@@ -1683,7 +1730,7 @@ export class PlatformAdminPortal {
             <div><strong>📱 Login Mobile:</strong> <code style="color: #38bdf8; font-weight: 700; font-size: 0.95rem;">${salon.phone}</code></div>
             <div><strong>🔑 Password:</strong> <code style="color: #10b981; font-weight: 700;">${rawPassword}</code></div>
             <div><strong>📧 Owner Email:</strong> <code style="color: #94a3b8;">${salon.email}</code></div>
-            <div><strong>🚀 Salon Admin Portal:</strong> <a href="${loginUrl}" target="_blank" style="color: #818cf8;">${loginUrl}</a></div>
+            <div><strong>🚀 Salon Admin Portal:</strong> <a href="${loginUrl}" target="_blank" style="color: #A855F7;">${loginUrl}</a></div>
             <div style="margin-top: 10px; padding: 10px 12px; background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.3); border-radius: 8px; font-size: 0.78rem; color: #34d399; line-height: 1.5;">
               📲 <strong>WhatsApp Notification Sent:</strong> Login mobile, password, and portal link have been sent directly to <strong>${salon.phone}</strong> on WhatsApp!
             </div>
@@ -1708,8 +1755,8 @@ export class PlatformAdminPortal {
 
   attachEventListeners() {
     document.getElementById('btn-super-logout')?.addEventListener('click', async () => {
-      await ApiClient.logout();
-      window.location.hash = '#super-admin';
+      await PlatformAuth.logout();
+      window.location.hash = '#superadmin-login';
       window.location.reload();
     });
 
@@ -1841,7 +1888,21 @@ export class PlatformAdminPortal {
           confirmBtn.removeAttribute('disabled');
         }
         if (errEl) {
-          errEl.textContent = err.message || 'Failed to delete salon.';
+          const isAuthErr = err.message?.toLowerCase().includes('unauthorized') || err.message?.toLowerCase().includes('forbidden');
+          if (isAuthErr) {
+            errEl.innerHTML = `
+              <div><strong>Session Expired / Unauthorized</strong></div>
+              <div style="margin-top: 4px; font-size: 0.78rem;">Please log in with Super Admin credentials.</div>
+              <button type="button" class="btn btn-sm btn-secondary" id="btn-modal-relogin" style="margin-top: 8px; font-size: 0.75rem; padding: 4px 10px;">Go to Super Admin Login →</button>
+            `;
+            document.getElementById('btn-modal-relogin')?.addEventListener('click', async () => {
+              await PlatformAuth.logout();
+              window.location.hash = '#superadmin-login';
+              window.location.reload();
+            });
+          } else {
+            errEl.textContent = err.message || 'Failed to delete salon.';
+          }
           errEl.style.display = 'block';
         }
       }
@@ -1855,7 +1916,7 @@ export class PlatformAdminPortal {
         <div class="modal-content" style="max-width: 620px; max-height: 90vh; overflow-y: auto;">
           <div class="modal-header">
             <div style="display: flex; align-items: center; gap: 10px;">
-              <div class="brand-icon-box" style="width: 38px; height: 38px; font-size: 1.2rem; background: linear-gradient(135deg, rgba(99,102,241,0.3), rgba(236,72,153,0.3));">🏷️</div>
+              <div class="brand-icon-box" style="width: 38px; height: 38px; font-size: 1.2rem; background: linear-gradient(135deg, rgba(139, 61, 255,0.3), rgba(236,72,153,0.3));">🏷️</div>
               <div>
                 <h3 style="font-size: 1.25rem; font-weight: 800; color: #fff;">Super Admin Master Categories</h3>
                 <p style="font-size: 0.78rem; color: var(--text-muted);">Global categories inherited by every newly created salon upon provisioning.</p>

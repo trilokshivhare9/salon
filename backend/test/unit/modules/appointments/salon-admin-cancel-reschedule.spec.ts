@@ -5,6 +5,7 @@ import { WhatsAppActionHandlerService } from '../../../../src/modules/channels/w
 import { PrismaService } from '../../../../src/database/prisma.service';
 import { AvailabilityService } from '../../../../src/modules/salon-admin/availability/availability.service';
 import { AvailabilityEngineService } from '../../../../src/modules/salon-admin/availability/availability-engine.service';
+import { AppointmentModifierService } from '../../../../src/modules/salon-admin/appointments/modifier/appointment-modifier.service';
 import { AppointmentEventsService } from '../../../../src/modules/salon-admin/appointments/events/appointment-events.service';
 import { WhatsAppSenderService } from '../../../../src/modules/channels/whatsapp/services/whatsapp-sender.service';
 import { WhatsAppService } from '../../../../src/modules/channels/whatsapp/whatsapp.service';
@@ -113,6 +114,17 @@ describe('Salon Admin - Cancellation & Reschedule Workflows', () => {
         CancellationService,
         RescheduleService,
         AvailabilityEngineService,
+        {
+          provide: AppointmentModifierService,
+          useValue: {
+            modifyStatus: jest.fn().mockImplementation(async (sId, aId, data) => ({
+              id: aId,
+              status: data.status,
+              cancelledBy: data.cancelledBy,
+              penaltyApplied: data.penaltyApplied,
+            })),
+          },
+        },
         { provide: PrismaService, useValue: mockPrisma },
         { provide: AppointmentEventsService, useValue: mockEventsService },
         { provide: WhatsAppSenderService, useValue: mockSender },
@@ -147,12 +159,14 @@ describe('Salon Admin - Cancellation & Reschedule Workflows', () => {
         saveSession: jest.fn(),
         updateConversationState: jest.fn().mockResolvedValue({}),
       } as any, // session
-      mockAvailability,
-      {} as any, // quickCodeService
-      { emitSalonEvent: jest.fn() } as any, // appointmentsService
-      cancellationService,
-      rescheduleService,
+      {} as any, // catalogCache
+      {} as any, // checkinAction
+      {} as any, // appointmentAction
+      {} as any, // draftRecoveryAction
+      {} as any, // quickBookingAction
+      {} as any, // bookingAction
       whatsappSender as any,
+      mockAvailability,
     );
   });
 

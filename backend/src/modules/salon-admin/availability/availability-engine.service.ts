@@ -135,20 +135,17 @@ export class AvailabilityEngineService {
     );
 
     const followsSalon = stylist?.followsSalonSchedule ?? true;
+    let effectiveOpen: number;
+    let effectiveClose: number;
+    let isWorking: boolean;
 
+    // Stage 1: Shift Window Resolution (Working boundary)
     if (followsSalon) {
-      return {
-        isWorking: true,
-        salonOpenMinutes: salonOpen,
-        salonCloseMinutes: salonClose,
-        effectiveOpenMinutes: salonOpen,
-        effectiveCloseMinutes: salonClose,
-        effectiveBreaks: salonBreaks,
-      };
-    }
-
-    // Custom stylist schedule
-    if (!stylistWorkingHours || !stylistWorkingHours.isWorking) {
+      effectiveOpen = salonOpen;
+      effectiveClose = salonClose;
+      isWorking = true;
+    } else if (stylistWorkingHours && stylistWorkingHours.isWorking === false) {
+      // Explicitly marked as day-off in custom schedule
       return {
         isWorking: false,
         salonOpenMinutes: salonOpen,
@@ -156,48 +153,49 @@ export class AvailabilityEngineService {
         effectiveOpenMinutes: null,
         effectiveCloseMinutes: null,
         effectiveBreaks: [],
-        statusReason: 'Stylist is not scheduled to work on this day.',
+        statusReason: 'Stylist is scheduled off-duty on this day.',
       };
-    }
+    } else if (stylistWorkingHours && stylistWorkingHours.startTime && stylistWorkingHours.endTime) {
+      // Explicit custom stylist shift
+      const customOpen = this.parseTimeStringToMinutes(stylistWorkingHours.startTime);
+      const customClose = this.parseTimeStringToMinutes(stylistWorkingHours.endTime);
 
-    const customOpen = this.parseTimeStringToMinutes(stylistWorkingHours.startTime);
-    const customClose = this.parseTimeStringToMinutes(stylistWorkingHours.endTime);
+      effectiveOpen = Math.max(customOpen, salonOpen);
+      effectiveClose = Math.min(customClose, salonClose);
 
-    // Hard boundary clamping: Stylist shift MUST be contained within salon window
-    const effectiveOpen = Math.max(customOpen, salonOpen);
-    const effectiveClose = Math.min(customClose, salonClose);
-
-    if (effectiveOpen >= effectiveClose) {
-      return {
-        isWorking: false,
-        salonOpenMinutes: salonOpen,
-        salonCloseMinutes: salonClose,
-        effectiveOpenMinutes: null,
-        effectiveCloseMinutes: null,
-        effectiveBreaks: [],
-        statusReason: 'Stylist working hours fall completely outside salon operating window.',
-      };
-    }
-
-    // Break Inheritance & Override Rule:
-    // If hasBreakOverride === true, use stylist custom breaks.
-    // If hasBreakOverride === false, INHERIT SALON BREAKS.
-    let unmergedBreaks: MinuteInterval[] = [];
-    const hasOverride = stylistWorkingHours.hasBreakOverride === true;
-
-    if (hasOverride) {
-      unmergedBreaks = this.extractBreaks(
-        stylistWorkingHours.breaks,
-        stylistWorkingHours.breakStartTime,
-        stylistWorkingHours.breakEndTime,
-      );
+      if (effectiveOpen >= effectiveClose) {
+        return {
+          isWorking: false,
+          salonOpenMinutes: salonOpen,
+          salonCloseMinutes: salonClose,
+          effectiveOpenMinutes: null,
+          effectiveCloseMinutes: null,
+          effectiveBreaks: [],
+          statusReason: 'Stylist working hours fall completely outside salon operating window.',
+        };
+      }
+      isWorking = true;
     } else {
-      unmergedBreaks = salonBreaks;
+      // Graceful Resilience Fallback: Custom schedule active but this specific day row is unconfigured (sparse table)
+      // Fall back to salon operating hours so staff is never silently killed
+      effectiveOpen = salonOpen;
+      effectiveClose = salonClose;
+      isWorking = true;
     }
 
-    // Clamp breaks to effective shift window
+    // Stage 2: Discrete Break Projection
+    // Reads directly from StylistBreak first-class entity
+    let rawBreaksToUse: MinuteInterval[] = [];
+
+    if (stylist?.breaks && Array.isArray(stylist.breaks) && stylist.breaks.length > 0) {
+      rawBreaksToUse = this.extractBreaks(stylist.breaks);
+    } else if (followsSalon) {
+      rawBreaksToUse = salonBreaks;
+    }
+
+    // Stage 3: Clamp breaks to effective shift window and merge overlapping intervals
     const clampedBreaks: MinuteInterval[] = [];
-    for (const b of unmergedBreaks) {
+    for (const b of rawBreaksToUse) {
       const cStart = Math.max(effectiveOpen, b.start);
       const cEnd = Math.min(effectiveClose, b.end);
       if (cStart < cEnd) {
@@ -222,27 +220,15 @@ export class AvailabilityEngineService {
     absence: any,
     effectiveOpen: number,
     effectiveClose: number,
-    effectiveBreaks: MinuteInterval[],
+    effectiveBreaks: MinuteInterval[] = [],
   ): MinuteInterval[] {
-    if (!absence.leavePortion || absence.leavePortion === 'FULL_DAY') {
-      return [{ start: effectiveOpen, end: effectiveClose }];
-    }
+    const isPartial = Boolean(absence.isPartialDay);
+    const startTime = absence.startTime;
+    const endTime = absence.endTime;
 
-    const midPoint = Math.floor(effectiveOpen + (effectiveClose - effectiveOpen) / 2);
-    const firstBreak = effectiveBreaks.length > 0 ? effectiveBreaks[0] : null;
-
-    const firstHalfEnd = firstBreak ? firstBreak.start : midPoint;
-    const secondHalfStart = firstBreak ? firstBreak.end : midPoint;
-
-    if (absence.leavePortion === 'FIRST_HALF') {
-      return [{ start: effectiveOpen, end: firstHalfEnd }];
-    }
-    if (absence.leavePortion === 'SECOND_HALF') {
-      return [{ start: secondHalfStart, end: effectiveClose }];
-    }
-    if (absence.leavePortion === 'CUSTOM_HOURS' && absence.customStartTime && absence.customEndTime) {
-      const customStart = this.parseTimeStringToMinutes(absence.customStartTime);
-      const customEnd = this.parseTimeStringToMinutes(absence.customEndTime);
+    if (isPartial && startTime && endTime) {
+      const customStart = this.parseTimeStringToMinutes(startTime);
+      const customEnd = this.parseTimeStringToMinutes(endTime);
       const clampedStart = Math.max(effectiveOpen, customStart);
       const clampedEnd = Math.min(effectiveClose, customEnd);
       if (clampedStart < clampedEnd) {

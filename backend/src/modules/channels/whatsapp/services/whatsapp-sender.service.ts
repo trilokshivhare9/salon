@@ -15,6 +15,8 @@ export enum WhatsAppButtonId {
   ADD_SERVICE = 'btn_add_service',
   CAT_BACK = 'cat_back',
   STAFF_ANY = 'staff_any',
+  CHANGE_TIME = 'btn_change_time',
+  CHANGE_DATE = 'btn_change_date',
 
   // Quick Booking
   QUICK_BOOK = 'btn_quick_book',
@@ -51,6 +53,9 @@ export enum WhatsAppButtonId {
   RESUME_BOOKING = 'btn_resume_booking',
   CHECK_LAST_BOOKING = 'btn_last_booking',
   NEW_BOOKING = 'btn_new_booking',
+
+  // Post-Service Review & Feedback
+  FEEDBACK_GREAT = 'btn_feedback_great',
 }
 
 export interface InteractiveButton {
@@ -119,6 +124,7 @@ export class WhatsAppSenderService {
       buttonText?: string;
       buttons?: InteractiveButton[];
       listRows?: InteractiveListRow[];
+      sections?: { title: string; rows: InteractiveListRow[] }[];
     },
     phoneNumberId?: string,
     salonId?: string,
@@ -197,17 +203,64 @@ export class WhatsAppSenderService {
           body: { text: payload.bodyText || 'Please select an option:' },
           footer: payload.footerText ? { text: payload.footerText } : undefined,
           action: {
-            buttons: payload.buttons.slice(0, 3).map((b) => ({
-              type: 'reply',
-              reply: { id: b.id, title: b.title.slice(0, 20) },
-            })),
+            buttons: (() => {
+              const seenIds = new Set<string>();
+              return payload.buttons.slice(0, 3).map((b: any, idx: number) => {
+                let id = String(b.id || `btn_${idx}`);
+                if (seenIds.has(id)) {
+                  this.logger.warn(
+                    `[WhatsAppSenderService] Protocol Defense Guard: Duplicate button id "${id}" detected at index ${idx}. Auto-sanitizing to avoid Meta #131009 rejection.`,
+                  );
+                  id = `${id}_${idx + 1}`;
+                }
+                seenIds.add(id);
+                return {
+                  type: 'reply',
+                  reply: {
+                    id: id.slice(0, 256),
+                    title: String(b.title || '').slice(0, 20),
+                  },
+                };
+              });
+            })(),
           },
         };
       } else if (
         payload.interactiveType === 'list' &&
-        payload.listRows &&
-        payload.listRows.length > 0
+        ((payload.sections && payload.sections.length > 0) || (payload.listRows && payload.listRows.length > 0))
       ) {
+        let sectionsData: any[] = [];
+        if (payload.sections && payload.sections.length > 0) {
+          let totalRows = 0;
+          for (const sec of payload.sections) {
+            if (totalRows >= 10) break;
+            const remaining = 10 - totalRows;
+            const rowsToTake = (sec.rows || []).slice(0, remaining);
+            if (rowsToTake.length > 0) {
+              sectionsData.push({
+                title: (sec.title || 'Available Options').slice(0, 24),
+                rows: rowsToTake.map((r: any) => ({
+                  id: String(r.id).slice(0, 200),
+                  title: String(r.title).slice(0, 24),
+                  description: r.description ? String(r.description).slice(0, 72) : undefined,
+                })),
+              });
+              totalRows += rowsToTake.length;
+            }
+          }
+        } else if (payload.listRows && payload.listRows.length > 0) {
+          sectionsData = [
+            {
+              title: 'Available Options',
+              rows: payload.listRows.slice(0, 10).map((r: any) => ({
+                id: String(r.id).slice(0, 200),
+                title: String(r.title).slice(0, 24),
+                description: r.description ? String(r.description).slice(0, 72) : undefined,
+              })),
+            },
+          ];
+        }
+
         bodyData.type = 'interactive';
         bodyData.interactive = {
           type: 'list',
@@ -218,16 +271,7 @@ export class WhatsAppSenderService {
           footer: payload.footerText ? { text: payload.footerText } : undefined,
           action: {
             button: (payload.buttonText || 'View Options').slice(0, 20),
-            sections: [
-              {
-                title: 'Available Options',
-                rows: payload.listRows.slice(0, 10).map((r) => ({
-                  id: r.id,
-                  title: r.title.slice(0, 24),
-                  description: r.description ? r.description.slice(0, 72) : undefined,
-                })),
-              },
-            ],
+            sections: sectionsData,
           },
         };
       } else {
@@ -298,6 +342,123 @@ export class WhatsAppSenderService {
       return true;
     } catch (err: any) {
       this.logger.error(`Exception dispatching Meta WhatsApp message: ${err.message}`, err.stack);
+      return false;
+    }
+  }
+
+  /**
+   * Dispatches a pre-approved Meta WhatsApp Template message.
+   * Required for business-initiated notifications outside the 24-hour customer service window
+   * (e.g. notifications sent to Salon Owners or Desk Managers).
+   */
+  async sendTemplateMessage(
+    toPhone: string,
+    templateName: string,
+    parameters: Array<{ type: 'text'; text: string }> = [],
+    languageCode = 'en',
+    phoneNumberId?: string,
+    salonId?: string,
+  ): Promise<boolean> {
+    let accessToken =
+      this.configService.get<string>('whatsapp.accessToken') ||
+      process.env.WHATSAPP_ACCESS_TOKEN;
+    let phoneId =
+      phoneNumberId ||
+      this.configService.get<string>('whatsapp.phoneNumberId');
+
+    if (salonId) {
+      const acc = await this.getCachedAccount(salonId);
+      if (acc) {
+        if (acc.phoneNumberId) phoneId = acc.phoneNumberId;
+        if (acc.accessTokenEncrypted && acc.accessTokenEncrypted !== 'system_managed') {
+          accessToken = acc.accessTokenEncrypted;
+        }
+      }
+    }
+
+    const cleanTo = this.cleanPhone(toPhone);
+
+    if (!phoneId || !accessToken) {
+      this.logger.warn(
+        `[WhatsAppSenderService] Cannot send WhatsApp template to ${toPhone}: Missing phoneId or accessToken.`,
+      );
+      return false;
+    }
+
+    try {
+      const url = `https://graph.facebook.com/v20.0/${phoneId}/messages`;
+      const bodyData: any = {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: cleanTo.replace('+', ''),
+        type: 'template',
+        template: {
+          name: templateName,
+          language: { code: languageCode },
+          components: parameters.length > 0 ? [
+            {
+              type: 'body',
+              parameters,
+            },
+          ] : undefined,
+        },
+      };
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+          Connection: 'keep-alive',
+        },
+        body: JSON.stringify(bodyData),
+        keepalive: true,
+        signal: AbortSignal.timeout(6000),
+      });
+
+      const resJson: any = await response.json();
+
+      if (!response.ok) {
+        this.logger.error(
+          `Meta WhatsApp Template API error (${response.status}): ${JSON.stringify(resJson)}`,
+        );
+        setImmediate(() => {
+          this.prisma.whatsAppLog
+            .create({
+              data: {
+                salonId: salonId || null,
+                phone: cleanTo,
+                direction: WhatsAppMessageDirection.OUTBOUND,
+                messageText: `[TEMPLATE: ${templateName}]`,
+                status: 'FAILED',
+                errorMessage: JSON.stringify(resJson),
+              },
+            })
+            .catch(() => { });
+        });
+        return false;
+      }
+
+      const metaMsgId = resJson?.messages?.[0]?.id || null;
+      setImmediate(() => {
+        this.prisma.whatsAppLog
+          .create({
+            data: {
+              salonId: salonId || null,
+              phone: cleanTo,
+              direction: WhatsAppMessageDirection.OUTBOUND,
+              messageText: `[TEMPLATE: ${templateName}]`,
+              status: 'SENT',
+              rawPayload: resJson,
+              metaMessageId: metaMsgId,
+            },
+          })
+          .catch(() => { });
+      });
+
+      return true;
+    } catch (err: any) {
+      this.logger.error(`Exception dispatching Meta WhatsApp template: ${err.message}`, err.stack);
       return false;
     }
   }

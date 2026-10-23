@@ -132,7 +132,7 @@ async function runQueueAndChatTestSuite() {
     // TEST 2: 1-Click Status Flow (CONFIRMED -> CHECKED_IN -> IN_SERVICE -> COMPLETED)
     // -------------------------------------------------------------------------
     console.log('\n--- TEST 2: 1-Click Status Progressive Workflow ---');
-    
+
     // Step 2a: Check In
     const checkedInAppt = await appointmentsService.updateAppointmentStatus(
       salon.id,
@@ -238,7 +238,7 @@ async function runQueueAndChatTestSuite() {
     // TEST 5: Two-Way Staff Live WhatsApp Chat & AI Bot Pause Logic
     // -------------------------------------------------------------------------
     console.log('\n--- TEST 5: Two-Way Staff Live WhatsApp Chat & 15-Minute AI Bot Pause ---');
-    
+
     // Step 5a: Staff sends message
     await whatsAppService.sendStaffChatMessage(
       salon.id,

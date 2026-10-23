@@ -11,20 +11,21 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { StaffService } from './staff.service';
-import { AbsenceService } from './absence.service';
+import { StaffLeaveFacade } from './leave/staff-leave.facade';
 import {
   CreateStaffDto,
   UpdateStaffDto,
   AssignStaffServicesDto,
-  UpdateStaffWorkingHoursDto,
-  CreateStaffBreakDto,
 } from './dto/create-staff.dto';
 import {
+  ApplyLeaveDto,
   MarkAbsentDto,
+  PreviewLeaveQueryDto,
   PreviewAbsenceQueryDto,
+  LeaveHistoryQueryDto,
   GetAbsencesQueryDto,
   ExtendLeaveDto,
-} from './dto/absence.dto';
+} from './leave/dto';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../../common/guards/roles.guard';
 import { Roles } from '../../../common/decorators/roles.decorator';
@@ -37,12 +38,23 @@ import { AdminRole } from '@prisma/client';
 export class StaffController {
   constructor(
     private readonly staffService: StaffService,
-    private readonly absenceService: AbsenceService,
+    private readonly leaveFacade: StaffLeaveFacade,
   ) {}
 
   @Get()
-  async getStaff(@CurrentSalonId() salonId: string) {
-    return this.staffService.getSalonStaff(salonId);
+  async getStaff(
+    @CurrentSalonId() salonId: string,
+    @Query('date') dateStr?: string,
+  ) {
+    return this.staffService.getSalonStaff(salonId, dateStr);
+  }
+
+  @Post()
+  async createStaff(
+    @CurrentSalonId() salonId: string,
+    @Body() dto: CreateStaffDto,
+  ) {
+    return this.staffService.createStaff(salonId, dto);
   }
 
   @Get(':id')
@@ -53,16 +65,6 @@ export class StaffController {
     return this.staffService.getStaffById(salonId, staffId);
   }
 
-  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
-  @Post()
-  async createStaff(
-    @CurrentSalonId() salonId: string,
-    @Body() dto: CreateStaffDto,
-  ) {
-    return this.staffService.createStaff(salonId, dto);
-  }
-
-  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
   @Put(':id')
   async updateStaff(
     @CurrentSalonId() salonId: string,
@@ -72,16 +74,6 @@ export class StaffController {
     return this.staffService.updateStaff(salonId, staffId, dto);
   }
 
-  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
-  @Patch(':id/toggle-status')
-  async toggleStaffStatus(
-    @CurrentSalonId() salonId: string,
-    @Param('id') staffId: string,
-  ) {
-    return this.staffService.toggleStaffStatus(salonId, staffId);
-  }
-
-  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
   @Put(':id/services')
   async assignServices(
     @CurrentSalonId() salonId: string,
@@ -89,16 +81,6 @@ export class StaffController {
     @Body() dto: AssignStaffServicesDto,
   ) {
     return this.staffService.assignServices(salonId, staffId, dto);
-  }
-
-  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
-  @Put(':id/working-hours')
-  async updateWorkingHours(
-    @CurrentSalonId() salonId: string,
-    @Param('id') staffId: string,
-    @Body() dto: UpdateStaffWorkingHoursDto,
-  ) {
-    return this.staffService.updateWorkingHours(salonId, staffId, dto);
   }
 
   @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
@@ -110,38 +92,20 @@ export class StaffController {
     return this.staffService.deleteStaff(salonId, staffId);
   }
 
-  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
-  @Get(':id/breaks')
-  async getStaffBreaks(
-    @CurrentSalonId() salonId: string,
-    @Param('id') staffId: string,
-  ) {
-    return this.staffService.getStaffBreaks(salonId, staffId);
-  }
-
-  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
-  @Post(':id/breaks')
-  async createStaffBreak(
-    @CurrentSalonId() salonId: string,
-    @Param('id') staffId: string,
-    @Body() dto: CreateStaffBreakDto,
-  ) {
-    return this.staffService.createStaffBreak(salonId, staffId, dto);
-  }
-
-  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
-  @Delete(':id/breaks/:breakId')
-  async deleteStaffBreak(
-    @CurrentSalonId() salonId: string,
-    @Param('id') staffId: string,
-    @Param('breakId') breakId: string,
-  ) {
-    return this.staffService.deleteStaffBreak(salonId, staffId, breakId);
-  }
-
   // ---------------------------------------------------------------------------
-  // Stylist Absence Management
+  // Staff Leave Management (Semantic Routes & Backward-Compatible Aliases)
   // ---------------------------------------------------------------------------
+
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
+  @Post(':id/leaves')
+  async applyLeaveSemantic(
+    @CurrentSalonId() salonId: string,
+    @Param('id') staffId: string,
+    @Body() dto: ApplyLeaveDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.leaveFacade.applyLeave(salonId, staffId, dto, user?.id);
+  }
 
   @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
   @Post(':id/absence')
@@ -151,7 +115,17 @@ export class StaffController {
     @Body() dto: MarkAbsentDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.absenceService.markStylistAbsent(salonId, staffId, dto, user?.id);
+    return this.leaveFacade.applyLeave(salonId, staffId, dto, user?.id);
+  }
+
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
+  @Get(':id/leaves/preview')
+  async previewLeaveSemantic(
+    @CurrentSalonId() salonId: string,
+    @Param('id') staffId: string,
+    @Query() query: PreviewLeaveQueryDto,
+  ) {
+    return this.leaveFacade.previewLeave(salonId, staffId, query);
   }
 
   @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
@@ -161,7 +135,19 @@ export class StaffController {
     @Param('id') staffId: string,
     @Query() query: PreviewAbsenceQueryDto,
   ) {
-    return this.absenceService.previewAbsenceImpact(salonId, staffId, query);
+    return this.leaveFacade.previewLeave(salonId, staffId, query);
+  }
+
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
+  @Patch(':id/leaves/:leaveId/extend')
+  async extendLeaveSemantic(
+    @CurrentSalonId() salonId: string,
+    @Param('id') staffId: string,
+    @Param('leaveId') leaveId: string,
+    @Body() dto: ExtendLeaveDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.leaveFacade.extendLeave(salonId, staffId, leaveId, dto, user?.id);
   }
 
   @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
@@ -173,7 +159,17 @@ export class StaffController {
     @Body() dto: ExtendLeaveDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.absenceService.extendStylistLeave(salonId, staffId, absenceId, dto, user?.id);
+    return this.leaveFacade.extendLeave(salonId, staffId, absenceId, dto, user?.id);
+  }
+
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
+  @Get(':id/leaves')
+  async getLeavesSemantic(
+    @CurrentSalonId() salonId: string,
+    @Param('id') staffId: string,
+    @Query() query: LeaveHistoryQueryDto,
+  ) {
+    return this.leaveFacade.getLeaveHistory(salonId, staffId, query);
   }
 
   @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
@@ -183,7 +179,18 @@ export class StaffController {
     @Param('id') staffId: string,
     @Query() query: GetAbsencesQueryDto,
   ) {
-    return this.absenceService.getStylistAbsences(salonId, staffId, query);
+    return this.leaveFacade.getLeaveHistory(salonId, staffId, query);
+  }
+
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
+  @Delete(':id/leaves/:leaveId')
+  async cancelLeaveSemantic(
+    @CurrentSalonId() salonId: string,
+    @Param('id') staffId: string,
+    @Param('leaveId') leaveId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.leaveFacade.cancelLeave(salonId, staffId, leaveId, user?.id);
   }
 
   @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
@@ -194,7 +201,6 @@ export class StaffController {
     @Param('absenceId') absenceId: string,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.absenceService.cancelAbsence(salonId, staffId, absenceId, user?.id);
+    return this.leaveFacade.cancelLeave(salonId, staffId, absenceId, user?.id);
   }
 }
-

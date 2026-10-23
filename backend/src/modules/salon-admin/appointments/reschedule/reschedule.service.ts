@@ -21,11 +21,12 @@ import {
   ServiceStatus,
   AbsenceStatus,
   DayOfWeek,
-  LeavePortion,
 } from '@prisma/client';
 import { DateTime } from 'luxon';
 import { TimeUtility } from '../../../../common/utils/time.utility';
+import { AppointmentModifierService } from '../modifier/appointment-modifier.service';
 import {
+  VALID_STATUS_TRANSITIONS,
   appointmentInclude,
   formatAppointment,
   hashToSignedInt32,
@@ -40,8 +41,10 @@ export class RescheduleService {
     private availabilityService: AvailabilityService,
     private engine: AvailabilityEngineService,
     private eventsService: AppointmentEventsService,
+    @Inject(forwardRef(() => AppointmentModifierService))
+    private modifierService: AppointmentModifierService,
     @Inject(forwardRef(() => WhatsAppService))
-    private whatsappService: WhatsAppService,
+    @Optional() private whatsappService?: WhatsAppService,
     @Inject(forwardRef(() => WhatsAppTemplateService))
     @Optional() private templates?: WhatsAppTemplateService,
   ) {
@@ -167,6 +170,12 @@ export class RescheduleService {
       (slot) => slot.startTime === dto.newStartTime,
     );
 
+    if (availability.status === 'MAX_ADVANCE_EXCEEDED') {
+      throw new BadRequestException(
+        availability.statusReason || `Appointments can only be rescheduled up to ${salon.maxAdvanceDays || 3} days in advance.`,
+      );
+    }
+
     if (!matchingSlot) {
       throw new ConflictException('Requested new slot is not available.');
     }
@@ -276,10 +285,8 @@ export class RescheduleService {
               salonId,
               stylistId: targetStylistId,
               status: AbsenceStatus.ACTIVE,
-              OR: [
-                { startDate: { lte: targetDateObj }, endDate: { gte: targetDateObj } },
-                { absenceDate: targetDateObj },
-              ],
+              startDate: { lte: targetDateObj },
+              endDate: { gte: targetDateObj },
             },
           });
 
@@ -319,13 +326,11 @@ export class RescheduleService {
               salonId,
               stylistId: targetStylistId,
               status: AbsenceStatus.ACTIVE,
-              OR: [
-                { startDate: { lte: new Date(`${dto.newDate}T00:00:00.000Z`) }, endDate: { gte: new Date(`${dto.newDate}T00:00:00.000Z`) } },
-                { absenceDate: new Date(`${dto.newDate}T00:00:00.000Z`) },
-              ],
+              startDate: { lte: new Date(`${dto.newDate}T00:00:00.000Z`) },
+              endDate: { gte: new Date(`${dto.newDate}T00:00:00.000Z`) },
             },
           });
-          if (rescheduleAbsence && (!rescheduleAbsence.leavePortion || rescheduleAbsence.leavePortion === 'FULL_DAY')) {
+          if (rescheduleAbsence && !rescheduleAbsence.isPartialDay) {
             throw new ConflictException('Selected specialist is marked absent on the new date.');
           }
 
@@ -401,37 +406,38 @@ export class RescheduleService {
           if (adminId) {
             // Salon admin initiated reschedule:
             // Booking status marked PENDING_RESCHEDULE, proposed new slot stored, customer prompted to accept/decline.
-            return tx.appointment.update({
-              where: { id: appointmentId },
-              data: {
-                status: AppointmentStatus.PENDING_RESCHEDULE,
-                proposedStartAt: startDt.toJSDate(),
-                proposedEndAt: endDt.toJSDate(),
-                proposedByAdminId: adminId,
-                notes: `${appointment.notes || ''} [Reschedule proposed by salon admin to ${newDateStr} at ${dto.newStartTime}]`.trim(),
-              },
-              include: appointmentInclude,
-            });
+            const payload = {
+              status: AppointmentStatus.PENDING_RESCHEDULE,
+              proposedStartAt: startDt.toJSDate(),
+              proposedEndAt: endDt.toJSDate(),
+              proposedStylistId: targetStylistId !== appointment.stylistId ? targetStylistId : null,
+              proposedByAdminId: adminId,
+              notes: `${appointment.notes || ''} [Reschedule proposed by salon admin to ${newDateStr} at ${dto.newStartTime}]`.trim(),
+              skipTransitionValidation: true,
+              existingAppointment: appointment,
+              tx,
+            };
+            return this.modifierService.modifyStatus(salonId, appointmentId, payload);
           }
 
           const leadTimeMinutes = (startDt.toMillis() - DateTime.now().setZone(timezone).toMillis()) / (1000 * 60);
           const newStatus = leadTimeMinutes > 120 ? AppointmentStatus.BOOKED : AppointmentStatus.CONFIRMED;
 
-          // In-place mutation of the appointment for customer self-reschedule
-          return tx.appointment.update({
-            where: { id: appointmentId },
-            data: {
-              appointmentDate: TimeUtility.toDbDate(dto.newDate),
-              startAt: startDt.toJSDate(),
-              endAt: endDt.toJSDate(),
-              stylistId: targetStylistId,
-              status: newStatus,
-              reminder2hSentAt: null,
-              reminder10mSentAt: null,
-              clientEtaStatus: null,
-            },
-            include: appointmentInclude,
-          });
+          // In-place mutation of the appointment for customer self-reschedule via centralized modifier engine
+          const reschedulePayload = {
+            status: newStatus,
+            appointmentDate: TimeUtility.toDbDate(dto.newDate),
+            startAt: startDt.toJSDate(),
+            endAt: endDt.toJSDate(),
+            stylistId: targetStylistId,
+            reminder2hSentAt: null,
+            reminder10mSentAt: null,
+            clientEtaStatus: null,
+            skipTransitionValidation: true,
+            existingAppointment: appointment,
+            tx,
+          };
+          return this.modifierService.modifyStatus(salonId, appointmentId, reschedulePayload);
         },
         { timeout: 15000 },
       );
@@ -449,7 +455,14 @@ export class RescheduleService {
         if (userPhone && salon?.whatsappAccount?.phoneNumberId && this.whatsappService) {
           const dateFriendly = TimeUtility.formatDateFriendly(startDt.toJSDate(), timezone);
           const timeFriendly = TimeUtility.formatTime12h(startDt.toJSDate(), timezone);
-          const stylistName = updated.stylist?.name || 'Stylist';
+          let stylistName = updated.stylist?.name || 'Stylist';
+          if (targetStylistId && targetStylistId !== appointment.stylistId) {
+            const peer = await this.prisma.stylist.findUnique({
+              where: { id: targetStylistId },
+              select: { name: true },
+            });
+            if (peer?.name) stylistName = peer.name;
+          }
 
           const proposalPayload = this.templates!.buildRescheduleProposalPrompt({
             salonName: salon.name,
@@ -508,7 +521,7 @@ export class RescheduleService {
     tx: any,
     stylist?: any,
   ): Promise<boolean> {
-    if (!absence.leavePortion || absence.leavePortion === LeavePortion.FULL_DAY) {
+    if (!absence.isPartialDay) {
       return true;
     }
 

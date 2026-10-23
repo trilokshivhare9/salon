@@ -3,6 +3,9 @@ import {
   Logger,
   BadRequestException,
   NotFoundException,
+  Inject,
+  forwardRef,
+  Optional,
 } from '@nestjs/common';
 import { PrismaService } from '../../../../database/prisma.service';
 import { AppointmentStatus } from '@prisma/client';
@@ -11,12 +14,18 @@ import {
   appointmentInclude,
   formatAppointment,
 } from '../utils/appointment-helpers';
+import { AppointmentModifierService } from '../modifier/appointment-modifier.service';
 
 @Injectable()
 export class AppointmentAddonService {
   private readonly logger = new Logger(AppointmentAddonService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    @Optional()
+    @Inject(forwardRef(() => AppointmentModifierService))
+    private modifierService?: AppointmentModifierService,
+  ) {}
 
   /**
    * Adds an add-on service to an active/in-service appointment, extending its duration.
@@ -57,7 +66,7 @@ export class AppointmentAddonService {
     // Check salon closing time and break window boundaries
     const salon = await this.prisma.salon.findUnique({
       where: { id: salonId },
-      include: { workingHours: true },
+      include: { workingHours: true, salonBreaks: true },
     });
     const tz = salon?.timezone || 'Asia/Kolkata';
     const apptDt = DateTime.fromJSDate(appointment.startAt).setZone(tz);
@@ -82,26 +91,27 @@ export class AppointmentAddonService {
           extraService,
         };
       }
+    }
 
-      if (workingHours.breakStartTime && workingHours.breakEndTime) {
-        const [bStartH, bStartM] = workingHours.breakStartTime.split(':').map(Number);
-        const [bEndH, bEndM] = workingHours.breakEndTime.split(':').map(Number);
-        const breakStartAt = apptDt.set({ hour: bStartH, minute: bStartM, second: 0, millisecond: 0 }).toJSDate();
-        const breakEndAt = apptDt.set({ hour: bEndH, minute: bEndM, second: 0, millisecond: 0 }).toJSDate();
+    const activeBreaks = (salon?.salonBreaks || []).filter((b) => b.dayOfWeek === dayOfWeek);
+    for (const b of activeBreaks) {
+      const [bStartH, bStartM] = b.startTime.split(':').map(Number);
+      const [bEndH, bEndM] = b.endTime.split(':').map(Number);
+      const breakStartAt = apptDt.set({ hour: bStartH, minute: bStartM, second: 0, millisecond: 0 }).toJSDate();
+      const breakEndAt = apptDt.set({ hour: bEndH, minute: bEndM, second: 0, millisecond: 0 }).toJSDate();
 
-        if (newEndAt > breakStartAt && appointment.endAt < breakEndAt) {
-          return {
-            success: false,
-            conflict: true,
-            conflictBooking: {
-              stylist: appointment.stylist,
-              staff: appointment.stylist,
-              stylistId: appointment.stylistId,
-              name: 'Salon Break Time',
-            },
-            extraService,
-          };
-        }
+      if (newEndAt > breakStartAt && appointment.endAt < breakEndAt) {
+        return {
+          success: false,
+          conflict: true,
+          conflictBooking: {
+            stylist: appointment.stylist,
+            staff: appointment.stylist,
+            stylistId: appointment.stylistId,
+            name: b.title || 'Salon Break Time',
+          },
+          extraService,
+        };
       }
     }
 
@@ -159,6 +169,10 @@ export class AppointmentAddonService {
         include: appointmentInclude,
       });
     });
+
+    if (this.modifierService) {
+      await this.modifierService.syncAlarm(appointmentId);
+    }
 
     const formatted = formatAppointment(updatedAppointment);
     return {
