@@ -117,7 +117,7 @@ export class AuthService {
     return {
       accessToken,
       refreshToken: rawRefreshToken,
-      expiresIn: 900,
+      expiresIn: 5184000, // 60 days (5184000s)
       user: {
         id: admin.id,
         name: admin.name,
@@ -182,7 +182,7 @@ export class AuthService {
     return {
       accessToken: newAccessToken,
       refreshToken: newRawRefreshToken,
-      expiresIn: 900,
+      expiresIn: 5184000, // 60 days (5184000s)
       user: {
         id: existingSession.admin.id,
         name: existingSession.admin.name,
@@ -303,7 +303,7 @@ export class AuthService {
       return {
         accessToken,
         refreshToken: rawRefreshToken,
-        expiresIn: 900,
+        expiresIn: 5184000, // 60 days (5184000s)
         user: {
           id: ownerAdmin.id,
           name: ownerAdmin.name,

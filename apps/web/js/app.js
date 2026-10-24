@@ -39,8 +39,17 @@ class App {
       };
     }
 
-    // Initialize session and hydrate authentication state
-    await this.initSession();
+    // Immediately handle route so workspace renders without waiting on network
+    if (!window.location.hash) {
+      window.location.hash = '#admin';
+    } else {
+      this.handleRoute();
+    }
+
+    // Initialize session and hydrate authentication state in background
+    this.initSession().catch((err) => {
+      console.warn('[App] Session init non-fatal:', err);
+    });
 
     // Handle mobile wake-up from screen lock gracefully per realm
     document.addEventListener('visibilitychange', () => {
@@ -52,7 +61,7 @@ class App {
           }
         } else if (currentHash === 'admin' || currentHash.startsWith('admin/')) {
           if (SalonAuth.getToken()) {
-            ApiClient.getMe().catch(() => {});
+            ApiClient.getMe().catch(() => { });
           }
         }
       }
@@ -60,12 +69,6 @@ class App {
 
     // Start background keepalive heartbeat to prevent cloud backend sleep
     this.startKeepAlive();
-
-    if (!window.location.hash) {
-      window.location.hash = '#admin';
-    } else {
-      this.handleRoute();
-    }
   }
 
   async initSession() {
@@ -135,7 +138,7 @@ class App {
     const modal = document.createElement('div');
     modal.id = 'reauth-modal';
     modal.style.cssText = 'position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.85); backdrop-filter:blur(10px); z-index:9999999; display:flex; align-items:center; justify-content:center; padding:20px;';
-    
+
     const initialIdentifier = salonUser?.phone || salonUser?.email || localStorage.getItem('last_user_identifier') || '';
 
     modal.innerHTML = `
@@ -177,7 +180,7 @@ class App {
       const password = document.getElementById('reauth-password').value;
       const errEl = document.getElementById('reauth-error');
       const submitBtn = document.getElementById('reauth-submit-btn');
-      
+
       errEl.style.display = 'none';
       submitBtn.disabled = true;
       submitBtn.textContent = 'Resuming...';
@@ -513,7 +516,7 @@ class App {
     setInterval(() => {
       if (document.visibilityState === 'visible') {
         if (SalonAuth.getToken()) {
-          ApiClient.getMe().catch(() => {});
+          ApiClient.getMe().catch(() => { });
         }
       }
     }, 210000);
@@ -584,17 +587,18 @@ class App {
       if (requestedTab) {
         try {
           sessionStorage.setItem('active_dashboard_tab', requestedTab);
-        } catch (_) {}
+        } catch (_) { }
       }
 
       const salonUser = SalonAuth.getUser();
       if (salonUser) {
         // If SalonDashboard instance is already initialized and mounted in DOM, switch tab smoothly without full destroy
         if (window.salonDashboard && window.salonDashboard.container && document.getElementById('tab-content')) {
-          if (requestedTab && window.salonDashboard.activeTab !== requestedTab) {
-            window.salonDashboard.switchTab(requestedTab, false);
-            return;
+          const targetTab = requestedTab || 'dashboard';
+          if (window.salonDashboard.activeTab !== targetTab) {
+            window.salonDashboard.switchTab(targetTab, false);
           }
+          return;
         }
         const dashboard = new SalonDashboard('app-root', salonUser);
         dashboard.init(requestedTab);
@@ -868,6 +872,12 @@ class App {
 
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+function bootApp() {
   new App();
-});
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bootApp);
+} else {
+  bootApp();
+}

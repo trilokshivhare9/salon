@@ -25,7 +25,7 @@ export class SessionService {
     const sessionFamilyId = familyId || uuidv4();
     const rawRefreshToken = this.tokenService.generateRefreshToken();
     const tokenHash = this.tokenService.hashToken(rawRefreshToken);
-    const expiresAt = this.tokenService.calculateExpiryDate(7);
+    const expiresAt = this.tokenService.calculateExpiryDate(60);
 
     const session = await db.userSession.create({
       data: {
