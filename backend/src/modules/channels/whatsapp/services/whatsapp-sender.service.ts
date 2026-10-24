@@ -129,6 +129,11 @@ export class WhatsAppSenderService {
     phoneNumberId?: string,
     salonId?: string,
   ): Promise<boolean> {
+    if (phoneNumberId === 'simulator') {
+      this.logger.log(`[WhatsAppSenderService] 🧪 Simulator bypass: skipped external Meta Graph API call for ${toPhone}`);
+      return true;
+    }
+
     let accessToken =
       this.configService.get<string>('whatsapp.accessToken') ||
       process.env.WHATSAPP_ACCESS_TOKEN;

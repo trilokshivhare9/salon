@@ -57,13 +57,20 @@ export class AvailabilityService {
   // Eliminates repetitive DB queries when calculating availability across multiple days
   private readonly salonMetaCache = new Map<string, { salon: any; cachedAt: number }>();
   private readonly workingHoursCache = new Map<string, { hours: any; cachedAt: number }>();
+  private readonly quickStatusCache = new Map<string, { status: QuickBookingOperatingStatus; cachedAt: number }>();
   private readonly CACHE_TTL_MS = 5 * 60 * 1000;
+  private readonly QUICK_STATUS_CACHE_TTL_MS = 60 * 1000;
 
   public invalidateSalonScheduleCache(salonId: string): void {
     this.salonMetaCache.delete(salonId);
     for (const key of this.workingHoursCache.keys()) {
       if (key.startsWith(`${salonId}:`)) {
         this.workingHoursCache.delete(key);
+      }
+    }
+    for (const key of this.quickStatusCache.keys()) {
+      if (key.startsWith(`${salonId}:`)) {
+        this.quickStatusCache.delete(key);
       }
     }
   }
@@ -740,6 +747,14 @@ export class AvailabilityService {
 
     const timezone = tzOverride || salon.timezone || TimeUtility.DEFAULT_TIMEZONE;
     const nowInSalonZone = DateTime.now().setZone(timezone);
+
+    // High-speed 60-second in-memory cache check (<0.001ms)
+    const cacheKey = `${salonId}:${nowInSalonZone.minute}`;
+    const cachedEntry = this.quickStatusCache.get(cacheKey);
+    if (cachedEntry && Date.now() - cachedEntry.cachedAt < this.QUICK_STATUS_CACHE_TTL_MS) {
+      return { ...cachedEntry.status };
+    }
+
     const todayStr = nowInSalonZone.toISODate();
     const targetDateObj = TimeUtility.toDbDate(todayStr);
 
@@ -838,7 +853,7 @@ export class AvailabilityService {
       }
     }
 
-    return {
+    const result: QuickBookingOperatingStatus = {
       isOpen: true,
       closingTime: workingHours.endTime,
       closingTimeFormatted,
@@ -846,6 +861,8 @@ export class AvailabilityService {
       nextOpeningTimeFormatted,
       salonTimezone: timezone,
     };
+    this.quickStatusCache.set(cacheKey, { status: result, cachedAt: Date.now() });
+    return result;
   }
 
   async isQuickBookingOperationalToday(salonId: string, tzOverride?: string): Promise<boolean> {

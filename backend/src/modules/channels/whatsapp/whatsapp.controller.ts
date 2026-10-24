@@ -375,6 +375,8 @@ export class WhatsAppController {
       body.customerPhone || '+919811122233',
       body.messageText || 'Hi',
       body.interactiveId,
+      'simulator',
+      'Simulator Customer',
     );
   }
 

@@ -135,6 +135,10 @@ export class WhatsAppActionHandlerService {
         where: { id: conversation.activeAppointmentId },
         include: { service: true, stylist: true },
       });
+      if (targetAppointment?.status === AppointmentStatus.PENDING_ACCEPTANCE) {
+        pendingAppointment = targetAppointment;
+        targetAppointment = null;
+      }
     }
 
     if (
@@ -144,18 +148,24 @@ export class WhatsAppActionHandlerService {
         conversation.state === ConversationState.START ||
         conversation.state === ConversationState.ACTIVE_HUB)
     ) {
-      targetAppointment = await this.prisma.appointment.findFirst({
+      // Single fast indexed query: loads up to 3 most recent appointments directly by userId
+      const recentAppts = await this.prisma.appointment.findMany({
         where: {
           salonId,
-          salonUser: {
-            user: {
-              phone: { in: [cleanNumber, `+${cleanNumber}`, cleanNumber.replace(/^\+/, '')] },
-            },
-          },
+          salonUser: { userId: user.id },
         },
         include: { service: true, stylist: true },
         orderBy: { createdAt: 'desc' },
+        take: 3,
       });
+
+      for (const a of recentAppts) {
+        if (!pendingAppointment && a.status === AppointmentStatus.PENDING_ACCEPTANCE) {
+          pendingAppointment = a;
+        } else if (!targetAppointment) {
+          targetAppointment = a;
+        }
+      }
     }
 
     if (targetAppointment) {
@@ -173,29 +183,11 @@ export class WhatsAppActionHandlerService {
         if (activeStatuses.includes(targetAppointment.status)) {
           activeAppointment = targetAppointment;
           if (conversation.activeAppointmentId !== targetAppointment.id) {
-            await this.session.updateConversationState(conversation.id, conversation.state, targetAppointment.id);
+            setImmediate(() => {
+              this.session.updateConversationState(conversation.id, conversation.state, targetAppointment.id).catch(() => {});
+            });
           }
         }
-      }
-    }
-
-    // Defensive check: if targetAppointment was not pending, check if user has an active pending quick request
-    if (!pendingAppointment) {
-      const activePending = await this.prisma.appointment.findFirst({
-        where: {
-          salonId,
-          salonUser: {
-            user: {
-              phone: { in: [cleanNumber, `+${cleanNumber}`, cleanNumber.replace(/^\+/, '')] },
-            },
-          },
-          status: AppointmentStatus.PENDING_ACCEPTANCE,
-        },
-        include: { service: true, stylist: true },
-        orderBy: { createdAt: 'desc' },
-      });
-      if (activePending) {
-        pendingAppointment = activePending;
       }
     }
 
