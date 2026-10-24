@@ -648,7 +648,7 @@ export class StaffService {
 
         if (futureBlocking) {
           throw new ConflictException(
-            `Cannot deactivate stylist: stylist has existing future appointment #${futureBlocking.appointmentNumber}.`,
+            `Cannot deactivate ${stylist.name || 'stylist'}: specialist has upcoming booking #${futureBlocking.appointmentNumber}. Please reassign or cancel this booking first.`,
           );
         }
       }

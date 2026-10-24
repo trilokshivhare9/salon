@@ -23,6 +23,8 @@ export const API_BASE = useLocal
 
 // In-flight GET request deduplication pool
 const inFlightRequests = new Map();
+// In-flight Mutation Mutex Pool (prevents duplicate writes across all forms/buttons)
+const inFlightMutations = new Map();
 
 export class ApiError extends Error {
   constructor(message, status = 500, payload = null) {
@@ -46,19 +48,29 @@ export class HttpClient {
     const method = (options.method || 'GET').toUpperCase();
     const isGet = method === 'GET';
 
-    // In-flight deduplication key for concurrent identical GET requests
-    const dedupeKey = isGet ? `${session.namespace}:${endpoint}` : null;
+    // 1. In-flight deduplication key for concurrent identical GET requests
+    const dedupeKey = isGet ? `${session?.namespace || 'public'}:${endpoint}` : null;
     if (isGet && inFlightRequests.has(dedupeKey)) {
       return inFlightRequests.get(dedupeKey);
+    }
+
+    // 2. In-flight mutation signature: METHOD:namespace:endpoint:body
+    const mutationKey = !isGet ? `${method}:${session?.namespace || 'public'}:${endpoint}:${options.body || ''}` : null;
+    if (mutationKey && inFlightMutations.has(mutationKey)) {
+      console.warn(`[HttpClient] In-flight mutation detected, joining active promise for ${method} ${endpoint}`);
+      return inFlightMutations.get(mutationKey);
     }
 
     const requestPromise = this._execute(endpoint, options, session, retriesRemaining, isGet)
       .finally(() => {
         if (dedupeKey) inFlightRequests.delete(dedupeKey);
+        if (mutationKey) inFlightMutations.delete(mutationKey);
       });
 
     if (isGet) {
       inFlightRequests.set(dedupeKey, requestPromise);
+    } else if (mutationKey) {
+      inFlightMutations.set(mutationKey, requestPromise);
     }
 
     return requestPromise;
@@ -76,6 +88,11 @@ export class HttpClient {
 
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    // Attach Idempotency-Key on all mutating requests (Stripe standard)
+    if (!isGet && !headers['Idempotency-Key'] && typeof crypto !== 'undefined' && crypto.randomUUID) {
+      headers['Idempotency-Key'] = crypto.randomUUID();
     }
 
     const controller = new AbortController();
