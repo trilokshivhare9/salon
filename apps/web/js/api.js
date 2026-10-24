@@ -54,8 +54,8 @@ export class AuthRealm {
       if (!token && !refreshToken) {
         return null;
       }
-      // If access token is expired AND refresh token is also expired or missing, user is logged out
-      if (token && ApiClient.isTokenExpired(token) && (!refreshToken || ApiClient.isTokenExpired(refreshToken))) {
+      // If access token is expired AND there is no refresh token, user is logged out
+      if (token && ApiClient.isTokenExpired(token) && !refreshToken) {
         return null;
       }
       const raw = localStorage.getItem(this.userKey);
@@ -67,9 +67,9 @@ export class AuthRealm {
 
   async refreshAccessToken() {
     const rawRefreshToken = this.getRefreshToken();
-    if (!rawRefreshToken || ApiClient.isTokenExpired(rawRefreshToken)) {
+    if (!rawRefreshToken) {
       this.clear();
-      throw new Error('Refresh token missing or expired');
+      throw new Error('Refresh token missing');
     }
 
     const refreshRes = await fetch(`${API_BASE}/auth/refresh`, {
@@ -80,7 +80,7 @@ export class AuthRealm {
 
     if (!refreshRes.ok) {
       this.clear();
-      throw new Error('Refresh token invalid');
+      throw new Error('Refresh token invalid or expired');
     }
 
     const refreshData = await refreshRes.json();
@@ -379,8 +379,14 @@ export class ApiClient {
   }
 
   static isTokenExpired(token) {
+    if (!token || typeof token !== 'string') return true;
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+      // Opaque token format (e.g. rt_...); server-side validated only
+      return false;
+    }
     const payload = this.parseJwt(token);
-    if (!payload || !payload.exp) return true;
+    if (!payload || !payload.exp) return false;
     return Date.now() >= payload.exp * 1000 - 15000; // 15s buffer
   }
 

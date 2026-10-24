@@ -559,6 +559,21 @@ export class SalonDashboard {
       // Re-attach only tab-specific event listeners (not header/nav)
       this.attachTabEventListeners();
 
+      // Ensure nav tabs active class matches this.activeTab
+      this.container.querySelectorAll('.nav-tab').forEach((el) => {
+        el.classList.toggle('active', el.getAttribute('data-tab') === this.activeTab);
+      });
+      this.container.querySelectorAll('.bottom-nav-item').forEach((el) => {
+        el.classList.toggle('active', el.getAttribute('data-tab') === this.activeTab);
+      });
+
+      // Update header quick requests button count
+      const quickReqVal = this.container.querySelector('#header-quick-requests-val');
+      if (quickReqVal) {
+        const pendingCount = (this.summaryData?.todayAppointments || []).filter((a) => a.status === 'PENDING_ACCEPTANCE').length;
+        quickReqVal.textContent = pendingCount;
+      }
+
       // Update header badge count (queue badge in bottom nav)
       const queueBadge = this.container.querySelector('.bottom-nav-badge');
       if (queueBadge && this.summaryData?.statusCounts) {
@@ -579,6 +594,13 @@ export class SalonDashboard {
       const servicesTabSpan = this.container.querySelector('.nav-tab[data-tab="services"] span');
       if (servicesTabSpan && this.servicesList) {
         servicesTabSpan.textContent = `Service Menu (${this.servicesList.length})`;
+      }
+
+      if (window.history && window.history.replaceState) {
+        try {
+          const newHash = this.activeTab === 'dashboard' ? '#admin' : `#admin/${this.activeTab}`;
+          window.history.replaceState(null, '', newHash);
+        } catch (_) {}
       }
     } else {
       // Fallback to full re-render if tab-content not found
@@ -747,63 +769,18 @@ export class SalonDashboard {
 
 
   renderLoading() {
+    // If persistent shell is already mounted, NEVER wipe the DOM during background syncs!
+    if (this.container && this.container.querySelector('.portal-header')) {
+      return;
+    }
+
     this.container.innerHTML = `
-      <!-- Skeleton Header -->
-      <header class="portal-header">
-        <div class="portal-header-content">
-          <div style="display: flex; align-items: center; gap: 12px;">
-            <div class="skeleton-pulse" style="width: 42px; height: 42px; border-radius: 12px;"></div>
-            <div>
-              <div class="skeleton-pulse" style="width: 160px; height: 16px; border-radius: 6px; margin-bottom: 6px;"></div>
-              <div class="skeleton-pulse" style="width: 100px; height: 10px; border-radius: 4px;"></div>
-            </div>
-          </div>
-        </div>
-      </header>
-      <main style="max-width: 1300px; margin: 0 auto; padding: 24px 16px;">
-        <!-- Skeleton Tab Bar -->
-        <div style="display: flex; gap: 8px; margin-bottom: 24px; overflow-x: auto;">
-          ${[120, 100, 130, 110, 105].map(w => `<div class="skeleton-pulse" style="width: ${w}px; height: 36px; border-radius: 20px; flex-shrink: 0;"></div>`).join('')}
-        </div>
-        <!-- Skeleton KPI Grid -->
-        <div class="stats-grid">
-          ${[1, 2, 3, 4].map(() => `
-            <div class="stat-card">
-              <div class="skeleton-pulse" style="width: 80%; height: 12px; border-radius: 4px; margin-bottom: 12px;"></div>
-              <div class="skeleton-pulse" style="width: 50%; height: 28px; border-radius: 6px; margin-bottom: 8px;"></div>
-              <div class="skeleton-pulse" style="width: 70%; height: 10px; border-radius: 4px;"></div>
-            </div>
-          `).join('')}
-        </div>
-        <!-- Skeleton Action Cards -->
-        <div class="glass-panel" style="margin-bottom: 24px;">
-          <div class="skeleton-pulse" style="width: 180px; height: 18px; border-radius: 6px; margin-bottom: 16px;"></div>
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px;">
-            ${[1, 2, 3, 4].map(() => `
-              <div class="staff-card" style="padding: 18px;">
-                <div class="skeleton-pulse" style="width: 40px; height: 40px; border-radius: 10px; margin-bottom: 10px;"></div>
-                <div class="skeleton-pulse" style="width: 75%; height: 14px; border-radius: 4px; margin-bottom: 8px;"></div>
-                <div class="skeleton-pulse" style="width: 90%; height: 10px; border-radius: 4px;"></div>
-              </div>
-            `).join('')}
-          </div>
-        </div>
-        <!-- Skeleton Staff Grid -->
-        <div class="glass-panel">
-          <div class="skeleton-pulse" style="width: 220px; height: 18px; border-radius: 6px; margin-bottom: 16px;"></div>
-          <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px;">
-            ${[1, 2, 3].map(() => `
-              <div class="staff-card" style="display: flex; align-items: center; gap: 14px; padding: 14px;">
-                <div class="skeleton-pulse" style="width: 44px; height: 44px; border-radius: 50%;"></div>
-                <div style="flex: 1;">
-                  <div class="skeleton-pulse" style="width: 70%; height: 14px; border-radius: 4px; margin-bottom: 8px;"></div>
-                  <div class="skeleton-pulse" style="width: 50%; height: 10px; border-radius: 4px;"></div>
-                </div>
-              </div>
-            `).join('')}
-          </div>
-        </div>
-      </main>
+      <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #0c0f17; color: #fff; font-family: sans-serif; gap: 16px;">
+        <div style="width: 46px; height: 46px; border: 3px solid rgba(168, 85, 247, 0.2); border-top-color: #a855f7; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+        <div style="font-size: 0.95rem; font-weight: 700; color: #e2e8f0; letter-spacing: -0.01em;">StyleSlot Operations</div>
+        <div style="font-size: 0.78rem; color: #94a3b8;">Loading secure salon workspace...</div>
+      </div>
+      <style>@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }</style>
     `;
   }
 
@@ -821,6 +798,15 @@ export class SalonDashboard {
   }
 
   render() {
+    // PERSISTENT SHELL PATTERN:
+    // If outer shell (header and tab-content) is already mounted in DOM, update in-place with zero flicker.
+    const existingTabContent = document.getElementById('tab-content');
+    const existingHeader = this.container?.querySelector('.portal-header');
+    if (existingTabContent && existingHeader) {
+      this.refreshActiveTab();
+      return;
+    }
+
     const salonName = this.salonProfile?.name || 'Salon Operations';
     const salonSlug = this.salonProfile?.slug || 'salon';
     const webBookingUrl = `${window.location.origin}/#book/${salonSlug}`;

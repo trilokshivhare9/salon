@@ -22,7 +22,7 @@ import { PlatformBootstrapService } from './services/platform-bootstrap.service'
       useFactory: (config: ConfigService) => ({
         secret: config.get<string>('jwt.secret') || 'default-secret-key-min32chars',
         signOptions: {
-          expiresIn: config.get<string>('jwt.expiresIn') || '1d',
+          expiresIn: config.get<string>('jwt.expiresIn') || '60d',
         },
       }),
     }),
