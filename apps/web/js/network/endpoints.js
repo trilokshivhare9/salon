@@ -16,6 +16,11 @@ export const ENDPOINTS = {
     REGISTER: '/auth/register',
     FORGOT_PASSWORD_REQUEST: '/auth/forgot-password/request',
     FORGOT_PASSWORD_CONFIRM: '/auth/forgot-password/confirm',
+    FORGOT_PASSWORD_LOOKUP: '/auth/forgot-password-lookup',
+    FORGOT_PASSWORD: '/auth/forgot-password',
+    RESET_PASSWORD_OTP: '/auth/reset-password-otp',
+    CHANGE_PASSWORD: '/auth/change-password',
+    PROFILE: '/auth/profile',
   },
 
   // Salon Operations & Working Hours
@@ -31,6 +36,19 @@ export const ENDPOINTS = {
     CLOSURE_BY_ID: (id) => `/salons/closures/${id}`,
     CLOSURES_SCHEDULE: (query = '') => `/salons/closures/calendar-schedule${query ? (query.startsWith('?') ? query : `?${query}`) : ''}`,
     CLOSURES_HOLIDAYS: (query = '') => `/salons/closures/holidays${query ? (query.startsWith('?') ? query : `?${query}`) : ''}`,
+    BLOCKED_TIMES: '/salons/blocked-times',
+    BLOCKED_TIME_BY_ID: (id) => `/salons/blocked-times/${id}`,
+    HOLIDAYS: (query = '') => `/salons/holidays${query ? (query.startsWith('?') ? query : `?${query}`) : ''}`,
+    QUICK_CODE: (salonId) => `/salons/${salonId}/quick-code`,
+    QUICK_CODE_GENERATE: (salonId) => `/salons/${salonId}/quick-code/generate`,
+    PLATFORM_ALL: '/salons/platform/all',
+    PLATFORM_CREATE: '/salons/platform/create',
+    PLATFORM_DEACTIVATION_PREVIEW: (id) => `/salons/platform/${id}/deactivation-preview`,
+    PLATFORM_TOGGLE_STATUS: (id, forceCancel = false) => `/salons/platform/${id}/toggle-status?forceCancel=${forceCancel ? 'true' : 'false'}`,
+    PLATFORM_VERIFY_META_PHONE: (phoneId) => `/salons/platform/verify-meta-phone/${phoneId}`,
+    PLATFORM_VERIFY_PHONE: '/salons/platform/verify-phone-number',
+    PLATFORM_LINK_WHATSAPP: (id) => `/salons/platform/${id}/link-whatsapp`,
+    PLATFORM_DELETE: (id) => `/salons/platform/${id}`,
   },
 
   // Staff Management & Stylist Schedules
@@ -65,9 +83,12 @@ export const ENDPOINTS = {
     CREATE: '/services',
     UPDATE: (id) => `/services/${id}`,
     DELETE: (id) => `/services/${id}`,
+    TOGGLE_STATUS: (id) => `/services/${id}/toggle-status`,
     CATEGORY_CREATE: '/services/categories',
     CATEGORY_UPDATE: (id) => `/services/categories/${id}`,
     CATEGORY_DELETE: (id) => `/services/categories/${id}`,
+    AI_SCAN: '/services/ai-scan',
+    BULK_IMPORT: '/services/bulk-import',
   },
 
   // Appointments, Dashboard Summary & Live Queue
@@ -89,10 +110,13 @@ export const ENDPOINTS = {
     LIST: (query = '') => `/customers${query ? (query.startsWith('?') ? query : `?${query}`) : ''}`,
     DETAIL: (id) => `/customers/${id}`,
     HISTORY: (id) => `/customers/${id}/history`,
+    UNBLOCK: (id) => `/customers/${id}/unblock`,
+    STRIKES: (id) => `/customers/${id}/strikes`,
   },
 
   // Analytics & Business Performance
   REPORTS: {
+    DASHBOARD: (dateStr = '') => dateStr ? `/reports/dashboard?date=${dateStr}` : '/reports/dashboard',
     STATS: (range = '30d') => `/reports/stats?range=${range}`,
     HEATMAP: '/reports/heatmap',
     SERVICE_MIX: '/reports/service-mix',
@@ -102,7 +126,7 @@ export const ENDPOINTS = {
   WHATSAPP: {
     CONFIG: '/whatsapp/config',
     QR: '/whatsapp/qr',
-    STATUS: '/whatsapp/status',
+    STATUS: (salonId = '') => salonId ? `/whatsapp/status?salonId=${salonId}` : '/whatsapp/status',
     SEND_MESSAGE: '/whatsapp/chat/send-message',
     RESUME_BOT: '/whatsapp/chat/resume-bot',
     CHAT_HISTORY: (params) => `/whatsapp/chat/history?${params}`,
@@ -113,6 +137,11 @@ export const ENDPOINTS = {
   // Public Booking Wizard (Client-facing)
   BOOKING: {
     DETAILS: (slug) => `/booking/${slug}`,
+    AVAILABILITY: (slug, serviceId, date, staffId = null) => {
+      let url = `/booking/${slug}/availability?serviceId=${serviceId}&date=${date}`;
+      if (staffId) url += `&staffId=${staffId}`;
+      return url;
+    },
     SLOTS: (slug, dateStr, serviceId, stylistId) =>
       `/booking/${slug}/slots?date=${dateStr}&serviceId=${serviceId}${stylistId ? `&stylistId=${stylistId}` : ''}`,
     CREATE: (slug) => `/booking/${slug}/appointments`,
@@ -120,6 +149,11 @@ export const ENDPOINTS = {
 
   // Super Admin Platform Realm
   PLATFORM: {
+    CATEGORIES: (query = '') => `/super-admin/categories${query ? (query.startsWith('?') ? query : `?${query}`) : ''}`,
+    CATEGORY_BY_ID: (id) => `/super-admin/categories/${id}`,
+    ERRORS: (query = '') => `/super-admin/errors${query ? (query.startsWith('?') ? query : `?${query}`) : ''}`,
+    ERROR_BY_ID: (id) => `/super-admin/errors/${id}`,
+    ERROR_RESOLVE: (id) => `/super-admin/errors/${id}/resolve`,
     TENANTS: '/super-admin/tenants',
     TENANT_BY_ID: (id) => `/super-admin/tenants/${id}`,
     TOGGLE_STATUS: (id) => `/super-admin/tenants/${id}/toggle-status`,

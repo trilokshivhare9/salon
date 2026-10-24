@@ -5,6 +5,8 @@
  * in-memory cache, localStorage persistence, and multi-tab synchronization.
  */
 
+import { ENDPOINTS } from './endpoints.js';
+
 export class SessionRealm {
   constructor(namespace, defaultLoginRoute) {
     this.namespace = namespace;
@@ -136,7 +138,7 @@ export class SessionRealm {
     const useLocal = (isLocalhost && !forceCloud) || new URLSearchParams(window.location.search).get('local') === '1' || localStorage.getItem('use_local_backend') === 'true';
     const apiBase = useLocal ? `http://${window.location.hostname || 'localhost'}:3000/api/v1` : 'https://salon-api-tuwo.onrender.com/api/v1';
 
-    const refreshRes = await fetch(`${apiBase}/auth/refresh`, {
+    const refreshRes = await fetch(`${apiBase}${ENDPOINTS.AUTH.REFRESH}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refreshToken: rawRefreshToken }),
