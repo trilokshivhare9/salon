@@ -14,7 +14,7 @@ export class PwaManager {
     if (!('serviceWorker' in navigator)) return;
 
     const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    
+
     // In local development (Vite dev server), actively unregister SW to prevent 3G request duplication and HMR blocking
     if (isLocalhost && !window.location.search.includes('enable_sw=1')) {
       navigator.serviceWorker.getRegistrations().then((registrations) => {
@@ -49,6 +49,9 @@ export class PwaManager {
     if (document.getElementById('pwa-install-banner') || localStorage.getItem('pwa_prompt_dismissed')) {
       return;
     }
+
+
+
 
     const banner = document.createElement('div');
     banner.id = 'pwa-install-banner';
