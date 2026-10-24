@@ -49,7 +49,13 @@ export class AuthRealm {
   getUser() {
     try {
       const token = this.getAccessToken();
-      if (!token || ApiClient.isTokenExpired(token)) {
+      const refreshToken = this.getRefreshToken();
+      // If neither token nor refresh token exists, user is logged out
+      if (!token && !refreshToken) {
+        return null;
+      }
+      // If access token is expired AND refresh token is also expired or missing, user is logged out
+      if (token && ApiClient.isTokenExpired(token) && (!refreshToken || ApiClient.isTokenExpired(refreshToken))) {
         return null;
       }
       const raw = localStorage.getItem(this.userKey);
@@ -57,6 +63,34 @@ export class AuthRealm {
     } catch {
       return null;
     }
+  }
+
+  async refreshAccessToken() {
+    const rawRefreshToken = this.getRefreshToken();
+    if (!rawRefreshToken || ApiClient.isTokenExpired(rawRefreshToken)) {
+      this.clear();
+      throw new Error('Refresh token missing or expired');
+    }
+
+    const refreshRes = await fetch(`${API_BASE}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: rawRefreshToken }),
+    });
+
+    if (!refreshRes.ok) {
+      this.clear();
+      throw new Error('Refresh token invalid');
+    }
+
+    const refreshData = await refreshRes.json();
+    const result = refreshData.data !== undefined ? refreshData.data : refreshData;
+
+    this.setAccessToken(result.accessToken);
+    if (result.refreshToken) this.setRefreshToken(result.refreshToken);
+    if (result.user) this.setUser(result.user);
+
+    return result;
   }
 
   setUser(user) {
@@ -136,22 +170,7 @@ async function executeRealmRequest(realm, endpoint, options = {}, ttlMs = 0) {
       if (!realm.isRefreshing) {
         realm.isRefreshing = true;
         try {
-          const rawRefreshToken = realm.getRefreshToken();
-          if (!rawRefreshToken) throw new Error('No refresh token');
-
-          const refreshRes = await fetch(`${API_BASE}/auth/refresh`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ refreshToken: rawRefreshToken }),
-          });
-
-          if (!refreshRes.ok) throw new Error('Refresh token invalid');
-          const refreshData = await refreshRes.json();
-          const result = refreshData.data !== undefined ? refreshData.data : refreshData;
-
-          realm.setAccessToken(result.accessToken);
-          if (result.refreshToken) realm.setRefreshToken(result.refreshToken);
-          if (result.user) realm.setUser(result.user);
+          const result = await realm.refreshAccessToken();
 
           realm.isRefreshing = false;
           realm.refreshSubscribers.forEach((cb) => cb(result.accessToken));
@@ -164,12 +183,16 @@ async function executeRealmRequest(realm, endpoint, options = {}, ttlMs = 0) {
           realm.refreshSubscribers = [];
           realm.clear();
 
-          // Only redirect if current route belongs to this realm
-          const currentHash = (window.location.hash || '').replace('#', '');
-          if (realm === PlatformRealm && (currentHash === 'super-admin' || currentHash === 'superadmin-login')) {
-            window.location.hash = '#superadmin-login';
-          } else if (realm === SalonRealm && (currentHash === 'admin' || currentHash === 'login' || currentHash === 'salon-login')) {
-            window.location.hash = '#login';
+          if (typeof window.onAuthFailure === 'function') {
+            window.onAuthFailure();
+          } else {
+            // Only redirect if current route belongs to this realm
+            const currentHash = (window.location.hash || '').replace('#', '');
+            if (realm === PlatformRealm && (currentHash === 'super-admin' || currentHash === 'superadmin-login')) {
+              window.location.hash = '#superadmin-login';
+            } else if (realm === SalonRealm && (currentHash === 'admin' || currentHash.startsWith('admin/') || currentHash === 'login' || currentHash === 'salon-login')) {
+              window.location.hash = '#login';
+            }
           }
 
           throw new Error(data.message || 'Session expired. Please log in again.');
@@ -213,6 +236,9 @@ export class PlatformAuth {
   static isAuthenticated() {
     const user = PlatformRealm.getUser();
     return !!(user && (user.role === 'SUPER_ADMIN' || user.role === 'PLATFORM_ADMIN'));
+  }
+  static refreshSession() {
+    return PlatformRealm.refreshAccessToken();
   }
   static async login(email, password) {
     PlatformRealm.clear();
@@ -258,6 +284,9 @@ export class SalonAuth {
   static isAuthenticated() {
     const user = SalonRealm.getUser();
     return !!user;
+  }
+  static refreshSession() {
+    return SalonRealm.refreshAccessToken();
   }
   static async login(identifier, password) {
     SalonRealm.clear();
@@ -1025,6 +1054,25 @@ export class ApiClient {
     this.invalidateCache('/reports');
     const res = await this.request(`/services/${id}`, {
       method: 'DELETE',
+    });
+    this.invalidateCache('/services');
+    this.invalidateCache('/reports');
+    return res;
+  }
+
+  static async scanMenuCardWithAi(imageBase64, mimeType = 'image/jpeg') {
+    return this.request('/services/ai-scan', {
+      method: 'POST',
+      body: JSON.stringify({ imageBase64, mimeType }),
+    });
+  }
+
+  static async bulkImportServices(services) {
+    this.invalidateCache('/services');
+    this.invalidateCache('/reports');
+    const res = await this.request('/services/bulk-import', {
+      method: 'POST',
+      body: JSON.stringify({ services }),
     });
     this.invalidateCache('/services');
     this.invalidateCache('/reports');

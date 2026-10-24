@@ -50,7 +50,7 @@ class App {
           if (!PlatformAuth.isAuthenticated()) {
             this.handleRoute();
           }
-        } else if (currentHash === 'admin') {
+        } else if (currentHash === 'admin' || currentHash.startsWith('admin/')) {
           if (SalonAuth.getToken()) {
             ApiClient.getMe().catch(() => {});
           }
@@ -69,23 +69,47 @@ class App {
   }
 
   async initSession() {
-    // 1. Hydrate Salon Realm if active token exists
+    // 1. Hydrate Salon Realm if active token or refresh token exists
+    const salonRefreshToken = SalonRealm.getRefreshToken();
     const salonToken = SalonAuth.getToken();
-    if (salonToken && !ApiClient.isTokenExpired(salonToken)) {
+
+    if (salonToken || salonRefreshToken) {
       try {
+        // If access token is missing or expired, attempt refresh immediately before routing
+        if (!salonToken || ApiClient.isTokenExpired(salonToken)) {
+          if (salonRefreshToken && !ApiClient.isTokenExpired(salonRefreshToken)) {
+            await SalonRealm.refreshAccessToken();
+          }
+        }
         const user = await ApiClient.getMe();
         if (user) SalonRealm.setUser(user);
       } catch (err) {
-        if (err.status === 401 || err.status === 403) {
+        console.warn('[App] Salon session hydration error:', err);
+        const currentToken = SalonRealm.getAccessToken();
+        if (!currentToken || ApiClient.isTokenExpired(currentToken)) {
           SalonRealm.clear();
         }
       }
     }
 
-    // 2. Hydrate Platform Realm if active token exists
+    // 2. Hydrate Platform Realm if active token or refresh token exists
+    const platformRefreshToken = PlatformRealm.getRefreshToken();
     const platformToken = PlatformAuth.getToken();
-    if (platformToken && ApiClient.isTokenExpired(platformToken)) {
-      PlatformRealm.clear();
+
+    if (platformToken || platformRefreshToken) {
+      try {
+        if (!platformToken || ApiClient.isTokenExpired(platformToken)) {
+          if (platformRefreshToken && !ApiClient.isTokenExpired(platformRefreshToken)) {
+            await PlatformRealm.refreshAccessToken();
+          }
+        }
+      } catch (err) {
+        console.warn('[App] Platform session hydration error:', err);
+        const currentToken = PlatformRealm.getAccessToken();
+        if (!currentToken || ApiClient.isTokenExpired(currentToken)) {
+          PlatformRealm.clear();
+        }
+      }
     }
   }
 
@@ -499,9 +523,10 @@ class App {
     const rawHash = (window.location.hash || '').replace(/^#\/?/, '') || 'admin';
     const appRoot = document.getElementById('app-root');
 
-    // 1. PUBLIC REALM: Client Booking Route (e.g. #book/:slug or #booking/:slug)
-    if (rawHash.startsWith('book/') || rawHash.startsWith('booking/')) {
-      const slug = rawHash.split('/')[1] || 'luxury-salon';
+    // 1. PUBLIC REALM: Client Booking Route (e.g. #book/:slug, #booking/:slug or fallback #book)
+    if (rawHash === 'book' || rawHash === 'booking' || rawHash.startsWith('book/') || rawHash.startsWith('booking/')) {
+      const parts = rawHash.split('/');
+      const slug = (parts.length > 1 && parts[1]) ? parts[1] : 'luxury-salon';
       const wizard = new BookingWizard('app-root', slug);
       wizard.init();
       return;
@@ -524,16 +549,55 @@ class App {
       return;
     }
 
-    // 3. SALON REALM: Salon Operations Dashboard
-    if (rawHash === 'admin' || rawHash === 'login' || rawHash === 'salon-login') {
+    // 3. SALON REALM: Salon Operations Dashboard & Deep Tabs (e.g. #admin, #admin/services, #services)
+    const validSalonTabs = ['dashboard', 'staff', 'queue', 'services', 'profile', 'customers', 'whatsapp-logs'];
+    const tabAliases = {
+      'settings': 'profile',
+      'clients': 'customers',
+      'menu': 'services',
+      'stylists': 'staff',
+    };
+
+    let requestedTab = null;
+    let isSalonAdminRoute = false;
+
+    if (rawHash === 'admin') {
+      isSalonAdminRoute = true;
+    } else if (rawHash.startsWith('admin/')) {
+      isSalonAdminRoute = true;
+      const sub = rawHash.replace(/^admin\//, '').trim();
+      const resolved = tabAliases[sub] || sub;
+      if (validSalonTabs.includes(resolved)) {
+        requestedTab = resolved;
+      }
+    } else if (validSalonTabs.includes(tabAliases[rawHash] || rawHash)) {
+      isSalonAdminRoute = true;
+      requestedTab = tabAliases[rawHash] || rawHash;
+    }
+
+    if (isSalonAdminRoute || rawHash === 'login' || rawHash === 'salon-login') {
       if (rawHash === 'login' || rawHash === 'salon-login') {
         this.renderSalonOwnerLogin(appRoot);
         return;
       }
+
+      if (requestedTab) {
+        try {
+          sessionStorage.setItem('active_dashboard_tab', requestedTab);
+        } catch (_) {}
+      }
+
       const salonUser = SalonAuth.getUser();
       if (salonUser) {
+        // If SalonDashboard instance is already initialized and mounted in DOM, switch tab smoothly without full destroy
+        if (window.salonDashboard && window.salonDashboard.container && document.getElementById('tab-content')) {
+          if (requestedTab && window.salonDashboard.activeTab !== requestedTab) {
+            window.salonDashboard.switchTab(requestedTab, false);
+            return;
+          }
+        }
         const dashboard = new SalonDashboard('app-root', salonUser);
-        dashboard.init();
+        dashboard.init(requestedTab);
       } else {
         this.renderSalonOwnerLogin(appRoot);
       }
