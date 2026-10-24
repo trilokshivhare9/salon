@@ -12,18 +12,18 @@ export class ServicesService {
   ) {}
 
   private async syncSalonActiveStatus(salonId: string) {
-    const activeStylistCount = await this.prisma.stylist.count({
-      where: { salonId, status: StylistStatus.ACTIVE },
-    });
-    const activeServiceCount = await this.prisma.service.count({
-      where: { salonId, status: ServiceStatus.ACTIVE },
-    });
+    try {
+      const [activeStylistCount, activeServiceCount] = await Promise.all([
+        this.prisma.stylist.count({ where: { salonId, status: StylistStatus.ACTIVE } }),
+        this.prisma.service.count({ where: { salonId, status: ServiceStatus.ACTIVE } }),
+      ]);
 
-    const meetsRequirements = activeStylistCount >= 1 && activeServiceCount >= 1;
-    await this.prisma.salon.update({
-      where: { id: salonId },
-      data: { status: meetsRequirements ? SalonStatus.ACTIVE : SalonStatus.INACTIVE },
-    });
+      const meetsRequirements = activeStylistCount >= 1 && activeServiceCount >= 1;
+      await this.prisma.salon.update({
+        where: { id: salonId },
+        data: { status: meetsRequirements ? SalonStatus.ACTIVE : SalonStatus.INACTIVE },
+      });
+    } catch (_) { }
   }
 
   async getSalonServices(salonId: string) {
@@ -254,7 +254,7 @@ export class ServicesService {
       });
     });
 
-    await this.syncSalonActiveStatus(salonId);
+    setImmediate(() => this.syncSalonActiveStatus(salonId));
     this.appointmentsService.emitSalonEvent(salonId, 'SERVICE_UPDATED', { serviceId: service!.id, action: 'CREATE' });
     return service;
   }
@@ -371,7 +371,7 @@ export class ServicesService {
       });
     });
 
-    await this.syncSalonActiveStatus(salonId);
+    setImmediate(() => this.syncSalonActiveStatus(salonId));
     this.appointmentsService.emitSalonEvent(salonId, 'SERVICE_UPDATED', { serviceId, action: 'UPDATE' });
     return updated;
   }
@@ -393,7 +393,7 @@ export class ServicesService {
       },
     });
 
-    await this.syncSalonActiveStatus(salonId);
+    setImmediate(() => this.syncSalonActiveStatus(salonId));
     this.appointmentsService.emitSalonEvent(salonId, 'SERVICE_UPDATED', { serviceId, action: 'TOGGLE' });
     return updated;
   }

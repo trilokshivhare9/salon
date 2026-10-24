@@ -33,18 +33,18 @@ export class StaffService {
   }
 
   private async syncSalonActiveStatus(salonId: string) {
-    const activeStylistCount = await this.prisma.stylist.count({
-      where: { salonId, status: StylistStatus.ACTIVE },
-    });
-    const activeServiceCount = await this.prisma.service.count({
-      where: { salonId, status: ServiceStatus.ACTIVE },
-    });
+    try {
+      const [activeStylistCount, activeServiceCount] = await Promise.all([
+        this.prisma.stylist.count({ where: { salonId, status: StylistStatus.ACTIVE } }),
+        this.prisma.service.count({ where: { salonId, status: ServiceStatus.ACTIVE } }),
+      ]);
 
-    const meetsRequirements = activeStylistCount >= 1 && activeServiceCount >= 1;
-    await this.prisma.salon.update({
-      where: { id: salonId },
-      data: { status: meetsRequirements ? SalonStatus.ACTIVE : SalonStatus.INACTIVE },
-    });
+      const meetsRequirements = activeStylistCount >= 1 && activeServiceCount >= 1;
+      await this.prisma.salon.update({
+        where: { id: salonId },
+        data: { status: meetsRequirements ? SalonStatus.ACTIVE : SalonStatus.INACTIVE },
+      });
+    } catch (_) { }
   }
 
   async getSalonStaff(salonId: string, targetDateStr?: string) {
@@ -163,10 +163,12 @@ export class StaffService {
         });
       }
 
-      // Clone Salon Facility Working Hours to new stylist (Hard Architecture Contract)
-      const salonHours = await tx.salonWorkingHours.findMany({
-        where: { salonId },
-      });
+      // Clone Salon Facility Working Hours and Routine Breaks to new stylist in parallel
+      const [salonHours, salonBreaks] = await Promise.all([
+        tx.salonWorkingHours.findMany({ where: { salonId } }),
+        tx.salonBreak.findMany({ where: { salonId } }),
+      ]);
+
       if (salonHours.length > 0) {
         await tx.stylistWorkingHours.createMany({
           data: salonHours.map((sh: any) => ({
@@ -182,10 +184,6 @@ export class StaffService {
         });
       }
 
-      // Clone Salon Facility Routine Breaks to new stylist
-      const salonBreaks = await tx.salonBreak.findMany({
-        where: { salonId },
-      });
       if (salonBreaks.length > 0) {
         await tx.stylistBreak.createMany({
           data: salonBreaks.map((sb: any) => ({
@@ -211,7 +209,7 @@ export class StaffService {
       });
     });
 
-    await this.syncSalonActiveStatus(salonId);
+    setImmediate(() => this.syncSalonActiveStatus(salonId));
     this.appointmentsService.emitSalonEvent(salonId, 'STAFF_UPDATED', { staffId: created.id, action: 'CREATE' });
     return created;
   }
@@ -663,7 +661,7 @@ export class StaffService {
       });
     });
 
-    await this.syncSalonActiveStatus(salonId);
+    setImmediate(() => this.syncSalonActiveStatus(salonId));
     this.appointmentsService.emitSalonEvent(salonId, 'STAFF_UPDATED', { staffId, action: 'TOGGLE' });
     return updated;
   }
