@@ -11,19 +11,33 @@ export class PwaManager {
   }
 
   static registerServiceWorker() {
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker
-          .register('/sw.js')
-          .then((reg) => {
-            console.log('[PWA] Service Worker registered with scope:', reg.scope);
-            reg.update();
-          })
-          .catch((err) => {
-            console.warn('[PWA] Service Worker registration failed:', err);
+    if (!('serviceWorker' in navigator)) return;
+
+    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    
+    // In local development (Vite dev server), actively unregister SW to prevent 3G request duplication and HMR blocking
+    if (isLocalhost && !window.location.search.includes('enable_sw=1')) {
+      navigator.serviceWorker.getRegistrations().then((registrations) => {
+        for (const reg of registrations) {
+          reg.unregister().then(() => {
+            console.log('[PWA] Unregistered development Service Worker to eliminate 3G request duplication');
           });
+        }
       });
+      return;
     }
+
+    window.addEventListener('load', () => {
+      navigator.serviceWorker
+        .register('/sw.js')
+        .then((reg) => {
+          console.log('[PWA] Service Worker registered with scope:', reg.scope);
+          reg.update();
+        })
+        .catch((err) => {
+          console.warn('[PWA] Service Worker registration failed:', err);
+        });
+    });
   }
 
   static setupInstallPrompt() {

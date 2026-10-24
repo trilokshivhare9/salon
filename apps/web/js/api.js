@@ -1,229 +1,24 @@
-const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-const forceCloud = new URLSearchParams(window.location.search).get('cloud') === '1' || localStorage.getItem('use_cloud_backend') === 'true';
-const useLocal = (isLocalhost && !forceCloud) || new URLSearchParams(window.location.search).get('local') === '1' || localStorage.getItem('use_local_backend') === 'true';
+import { HttpClient, API_BASE, ApiError } from './network/http-client.js';
+import { SalonSession, PlatformSession, SessionRealm } from './network/session-manager.js';
+import { SalonRepository } from './repositories/salon-repository.js';
+import { ENDPOINTS } from './network/endpoints.js';
 
-export const API_BASE = useLocal
-  ? `http://${window.location.hostname || 'localhost'}:3000/api/v1`
-  : 'https://salon-api-tuwo.onrender.com/api/v1';
+export { API_BASE, ApiError, SalonRepository, ENDPOINTS };
+
+// Dual-Realm Session Bindings
+export const PlatformRealm = PlatformSession;
+export const SalonRealm = SalonSession;
+export const AuthRealm = SessionRealm;
 
 const memoryCache = new Map();
-
-/**
- * DUAL-REALM ISOLATED STORAGE & SESSION ENGINE
- * 
- * Provides absolute physical isolation between Platform Super Admin
- * and Salon Store Operations. A browser instance can have both active
- * simultaneously with zero token collisions or cross-realm state leaks.
- */
-export class AuthRealm {
-  constructor(namespace, defaultLoginRoute) {
-    this.namespace = namespace;
-    this.defaultLoginRoute = defaultLoginRoute;
-    this.accessTokenKey = `${namespace}_access_token`;
-    this.refreshTokenKey = `${namespace}_refresh_token`;
-    this.userKey = `${namespace}_user_profile`;
-    this.inMemoryToken = null;
-    this.isRefreshing = false;
-    this.refreshSubscribers = [];
-  }
-
-  getAccessToken() {
-    return this.inMemoryToken || localStorage.getItem(this.accessTokenKey);
-  }
-
-  setAccessToken(token) {
-    this.inMemoryToken = token || null;
-    if (token) localStorage.setItem(this.accessTokenKey, token);
-    else localStorage.removeItem(this.accessTokenKey);
-  }
-
-  getRefreshToken() {
-    return localStorage.getItem(this.refreshTokenKey);
-  }
-
-  setRefreshToken(token) {
-    if (token) localStorage.setItem(this.refreshTokenKey, token);
-    else localStorage.removeItem(this.refreshTokenKey);
-  }
-
-  getUser() {
-    try {
-      const token = this.getAccessToken();
-      const refreshToken = this.getRefreshToken();
-      // If neither token nor refresh token exists, user is logged out
-      if (!token && !refreshToken) {
-        return null;
-      }
-      // If access token is expired AND there is no refresh token, user is logged out
-      if (token && ApiClient.isTokenExpired(token) && !refreshToken) {
-        return null;
-      }
-      const raw = localStorage.getItem(this.userKey);
-      return raw ? JSON.parse(raw) : null;
-    } catch {
-      return null;
-    }
-  }
-
-  async refreshAccessToken() {
-    const rawRefreshToken = this.getRefreshToken();
-    if (!rawRefreshToken) {
-      this.clear();
-      throw new Error('Refresh token missing');
-    }
-
-    const refreshRes = await fetch(`${API_BASE}/auth/refresh`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken: rawRefreshToken }),
-    });
-
-    if (!refreshRes.ok) {
-      this.clear();
-      throw new Error('Refresh token invalid or expired');
-    }
-
-    const refreshData = await refreshRes.json();
-    const result = refreshData.data !== undefined ? refreshData.data : refreshData;
-
-    this.setAccessToken(result.accessToken);
-    if (result.refreshToken) this.setRefreshToken(result.refreshToken);
-    if (result.user) this.setUser(result.user);
-
-    return result;
-  }
-
-  setUser(user) {
-    if (user) localStorage.setItem(this.userKey, JSON.stringify(user));
-    else localStorage.removeItem(this.userKey);
-  }
-
-  clear() {
-    this.inMemoryToken = null;
-    localStorage.removeItem(this.accessTokenKey);
-    localStorage.removeItem(this.refreshTokenKey);
-    localStorage.removeItem(this.userKey);
-    this.refreshSubscribers = [];
-    this.isRefreshing = false;
-  }
-}
-
-// Global Singletons for Platform Super Admin and Salon Store Operations
-export const PlatformRealm = new AuthRealm('platform', '#superadmin-login');
-export const SalonRealm = new AuthRealm('salon', '#login');
-
 const authChannel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('salon_auth_sync') : null;
 
 /**
  * REUSABLE REALM HTTP REQUEST EXECUTOR
- * Executes authenticated API requests within an isolated realm context.
+ * Delegates directly to the centralized, resilient HttpClient gateway.
  */
 async function executeRealmRequest(realm, endpoint, options = {}, ttlMs = 0) {
-  const isGet = !options.method || options.method === 'GET';
-  const token = realm.getAccessToken();
-  const user = realm.getUser();
-  const tenantContext = user?.salonId || 'tenant_' + realm.namespace;
-  const cacheKey = `${tenantContext}:${endpoint}`;
-
-  if (isGet && ttlMs > 0) {
-    const cached = memoryCache.get(cacheKey);
-    if (cached && Date.now() - cached.timestamp < ttlMs) {
-      return cached.data;
-    }
-  }
-
-  const headers = {
-    'Content-Type': 'application/json',
-    'Cache-Control': 'no-cache, no-store, must-revalidate',
-    'Pragma': 'no-cache',
-    ...options.headers,
-  };
-
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), options.timeoutMs || 45000);
-
-  try {
-    const response = await fetch(`${API_BASE}${endpoint}`, {
-      ...options,
-      cache: 'no-store',
-      headers,
-      signal: options.signal || controller.signal,
-    });
-
-    clearTimeout(timeoutId);
-
-    let data;
-    const contentType = response.headers.get('content-type') || '';
-    if (contentType.includes('application/json')) {
-      data = await response.json();
-    } else {
-      const text = await response.text();
-      data = { message: text || `Server error (${response.status}: ${response.statusText})` };
-    }
-
-    // 401 Interception with realm-isolated refresh mutex
-    if (response.status === 401 && !endpoint.includes('/auth/login') && !endpoint.includes('/auth/refresh')) {
-      if (!realm.isRefreshing) {
-        realm.isRefreshing = true;
-        try {
-          const result = await realm.refreshAccessToken();
-
-          realm.isRefreshing = false;
-          realm.refreshSubscribers.forEach((cb) => cb(result.accessToken));
-          realm.refreshSubscribers = [];
-
-          options.headers = { ...options.headers, Authorization: `Bearer ${result.accessToken}` };
-          return executeRealmRequest(realm, endpoint, options, ttlMs);
-        } catch (refreshErr) {
-          realm.isRefreshing = false;
-          realm.refreshSubscribers = [];
-          realm.clear();
-
-          if (typeof window.onAuthFailure === 'function') {
-            window.onAuthFailure();
-          } else {
-            // Only redirect if current route belongs to this realm
-            const currentHash = (window.location.hash || '').replace('#', '');
-            if (realm === PlatformRealm && (currentHash === 'super-admin' || currentHash === 'superadmin-login')) {
-              window.location.hash = '#superadmin-login';
-            } else if (realm === SalonRealm && (currentHash === 'admin' || currentHash.startsWith('admin/') || currentHash === 'login' || currentHash === 'salon-login')) {
-              window.location.hash = '#login';
-            }
-          }
-
-          throw new Error(data.message || 'Session expired. Please log in again.');
-        }
-      } else {
-        return new Promise((resolve, reject) => {
-          realm.refreshSubscribers.push((newToken) => {
-            options.headers = { ...options.headers, Authorization: `Bearer ${newToken}` };
-            executeRealmRequest(realm, endpoint, options, ttlMs).then(resolve).catch(reject);
-          });
-        });
-      }
-    }
-
-    if (!response.ok) {
-      throw new Error(data.message || `Request failed with status ${response.status}`);
-    }
-
-    const result = data.data !== undefined ? data.data : data;
-    if (isGet && ttlMs > 0) {
-      memoryCache.set(cacheKey, { data: result, timestamp: Date.now() });
-    }
-    return result;
-  } catch (err) {
-    clearTimeout(timeoutId);
-    if (isGet && ttlMs > 0) {
-      const stale = memoryCache.get(cacheKey);
-      if (stale) return stale.data;
-    }
-    throw err;
-  }
+  return HttpClient.request(endpoint, options, realm);
 }
 
 /**
@@ -242,7 +37,7 @@ export class PlatformAuth {
   }
   static async login(email, password) {
     PlatformRealm.clear();
-    const data = await executeRealmRequest(PlatformRealm, '/auth/login', {
+    const data = await executeRealmRequest(PlatformRealm, ENDPOINTS.AUTH.LOGIN, {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
@@ -262,7 +57,7 @@ export class PlatformAuth {
     const refresh = PlatformRealm.getRefreshToken();
     try {
       if (refresh) {
-        await executeRealmRequest(PlatformRealm, '/auth/logout', {
+        await executeRealmRequest(PlatformRealm, ENDPOINTS.AUTH.LOGOUT, {
           method: 'POST',
           body: JSON.stringify({ refreshToken: refresh }),
         }).catch(() => { });
@@ -290,7 +85,7 @@ export class SalonAuth {
   }
   static async login(identifier, password) {
     SalonRealm.clear();
-    const data = await executeRealmRequest(SalonRealm, '/auth/login', {
+    const data = await executeRealmRequest(SalonRealm, ENDPOINTS.AUTH.LOGIN, {
       method: 'POST',
       body: JSON.stringify({ email: identifier, password }),
     });
@@ -306,7 +101,7 @@ export class SalonAuth {
     const refresh = SalonRealm.getRefreshToken();
     try {
       if (refresh) {
-        await executeRealmRequest(SalonRealm, '/auth/logout', {
+        await executeRealmRequest(SalonRealm, ENDPOINTS.AUTH.LOGOUT, {
           method: 'POST',
           body: JSON.stringify({ refreshToken: refresh }),
         }).catch(() => { });
@@ -318,35 +113,35 @@ export class SalonAuth {
   }
 
   static async lookupSalonForReset(mobile) {
-    return executeRealmRequest(SalonRealm, '/auth/forgot-password-lookup', {
+    return executeRealmRequest(SalonRealm, ENDPOINTS.AUTH.FORGOT_PASSWORD_LOOKUP, {
       method: 'POST',
       body: JSON.stringify({ mobile }),
     });
   }
 
   static async forgotPassword(mobile) {
-    return executeRealmRequest(SalonRealm, '/auth/forgot-password', {
+    return executeRealmRequest(SalonRealm, ENDPOINTS.AUTH.FORGOT_PASSWORD, {
       method: 'POST',
       body: JSON.stringify({ mobile }),
     });
   }
 
   static async resetPasswordWithOtp(identifier, otp, newPassword) {
-    return executeRealmRequest(SalonRealm, '/auth/reset-password-otp', {
+    return executeRealmRequest(SalonRealm, ENDPOINTS.AUTH.RESET_PASSWORD_OTP, {
       method: 'POST',
       body: JSON.stringify({ identifier, otp, newPassword }),
     });
   }
 
   static async changePassword(currentPassword, newPassword) {
-    return executeRealmRequest(SalonRealm, '/auth/change-password', {
+    return executeRealmRequest(SalonRealm, ENDPOINTS.AUTH.CHANGE_PASSWORD, {
       method: 'PATCH',
       body: JSON.stringify({ currentPassword, newPassword }),
     });
   }
 
   static async updateProfile(profileData) {
-    const data = await executeRealmRequest(SalonRealm, '/auth/profile', {
+    const data = await executeRealmRequest(SalonRealm, ENDPOINTS.AUTH.PROFILE, {
       method: 'PATCH',
       body: JSON.stringify(profileData),
     });
@@ -414,6 +209,7 @@ export class ApiClient {
   static clearSession() {
     PlatformRealm.clear();
     SalonRealm.clear();
+    SalonRepository.clear();
     this.invalidateCache();
   }
 
@@ -469,14 +265,14 @@ export class ApiClient {
 
   static async logoutAllDevices() {
     try {
-      await this.request('/auth/logout-all', { method: 'POST' }).catch(() => { });
+      await this.request(ENDPOINTS.AUTH.LOGOUT_ALL, { method: 'POST' }).catch(() => { });
     } finally {
       SalonRealm.clear();
     }
   }
 
   static async getMe() {
-    const user = await this.request('/auth/me', {}, 60000); // 1-min cache
+    const user = await this.request(ENDPOINTS.AUTH.ME, {}, 60000); // 1-min cache
     if (user) {
       this.setUser(user);
     }
@@ -505,21 +301,17 @@ export class ApiClient {
 
   // Public Booking
   static async getPublicSalon(slug) {
-    return this.request(`/booking/${slug}`, {}, 120000); // 2-min cache
+    return this.request(ENDPOINTS.BOOKING.DETAILS(slug), {}, 120000); // 2-min cache
   }
 
   static async getPublicAvailability(slug, serviceId, date, staffId = null) {
-    let url = `/booking/${slug}/availability?serviceId=${serviceId}&date=${date}`;
-    if (staffId) {
-      url += `&staffId=${staffId}`;
-    }
-    return this.request(url, {}, 10000); // 10-sec cache
+    return this.request(ENDPOINTS.BOOKING.AVAILABILITY(slug, serviceId, date, staffId), {}, 10000); // 10-sec cache
   }
 
   static async createPublicAppointment(slug, payload) {
     this.invalidateCache('/booking');
     this.invalidateCache('/reports');
-    return this.request(`/booking/${slug}/appointments`, {
+    return this.request(ENDPOINTS.BOOKING.CREATE(slug), {
       method: 'POST',
       body: JSON.stringify(payload),
     });
@@ -527,8 +319,7 @@ export class ApiClient {
 
   // Salon Dashboard & Appointments
   static async getDashboardSummary(dateStr, bypassCache = false) {
-    const endpoint = dateStr ? `/reports/dashboard?date=${dateStr}` : '/reports/dashboard';
-    return this.request(endpoint, {}, (bypassCache || dateStr) ? 0 : 5000);
+    return this.request(ENDPOINTS.REPORTS.DASHBOARD(dateStr), {}, (bypassCache || dateStr) ? 0 : 5000);
   }
 
   static async getQueue(params = {}, bypassCache = true) {
@@ -539,23 +330,22 @@ export class ApiClient {
       }
     }
     const query = new URLSearchParams(cleanParams).toString();
-    const endpoint = query ? `/appointments/queue?${query}` : '/appointments/queue';
-    return this.request(endpoint, {}, bypassCache ? 0 : 5000);
+    return this.request(ENDPOINTS.APPOINTMENTS.QUEUE(query), {}, bypassCache ? 0 : 5000);
   }
 
   static async getAppointments(filters = {}) {
     const query = new URLSearchParams(filters).toString();
-    return this.request(`/appointments?${query}`, {}, 15000);
+    return this.request(ENDPOINTS.APPOINTMENTS.LIST(query), {}, 15000);
   }
 
   static async getAppointmentById(id) {
-    return this.request(`/appointments/${id}`);
+    return this.request(ENDPOINTS.APPOINTMENTS.DETAIL(id));
   }
 
   static async createAppointment(payload) {
     this.invalidateCache('/reports');
     this.invalidateCache('/appointments');
-    return this.request('/appointments', {
+    return this.request(ENDPOINTS.APPOINTMENTS.CREATE, {
       method: 'POST',
       body: JSON.stringify(payload),
     });
@@ -564,7 +354,7 @@ export class ApiClient {
   static async updateAppointmentStatus(id, status, reason = '', reasonCategory = '') {
     this.invalidateCache('/reports');
     this.invalidateCache('/appointments');
-    return this.request(`/appointments/${id}/status`, {
+    return this.request(ENDPOINTS.APPOINTMENTS.STATUS(id), {
       method: 'PATCH',
       body: JSON.stringify({ status, reason, reasonCategory }),
     });
@@ -573,7 +363,7 @@ export class ApiClient {
   static async cancelBooking(id, context) {
     this.invalidateCache('/reports');
     this.invalidateCache('/appointments');
-    return this.request(`/appointments/${id}/cancel`, {
+    return this.request(ENDPOINTS.APPOINTMENTS.CANCEL(id), {
       method: 'POST',
       body: JSON.stringify(context),
     });
@@ -583,7 +373,7 @@ export class ApiClient {
   static async rescheduleAppointment(id, payload) {
     this.invalidateCache('/reports');
     this.invalidateCache('/appointments');
-    return this.request(`/appointments/${id}/reschedule`, {
+    return this.request(ENDPOINTS.APPOINTMENTS.RESCHEDULE(id), {
       method: 'POST',
       body: JSON.stringify(payload),
     });
@@ -592,7 +382,7 @@ export class ApiClient {
   static async proposeAdminReschedule(id, payload) {
     this.invalidateCache('/reports');
     this.invalidateCache('/appointments');
-    return this.request(`/appointments/${id}/propose-reschedule`, {
+    return this.request(ENDPOINTS.APPOINTMENTS.PROPOSE_RESCHEDULE(id), {
       method: 'PATCH',
       body: JSON.stringify(payload),
     });
@@ -601,21 +391,21 @@ export class ApiClient {
   static async addAddonService(id, serviceId) {
     this.invalidateCache('/reports');
     this.invalidateCache('/appointments');
-    return this.request(`/appointments/${id}/addons`, {
+    return this.request(ENDPOINTS.APPOINTMENTS.ADDONS(id), {
       method: 'POST',
       body: JSON.stringify({ serviceId }),
     });
   }
 
   static async sendStaffChatMessage(salonId, customerPhone, messageText) {
-    return this.request('/whatsapp/chat/send-message', {
+    return this.request(ENDPOINTS.WHATSAPP.SEND_MESSAGE, {
       method: 'POST',
       body: JSON.stringify({ salonId, customerPhone, messageText }),
     });
   }
 
   static async resumeBot(salonId, customerPhone) {
-    return this.request('/whatsapp/chat/resume-bot', {
+    return this.request(ENDPOINTS.WHATSAPP.RESUME_BOT, {
       method: 'POST',
       body: JSON.stringify({ salonId, customerPhone }),
     });
@@ -623,13 +413,12 @@ export class ApiClient {
 
   static async getChatHistory(salonId, customerPhone) {
     const params = new URLSearchParams({ salonId, customerPhone });
-    return this.request(`/whatsapp/chat/history?${params.toString()}`);
+    return this.request(ENDPOINTS.WHATSAPP.CHAT_HISTORY(params.toString()));
   }
 
   // Salon Closures & Holidays Management
   static async getSalonClosures(bypassCache = false) {
-    const url = bypassCache ? `/salons/closures?_t=${Date.now()}` : '/salons/closures';
-    return this.request(url, {}, 30000);
+    return SalonRepository.getSalonClosures(bypassCache);
   }
 
   static async createSalonClosure(payload) {
@@ -637,10 +426,12 @@ export class ApiClient {
     this.invalidateCache('/salons/closures/calendar-schedule');
     this.invalidateCache('/appointments');
     this.invalidateCache('/reports');
-    return this.request('/salons/closures', {
+    const res = await this.request(ENDPOINTS.SALONS.CLOSURES, {
       method: 'POST',
       body: JSON.stringify(payload),
     });
+    SalonRepository.invalidate('closures');
+    return res;
   }
 
   static async deleteSalonClosure(id) {
@@ -648,9 +439,11 @@ export class ApiClient {
     this.invalidateCache('/salons/closures/calendar-schedule');
     this.invalidateCache('/appointments');
     this.invalidateCache('/reports');
-    return this.request(`/salons/closures/${id}`, {
+    const res = await this.request(ENDPOINTS.SALONS.CLOSURE_BY_ID(id), {
       method: 'DELETE',
     });
+    SalonRepository.invalidate('closures');
+    return res;
   }
 
   static async getCalendarSchedule(options = {}, bypassCache = false) {
@@ -664,8 +457,7 @@ export class ApiClient {
       params.append('staffId', targetStaffId);
       params.append('stylistId', targetStaffId);
     }
-    const queryStr = params.toString() ? `?${params.toString()}` : '';
-    return this.request(`/salons/closures/calendar-schedule${queryStr}`, {}, bypassCache ? 0 : 30000);
+    return this.request(ENDPOINTS.SALONS.CLOSURES_SCHEDULE(params.toString()), {}, bypassCache ? 0 : 30000);
   }
 
   static async getHolidays(options = {}) {
@@ -674,48 +466,43 @@ export class ApiClient {
     if (options.endDate) params.append('endDate', options.endDate);
     if (options.year) params.append('year', options.year);
     if (options.month) params.append('month', options.month);
-    const queryStr = params.toString() ? `?${params.toString()}` : '';
-    return this.request(`/salons/closures/holidays${queryStr}`);
+    return this.request(ENDPOINTS.SALONS.CLOSURES_HOLIDAYS(params.toString()));
   }
 
 
   // Staff Management (Cached for 3 mins)
   static async getStaff(bypassCache = false) {
-    const url = bypassCache ? `/staff?_t=${Date.now()}` : '/staff';
-    return this.request(url, {}, bypassCache ? 0 : 180000);
+    return SalonRepository.getStaff(bypassCache);
   }
 
   static async createStaff(payload) {
     this.invalidateCache('/staff');
     this.invalidateCache('/reports');
-    const res = await this.request('/staff', {
+    const res = await this.request(ENDPOINTS.STAFF.CREATE, {
       method: 'POST',
       body: JSON.stringify(payload),
     });
-    this.invalidateCache('/staff');
-    this.invalidateCache('/reports');
+    SalonRepository.invalidate('staff');
     return res;
   }
   static async updateStaff(id, payload) {
     this.invalidateCache('/staff');
     this.invalidateCache('/reports');
-    const res = await this.request(`/staff/${id}`, {
+    const res = await this.request(ENDPOINTS.STAFF.UPDATE(id), {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
-    this.invalidateCache('/staff');
-    this.invalidateCache('/reports');
+    SalonRepository.invalidate('staff');
     return res;
   }
 
   static async toggleStaffStatus(id) {
     this.invalidateCache('/staff');
     this.invalidateCache('/reports');
-    const res = await this.request(`/staff/${id}/toggle-status`, {
+    const res = await this.request(ENDPOINTS.STAFF.TOGGLE_STATUS(id), {
       method: 'PATCH',
     });
-    this.invalidateCache('/staff');
-    this.invalidateCache('/reports');
+    SalonRepository.invalidate('staff');
     return res;
   }
 
@@ -723,30 +510,29 @@ export class ApiClient {
     this.invalidateCache('/staff');
     this.invalidateCache('/services');
     this.invalidateCache('/reports');
-    const res = await this.request(`/staff/${staffId}/services`, {
+    const res = await this.request(ENDPOINTS.STAFF.SERVICES(staffId), {
       method: 'PUT',
       body: JSON.stringify({ serviceIds }),
       keepalive: true,
     });
-    this.invalidateCache('/staff');
-    this.invalidateCache('/services');
-    this.invalidateCache('/reports');
+    SalonRepository.invalidate('staff');
+    SalonRepository.invalidate('services');
     return res;
   }
 
   static async deleteStaff(id) {
     this.invalidateCache('/staff');
     this.invalidateCache('/reports');
-    const res = await this.request(`/staff/${id}`, {
+    const res = await this.request(ENDPOINTS.STAFF.DELETE(id), {
       method: 'DELETE',
     });
-    this.invalidateCache('/staff');
-    this.invalidateCache('/reports');
+    SalonRepository.invalidate('staff');
     return res;
   }
 
   static async getStaffWorkingHours(staffId, bypassCache = true) {
-    const url = bypassCache ? `/staff/${staffId}/working-hours?_t=${Date.now()}` : `/staff/${staffId}/working-hours`;
+    const query = bypassCache ? `_t=${Date.now()}` : '';
+    const url = ENDPOINTS.STAFF.WORKING_HOURS(staffId) + (query ? `?${query}` : '');
     return this.request(url, {}, bypassCache ? 0 : 60000);
   }
 
@@ -768,7 +554,7 @@ export class ApiClient {
     if (followsSalonSchedule !== undefined) {
       payload.followsSalonSchedule = followsSalonSchedule;
     }
-    const res = await this.request(`/staff/${staffId}/working-hours`, {
+    const res = await this.request(ENDPOINTS.STAFF.WORKING_HOURS(staffId), {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
@@ -780,7 +566,7 @@ export class ApiClient {
   static async patchStaffDayShift(staffId, dayOfWeek, shiftData) {
     this.invalidateCache('/staff');
     this.invalidateCache('/salons/closures/calendar-schedule');
-    const res = await this.request(`/staff/${staffId}/working-hours/${dayOfWeek}`, {
+    const res = await this.request(ENDPOINTS.STAFF.WORKING_HOURS_DAY(staffId, dayOfWeek), {
       method: 'PATCH',
       body: JSON.stringify(shiftData),
     });
@@ -791,7 +577,7 @@ export class ApiClient {
 
   static async resetStaffWorkingHours(staffId) {
     this.invalidateCache('/staff');
-    const res = await this.request(`/staff/${staffId}/working-hours/reset`, {
+    const res = await this.request(ENDPOINTS.STAFF.WORKING_HOURS_RESET(staffId), {
       method: 'POST',
       body: JSON.stringify({}),
     });
@@ -800,13 +586,14 @@ export class ApiClient {
   }
 
   static async getStaffBreaks(staffId, bypassCache = true) {
-    const url = bypassCache ? `/staff/${staffId}/breaks?_t=${Date.now()}` : `/staff/${staffId}/breaks`;
+    const query = bypassCache ? `_t=${Date.now()}` : '';
+    const url = ENDPOINTS.STAFF.BREAKS(staffId) + (query ? `?${query}` : '');
     return this.request(url, {}, bypassCache ? 0 : 60000);
   }
 
   static async createStaffBreak(staffId, payload) {
     this.invalidateCache('/staff');
-    const res = await this.request(`/staff/${staffId}/breaks`, {
+    const res = await this.request(ENDPOINTS.STAFF.BREAKS(staffId), {
       method: 'POST',
       body: JSON.stringify(payload),
     });
@@ -816,7 +603,7 @@ export class ApiClient {
 
   static async deleteStaffBreak(staffId, breakId) {
     this.invalidateCache('/staff');
-    const res = await this.request(`/staff/${staffId}/breaks/${breakId}`, {
+    const res = await this.request(ENDPOINTS.STAFF.BREAK_BY_ID(staffId, breakId), {
       method: 'DELETE',
     });
     this.invalidateCache('/staff');
@@ -825,7 +612,7 @@ export class ApiClient {
 
   static async updateStaffBreak(staffId, breakId, payload) {
     this.invalidateCache('/staff');
-    const res = await this.request(`/staff/${staffId}/breaks/${breakId}`, {
+    const res = await this.request(ENDPOINTS.STAFF.BREAK_BY_ID(staffId, breakId), {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
@@ -835,7 +622,7 @@ export class ApiClient {
 
   static async resetStaffBreak(staffId, breakId) {
     this.invalidateCache('/staff');
-    const res = await this.request(`/staff/${staffId}/breaks/${breakId}/reset`, {
+    const res = await this.request(ENDPOINTS.STAFF.BREAKS_RESET(staffId, breakId), {
       method: 'POST',
     });
     this.invalidateCache('/staff');
@@ -844,7 +631,7 @@ export class ApiClient {
 
   static async inheritSalonBreak(staffId, payload) {
     this.invalidateCache('/staff');
-    const res = await this.request(`/staff/${staffId}/breaks/inherit`, {
+    const res = await this.request(ENDPOINTS.STAFF.BREAKS_INHERIT(staffId), {
       method: 'POST',
       body: JSON.stringify(payload),
     });
@@ -854,7 +641,7 @@ export class ApiClient {
 
   static async updateStaffRoutineBreak(staffId, payload) {
     this.invalidateCache('/staff');
-    const res = await this.request(`/staff/${staffId}/breaks/routine`, {
+    const res = await this.request(ENDPOINTS.STAFF.BREAKS_ROUTINE(staffId), {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
@@ -864,7 +651,7 @@ export class ApiClient {
 
   static async deleteStaffRoutineBreak(staffId, payload) {
     this.invalidateCache('/staff');
-    const res = await this.request(`/staff/${staffId}/breaks/routine`, {
+    const res = await this.request(ENDPOINTS.STAFF.BREAKS_ROUTINE(staffId), {
       method: 'DELETE',
       body: JSON.stringify(payload),
     });
@@ -874,7 +661,7 @@ export class ApiClient {
 
   static async markStaffAbsent(staffId, payload) {
     this.invalidateCache('/staff');
-    const res = await this.request(`/staff/${staffId}/absence`, {
+    const res = await this.request(ENDPOINTS.STAFF.ABSENCE(staffId), {
       method: 'POST',
       body: JSON.stringify(payload),
     });
@@ -884,7 +671,7 @@ export class ApiClient {
 
   static async cancelStaffAbsence(staffId, absenceId) {
     this.invalidateCache('/staff');
-    const res = await this.request(`/staff/${staffId}/absence/${absenceId}`, {
+    const res = await this.request(ENDPOINTS.STAFF.ABSENCE_BY_ID(staffId, absenceId), {
       method: 'DELETE',
     });
     this.invalidateCache('/staff');
@@ -892,9 +679,9 @@ export class ApiClient {
   }
 
   static async previewStaffAbsence(staffId, queryParams) {
-    let url = `/staff/${staffId}/absence/preview`;
+    let qStr = '';
     if (typeof queryParams === 'string') {
-      url += `?date=${encodeURIComponent(queryParams)}`;
+      qStr = `date=${encodeURIComponent(queryParams)}`;
     } else if (queryParams && typeof queryParams === 'object') {
       const params = new URLSearchParams();
       if (queryParams.date) params.append('date', queryParams.date);
@@ -903,15 +690,14 @@ export class ApiClient {
       if (queryParams.isPartialDay !== undefined) params.append('isPartialDay', String(queryParams.isPartialDay));
       if (queryParams.startTime) params.append('startTime', queryParams.startTime);
       if (queryParams.endTime) params.append('endTime', queryParams.endTime);
-      const qStr = params.toString();
-      if (qStr) url += `?${qStr}`;
+      qStr = params.toString();
     }
-    return this.request(url);
+    return this.request(ENDPOINTS.STAFF.ABSENCE_PREVIEW(staffId, qStr));
   }
 
   static async extendStaffAbsence(staffId, absenceId, payload) {
     this.invalidateCache('/staff');
-    const res = await this.request(`/staff/${staffId}/absence/${absenceId}/extend`, {
+    const res = await this.request(ENDPOINTS.STAFF.ABSENCE_EXTEND(staffId, absenceId), {
       method: 'PATCH',
       body: JSON.stringify(payload),
     });
@@ -920,74 +706,61 @@ export class ApiClient {
   }
 
   static async getStaffAbsences(staffId, queryParams = {}) {
-    let url = `/staff/${staffId}/absences`;
     const params = new URLSearchParams();
     if (queryParams.startDate) params.append('startDate', queryParams.startDate);
     if (queryParams.endDate) params.append('endDate', queryParams.endDate);
-    const queryString = params.toString();
-    if (queryString) url += `?${queryString}`;
-    return this.request(url);
-  }
-
-  static async cancelStaffAbsence(staffId, absenceId) {
-    this.invalidateCache('/staff');
-    const res = await this.request(`/staff/${staffId}/absence/${absenceId}`, {
-      method: 'DELETE',
-    });
-    this.invalidateCache('/staff');
-    return res;
+    return this.request(ENDPOINTS.STAFF.ABSENCE_CALENDAR(staffId, params.toString()));
   }
 
   // Service Category Management
   static async getServiceCategories(bypassCache = false) {
-    const url = bypassCache ? `/services/categories?_t=${Date.now()}` : '/services/categories';
-    return this.request(url, {}, bypassCache ? 0 : 180000);
+    return SalonRepository.getServiceCategories(bypassCache);
   }
 
   static async createServiceCategory(payload) {
     this.invalidateCache('/services/categories');
     this.invalidateCache('/services');
-    const res = await this.request('/services/categories', {
+    const res = await this.request(ENDPOINTS.SERVICES.CATEGORY_CREATE, {
       method: 'POST',
       body: JSON.stringify(payload),
     });
-    this.invalidateCache('/services/categories');
-    this.invalidateCache('/services');
+    SalonRepository.invalidate('categories');
+    SalonRepository.invalidate('services');
     return res;
   }
 
   static async updateServiceCategory(id, payload) {
     this.invalidateCache('/services/categories');
     this.invalidateCache('/services');
-    const res = await this.request(`/services/categories/${id}`, {
+    const res = await this.request(ENDPOINTS.SERVICES.CATEGORY_UPDATE(id), {
       method: 'PATCH',
       body: JSON.stringify(payload),
     });
-    this.invalidateCache('/services/categories');
-    this.invalidateCache('/services');
+    SalonRepository.invalidate('categories');
+    SalonRepository.invalidate('services');
     return res;
   }
 
   static async deleteServiceCategory(id) {
     this.invalidateCache('/services/categories');
     this.invalidateCache('/services');
-    const res = await this.request(`/services/categories/${id}`, {
+    const res = await this.request(ENDPOINTS.SERVICES.CATEGORY_DELETE(id), {
       method: 'DELETE',
     });
-    this.invalidateCache('/services/categories');
-    this.invalidateCache('/services');
+    SalonRepository.invalidate('categories');
+    SalonRepository.invalidate('services');
     return res;
   }
 
   // Super Admin Master Categories
   static async getMasterCategories(bypassCache = false) {
-    const url = bypassCache ? `/super-admin/categories?_t=${Date.now()}` : '/super-admin/categories';
+    const url = bypassCache ? `${ENDPOINTS.PLATFORM.CATEGORIES()}?_t=${Date.now()}` : ENDPOINTS.PLATFORM.CATEGORIES();
     return this.request(url, {}, bypassCache ? 0 : 60000);
   }
 
   static async createMasterCategory(payload) {
     this.invalidateCache('/super-admin/categories');
-    const res = await this.request('/super-admin/categories', {
+    const res = await this.request(ENDPOINTS.PLATFORM.CATEGORIES(), {
       method: 'POST',
       body: JSON.stringify(payload),
     });
@@ -997,7 +770,7 @@ export class ApiClient {
 
   static async updateMasterCategory(id, payload) {
     this.invalidateCache('/super-admin/categories');
-    const res = await this.request(`/super-admin/categories/${id}`, {
+    const res = await this.request(ENDPOINTS.PLATFORM.CATEGORY_BY_ID(id), {
       method: 'PATCH',
       body: JSON.stringify(payload),
     });
@@ -1007,7 +780,7 @@ export class ApiClient {
 
   static async deleteMasterCategory(id) {
     this.invalidateCache('/super-admin/categories');
-    const res = await this.request(`/super-admin/categories/${id}`, {
+    const res = await this.request(ENDPOINTS.PLATFORM.CATEGORY_BY_ID(id), {
       method: 'DELETE',
     });
     this.invalidateCache('/super-admin/categories');
@@ -1016,58 +789,53 @@ export class ApiClient {
 
   // Service Management (Cached for 3 mins)
   static async getServices(bypassCache = false) {
-    const url = bypassCache ? `/services?_t=${Date.now()}` : '/services';
-    return this.request(url, {}, bypassCache ? 0 : 180000);
+    return SalonRepository.getServices(bypassCache);
   }
 
   static async createService(payload) {
     this.invalidateCache('/services');
     this.invalidateCache('/reports');
-    const res = await this.request('/services', {
+    const res = await this.request(ENDPOINTS.SERVICES.CREATE, {
       method: 'POST',
       body: JSON.stringify(payload),
     });
-    this.invalidateCache('/services');
-    this.invalidateCache('/reports');
+    SalonRepository.invalidate('services');
     return res;
   }
 
   static async updateService(id, payload) {
     this.invalidateCache('/services');
     this.invalidateCache('/reports');
-    const res = await this.request(`/services/${id}`, {
+    const res = await this.request(ENDPOINTS.SERVICES.UPDATE(id), {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
-    this.invalidateCache('/services');
-    this.invalidateCache('/reports');
+    SalonRepository.invalidate('services');
     return res;
   }
 
   static async toggleServiceStatus(id) {
     this.invalidateCache('/services');
     this.invalidateCache('/reports');
-    const res = await this.request(`/services/${id}/toggle-status`, {
+    const res = await this.request(ENDPOINTS.SERVICES.TOGGLE_STATUS(id), {
       method: 'PATCH',
     });
-    this.invalidateCache('/services');
-    this.invalidateCache('/reports');
+    SalonRepository.invalidate('services');
     return res;
   }
 
   static async deleteService(id) {
     this.invalidateCache('/services');
     this.invalidateCache('/reports');
-    const res = await this.request(`/services/${id}`, {
+    const res = await this.request(ENDPOINTS.SERVICES.DELETE(id), {
       method: 'DELETE',
     });
-    this.invalidateCache('/services');
-    this.invalidateCache('/reports');
+    SalonRepository.invalidate('services');
     return res;
   }
 
   static async scanMenuCardWithAi(imageBase64, mimeType = 'image/jpeg') {
-    return this.request('/services/ai-scan', {
+    return this.request(ENDPOINTS.SERVICES.AI_SCAN, {
       method: 'POST',
       body: JSON.stringify({ imageBase64, mimeType }),
     });
@@ -1076,44 +844,44 @@ export class ApiClient {
   static async bulkImportServices(services) {
     this.invalidateCache('/services');
     this.invalidateCache('/reports');
-    const res = await this.request('/services/bulk-import', {
+    const res = await this.request(ENDPOINTS.SERVICES.BULK_IMPORT, {
       method: 'POST',
       body: JSON.stringify({ services }),
     });
-    this.invalidateCache('/services');
-    this.invalidateCache('/reports');
+    SalonRepository.invalidate('services');
     return res;
   }
 
   static async getSalonProfile(bypassCache = false) {
-    return this.request('/salons/profile', {}, bypassCache ? 0 : 300000);
+    return SalonRepository.getSalonProfile(bypassCache);
   }
 
   static async updateSalonProfile(payload) {
     this.invalidateCache('/salons');
     this.invalidateCache('/reports');
-    return this.request('/salons/profile', {
+    const res = await this.request(ENDPOINTS.SALONS.PROFILE, {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
+    SalonRepository.invalidate('profile');
+    return res;
   }
 
   static async getPersonalProfile(bypassCache = false) {
-    return this.request('/salons/personal-profile', {}, bypassCache ? 0 : 60000);
+    return this.request(ENDPOINTS.SALONS.PERSONAL_PROFILE, {}, bypassCache ? 0 : 60000);
   }
 
   static async updatePersonalProfile(payload) {
     this.invalidateCache('/salons');
     this.invalidateCache('/reports');
-    return this.request('/salons/personal-profile', {
+    return this.request(ENDPOINTS.SALONS.PERSONAL_PROFILE, {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
   }
 
   static async getSalonWorkingHours(bypassCache = false) {
-    const url = bypassCache ? `/salons/working-hours?_t=${Date.now()}` : '/salons/working-hours';
-    return this.request(url, {}, bypassCache ? 0 : 180000);
+    return SalonRepository.getSalonWorkingHours(bypassCache);
   }
 
   static async updateSalonWorkingHours(hours) {
@@ -1134,63 +902,55 @@ export class ApiClient {
       };
     });
 
-    const res = await this.request('/salons/working-hours', {
+    const res = await this.request(ENDPOINTS.SALONS.WORKING_HOURS, {
       method: 'PUT',
       body: JSON.stringify({ hours: sanitizedHours }),
     });
-    this.invalidateCache('/salons/working-hours');
-    this.invalidateCache('/salons/profile');
-    this.invalidateCache('/salons');
-    this.invalidateCache('/booking');
-    this.invalidateCache('/staff');
-    this.invalidateCache('/reports');
+    SalonRepository.invalidate('working_hours');
+    SalonRepository.invalidate('profile');
     return res;
   }
 
-  static async getSalonBreaks(bypassCache = true) {
-    const url = bypassCache ? `/salons/breaks?_t=${Date.now()}` : '/salons/breaks';
-    return this.request(url, {}, bypassCache ? 0 : 60000);
+  static async getSalonBreaks(bypassCache = false) {
+    return SalonRepository.getSalonBreaks(bypassCache);
   }
 
   static async createSalonBreak(payload) {
     this.invalidateCache('/salons');
     this.invalidateCache('/staff');
-    const res = await this.request('/salons/breaks', {
+    const res = await this.request(ENDPOINTS.SALONS.BREAKS, {
       method: 'POST',
       body: JSON.stringify(payload),
     });
-    this.invalidateCache('/salons');
-    this.invalidateCache('/staff');
+    SalonRepository.invalidate('breaks');
     return res;
   }
 
   static async updateSalonBreak(breakId, payload) {
     this.invalidateCache('/salons');
     this.invalidateCache('/staff');
-    const res = await this.request(`/salons/breaks/${breakId}`, {
+    const res = await this.request(ENDPOINTS.SALONS.BREAK_BY_ID(breakId), {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
-    this.invalidateCache('/salons');
-    this.invalidateCache('/staff');
+    SalonRepository.invalidate('breaks');
     return res;
   }
 
   static async deleteSalonBreak(breakId) {
     this.invalidateCache('/salons');
     this.invalidateCache('/staff');
-    const res = await this.request(`/salons/breaks/${breakId}`, {
+    const res = await this.request(ENDPOINTS.SALONS.BREAK_BY_ID(breakId), {
       method: 'DELETE',
     });
-    this.invalidateCache('/salons');
-    this.invalidateCache('/staff');
+    SalonRepository.invalidate('breaks');
     return res;
   }
 
   static async updateSalonRoutineBreak(payload) {
     this.invalidateCache('/salons');
     this.invalidateCache('/staff');
-    const res = await this.request('/salons/breaks/routine', {
+    const res = await this.request(ENDPOINTS.SALONS.BREAKS_ROUTINE, {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
@@ -1202,7 +962,7 @@ export class ApiClient {
   static async deleteSalonRoutineBreak(payload) {
     this.invalidateCache('/salons');
     this.invalidateCache('/staff');
-    const res = await this.request('/salons/breaks/routine', {
+    const res = await this.request(ENDPOINTS.SALONS.BREAKS_ROUTINE, {
       method: 'DELETE',
       body: JSON.stringify(payload),
     });
@@ -1230,7 +990,7 @@ export class ApiClient {
     this.invalidateCache('/booking');
     this.invalidateCache('/staff');
     this.invalidateCache('/reports');
-    const res = await this.request('/salons/working-hours', {
+    const res = await this.request(ENDPOINTS.SALONS.WORKING_HOURS, {
       method: 'PUT',
       headers: { 'x-salon-id': salonId },
       body: JSON.stringify({ hours }),
@@ -1245,13 +1005,13 @@ export class ApiClient {
   }
 
   static async getBlockedTimes() {
-    return this.request('/salons/blocked-times', {}, 60000);
+    return this.request(ENDPOINTS.SALONS.BLOCKED_TIMES, {}, 60000);
   }
 
   static async addBlockedTime(payload) {
     this.invalidateCache('/salons/blocked-times');
     this.invalidateCache('/reports');
-    return this.request('/salons/blocked-times', {
+    return this.request(ENDPOINTS.SALONS.BLOCKED_TIMES, {
       method: 'POST',
       body: JSON.stringify(payload),
     });
@@ -1260,18 +1020,18 @@ export class ApiClient {
   static async deleteBlockedTime(id) {
     this.invalidateCache('/salons/blocked-times');
     this.invalidateCache('/reports');
-    return this.request(`/salons/blocked-times/${id}`, {
+    return this.request(ENDPOINTS.SALONS.BLOCKED_TIME_BY_ID(id), {
       method: 'DELETE',
     });
   }
 
   static async getHolidays() {
-    return this.request('/salons/holidays', {}, 120000);
+    return this.request(ENDPOINTS.SALONS.HOLIDAYS(), {}, 120000);
   }
 
   static async addHoliday(payload) {
     this.invalidateCache('/salons/holidays');
-    return this.request('/salons/holidays', {
+    return this.request(ENDPOINTS.SALONS.HOLIDAYS(), {
       method: 'POST',
       body: JSON.stringify(payload),
     });
@@ -1283,23 +1043,23 @@ export class ApiClient {
     if (search) params.append('search', search);
     params.append('page', page.toString());
     params.append('limit', limit.toString());
-    return this.request(`/customers?${params.toString()}`);
+    return this.request(ENDPOINTS.CUSTOMERS.LIST(params.toString()));
   }
 
   static async getCustomerById(id) {
-    return this.request(`/customers/${id}`);
+    return this.request(ENDPOINTS.CUSTOMERS.DETAIL(id));
   }
 
   static async unblockCustomer(id) {
     this.invalidateCache('/customers');
-    return this.request(`/customers/${id}/unblock`, {
+    return this.request(ENDPOINTS.CUSTOMERS.UNBLOCK(id), {
       method: 'PATCH',
     });
   }
 
   static async updateCustomerStrikes(id, yearlyNoShowCount, isBookingBlocked) {
     this.invalidateCache('/customers');
-    return this.request(`/customers/${id}/strikes`, {
+    return this.request(ENDPOINTS.CUSTOMERS.STRIKES(id), {
       method: 'PATCH',
       body: JSON.stringify({ yearlyNoShowCount, isBookingBlocked }),
     });
@@ -1307,30 +1067,27 @@ export class ApiClient {
 
   // Quick Booking Code Management
   static async getQuickCode(salonId) {
-    return this.request(`/salons/${salonId}/quick-code`);
+    return this.request(ENDPOINTS.SALONS.QUICK_CODE(salonId));
   }
 
   static async regenerateQuickCode(salonId) {
-    return this.request(`/salons/${salonId}/quick-code/generate`, {
+    return this.request(ENDPOINTS.SALONS.QUICK_CODE_GENERATE(salonId), {
       method: 'POST',
     });
   }
 
-
-
   // WhatsApp Logs & Simulator
   static async getWhatsAppLogs(filters = {}) {
     const params = new URLSearchParams(filters);
-    return this.request(`/whatsapp/logs?${params.toString()}`);
+    return this.request(ENDPOINTS.WHATSAPP.LOGS(params.toString()));
   }
 
   static async getWhatsAppStatus(salonId = '') {
-    const endpoint = salonId ? `/whatsapp/status?salonId=${salonId}` : '/whatsapp/status';
-    return this.request(endpoint);
+    return this.request(ENDPOINTS.WHATSAPP.STATUS(salonId));
   }
 
   static async simulateWhatsAppMessage(payload) {
-    return this.request('/whatsapp/simulate', {
+    return this.request(ENDPOINTS.WHATSAPP.SIMULATE, {
       method: 'POST',
       body: JSON.stringify(payload),
     });
@@ -1338,47 +1095,47 @@ export class ApiClient {
 
   // Super Admin Platform
   static async getAllSalonsPlatform() {
-    return this.request('/salons/platform/all');
+    return this.request(ENDPOINTS.SALONS.PLATFORM_ALL);
   }
 
   static async createSalonPlatform(payload) {
-    return this.request('/salons/platform/create', {
+    return this.request(ENDPOINTS.SALONS.PLATFORM_CREATE, {
       method: 'POST',
       body: JSON.stringify(payload),
     });
   }
 
   static async getDeactivationPreview(salonId) {
-    return this.request(`/salons/platform/${salonId}/deactivation-preview`);
+    return this.request(ENDPOINTS.SALONS.PLATFORM_DEACTIVATION_PREVIEW(salonId));
   }
 
   static async toggleSalonStatusPlatform(salonId, forceCancel = false) {
-    return this.request(`/salons/platform/${salonId}/toggle-status?forceCancel=${forceCancel ? 'true' : 'false'}`, {
+    return this.request(ENDPOINTS.SALONS.PLATFORM_TOGGLE_STATUS(salonId, forceCancel), {
       method: 'PATCH',
       body: JSON.stringify({ forceCancelBookings: forceCancel }),
     });
   }
 
   static async verifyMetaPhoneId(phoneNumberId) {
-    return this.request(`/salons/platform/verify-meta-phone/${phoneNumberId}`);
+    return this.request(ENDPOINTS.SALONS.PLATFORM_VERIFY_META_PHONE(phoneNumberId));
   }
 
   static async verifySalonPhoneNumber(phone, usePlatformBot = false) {
-    return this.request('/salons/platform/verify-phone-number', {
+    return this.request(ENDPOINTS.SALONS.PLATFORM_VERIFY_PHONE, {
       method: 'POST',
       body: JSON.stringify({ phone, usePlatformBot }),
     });
   }
 
   static async linkSalonWhatsAppAccount(salonId, phoneNumberId) {
-    return this.request(`/salons/platform/${salonId}/link-whatsapp`, {
+    return this.request(ENDPOINTS.SALONS.PLATFORM_LINK_WHATSAPP(salonId), {
       method: 'POST',
       body: JSON.stringify({ phoneNumberId }),
     });
   }
 
   static async deleteSalonPlatform(salonId) {
-    return this.request(`/salons/platform/${salonId}`, {
+    return this.request(ENDPOINTS.SALONS.PLATFORM_DELETE(salonId), {
       method: 'DELETE',
     });
   }
@@ -1392,16 +1149,15 @@ export class ApiClient {
     if (params.search) query.append('search', params.search);
     if (params.page) query.append('page', params.page);
     if (params.limit) query.append('limit', params.limit);
-    const queryString = query.toString() ? `?${query.toString()}` : '';
-    return this.request(`/super-admin/errors${queryString}`);
+    return this.request(ENDPOINTS.PLATFORM.ERRORS(query.toString()));
   }
 
   static async getErrorLogById(id) {
-    return this.request(`/super-admin/errors/${id}`);
+    return this.request(ENDPOINTS.PLATFORM.ERROR_BY_ID(id));
   }
 
   static async resolveErrorLog(id, resolutionNotes = '') {
-    return this.request(`/super-admin/errors/${id}/resolve`, {
+    return this.request(ENDPOINTS.PLATFORM.ERROR_RESOLVE(id), {
       method: 'PATCH',
       body: JSON.stringify({ resolutionNotes }),
     });
