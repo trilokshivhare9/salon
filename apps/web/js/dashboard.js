@@ -8468,6 +8468,10 @@ export class SalonDashboard {
       card.addEventListener('click', () => {
         const sId = card.getAttribute('data-staff-id');
         if (sId) {
+          if (String(sId).startsWith('temp-')) {
+            this.showToast('Please wait a moment while this stylist finishes saving to the cloud...', 'info');
+            return;
+          }
           this.staffManager.setStaff(sId, 'overview');
           this.render();
         }
@@ -10039,6 +10043,9 @@ export class SalonDashboard {
         phone,
         email,
         status: 'ACTIVE',
+        statusLabel: 'Available',
+        statusDotClass: 'status-available',
+        statusBadgeClass: 'badge-available',
         services: selectedServices.map((id) => ({ serviceId: id })),
         workingHours: [],
         breaks: [],
@@ -11262,6 +11269,10 @@ export class SalonDashboard {
   }
 
   showEditServiceModal(service) {
+    if (service?.id && String(service.id).startsWith('temp-')) {
+      this.showToast('Please wait a moment while this service finishes saving to the cloud...', 'info');
+      return;
+    }
     const modalContainer = this.getModalContainer();
     const matchedCat = (this.categoriesList || []).find((c) => c.name === service.category);
     const initialCatValue = matchedCat ? service.category : 'CUSTOM';
@@ -12770,6 +12781,10 @@ export class SalonDashboard {
   }
 
   showDeleteServiceModal(serviceId, serviceName) {
+    if (serviceId && String(serviceId).startsWith('temp-')) {
+      this.showToast('Please wait a moment while this service finishes saving to the cloud...', 'info');
+      return;
+    }
     const modalContainer = document.getElementById('modal-container');
 
     modalContainer.innerHTML = `
