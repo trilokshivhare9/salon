@@ -1,4 +1,5 @@
 import { ApiClient, PlatformAuth, SalonAuth, PlatformRealm, SalonRealm } from './api.js';
+import { StartupOrchestrator } from './network/startup-orchestrator.js';
 import { BookingWizard } from './booking.js';
 import { SalonDashboard } from './dashboard.js';
 import { PlatformAdminPortal } from './platform-admin.js';
@@ -39,16 +40,13 @@ class App {
       };
     }
 
-    // Immediately handle route so workspace renders without waiting on network
     if (!window.location.hash) {
       window.location.hash = '#admin';
-    } else {
-      this.handleRoute();
     }
 
-    // Initialize session and hydrate authentication state in background
-    this.initSession().catch((err) => {
-      console.warn('[App] Session init non-fatal:', err);
+    // Coordinated 3-Phase App Boot (Session Gatekeeper -> Instant Paint -> Silent Sync)
+    await StartupOrchestrator.boot(() => {
+      this.handleRoute();
     });
 
     // Handle mobile wake-up from screen lock gracefully per realm
@@ -69,51 +67,6 @@ class App {
 
     // Start background keepalive heartbeat to prevent cloud backend sleep
     this.startKeepAlive();
-  }
-
-  async initSession() {
-    // 1. Hydrate Salon Realm if active token or refresh token exists
-    const salonRefreshToken = SalonRealm.getRefreshToken();
-    const salonToken = SalonAuth.getToken();
-
-    if (salonToken || salonRefreshToken) {
-      try {
-        // If access token is missing or expired, attempt refresh immediately before routing
-        if (!salonToken || ApiClient.isTokenExpired(salonToken)) {
-          if (salonRefreshToken && !ApiClient.isTokenExpired(salonRefreshToken)) {
-            await SalonRealm.refreshAccessToken();
-          }
-        }
-        const user = await ApiClient.getMe();
-        if (user) SalonRealm.setUser(user);
-      } catch (err) {
-        console.warn('[App] Salon session hydration error:', err);
-        const currentToken = SalonRealm.getAccessToken();
-        if (!currentToken || ApiClient.isTokenExpired(currentToken)) {
-          SalonRealm.clear();
-        }
-      }
-    }
-
-    // 2. Hydrate Platform Realm if active token or refresh token exists
-    const platformRefreshToken = PlatformRealm.getRefreshToken();
-    const platformToken = PlatformAuth.getToken();
-
-    if (platformToken || platformRefreshToken) {
-      try {
-        if (!platformToken || ApiClient.isTokenExpired(platformToken)) {
-          if (platformRefreshToken && !ApiClient.isTokenExpired(platformRefreshToken)) {
-            await PlatformRealm.refreshAccessToken();
-          }
-        }
-      } catch (err) {
-        console.warn('[App] Platform session hydration error:', err);
-        const currentToken = PlatformRealm.getAccessToken();
-        if (!currentToken || ApiClient.isTokenExpired(currentToken)) {
-          PlatformRealm.clear();
-        }
-      }
-    }
   }
 
   showInPlaceReAuthModal() {

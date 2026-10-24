@@ -1,4 +1,4 @@
-import { ApiClient, formatTime12h } from './api.js';
+import { ApiClient, formatTime12h, SalonRepository } from './api.js';
 import * as IndianFestivals from '@aryanjsx/indian-festivals';
 import { RealtimeNotifier } from './realtime.js';
 import { QueueSyncManager } from './queue/queue-sync.js';
@@ -199,7 +199,7 @@ export class SalonDashboard {
     this.staffList = [];
     this.servicesList = [];
     this.categoriesList = [];
-    this.salonProfile = {};
+    this.salonProfile = this.currentUser?.salon ? { ...this.currentUser.salon } : {};
     this.searchQuery = '';
     this.activeProfileSubtab = 'account';
     this.calYear = new Date().getFullYear();
@@ -432,7 +432,6 @@ export class SalonDashboard {
   }
 
   async init(initialTab = null) {
-    this.renderLoading();
     try {
       try {
         const savedTab = initialTab || sessionStorage.getItem('active_dashboard_tab');
@@ -441,20 +440,75 @@ export class SalonDashboard {
         }
       } catch (_) { }
 
-      await this.loadData();
+      const hasCache = SalonRepository.hasCachedWorkspace();
 
-      try {
-        const savedStaffJson = sessionStorage.getItem('active_staff_workspace');
-        if (savedStaffJson) {
-          const { staffId, view } = JSON.parse(savedStaffJson);
-          if (staffId && (this.staffList || []).some((s) => s.id === staffId)) {
-            this.selectedStaffId = staffId;
-            this.staffManager.setStaff(staffId, view || 'schedule');
+      if (hasCache) {
+        // FAST PATH: Instant Frame-1 Paint (<15ms)
+        const cachedWorkspace = SalonRepository.getCachedWorkspace();
+        this.salonProfile = cachedWorkspace.profile || this.salonProfile || {};
+        this.staffList = cachedWorkspace.staff || [];
+        this.servicesList = cachedWorkspace.services || [];
+        this.categoriesList = cachedWorkspace.categories || [];
+        this.salonWorkingHours = cachedWorkspace.workingHours || [];
+
+        try {
+          const savedStaffJson = sessionStorage.getItem('active_staff_workspace');
+          if (savedStaffJson) {
+            const { staffId, view } = JSON.parse(savedStaffJson);
+            if (staffId && (this.staffList || []).some((s) => s.id === staffId)) {
+              this.selectedStaffId = staffId;
+              this.staffManager.setStaff(staffId, view || 'schedule');
+            }
           }
-        }
-      } catch (_) { }
+        } catch (_) { }
 
-      this.render();
+        // Render immediately with 0 delay and NO full-screen blocking spinner!
+        this.render();
+
+        // Silent background revalidation
+        this.loadData(true).then(() => {
+          this.refreshActiveTab();
+          this.updateQuickRequestsBadge();
+        }).catch((err) => {
+          console.warn('[Dashboard] Background revalidation warning:', err);
+        });
+      } else {
+        // COLD BOOT: Show loading indicator only on brand new login
+        this.renderLoading();
+        await this.loadData();
+
+        try {
+          const savedStaffJson = sessionStorage.getItem('active_staff_workspace');
+          if (savedStaffJson) {
+            const { staffId, view } = JSON.parse(savedStaffJson);
+            if (staffId && (this.staffList || []).some((s) => s.id === staffId)) {
+              this.selectedStaffId = staffId;
+              this.staffManager.setStaff(staffId, view || 'schedule');
+            }
+          }
+        } catch (_) { }
+
+        this.render();
+      }
+
+      // Repository reactive listener cleanup & registration
+      if (this._repoUnsub) {
+        this._repoUnsub.forEach((unsub) => unsub());
+      }
+      this._repoUnsub = [
+        SalonRepository.on('staff:updated', (newStaff) => {
+          this.staffList = newStaff;
+          if (this.activeTab === 'staff') this.refreshActiveTab();
+        }),
+        SalonRepository.on('services:updated', (newServices) => {
+          this.servicesList = newServices;
+          if (this.activeTab === 'services') this.refreshActiveTab();
+        }),
+        SalonRepository.on('profile:updated', (newProfile) => {
+          this.salonProfile = newProfile;
+          if (this.activeTab === 'profile') this.refreshActiveTab();
+        }),
+      ];
 
       window.salonDashboard = this;
       window.dashboardApp = this;
@@ -589,11 +643,20 @@ export class SalonDashboard {
           const e = (ab.endDate || s).split('T')[0];
           return s <= _tabDateIso && e >= _tabDateIso && ab.status === 'ACTIVE';
         })).length;
-        staffTabSpan.textContent = `Stylists (${this.staffList.length}) \u2022 ${_tabAvailCount} Available`;
+        staffTabSpan.textContent = `Stylists (${this.staffList.length}) • ${_tabAvailCount} Available`;
       }
       const servicesTabSpan = this.container.querySelector('.nav-tab[data-tab="services"] span');
       if (servicesTabSpan && this.servicesList) {
         servicesTabSpan.textContent = `Service Menu (${this.servicesList.length})`;
+      }
+
+      // Auto-remove setup required banner if store is active or setup is complete
+      const totalStaff = (this.salonProfile?._count?.stylists !== undefined ? this.salonProfile._count.stylists : (this.staffList ? this.staffList.length : 0));
+      const totalServices = (this.salonProfile?._count?.services !== undefined ? this.salonProfile._count.services : (this.servicesList ? this.servicesList.length : 0));
+      const isStillSetupRequired = (this.salonProfile?.status && this.salonProfile.status !== 'ACTIVE') && (totalStaff === 0 || totalServices === 0);
+      const setupBanner = this.container.querySelector('#setup-required-banner');
+      if (setupBanner && !isStillSetupRequired) {
+        setupBanner.remove();
       }
 
       if (window.history && window.history.replaceState) {
@@ -676,42 +739,25 @@ export class SalonDashboard {
     if (fullReload) {
       try {
         this.queueSync.setDate(this.selectedDate);
-        const [summary, staff, services, profile, categories, calendarScheduleRes, workingHours, salonBreaks, queueRes] = await Promise.all([
-          ApiClient.getDashboardSummary(this.selectedDate, true).catch((err) => {
+        // Stage 1: Critical Core Data (Immediate display — fast path without cache-busting penalty)
+        const [summary, staff, services, profile] = await Promise.all([
+          ApiClient.getDashboardSummary(this.selectedDate, false).catch((err) => {
             console.warn('[Dashboard] Summary fetch error:', err);
             return fallbackSummary;
           }),
-          ApiClient.getStaff(true).catch((err) => {
+          ApiClient.getStaff(false).catch((err) => {
             console.warn('[Dashboard] Staff fetch error:', err);
             return this.staffList || [];
           }),
-          ApiClient.getServices(true).catch((err) => {
+          ApiClient.getServices(false).catch((err) => {
             console.warn('[Dashboard] Services fetch error:', err);
             return this.servicesList || [];
           }),
-          ApiClient.getSalonProfile(true).catch((err) => {
+          ApiClient.getSalonProfile(false).catch((err) => {
             console.warn('[Dashboard] Profile fetch error:', err);
             return this.salonProfile || {};
           }),
-          ApiClient.getServiceCategories(true).catch((err) => {
-            console.warn('[Dashboard] Categories fetch error:', err);
-            return this.categoriesList || [];
-          }),
-          ApiClient.getCalendarSchedule({
-            month: `${this.calYear}-${String(this.calMonth + 1).padStart(2, '0')}`,
-          }, true).catch((err) => {
-            console.warn('[Dashboard] Calendar schedule fetch error:', err);
-            return null;
-          }),
-          ApiClient.getSalonWorkingHours(true).catch((err) => {
-            console.warn('[Dashboard] Working hours fetch error:', err);
-            return this.salonWorkingHours || [];
-          }),
-          ApiClient.getSalonBreaks(true).catch((err) => {
-            console.warn('[Dashboard] Salon breaks fetch error:', err);
-            return this.salonBreaks || [];
-          }),
-          this.queueSync.fetchQueue(true).catch((err) => {
+          this.queueSync.fetchQueue(false).catch((err) => {
             console.warn('[Dashboard] Queue fetch error:', err);
             return null;
           }),
@@ -723,29 +769,36 @@ export class SalonDashboard {
         }
         this.staffList = Array.isArray(staff) ? staff : [];
         this.servicesList = Array.isArray(services) ? services : [];
-        this.categoriesList = Array.isArray(categories) ? categories : [];
         this.salonProfile = profile || {};
-        const calData = calendarScheduleRes?.data || calendarScheduleRes;
-        this.calendarSchedule = calData || null;
-        this.closuresList = this.calendarSchedule?.salonSchedule?.closures || [];
-        this.salonWorkingHours = this.calendarSchedule?.salonSchedule?.weeklyHours || (Array.isArray(workingHours) ? workingHours : (profile?.workingHours || []));
-        if (salonBreaks && typeof salonBreaks === 'object') {
-          if (Array.isArray(salonBreaks)) {
-            this.salonBreaks = salonBreaks;
-            this.salonRoutineBreaks = [];
-            this.salonBreaksByDay = {};
-          } else {
-            this.salonRoutineBreaks = Array.isArray(salonBreaks.routineBreaks) ? salonBreaks.routineBreaks : [];
-            this.salonBreaksByDay = salonBreaks.byDay || {};
-            this.salonBreaks = Object.entries(this.salonBreaksByDay).flatMap(([day, bList]) =>
-              (bList || []).map((b) => ({ ...b, dayOfWeek: day }))
-            );
+
+        // Stage 2: Background Non-Blocking Enrichment (Hydrates categories, calendar, hours, breaks asynchronously)
+        Promise.all([
+          ApiClient.getServiceCategories(false).catch(() => this.categoriesList || []),
+          ApiClient.getCalendarSchedule({
+            month: `${this.calYear}-${String(this.calMonth + 1).padStart(2, '0')}`,
+          }, false).catch(() => null),
+          ApiClient.getSalonWorkingHours(false).catch(() => this.salonWorkingHours || []),
+          ApiClient.getSalonBreaks(false).catch(() => this.salonBreaks || []),
+        ]).then(([categories, calendarScheduleRes, workingHours, salonBreaks]) => {
+          this.categoriesList = Array.isArray(categories) ? categories : [];
+          const calData = calendarScheduleRes?.data || calendarScheduleRes;
+          this.calendarSchedule = calData || null;
+          this.closuresList = this.calendarSchedule?.salonSchedule?.closures || [];
+          this.salonWorkingHours = this.calendarSchedule?.salonSchedule?.weeklyHours || (Array.isArray(workingHours) ? workingHours : (this.salonProfile?.workingHours || []));
+          if (salonBreaks && typeof salonBreaks === 'object') {
+            if (Array.isArray(salonBreaks)) {
+              this.salonBreaks = salonBreaks;
+              this.salonRoutineBreaks = [];
+              this.salonBreaksByDay = {};
+            } else {
+              this.salonRoutineBreaks = Array.isArray(salonBreaks.routineBreaks) ? salonBreaks.routineBreaks : [];
+              this.salonBreaksByDay = salonBreaks.byDay || {};
+              this.salonBreaks = Object.entries(this.salonBreaksByDay).flatMap(([day, bList]) =>
+                (bList || []).map((b) => ({ ...b, dayOfWeek: day }))
+              );
+            }
           }
-        } else {
-          this.salonBreaks = [];
-          this.salonRoutineBreaks = [];
-          this.salonBreaksByDay = {};
-        }
+        }).catch((err) => console.warn('[Dashboard] Background enrichment error:', err));
 
       } catch (err) {
         console.warn('[Dashboard] loadData batch error:', err);
@@ -810,7 +863,15 @@ export class SalonDashboard {
     const salonName = this.salonProfile?.name || 'Salon Operations';
     const salonSlug = this.salonProfile?.slug || 'salon';
     const webBookingUrl = `${window.location.origin}/#book/${salonSlug}`;
-    const isDeactivated = this.salonProfile?.status === 'DEACTIVATED' || this.staffList.length === 0 || this.servicesList.length === 0;
+
+    // A salon is ONLY deactivated if its explicit status in DB is DEACTIVATED
+    const isDeactivated = this.salonProfile?.status === 'DEACTIVATED';
+
+    // A salon only requires initial setup onboarding if its status is NOT active AND it has 0 staff & 0 services
+    const stylistCount = (this.salonProfile?._count?.stylists !== undefined ? this.salonProfile._count.stylists : (this.staffList ? this.staffList.length : 0));
+    const serviceCount = (this.salonProfile?._count?.services !== undefined ? this.salonProfile._count.services : (this.servicesList ? this.servicesList.length : 0));
+    const isSetupRequired = (this.salonProfile?.status && this.salonProfile.status !== 'ACTIVE') && (stylistCount === 0 || serviceCount === 0);
+
     const todayClosure = this.getTodayClosure();
     const isClosedToday = !!todayClosure;
 
@@ -864,9 +925,9 @@ export class SalonDashboard {
           </div>
         </div>
 
-        <!-- Setup Required Onboarding Banner -->
-        ${isDeactivated ? `
-          <div style="background: linear-gradient(135deg, rgba(245,158,11,0.08) 0%, rgba(139, 61, 255,0.08) 100%); border: 1px solid rgba(245,158,11,0.3); border-radius: var(--radius-md); padding: 16px 20px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px;">
+        <!-- Setup Required Onboarding Banner (Only for genuinely inactive/unconfigured salons) -->
+        ${isSetupRequired ? `
+          <div id="setup-required-banner" style="background: linear-gradient(135deg, rgba(245,158,11,0.08) 0%, rgba(139, 61, 255,0.08) 100%); border: 1px solid rgba(245,158,11,0.3); border-radius: var(--radius-md); padding: 16px 20px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px;">
             <div style="display: flex; align-items: center; gap: 14px;">
               <div style="width: 44px; height: 44px; border-radius: 12px; background: rgba(245,158,11,0.15); display: flex; align-items: center; justify-content: center; color: #fbbf24;">
                 ${Icons.sparkles({ size: 22, color: '#fbbf24' })}
@@ -874,7 +935,7 @@ export class SalonDashboard {
               <div>
                 <div style="font-weight: 800; font-size: 1.05rem; color: #fff;">Initial Store Setup Required</div>
                 <div style="font-size: 0.82rem; color: var(--text-secondary); margin-top: 2px;">
-                  Add at least <strong>1 Stylist</strong> (${this.staffList.length}/1) and <strong>1 Service</strong> (${this.servicesList.length}/1) to automatically activate your store for live online bookings.
+                  Add at least <strong>1 Stylist</strong> (${stylistCount}/1) and <strong>1 Service</strong> (${serviceCount}/1) to automatically activate your store for live online bookings.
                 </div>
               </div>
             </div>

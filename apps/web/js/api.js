@@ -1,229 +1,24 @@
-const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-const forceCloud = new URLSearchParams(window.location.search).get('cloud') === '1' || localStorage.getItem('use_cloud_backend') === 'true';
-const useLocal = (isLocalhost && !forceCloud) || new URLSearchParams(window.location.search).get('local') === '1' || localStorage.getItem('use_local_backend') === 'true';
+import { HttpClient, API_BASE, ApiError } from './network/http-client.js';
+import { SalonSession, PlatformSession, SessionRealm } from './network/session-manager.js';
+import { SalonRepository } from './repositories/salon-repository.js';
+import { ENDPOINTS } from './network/endpoints.js';
 
-export const API_BASE = useLocal
-  ? `http://${window.location.hostname || 'localhost'}:3000/api/v1`
-  : 'https://salon-api-tuwo.onrender.com/api/v1';
+export { API_BASE, ApiError, SalonRepository, ENDPOINTS };
+
+// Dual-Realm Session Bindings
+export const PlatformRealm = PlatformSession;
+export const SalonRealm = SalonSession;
+export const AuthRealm = SessionRealm;
 
 const memoryCache = new Map();
-
-/**
- * DUAL-REALM ISOLATED STORAGE & SESSION ENGINE
- * 
- * Provides absolute physical isolation between Platform Super Admin
- * and Salon Store Operations. A browser instance can have both active
- * simultaneously with zero token collisions or cross-realm state leaks.
- */
-export class AuthRealm {
-  constructor(namespace, defaultLoginRoute) {
-    this.namespace = namespace;
-    this.defaultLoginRoute = defaultLoginRoute;
-    this.accessTokenKey = `${namespace}_access_token`;
-    this.refreshTokenKey = `${namespace}_refresh_token`;
-    this.userKey = `${namespace}_user_profile`;
-    this.inMemoryToken = null;
-    this.isRefreshing = false;
-    this.refreshSubscribers = [];
-  }
-
-  getAccessToken() {
-    return this.inMemoryToken || localStorage.getItem(this.accessTokenKey);
-  }
-
-  setAccessToken(token) {
-    this.inMemoryToken = token || null;
-    if (token) localStorage.setItem(this.accessTokenKey, token);
-    else localStorage.removeItem(this.accessTokenKey);
-  }
-
-  getRefreshToken() {
-    return localStorage.getItem(this.refreshTokenKey);
-  }
-
-  setRefreshToken(token) {
-    if (token) localStorage.setItem(this.refreshTokenKey, token);
-    else localStorage.removeItem(this.refreshTokenKey);
-  }
-
-  getUser() {
-    try {
-      const token = this.getAccessToken();
-      const refreshToken = this.getRefreshToken();
-      // If neither token nor refresh token exists, user is logged out
-      if (!token && !refreshToken) {
-        return null;
-      }
-      // If access token is expired AND there is no refresh token, user is logged out
-      if (token && ApiClient.isTokenExpired(token) && !refreshToken) {
-        return null;
-      }
-      const raw = localStorage.getItem(this.userKey);
-      return raw ? JSON.parse(raw) : null;
-    } catch {
-      return null;
-    }
-  }
-
-  async refreshAccessToken() {
-    const rawRefreshToken = this.getRefreshToken();
-    if (!rawRefreshToken) {
-      this.clear();
-      throw new Error('Refresh token missing');
-    }
-
-    const refreshRes = await fetch(`${API_BASE}/auth/refresh`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken: rawRefreshToken }),
-    });
-
-    if (!refreshRes.ok) {
-      this.clear();
-      throw new Error('Refresh token invalid or expired');
-    }
-
-    const refreshData = await refreshRes.json();
-    const result = refreshData.data !== undefined ? refreshData.data : refreshData;
-
-    this.setAccessToken(result.accessToken);
-    if (result.refreshToken) this.setRefreshToken(result.refreshToken);
-    if (result.user) this.setUser(result.user);
-
-    return result;
-  }
-
-  setUser(user) {
-    if (user) localStorage.setItem(this.userKey, JSON.stringify(user));
-    else localStorage.removeItem(this.userKey);
-  }
-
-  clear() {
-    this.inMemoryToken = null;
-    localStorage.removeItem(this.accessTokenKey);
-    localStorage.removeItem(this.refreshTokenKey);
-    localStorage.removeItem(this.userKey);
-    this.refreshSubscribers = [];
-    this.isRefreshing = false;
-  }
-}
-
-// Global Singletons for Platform Super Admin and Salon Store Operations
-export const PlatformRealm = new AuthRealm('platform', '#superadmin-login');
-export const SalonRealm = new AuthRealm('salon', '#login');
-
 const authChannel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('salon_auth_sync') : null;
 
 /**
  * REUSABLE REALM HTTP REQUEST EXECUTOR
- * Executes authenticated API requests within an isolated realm context.
+ * Delegates directly to the centralized, resilient HttpClient gateway.
  */
 async function executeRealmRequest(realm, endpoint, options = {}, ttlMs = 0) {
-  const isGet = !options.method || options.method === 'GET';
-  const token = realm.getAccessToken();
-  const user = realm.getUser();
-  const tenantContext = user?.salonId || 'tenant_' + realm.namespace;
-  const cacheKey = `${tenantContext}:${endpoint}`;
-
-  if (isGet && ttlMs > 0) {
-    const cached = memoryCache.get(cacheKey);
-    if (cached && Date.now() - cached.timestamp < ttlMs) {
-      return cached.data;
-    }
-  }
-
-  const headers = {
-    'Content-Type': 'application/json',
-    'Cache-Control': 'no-cache, no-store, must-revalidate',
-    'Pragma': 'no-cache',
-    ...options.headers,
-  };
-
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), options.timeoutMs || 45000);
-
-  try {
-    const response = await fetch(`${API_BASE}${endpoint}`, {
-      ...options,
-      cache: 'no-store',
-      headers,
-      signal: options.signal || controller.signal,
-    });
-
-    clearTimeout(timeoutId);
-
-    let data;
-    const contentType = response.headers.get('content-type') || '';
-    if (contentType.includes('application/json')) {
-      data = await response.json();
-    } else {
-      const text = await response.text();
-      data = { message: text || `Server error (${response.status}: ${response.statusText})` };
-    }
-
-    // 401 Interception with realm-isolated refresh mutex
-    if (response.status === 401 && !endpoint.includes('/auth/login') && !endpoint.includes('/auth/refresh')) {
-      if (!realm.isRefreshing) {
-        realm.isRefreshing = true;
-        try {
-          const result = await realm.refreshAccessToken();
-
-          realm.isRefreshing = false;
-          realm.refreshSubscribers.forEach((cb) => cb(result.accessToken));
-          realm.refreshSubscribers = [];
-
-          options.headers = { ...options.headers, Authorization: `Bearer ${result.accessToken}` };
-          return executeRealmRequest(realm, endpoint, options, ttlMs);
-        } catch (refreshErr) {
-          realm.isRefreshing = false;
-          realm.refreshSubscribers = [];
-          realm.clear();
-
-          if (typeof window.onAuthFailure === 'function') {
-            window.onAuthFailure();
-          } else {
-            // Only redirect if current route belongs to this realm
-            const currentHash = (window.location.hash || '').replace('#', '');
-            if (realm === PlatformRealm && (currentHash === 'super-admin' || currentHash === 'superadmin-login')) {
-              window.location.hash = '#superadmin-login';
-            } else if (realm === SalonRealm && (currentHash === 'admin' || currentHash.startsWith('admin/') || currentHash === 'login' || currentHash === 'salon-login')) {
-              window.location.hash = '#login';
-            }
-          }
-
-          throw new Error(data.message || 'Session expired. Please log in again.');
-        }
-      } else {
-        return new Promise((resolve, reject) => {
-          realm.refreshSubscribers.push((newToken) => {
-            options.headers = { ...options.headers, Authorization: `Bearer ${newToken}` };
-            executeRealmRequest(realm, endpoint, options, ttlMs).then(resolve).catch(reject);
-          });
-        });
-      }
-    }
-
-    if (!response.ok) {
-      throw new Error(data.message || `Request failed with status ${response.status}`);
-    }
-
-    const result = data.data !== undefined ? data.data : data;
-    if (isGet && ttlMs > 0) {
-      memoryCache.set(cacheKey, { data: result, timestamp: Date.now() });
-    }
-    return result;
-  } catch (err) {
-    clearTimeout(timeoutId);
-    if (isGet && ttlMs > 0) {
-      const stale = memoryCache.get(cacheKey);
-      if (stale) return stale.data;
-    }
-    throw err;
-  }
+  return HttpClient.request(endpoint, options, realm);
 }
 
 /**
@@ -414,6 +209,7 @@ export class ApiClient {
   static clearSession() {
     PlatformRealm.clear();
     SalonRealm.clear();
+    SalonRepository.clear();
     this.invalidateCache();
   }
 
@@ -628,8 +424,7 @@ export class ApiClient {
 
   // Salon Closures & Holidays Management
   static async getSalonClosures(bypassCache = false) {
-    const url = bypassCache ? `/salons/closures?_t=${Date.now()}` : '/salons/closures';
-    return this.request(url, {}, 30000);
+    return SalonRepository.getSalonClosures(bypassCache);
   }
 
   static async createSalonClosure(payload) {
@@ -637,10 +432,12 @@ export class ApiClient {
     this.invalidateCache('/salons/closures/calendar-schedule');
     this.invalidateCache('/appointments');
     this.invalidateCache('/reports');
-    return this.request('/salons/closures', {
+    const res = await this.request('/salons/closures', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
+    SalonRepository.invalidate('closures');
+    return res;
   }
 
   static async deleteSalonClosure(id) {
@@ -648,9 +445,11 @@ export class ApiClient {
     this.invalidateCache('/salons/closures/calendar-schedule');
     this.invalidateCache('/appointments');
     this.invalidateCache('/reports');
-    return this.request(`/salons/closures/${id}`, {
+    const res = await this.request(`/salons/closures/${id}`, {
       method: 'DELETE',
     });
+    SalonRepository.invalidate('closures');
+    return res;
   }
 
   static async getCalendarSchedule(options = {}, bypassCache = false) {
@@ -681,8 +480,7 @@ export class ApiClient {
 
   // Staff Management (Cached for 3 mins)
   static async getStaff(bypassCache = false) {
-    const url = bypassCache ? `/staff?_t=${Date.now()}` : '/staff';
-    return this.request(url, {}, bypassCache ? 0 : 180000);
+    return SalonRepository.getStaff(bypassCache);
   }
 
   static async createStaff(payload) {
@@ -692,8 +490,7 @@ export class ApiClient {
       method: 'POST',
       body: JSON.stringify(payload),
     });
-    this.invalidateCache('/staff');
-    this.invalidateCache('/reports');
+    SalonRepository.invalidate('staff');
     return res;
   }
   static async updateStaff(id, payload) {
@@ -703,8 +500,7 @@ export class ApiClient {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
-    this.invalidateCache('/staff');
-    this.invalidateCache('/reports');
+    SalonRepository.invalidate('staff');
     return res;
   }
 
@@ -714,8 +510,7 @@ export class ApiClient {
     const res = await this.request(`/staff/${id}/toggle-status`, {
       method: 'PATCH',
     });
-    this.invalidateCache('/staff');
-    this.invalidateCache('/reports');
+    SalonRepository.invalidate('staff');
     return res;
   }
 
@@ -728,9 +523,8 @@ export class ApiClient {
       body: JSON.stringify({ serviceIds }),
       keepalive: true,
     });
-    this.invalidateCache('/staff');
-    this.invalidateCache('/services');
-    this.invalidateCache('/reports');
+    SalonRepository.invalidate('staff');
+    SalonRepository.invalidate('services');
     return res;
   }
 
@@ -740,8 +534,7 @@ export class ApiClient {
     const res = await this.request(`/staff/${id}`, {
       method: 'DELETE',
     });
-    this.invalidateCache('/staff');
-    this.invalidateCache('/reports');
+    SalonRepository.invalidate('staff');
     return res;
   }
 
@@ -940,8 +733,7 @@ export class ApiClient {
 
   // Service Category Management
   static async getServiceCategories(bypassCache = false) {
-    const url = bypassCache ? `/services/categories?_t=${Date.now()}` : '/services/categories';
-    return this.request(url, {}, bypassCache ? 0 : 180000);
+    return SalonRepository.getServiceCategories(bypassCache);
   }
 
   static async createServiceCategory(payload) {
@@ -951,8 +743,8 @@ export class ApiClient {
       method: 'POST',
       body: JSON.stringify(payload),
     });
-    this.invalidateCache('/services/categories');
-    this.invalidateCache('/services');
+    SalonRepository.invalidate('categories');
+    SalonRepository.invalidate('services');
     return res;
   }
 
@@ -963,8 +755,8 @@ export class ApiClient {
       method: 'PATCH',
       body: JSON.stringify(payload),
     });
-    this.invalidateCache('/services/categories');
-    this.invalidateCache('/services');
+    SalonRepository.invalidate('categories');
+    SalonRepository.invalidate('services');
     return res;
   }
 
@@ -974,8 +766,8 @@ export class ApiClient {
     const res = await this.request(`/services/categories/${id}`, {
       method: 'DELETE',
     });
-    this.invalidateCache('/services/categories');
-    this.invalidateCache('/services');
+    SalonRepository.invalidate('categories');
+    SalonRepository.invalidate('services');
     return res;
   }
 
@@ -1016,8 +808,7 @@ export class ApiClient {
 
   // Service Management (Cached for 3 mins)
   static async getServices(bypassCache = false) {
-    const url = bypassCache ? `/services?_t=${Date.now()}` : '/services';
-    return this.request(url, {}, bypassCache ? 0 : 180000);
+    return SalonRepository.getServices(bypassCache);
   }
 
   static async createService(payload) {
@@ -1027,8 +818,7 @@ export class ApiClient {
       method: 'POST',
       body: JSON.stringify(payload),
     });
-    this.invalidateCache('/services');
-    this.invalidateCache('/reports');
+    SalonRepository.invalidate('services');
     return res;
   }
 
@@ -1039,8 +829,7 @@ export class ApiClient {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
-    this.invalidateCache('/services');
-    this.invalidateCache('/reports');
+    SalonRepository.invalidate('services');
     return res;
   }
 
@@ -1050,8 +839,7 @@ export class ApiClient {
     const res = await this.request(`/services/${id}/toggle-status`, {
       method: 'PATCH',
     });
-    this.invalidateCache('/services');
-    this.invalidateCache('/reports');
+    SalonRepository.invalidate('services');
     return res;
   }
 
@@ -1061,8 +849,7 @@ export class ApiClient {
     const res = await this.request(`/services/${id}`, {
       method: 'DELETE',
     });
-    this.invalidateCache('/services');
-    this.invalidateCache('/reports');
+    SalonRepository.invalidate('services');
     return res;
   }
 
@@ -1080,22 +867,23 @@ export class ApiClient {
       method: 'POST',
       body: JSON.stringify({ services }),
     });
-    this.invalidateCache('/services');
-    this.invalidateCache('/reports');
+    SalonRepository.invalidate('services');
     return res;
   }
 
   static async getSalonProfile(bypassCache = false) {
-    return this.request('/salons/profile', {}, bypassCache ? 0 : 300000);
+    return SalonRepository.getSalonProfile(bypassCache);
   }
 
   static async updateSalonProfile(payload) {
     this.invalidateCache('/salons');
     this.invalidateCache('/reports');
-    return this.request('/salons/profile', {
+    const res = await this.request('/salons/profile', {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
+    SalonRepository.invalidate('profile');
+    return res;
   }
 
   static async getPersonalProfile(bypassCache = false) {
@@ -1112,8 +900,7 @@ export class ApiClient {
   }
 
   static async getSalonWorkingHours(bypassCache = false) {
-    const url = bypassCache ? `/salons/working-hours?_t=${Date.now()}` : '/salons/working-hours';
-    return this.request(url, {}, bypassCache ? 0 : 180000);
+    return SalonRepository.getSalonWorkingHours(bypassCache);
   }
 
   static async updateSalonWorkingHours(hours) {
@@ -1138,18 +925,13 @@ export class ApiClient {
       method: 'PUT',
       body: JSON.stringify({ hours: sanitizedHours }),
     });
-    this.invalidateCache('/salons/working-hours');
-    this.invalidateCache('/salons/profile');
-    this.invalidateCache('/salons');
-    this.invalidateCache('/booking');
-    this.invalidateCache('/staff');
-    this.invalidateCache('/reports');
+    SalonRepository.invalidate('working_hours');
+    SalonRepository.invalidate('profile');
     return res;
   }
 
-  static async getSalonBreaks(bypassCache = true) {
-    const url = bypassCache ? `/salons/breaks?_t=${Date.now()}` : '/salons/breaks';
-    return this.request(url, {}, bypassCache ? 0 : 60000);
+  static async getSalonBreaks(bypassCache = false) {
+    return SalonRepository.getSalonBreaks(bypassCache);
   }
 
   static async createSalonBreak(payload) {
@@ -1159,8 +941,7 @@ export class ApiClient {
       method: 'POST',
       body: JSON.stringify(payload),
     });
-    this.invalidateCache('/salons');
-    this.invalidateCache('/staff');
+    SalonRepository.invalidate('breaks');
     return res;
   }
 
@@ -1171,8 +952,7 @@ export class ApiClient {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
-    this.invalidateCache('/salons');
-    this.invalidateCache('/staff');
+    SalonRepository.invalidate('breaks');
     return res;
   }
 
@@ -1182,8 +962,7 @@ export class ApiClient {
     const res = await this.request(`/salons/breaks/${breakId}`, {
       method: 'DELETE',
     });
-    this.invalidateCache('/salons');
-    this.invalidateCache('/staff');
+    SalonRepository.invalidate('breaks');
     return res;
   }
 

@@ -1,5 +1,5 @@
-// SalonFlow PWA Service Worker (v3.0.0 - Network-First for instant deploys)
-const CACHE_NAME = 'salonflow-cache-v3';
+// StyleSlot PWA Service Worker (v4.0.0 - Stale-While-Revalidate for sub-second 3G load)
+const CACHE_NAME = 'styleslot-cache-v4';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -61,10 +61,11 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Static Assets & Scripts: Network-First Strategy (Always fresh code, offline fallback)
+  // Static Assets & Scripts: Stale-While-Revalidate Strategy (Instant load from cache, silent background update)
   event.respondWith(
-    fetch(event.request)
-      .then((networkResponse) => {
+    caches.match(event.request, { ignoreSearch: true }).then((cachedResponse) => {
+      // 1. Fetch fresh copy from network in parallel to update cache
+      const fetchPromise = fetch(event.request).then((networkResponse) => {
         if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
           const responseToCache = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => {
@@ -72,8 +73,11 @@ self.addEventListener('fetch', (event) => {
           });
         }
         return networkResponse;
-      })
-      .catch(() => caches.match(event.request))
+      }).catch(() => cachedResponse);
+
+      // 2. Return cached response IMMEDIATELY if present (<2ms), otherwise wait for network fetch
+      return cachedResponse || fetchPromise;
+    })
   );
 });
 
