@@ -367,7 +367,7 @@ export class SalonDashboard {
           await ApiClient.updateAppointmentStatus(id, 'CHECKED_IN');
           this.showToast('Quick booking accepted & customer checked in!', 'success');
           modal.remove();
-          await this.loadData(true);
+          await this.refreshCurrentView(true);
           this.render();
         } catch (err) {
           this.showToast(`Error accepting booking: ${err.message}`, 'danger');
@@ -387,7 +387,7 @@ export class SalonDashboard {
           await ApiClient.updateAppointmentStatus(id, 'CANCELLED');
           this.showToast('Quick booking declined.', 'warning');
           modal.remove();
-          await this.loadData(true);
+          await this.refreshCurrentView(true);
           this.render();
         } catch (err) {
           this.showToast(`Error declining booking: ${err.message}`, 'danger');
@@ -724,6 +724,47 @@ export class SalonDashboard {
       }
     } else {
       this.render();
+    }
+  }
+
+  async refreshCurrentView(force = true) {
+    const tab = this.activeTab || 'queue';
+    try {
+      if (tab === 'queue') {
+        await Promise.all([
+          this.queueSync.fetchQueue(force).catch(() => {}),
+          ApiClient.getDashboardSummary(this.selectedDate, force).then((s) => {
+            if (s) this.summaryData = s;
+          }).catch(() => {}),
+        ]);
+        if (Array.isArray(this.queueSync.items)) {
+          this.summaryData.todayAppointments = this.queueSync.items;
+        }
+      } else if (tab === 'services') {
+        const [services, categories] = await Promise.all([
+          ApiClient.getServices(force).catch(() => this.servicesList),
+          ApiClient.getServiceCategories(force).catch(() => this.categoriesList),
+        ]);
+        if (Array.isArray(services)) this.servicesList = services;
+        if (Array.isArray(categories)) this.categoriesList = categories;
+      } else if (tab === 'staff') {
+        const staff = await ApiClient.getStaff(force).catch(() => this.staffList);
+        if (Array.isArray(staff)) this.staffList = staff;
+      } else if (tab === 'calendar') {
+        const calData = await ApiClient.getCalendarSchedule({
+          month: `${this.calYear}-${String(this.calMonth + 1).padStart(2, '0')}`,
+        }, force).catch(() => null);
+        if (calData) {
+          const payload = calData.data || calData;
+          this.calendarSchedule = payload;
+          this.closuresList = payload?.salonSchedule?.closures || [];
+        }
+      } else {
+        const profile = await ApiClient.getSalonProfile(force).catch(() => this.salonProfile);
+        if (profile) this.salonProfile = profile;
+      }
+    } catch (err) {
+      console.warn('[Dashboard] Targeted refresh failed:', err);
     }
   }
 
@@ -8656,9 +8697,10 @@ export class SalonDashboard {
       isPulling = false;
       if (currentPullDist > 45) {
         ptrWrapper.classList.add('ptr-spinning');
-        if (ptrText) ptrText.textContent = 'Refreshing queue...';
+        const tabName = (this.activeTab || 'queue');
+        if (ptrText) ptrText.textContent = `Refreshing ${tabName}...`;
         try {
-          await this.loadData(true);
+          await this.refreshCurrentView(true);
         } catch (err) {
           console.warn('[PTR] Error during sync:', err);
         } finally {
@@ -8724,14 +8766,27 @@ export class SalonDashboard {
     // Status Updates (Check In, Start Service, Complete)
     this.container.querySelectorAll('.btn-status').forEach((btn) => {
       btn.addEventListener('click', async (e) => {
-        const id = e.currentTarget.getAttribute('data-id');
-        const status = e.currentTarget.getAttribute('data-status');
-        e.currentTarget.textContent = 'Updating...';
+        const targetBtn = e.currentTarget;
+        if (targetBtn.disabled) return;
+        targetBtn.disabled = true;
+        const id = targetBtn.getAttribute('data-id');
+        const status = targetBtn.getAttribute('data-status');
+
+        // Optimistic in-memory update (0ms Frame 1)
+        const targetItem = (this.queueSync?.items || []).find((item) => item.id === id);
+        const prevStatus = targetItem ? targetItem.status : null;
+        if (targetItem) {
+          targetItem.status = status;
+          this.render();
+        }
+
         try {
           await ApiClient.updateAppointmentStatus(id, status);
-          await this.loadData();
-          this.render();
         } catch (err) {
+          if (targetItem && prevStatus) {
+            targetItem.status = prevStatus;
+            this.render();
+          }
           alert(`Could not update status: ${err.message}`);
         }
       });
@@ -9153,14 +9208,27 @@ export class SalonDashboard {
     // Status Updates
     tabContent.querySelectorAll('.btn-status').forEach((btn) => {
       btn.addEventListener('click', async (e) => {
-        const id = e.currentTarget.getAttribute('data-id');
-        const status = e.currentTarget.getAttribute('data-status');
-        e.currentTarget.textContent = 'Updating...';
+        const targetBtn = e.currentTarget;
+        if (targetBtn.disabled) return;
+        targetBtn.disabled = true;
+        const id = targetBtn.getAttribute('data-id');
+        const status = targetBtn.getAttribute('data-status');
+
+        // Optimistic in-memory update (0ms Frame 1)
+        const targetItem = (this.queueSync?.items || []).find((item) => item.id === id);
+        const prevStatus = targetItem ? targetItem.status : null;
+        if (targetItem) {
+          targetItem.status = status;
+          this.render();
+        }
+
         try {
           await ApiClient.updateAppointmentStatus(id, status);
-          await this.loadData();
-          this.render();
         } catch (err) {
+          if (targetItem && prevStatus) {
+            targetItem.status = prevStatus;
+            this.render();
+          }
           alert(`Could not update status: ${err.message}`);
         }
       });
@@ -9843,20 +9911,29 @@ export class SalonDashboard {
     this._isTogglingStaff = true;
     this.lastLocalActionTimestamp = Date.now();
 
+    const idx = this.staffList.findIndex((s) => String(s.id) === String(id));
+    const previousStatus = idx !== -1 ? this.staffList[idx].status : null;
+
     try {
-      const idx = this.staffList.findIndex((s) => String(s.id) === String(id));
       if (idx !== -1) {
         this.staffList[idx] = {
           ...this.staffList[idx],
-          status: this.staffList[idx].status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE',
+          status: previousStatus === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE',
         };
         this.render();
       }
       await ApiClient.toggleStaffStatus(id);
-      this.loadData(true).then(() => this.refreshActiveTab()).catch(() => { });
+      SalonRepository.invalidate('staff');
+      this.showToast(`Stylist is now ${this.staffList[idx]?.status === 'ACTIVE' ? 'Active' : 'Inactive'}`, 'success');
     } catch (err) {
-      alert(`Status update failed: ${err.message}`);
-      this.loadData(true).then(() => this.render()).catch(() => { });
+      if (idx !== -1 && previousStatus) {
+        this.staffList[idx] = {
+          ...this.staffList[idx],
+          status: previousStatus,
+        };
+        this.render();
+      }
+      alert(`${err.message}`);
     } finally {
       setTimeout(() => {
         this._isTogglingStaff = false;
@@ -9970,11 +10047,9 @@ export class SalonDashboard {
         }
 
         modalContainer.innerHTML = '';
+        this.showToast(`Stylist "${document.getElementById('new-staff-name')?.value || 'New'}" added!`, 'success');
         this.render();
-
-        this.loadData(true).then(() => {
-          this.refreshActiveTab();
-        }).catch(() => { });
+        SalonRepository.invalidate('staff');
       } catch (err) {
         submitBtn.innerHTML = originalText;
         submitBtn.removeAttribute('disabled');
@@ -11144,6 +11219,13 @@ export class SalonDashboard {
         stylistIds: selectedStylistIds,
       };
 
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+      if (submitBtn) {
+        if (submitBtn.disabled) return;
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Creating...';
+      }
+
       try {
         this.lastLocalActionTimestamp = Date.now();
         const created = await ApiClient.createService(payload);
@@ -11154,11 +11236,12 @@ export class SalonDashboard {
         modalContainer.innerHTML = '';
         this.showToast(`Service "${payload.name}" created!`, 'success');
         this.render();
-
-        this.loadData(true).then(() => {
-          this.refreshActiveTab();
-        }).catch(() => { });
+        SalonRepository.invalidate('services');
       } catch (err) {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = 'Save Service';
+        }
         alert(err.message);
       }
     });
@@ -11722,10 +11805,21 @@ export class SalonDashboard {
 
     document.getElementById('edit-service-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
+      const submitBtn = document.getElementById('btn-submit-edit-svc') || e.target.querySelector('button[type="submit"]');
+      if (submitBtn) {
+        if (submitBtn.disabled) return;
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving changes...';
+      }
+
       const rawCat = categorySelect.value;
       const finalCategory = rawCat === 'CUSTOM' ? (customCatInput.value.trim() || 'General') : rawCat;
       const dur = parseInt(document.getElementById('edit-svc-duration').value, 10);
       if (isNaN(dur) || dur < 30 || dur % 15 !== 0) {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = 'Save Changes to Menu →';
+        }
         alert('Service duration must be at least 30 minutes and a multiple of 15 (e.g. 30, 45, 60, 75, 90 mins).');
         return;
       }
@@ -11759,11 +11853,12 @@ export class SalonDashboard {
         modalContainer.innerHTML = '';
         this.showToast(`Service "${payload.name}" updated!`, 'success');
         this.render();
-
-        this.loadData(true).then(() => {
-          this.refreshActiveTab();
-        }).catch(() => { });
+        SalonRepository.invalidate('services');
       } catch (err) {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = 'Save Changes to Menu →';
+        }
         alert(err.message);
       }
     });
@@ -11811,6 +11906,13 @@ export class SalonDashboard {
 
     document.getElementById('edit-staff-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+      if (submitBtn) {
+        if (submitBtn.disabled) return;
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving...';
+      }
+
       const payload = {
         name: document.getElementById('edit-staff-name').value.trim(),
         phone: document.getElementById('edit-staff-phone').value.trim(),
@@ -11833,12 +11935,14 @@ export class SalonDashboard {
         }
 
         modalContainer.innerHTML = '';
+        this.showToast('Stylist details saved!', 'success');
         this.render();
-
-        this.loadData(true).then(() => {
-          this.refreshActiveTab();
-        }).catch(() => { });
+        SalonRepository.invalidate('staff');
       } catch (err) {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = 'Save Stylist Details →';
+        }
         alert(`Failed: ${err.message}`);
       }
     });
@@ -11869,16 +11973,22 @@ export class SalonDashboard {
     document.getElementById('btn-cancel-delete-staff')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
 
     document.getElementById('btn-confirm-delete-staff')?.addEventListener('click', async () => {
+      const originalStaffList = [...this.staffList];
+      const targetStaff = this.staffList.find((s) => s.id === staffId);
+      
+      // 1. Optimistic removal (16ms)
+      this.staffList = this.staffList.filter((s) => s.id !== staffId);
+      modalContainer.innerHTML = '';
+      this.render();
+
       try {
         await ApiClient.deleteStaff(staffId);
-        this.staffList = this.staffList.filter((s) => s.id !== staffId);
-        modalContainer.innerHTML = '';
-        this.render();
-
-        this.loadData(true).then(() => {
-          this.refreshActiveTab();
-        }).catch(() => { });
+        this.showToast(`Stylist "${targetStaff?.name || 'Stylist'}" deleted`, 'success');
+        SalonRepository.invalidate('staff');
       } catch (err) {
+        // Rollback on failure
+        this.staffList = originalStaffList;
+        this.render();
         alert(`Failed to delete stylist: ${err.message}`);
       }
     });
@@ -12669,18 +12779,29 @@ export class SalonDashboard {
 
     document.getElementById('btn-cancel-delete-svc')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
 
-    document.getElementById('btn-confirm-delete-svc')?.addEventListener('click', async () => {
+    document.getElementById('btn-confirm-delete-svc')?.addEventListener('click', async (e) => {
+      const confirmBtn = e.currentTarget;
+      if (confirmBtn.disabled) return;
+      confirmBtn.disabled = true;
+
+      // 1. Snapshot previous state for rollback safety
+      const previousServices = [...(this.servicesList || [])];
+
+      // 2. Optimistic Update (Frame 1: 0ms delay)
+      this.servicesList = this.servicesList.filter((s) => s.id !== serviceId);
+      modalContainer.innerHTML = '';
+      this.render();
+      this.showToast('Service deleted.', 'info');
+
       try {
+        // 3. Background Sync (Zero re-fetch!)
         this.lastLocalActionTimestamp = Date.now();
         await ApiClient.deleteService(serviceId);
-        this.servicesList = this.servicesList.filter((s) => s.id !== serviceId);
-        modalContainer.innerHTML = '';
-        this.render();
-
-        this.loadData(true).then(() => {
-          this.refreshActiveTab();
-        }).catch(() => { });
+        SalonRepository.invalidate('services');
       } catch (err) {
+        // 4. Safe Rollback on rejection (e.g. active bookings guard)
+        this.servicesList = previousServices;
+        this.render();
         alert(`Failed to delete service: ${err.message}`);
       }
     });

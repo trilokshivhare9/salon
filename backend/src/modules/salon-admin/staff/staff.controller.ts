@@ -74,6 +74,14 @@ export class StaffController {
     return this.staffService.updateStaff(salonId, staffId, dto);
   }
 
+  @Patch(':id/toggle-status')
+  async toggleStaffStatus(
+    @CurrentSalonId() salonId: string,
+    @Param('id') staffId: string,
+  ) {
+    return this.staffService.toggleStaffStatus(salonId, staffId);
+  }
+
   @Put(':id/services')
   async assignServices(
     @CurrentSalonId() salonId: string,

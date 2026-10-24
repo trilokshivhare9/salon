@@ -1,8 +1,6 @@
 import { ApiClient, PlatformAuth, SalonAuth, PlatformRealm, SalonRealm } from './api.js';
 import { StartupOrchestrator } from './network/startup-orchestrator.js';
-import { BookingWizard } from './booking.js';
 import { SalonDashboard } from './dashboard.js';
-import { PlatformAdminPortal } from './platform-admin.js';
 import { PwaManager } from './pwa.js';
 import { Icons } from './icons.js';
 
@@ -483,6 +481,7 @@ class App {
     if (rawHash === 'book' || rawHash === 'booking' || rawHash.startsWith('book/') || rawHash.startsWith('booking/')) {
       const parts = rawHash.split('/');
       const slug = (parts.length > 1 && parts[1]) ? parts[1] : 'luxury-salon';
+      const { BookingWizard } = await import('./booking.js');
       const wizard = new BookingWizard('app-root', slug);
       wizard.init();
       return;
@@ -496,6 +495,7 @@ class App {
       }
       const platformUser = PlatformAuth.getUser();
       if (platformUser && (platformUser.role === 'SUPER_ADMIN' || platformUser.role === 'PLATFORM_ADMIN')) {
+        const { PlatformAdminPortal } = await import('./platform-admin.js');
         const portal = new PlatformAdminPortal('app-root', platformUser);
         portal.init();
       } else {
