@@ -8468,6 +8468,10 @@ export class SalonDashboard {
       card.addEventListener('click', () => {
         const sId = card.getAttribute('data-staff-id');
         if (sId) {
+          if (String(sId).startsWith('temp-')) {
+            this.showToast('Please wait a moment while this stylist finishes saving to the cloud...', 'info');
+            return;
+          }
           this.staffManager.setStaff(sId, 'overview');
           this.render();
         }
@@ -10024,37 +10028,52 @@ export class SalonDashboard {
       setTimeout(() => this.showAddServiceModal(), 120);
     });
 
-    document.getElementById('add-staff-form')?.addEventListener('submit', async (e) => {
+    document.getElementById('add-staff-form')?.addEventListener('submit', (e) => {
       e.preventDefault();
-      const submitBtn = e.target.querySelector('button[type="submit"]');
-      const originalText = submitBtn.innerHTML;
-      submitBtn.textContent = 'Adding Stylist Member...';
-      submitBtn.setAttribute('disabled', 'true');
+      const name = document.getElementById('new-staff-name').value.trim();
+      const phone = document.getElementById('new-staff-phone').value.trim();
+      const email = document.getElementById('new-staff-email')?.value?.trim() || undefined;
+      const selectedServices = Array.from(document.querySelectorAll('.staff-service-chk:checked')).map((c) => c.value);
 
-      try {
-        const selectedServices = Array.from(document.querySelectorAll('.staff-service-chk:checked')).map((c) => c.value);
+      // Instant UI response (0ms)
+      const tempId = `temp-staff-${Date.now()}`;
+      const optimisticStaff = {
+        id: tempId,
+        name,
+        phone,
+        email,
+        status: 'ACTIVE',
+        statusLabel: 'Available',
+        statusDotClass: 'status-available',
+        statusBadgeClass: 'badge-available',
+        services: selectedServices.map((id) => ({ serviceId: id })),
+        workingHours: [],
+        breaks: [],
+        _isOptimistic: true,
+      };
 
-        this.lastLocalActionTimestamp = Date.now();
-        const created = await ApiClient.createStaff({
-          name: document.getElementById('new-staff-name').value.trim(),
-          phone: document.getElementById('new-staff-phone').value.trim(),
-          email: document.getElementById('new-staff-email')?.value?.trim() || undefined,
-          serviceIds: selectedServices,
-        });
+      this.staffList = [optimisticStaff, ...this.staffList];
+      modalContainer.innerHTML = '';
+      this.showToast(`Stylist "${name}" added!`, 'success');
+      this.render();
 
+      // Background network sync
+      ApiClient.createStaff({
+        name,
+        phone,
+        email,
+        serviceIds: selectedServices,
+      }).then((created) => {
         if (created && created.id) {
-          this.staffList = [created, ...this.staffList.filter((s) => s.id !== created.id)];
+          this.staffList = this.staffList.map((s) => (s.id === tempId ? created : s));
+          this.render();
+          SalonRepository.invalidate('staff');
         }
-
-        modalContainer.innerHTML = '';
-        this.showToast(`Stylist "${document.getElementById('new-staff-name')?.value || 'New'}" added!`, 'success');
+      }).catch((err) => {
+        this.staffList = this.staffList.filter((s) => s.id !== tempId);
         this.render();
-        SalonRepository.invalidate('staff');
-      } catch (err) {
-        submitBtn.innerHTML = originalText;
-        submitBtn.removeAttribute('disabled');
-        alert(`Failed: ${err.message}`);
-      }
+        alert(`Failed to add stylist: ${err.message}`);
+      });
     });
   }
 
@@ -11219,35 +11238,41 @@ export class SalonDashboard {
         stylistIds: selectedStylistIds,
       };
 
-      const submitBtn = e.target.querySelector('button[type="submit"]');
-      if (submitBtn) {
-        if (submitBtn.disabled) return;
-        submitBtn.disabled = true;
-        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Creating...';
-      }
+      // Instant UI response (0ms)
+      const tempId = `temp-svc-${Date.now()}`;
+      const optimisticService = {
+        id: tempId,
+        ...payload,
+        status: 'ACTIVE',
+        stylists: selectedStylistIds.map((id) => ({ stylistId: id })),
+        _isOptimistic: true,
+      };
 
-      try {
-        this.lastLocalActionTimestamp = Date.now();
-        const created = await ApiClient.createService(payload);
+      this.servicesList = [optimisticService, ...this.servicesList];
+      modalContainer.innerHTML = '';
+      this.showToast(`Service "${payload.name}" created!`, 'success');
+      this.render();
+
+      // Background network sync
+      ApiClient.createService(payload).then((created) => {
         if (created && created.id) {
-          this.servicesList = [created, ...this.servicesList.filter((s) => s.id !== created.id)];
+          this.servicesList = this.servicesList.map((s) => (s.id === tempId ? created : s));
+          this.render();
+          SalonRepository.invalidate('services');
         }
-
-        modalContainer.innerHTML = '';
-        this.showToast(`Service "${payload.name}" created!`, 'success');
+      }).catch((err) => {
+        this.servicesList = this.servicesList.filter((s) => s.id !== tempId);
         this.render();
-        SalonRepository.invalidate('services');
-      } catch (err) {
-        if (submitBtn) {
-          submitBtn.disabled = false;
-          submitBtn.innerHTML = 'Save Service';
-        }
-        alert(err.message);
-      }
+        alert(`Failed to create service: ${err.message}`);
+      });
     });
   }
 
   showEditServiceModal(service) {
+    if (service?.id && String(service.id).startsWith('temp-')) {
+      this.showToast('Please wait a moment while this service finishes saving to the cloud...', 'info');
+      return;
+    }
     const modalContainer = this.getModalContainer();
     const matchedCat = (this.categoriesList || []).find((c) => c.name === service.category);
     const initialCatValue = matchedCat ? service.category : 'CUSTOM';
@@ -12756,6 +12781,10 @@ export class SalonDashboard {
   }
 
   showDeleteServiceModal(serviceId, serviceName) {
+    if (serviceId && String(serviceId).startsWith('temp-')) {
+      this.showToast('Please wait a moment while this service finishes saving to the cloud...', 'info');
+      return;
+    }
     const modalContainer = document.getElementById('modal-container');
 
     modalContainer.innerHTML = `
