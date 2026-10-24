@@ -431,11 +431,11 @@ export class SalonDashboard {
     }
   }
 
-  async init() {
+  async init(initialTab = null) {
     this.renderLoading();
     try {
       try {
-        const savedTab = sessionStorage.getItem('active_dashboard_tab');
+        const savedTab = initialTab || sessionStorage.getItem('active_dashboard_tab');
         if (savedTab && ['dashboard', 'staff', 'queue', 'services', 'profile', 'customers', 'whatsapp-logs'].includes(savedTab)) {
           this.activeTab = savedTab;
         }
@@ -594,7 +594,7 @@ export class SalonDashboard {
    * PERFORMANCE: Flicker-free instant tab switching.
    * Swaps only #tab-content and updates nav active state without destroying the DOM tree.
    */
-  switchTab(targetTab) {
+  switchTab(targetTab, updateHistory = true) {
     if (!targetTab) return;
     if (this.activeTab && this.activeTab !== targetTab) {
       this.previousTab = this.activeTab;
@@ -609,6 +609,13 @@ export class SalonDashboard {
     try {
       sessionStorage.setItem('active_dashboard_tab', targetTab);
     } catch (_) { }
+
+    if (updateHistory && window.history && window.history.replaceState) {
+      try {
+        const newHash = targetTab === 'dashboard' ? '#admin' : `#admin/${targetTab}`;
+        window.history.replaceState(null, '', newHash);
+      } catch (_) {}
+    }
 
     // Update active state on desktop tab buttons
     this.container.querySelectorAll('.nav-tab').forEach((el) => {
@@ -974,6 +981,12 @@ export class SalonDashboard {
 
 
     this.attachEventListeners();
+    if (window.history && window.history.replaceState) {
+      try {
+        const newHash = this.activeTab === 'dashboard' ? '#admin' : `#admin/${this.activeTab}`;
+        window.history.replaceState(null, '', newHash);
+      } catch (_) {}
+    }
   }
 
   getTabHtml() {
@@ -6215,7 +6228,7 @@ export class SalonDashboard {
               <h3 class="service-hub-title">Services & Pricing</h3>
               <span class="service-hub-count" id="svc-total-count">${services.length}</span>
             </div>
-            <div class="service-hub-actions" style="display: flex; align-items: center; gap: 8px;">
+            <div class="service-hub-actions">
               <button type="button" class="btn-scan-camera" id="btn-scan-menu-ai" title="Scan Rate Card with AI">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
