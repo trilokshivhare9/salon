@@ -4,9 +4,12 @@ import { WhatsAppService } from '../../../../src/modules/channels/whatsapp/whats
 import { AppointmentsService } from '../../../../src/modules/salon-admin/appointments/appointments.service';
 import { AvailabilityService } from '../../../../src/modules/salon-admin/availability/availability.service';
 import { ReportsService } from '../../../../src/modules/salon-admin/reports/reports.service';
+import { StylistStatusEngine } from '../../../../src/modules/salon-admin/staff/engines/stylist-status.engine';
+import { QuickBookingService } from '../../../../src/modules/salon-admin/quick-booking/quick-booking.service';
 import { ConfigService } from '@nestjs/config';
 import { ConversationState, AppointmentStatus, BookingSource } from '@prisma/client';
 import { QuickCodeService } from '../../../../src/modules/salon-admin/quick-booking/quick-code.service';
+import { WhatsAppSenderService } from '../../../../src/modules/channels/whatsapp/services/whatsapp-sender.service';
 import { DateTime } from 'luxon';
 
 describe('Human-like Quick Booking & Dashboard Approval Flow (Complete Scenario Suite)', () => {
@@ -14,6 +17,7 @@ describe('Human-like Quick Booking & Dashboard Approval Flow (Complete Scenario 
   let appointmentsService: AppointmentsService;
   let reportsService: ReportsService;
   let prisma: PrismaService;
+  let quickBookingService: QuickBookingService;
 
   let testSalon: any;
   let testService: any;
@@ -31,6 +35,36 @@ describe('Human-like Quick Booking & Dashboard Approval Flow (Complete Scenario 
         PrismaService,
         WhatsAppService,
         ReportsService,
+        StylistStatusEngine,
+        {
+          provide: QuickBookingService,
+          useValue: {
+            getOperatingStatus: jest.fn().mockResolvedValue({ isOpen: true }),
+            findNextAvailableSlot: jest.fn().mockResolvedValue({
+              isAvailable: true,
+              dateStr: '2026-10-26',
+              startTime: '14:30',
+              assignedStylistId: 'stylist-1',
+              stylistName: 'Rahul Sharma',
+              displayTime: '02:30 PM',
+              leadTimeMinutes: 5,
+              isImmediateWindow: true,
+            }),
+            confirmQuickBooking: jest.fn().mockImplementation(async (salonId, dto) => {
+              const appt = await mockAppointmentsService.createAppointment(
+                salonId,
+                {
+                  customerPhone: dto.customerPhone,
+                  serviceIds: [dto.serviceId],
+                  source: dto.source || BookingSource.QUICK_BOOK,
+                },
+                undefined,
+                { initialStatus: AppointmentStatus.PENDING_ACCEPTANCE },
+              );
+              return { success: true, appointment: appt };
+            }),
+          },
+        },
         {
           provide: QuickCodeService,
           useValue: {
@@ -60,8 +94,12 @@ describe('Human-like Quick Booking & Dashboard Approval Flow (Complete Scenario 
     whatsAppService = moduleRef.get<WhatsAppService>(WhatsAppService);
     reportsService = moduleRef.get<ReportsService>(ReportsService);
     prisma = moduleRef.get<PrismaService>(PrismaService);
+    quickBookingService = moduleRef.get<QuickBookingService>(QuickBookingService);
 
-    sendMetaSpy = jest.spyOn(whatsAppService, 'sendMetaMessage').mockImplementation(async () => true as any);
+    sendMetaSpy = jest.spyOn(WhatsAppSenderService.prototype, 'sendMetaMessage').mockImplementation(async () => true as any);
+    jest.spyOn(whatsAppService, 'sendMetaMessage').mockImplementation(async (toPhone, payload, phoneNumberId, salonId) => {
+      return (WhatsAppSenderService.prototype.sendMetaMessage as any)(toPhone, payload, phoneNumberId, salonId);
+    });
 
     testSalon = await prisma.salon.findFirst({
       where: { status: 'ACTIVE' },
@@ -163,7 +201,7 @@ describe('Human-like Quick Booking & Dashboard Approval Flow (Complete Scenario 
 
     expect(sendMetaSpy).toHaveBeenCalled();
     const sentText = sendMetaSpy.mock.calls[0][1].bodyText;
-    expect(sentText).toContain('⏳ *REQUEST SENT TO SALON!*');
+    expect(sentText).toContain('Quick Booking Request Sent!');
     expect(sentText).toContain('Pending Approval');
   });
 
@@ -302,4 +340,127 @@ describe('Human-like Quick Booking & Dashboard Approval Flow (Complete Scenario 
     expect(summary.statusCounts).toHaveProperty('pendingAcceptance');
     expect(typeof summary.statusCounts.pendingAcceptance).toBe('number');
   });
+
+  // ---------------------------------------------------------------------------
+  // SCENARIO 8: Quick Booking slot > 15m away -> Pivots to Today's Advance Booking
+  // ---------------------------------------------------------------------------
+  it('SCENARIO 8: Service selected in Quick Booking with slot > 15m away -> Pivots to SELECT_TIME, shows notice + today slots, and clears quickCodeVerifiedAt', async () => {
+    if (!testSalon || !testService) return;
+
+    (quickBookingService.findNextAvailableSlot as jest.Mock).mockResolvedValueOnce({
+      isAvailable: true,
+      dateStr: '2026-10-26',
+      startTime: '18:00',
+      assignedStylistId: 'stylist-1',
+      stylistName: 'Rahul Sharma',
+      displayTime: '06:00 PM',
+      leadTimeMinutes: 210,
+      isImmediateWindow: false,
+    });
+
+    jest.spyOn((whatsAppService as any).availabilityService, 'getAvailableSlots')
+      .mockResolvedValueOnce({
+        availableSlots: [
+          { startTime: '18:00', eligibleStaffIds: ['stylist-1'] },
+          { startTime: '18:30', eligibleStaffIds: ['stylist-1'] },
+        ],
+      });
+
+    await prisma.conversation.upsert({
+      where: { salonId_customerPhone: { salonId: testSalon.id, customerPhone: testCustomerPhone } },
+      update: {
+        state: ConversationState.SELECT_SERVICE,
+        quickCodeVerifiedAt: new Date(),
+      },
+      create: {
+        salonId: testSalon.id,
+        customerPhone: testCustomerPhone,
+        state: ConversationState.SELECT_SERVICE,
+        quickCodeVerifiedAt: new Date(),
+      },
+    });
+
+    const result = await whatsAppService.handleIncomingMessage(
+      testSalon.id,
+      testCustomerPhone,
+      `svc_${testService.id}`,
+      `svc_${testService.id}`,
+    );
+
+    expect(result.state).toBe(ConversationState.SELECT_TIME);
+    expect(sendMetaSpy).toHaveBeenCalled();
+    const sentPayload = sendMetaSpy.mock.calls[0][1];
+    expect(sentPayload.bodyText).toContain('No Quick Booking slot available right now');
+    expect(sentPayload.bodyText).toContain('choose a time slot for today from the list below');
+
+    // Verify session state in database: quickCodeVerifiedAt must be cleared to transition to NORMAL booking
+    const conv = await prisma.conversation.findUnique({
+      where: { salonId_customerPhone: { salonId: testSalon.id, customerPhone: testCustomerPhone } },
+    });
+    expect(conv?.state).toBe(ConversationState.SELECT_TIME);
+    expect(conv?.quickCodeVerifiedAt).toBeNull();
+  });
+
+  // ---------------------------------------------------------------------------
+  // SCENARIO 9: Customer selects offered slot after pivot -> Completes as NORMAL booking
+  // ---------------------------------------------------------------------------
+  it('SCENARIO 9: Customer selects offered slot (18:00) after pivot -> Books as NORMAL advance booking with WHATSAPP source', async () => {
+    if (!testSalon || !testService) return;
+
+    const tz = testSalon.timezone || 'Asia/Kolkata';
+    const todayDateStr = DateTime.now().setZone(tz).toFormat('yyyy-MM-dd');
+    const futureTimeJS = DateTime.fromISO(todayDateStr, { zone: tz }).set({ hour: 23, minute: 59 }).toJSDate();
+
+    // Setup state as pivoted to SELECT_TIME
+    await prisma.conversation.update({
+      where: { salonId_customerPhone: { salonId: testSalon.id, customerPhone: testCustomerPhone } },
+      data: {
+        state: ConversationState.SELECT_TIME,
+        selectedServiceId: testService.id,
+        selectedDate: new Date(`${todayDateStr}T00:00:00Z`),
+        quickCodeVerifiedAt: null,
+        customerName: 'Pivoted Customer',
+      },
+    });
+
+    // 1. Customer taps slot_23:59
+    const slotRes = await whatsAppService.handleIncomingMessage(
+      testSalon.id,
+      testCustomerPhone,
+      'slot_23:59',
+      'slot_23:59',
+    );
+
+    expect(slotRes.state).toBe(ConversationState.CONFIRMATION);
+
+    // 2. Customer confirms booking
+    mockAppointmentsService.createAppointment.mockResolvedValueOnce({
+      id: 'appt_pivoted_normal_123',
+      appointmentNumber: 'SAL-112233',
+      serviceNameSnapshot: testService.name,
+      startAt: futureTimeJS,
+      stylist: { name: 'Any Specialist' },
+      status: AppointmentStatus.CONFIRMED,
+    });
+
+    const confirmRes = await whatsAppService.handleIncomingMessage(
+      testSalon.id,
+      testCustomerPhone,
+      'btn_confirm_yes',
+      'btn_confirm_yes',
+    );
+
+    expect(confirmRes.state).toBe(ConversationState.START);
+    expect(mockAppointmentsService.createAppointment).toHaveBeenCalledWith(
+      testSalon.id,
+      expect.objectContaining({
+        customerPhone: testCustomerPhone,
+        customerName: 'Pivoted Customer',
+        serviceIds: [testService.id],
+        source: BookingSource.WHATSAPP, // Must be normal WHATSAPP booking, NOT QUICK_BOOK!
+      }),
+    );
+  });
 });
+
+

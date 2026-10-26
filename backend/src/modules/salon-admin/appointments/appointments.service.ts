@@ -17,6 +17,7 @@ import { AvailabilityService } from '../availability/availability.service';
 import { AvailabilityEngineService } from '../availability/availability-engine.service';
 import { RemindersService } from './reminders/reminders.service';
 import { WhatsAppService } from '../../channels/whatsapp/whatsapp.service';
+import { QuickBookingService } from '../quick-booking/quick-booking.service';
 import {
   CreateAppointmentDto,
   UpdateAppointmentStatusDto,
@@ -67,6 +68,8 @@ export class AppointmentsService {
     @Optional() private addonService?: AppointmentAddonService,
     @Inject(forwardRef(() => RemindersService))
     @Optional() private remindersService?: RemindersService,
+    @Inject(forwardRef(() => QuickBookingService))
+    @Optional() private quickBookingService?: QuickBookingService,
     @Inject(forwardRef(() => WhatsAppService))
     @Optional() private whatsappService?: WhatsAppService,
     @Inject(forwardRef(() => ScheduleConflictResolutionEngine))
@@ -106,6 +109,7 @@ export class AppointmentsService {
         this.prisma,
         this.getModifierService(),
         this.getCancellationService(),
+        this.getQuickBookingService(),
         this.whatsappService,
       );
     }
@@ -157,6 +161,21 @@ export class AppointmentsService {
       );
     }
     return this.rescheduleService;
+  }
+
+  private getQuickBookingService(): QuickBookingService {
+    if (!this.quickBookingService) {
+      this.ensureInitializedServices();
+      this.quickBookingService = new QuickBookingService(
+        this.prisma,
+        this.availabilityService!,
+        this.getCreationService(),
+        this.getModifierService(),
+        this.getCancellationService(),
+        this.whatsappService,
+      );
+    }
+    return this.quickBookingService;
   }
 
   // ---------------------------------------------------------------------------
@@ -242,23 +261,7 @@ export class AppointmentsService {
     return this.getCreationService().createAppointment(salonId, dto, createdByAdminId, options);
   }
 
-  /**
-   * Fast-Track Quick Booking Creation (auto-resolves today's earliest slot)
-   */
-  async createQuickBooking(
-    salonId: string,
-    dto: {
-      customerPhone: string;
-      customerName?: string;
-      serviceId?: string;
-      serviceIds?: string[];
-      stylistId?: string;
-      startTime?: string;
-      notes?: string;
-    },
-  ) {
-    return this.getCreationService().createQuickBooking(salonId, dto);
-  }
+
 
   /**
    * Status State Machine Transitions
@@ -300,20 +303,7 @@ export class AppointmentsService {
     return this.getAddonService().addServiceToAppointment(salonId, appointmentId, serviceId);
   }
 
-  async cancelAppointment(
-    salonId: string,
-    appointmentId: string,
-    reason?: string,
-    reasonCategory?: string,
-  ) {
-    const result = await this.getCancellationService().cancelBooking(salonId, appointmentId, {
-      source: 'ADMIN_DASHBOARD',
-      fault: 'CLIENT',
-      reason,
-      reasonCategory,
-    });
-    return result.appointment;
-  }
+
 
   async cancelBooking(
     salonId: string,
@@ -342,6 +332,24 @@ export class AppointmentsService {
 
   async autoCompleteElapsedAppointments(salonId?: string): Promise<number> {
     return this.getStatusService().autoCompleteElapsedAppointments(salonId);
+  }
+
+  async acceptQuickBooking(
+    salonId: string,
+    appointmentId: string,
+    adminId?: string,
+    targetStatus?: AppointmentStatus,
+  ) {
+    return this.getQuickBookingService().acceptQuickBooking(salonId, appointmentId, adminId, targetStatus);
+  }
+
+  async declineQuickBooking(
+    salonId: string,
+    appointmentId: string,
+    adminId?: string,
+    reason?: string,
+  ) {
+    return this.getQuickBookingService().declineQuickBooking(salonId, appointmentId, adminId, reason);
   }
 
   // ---------------------------------------------------------------------------

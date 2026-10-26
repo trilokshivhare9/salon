@@ -31,6 +31,7 @@ export class StartupOrchestrator {
         const refreshData = await HttpClient.request(ENDPOINTS.AUTH.REFRESH, {
           method: 'POST',
           body: JSON.stringify({ refreshToken: salonRefreshToken }),
+          timeoutMs: 3000,
         }, SalonSession, 0);
 
         if (refreshData?.accessToken) {
@@ -51,6 +52,7 @@ export class StartupOrchestrator {
         const refreshData = await HttpClient.request(ENDPOINTS.AUTH.REFRESH, {
           method: 'POST',
           body: JSON.stringify({ refreshToken: platformRefreshToken }),
+          timeoutMs: 3000,
         }, PlatformSession, 0);
 
         if (refreshData?.accessToken) {

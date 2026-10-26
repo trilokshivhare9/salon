@@ -258,8 +258,14 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
       case AppointmentActionType.CUTOFF_5M: {
         // 5-Minute Quick Booking Auto-Expiry Cutoff
         if (appointment.status === AppointmentStatus.PENDING_ACCEPTANCE) {
-          await this.purgeQuickBooking(salon, appointment);
-          return 'QUICK_BOOKING_PURGED';
+          await this.appointmentsService.cancelBooking(salon.id, appointment.id, {
+            source: 'SYSTEM_AUTO_EXPIRED',
+            fault: 'SYSTEM',
+            cancelledBy: CancelledBy.SYSTEM,
+            noPenalty: true,
+            reason: 'Quick booking expired before salon acceptance',
+          });
+          return 'QUICK_BOOKING_EXPIRED';
         }
         await this.modifierService.syncAlarm(appointmentId);
         return null;
@@ -278,8 +284,14 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
         }
 
         if (appointment.status === AppointmentStatus.PENDING_ACCEPTANCE) {
-          await this.purgeQuickBooking(salon, appointment);
-          return 'QUICK_BOOKING_PURGED';
+          await this.appointmentsService.cancelBooking(salon.id, appointment.id, {
+            source: 'SYSTEM_AUTO_EXPIRED',
+            fault: 'SYSTEM',
+            cancelledBy: CancelledBy.SYSTEM,
+            noPenalty: true,
+            reason: 'Quick booking expired before salon acceptance',
+          });
+          return 'QUICK_BOOKING_EXPIRED';
         }
 
         if (appointment.status !== AppointmentStatus.BOOKED) {
@@ -438,64 +450,5 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
     }
 
     return { newCount, remainingPenalties };
-  }
-
-  private async purgeQuickBooking(salon: any, appointment: any): Promise<void> {
-    const userPhone = appointment.salonUser?.user?.phone;
-    const userName = appointment.salonUser?.user?.name || appointment.customerName || 'Customer';
-    const phoneNumberId = salon.whatsappAccount?.phoneNumberId;
-
-    if (userPhone && phoneNumberId && this.whatsAppService) {
-      const timeoutMsg = `⏳ *QUICK BOOKING REQUEST EXPIRED*\n\nHi *${userName}*, our stylists at *${salon.name}* are currently occupied in-chair and were unable to accept your walk-in request before the start time.\n\nWould you like to browse other upcoming slots or choose another time?`;
-      await this.whatsAppService.sendMetaMessage(
-        userPhone,
-        {
-          bodyText: timeoutMsg,
-          interactiveType: 'button',
-          buttons: [
-            { id: 'btn_book', title: '📅 View Slots' },
-            { id: 'btn_start', title: '🏠 Main Menu' },
-          ],
-        },
-        phoneNumberId,
-        salon.id,
-      ).catch((err: any) => {
-        this.logger.error(`Failed to send quick booking timeout WhatsApp: ${err?.message || err}`);
-      });
-    }
-
-    if (userPhone) {
-      await this.prisma.conversation.updateMany({
-        where: {
-          salonId: salon.id,
-          customerPhone: { in: [userPhone, userPhone.replace('+', ''), `+${userPhone.replace('+', '')}`] },
-        },
-        data: {
-          state: 'START',
-          activeAppointmentId: null,
-          selectedServiceId: null,
-          selectedStaffId: null,
-          selectedDate: null,
-          selectedStartTime: null,
-        },
-      }).catch(() => { });
-    }
-
-    if (this.redisService) {
-      await this.redisService.clearAlarm(appointment.id);
-    }
-
-    await this.prisma.appointment.delete({
-      where: { id: appointment.id },
-    }).catch((err: any) => {
-      this.logger.error(`Failed to delete expired quick booking ${appointment.id}: ${err?.message}`);
-    });
-
-    this.appointmentsService.emitSalonEvent(salon.id, 'BOOKING_CANCELLED', {
-      id: appointment.id,
-      status: AppointmentStatus.CANCELLED,
-      startTime: appointment.startAt,
-      cancellationReason: 'Quick booking expired before start time',
-    });
   }
 }

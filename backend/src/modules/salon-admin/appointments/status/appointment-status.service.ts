@@ -22,6 +22,7 @@ import {
 } from '../utils/appointment-helpers';
 
 import { AppointmentModifierService } from '../modifier/appointment-modifier.service';
+import { QuickBookingService } from '../../quick-booking/quick-booking.service';
 
 export interface ApplyStatusChangeDto {
   status: AppointmentStatus;
@@ -60,6 +61,8 @@ export class AppointmentStatusService {
     private modifierService: AppointmentModifierService,
     @Inject(forwardRef(() => CancellationService))
     @Optional() private cancellationService?: CancellationService,
+    @Inject(forwardRef(() => QuickBookingService))
+    @Optional() private quickBookingService?: QuickBookingService,
     @Inject(forwardRef(() => WhatsAppService))
     @Optional() private whatsappService?: WhatsAppService,
     @Inject(forwardRef(() => WhatsAppTemplateService))
@@ -111,36 +114,38 @@ export class AppointmentStatusService {
       ? await appointmentsService.getAppointmentById(salonId, appointmentId)
       : await this.getAppointment(salonId, appointmentId);
 
-    // Idempotency: If already in target status or both current and target are CANCELLED/REJECTED
-    const isTargetCancelled = ([AppointmentStatus.CANCELLED, AppointmentStatus.REJECTED] as string[]).includes(dto.status);
-    const isCurrentCancelled = ([AppointmentStatus.CANCELLED, AppointmentStatus.REJECTED] as string[]).includes(appointment.status);
-    if (appointment.status === dto.status || (isCurrentCancelled && isTargetCancelled)) {
-      return formatAppointment(appointment);
+    // 1. Centralized Quick Booking Delegation (Accept / Decline)
+    if (appointment.status === AppointmentStatus.PENDING_ACCEPTANCE) {
+      if (dto.status === AppointmentStatus.CANCELLED || dto.status === AppointmentStatus.REJECTED) {
+        if (this.quickBookingService) {
+          const res = await this.quickBookingService.declineQuickBooking(salonId, appointmentId, adminId, dto.reason);
+          return res.appointment;
+        }
+      } else if (dto.status === AppointmentStatus.CHECKED_IN || dto.status === AppointmentStatus.CONFIRMED) {
+        if (this.quickBookingService) {
+          return this.quickBookingService.acceptQuickBooking(salonId, appointmentId, adminId, dto.status);
+        }
+      }
     }
 
-    const allowedTransitions = VALID_STATUS_TRANSITIONS[appointment.status as AppointmentStatus] || [];
-    if (!allowedTransitions.includes(dto.status)) {
-      throw new BadRequestException(
-        `Cannot transition appointment status from ${appointment.status} to ${dto.status}.`,
-      );
-    }
-
-    // Centralized Cancellation Delegation
-    if (dto.status === AppointmentStatus.CANCELLED) {
+    // 2. Centralized Cancellation / Rejection Delegation for all other appointments
+    if (dto.status === AppointmentStatus.CANCELLED || dto.status === AppointmentStatus.REJECTED) {
       if (this.cancellationService) {
         const result = await this.cancellationService.cancelBooking(salonId, appointmentId, {
           source: adminId ? 'ADMIN_DASHBOARD' : 'CUSTOMER_WHATSAPP',
           fault: dto.reasonCategory === 'SALON_EMERGENCY' ? 'SALON' : 'CLIENT',
           reason: dto.reason || 'Status updated to CANCELLED',
           reasonCategory: dto.reasonCategory || (adminId ? 'SALON_ADMIN_CANCELLED' : 'CLIENT_MISTAKE'),
+          cancelledBy: CancelledBy.SALON,
           adminId,
         });
         return result.appointment;
       }
     }
 
-    // Centralized applyStatusChange executes DB update + Redis alarm update + STATUS_UPDATED event
-    const formatted = await this.applyStatusChange(salonId, appointmentId, {
+    // 3. Centralized applyStatusChange executes DB update + Redis alarm update + STATUS_UPDATED event
+    // (Note: modifierService internally checks idempotency and validates VALID_STATUS_TRANSITIONS)
+    const updated = await this.applyStatusChange(salonId, appointmentId, {
       status: dto.status,
       notes: dto.reason ? `${appointment.notes || ''} [Note: ${dto.reason}]`.trim() : appointment.notes,
       reason: dto.reason,
@@ -148,9 +153,22 @@ export class AppointmentStatusService {
       adminId,
       existingAppointment: appointment,
     });
-    const updated = formatted;
 
-    // Dispatch Customer WhatsApp Notifications asynchronously in the background (<15ms return for salon operator)
+    // 4. Dispatch Customer WhatsApp Notifications asynchronously in the background
+    this.dispatchStatusNotification(salonId, appointment, updated, dto);
+
+    return updated;
+  }
+
+  /**
+   * Helper: Dispatches customer WhatsApp alerts
+   */
+  private dispatchStatusNotification(
+    salonId: string,
+    previousAppointment: any,
+    updated: any,
+    dto: UpdateAppointmentStatusDto,
+  ) {
     setImmediate(async () => {
       try {
         const salon = await this.prisma.salon.findUnique({
@@ -161,141 +179,40 @@ export class AppointmentStatusService {
         const userPhone = updated.salonUser?.user?.phone;
         const userName = updated.salonUser?.user?.name || 'Customer';
 
-        if (salon && userPhone && salon.whatsappAccount?.phoneNumberId && this.whatsappService) {
-          const phoneNumberId = salon.whatsappAccount.phoneNumberId;
-          const tz = salon.timezone || 'Asia/Kolkata';
-          const timeStr = TimeUtility.formatTime12h(updated.startAt, tz);
+        if (!salon || !userPhone || !salon.whatsappAccount?.phoneNumberId || !this.whatsappService) {
+          return;
+        }
 
-          if (appointment.status === AppointmentStatus.PENDING_ACCEPTANCE) {
-            if (dto.status === AppointmentStatus.CHECKED_IN || dto.status === AppointmentStatus.CONFIRMED) {
-              const acceptMsg = `🎉 *QUICK BOOKING ACCEPTED!*\n\nHi *${userName}*, your quick booking at *${salon.name}* has been accepted!\n\n• *Booking #:* *${updated.appointmentNumber}*\n• *Service:* *${updated.serviceNameSnapshot}*\n• *Time:* *${timeStr}*\n• *Specialist:* *${updated.stylist?.name || 'Your Specialist'}*\n• *Status:* *Confirmed*\n\nPlease tap below when you are on the way:`;
-              await this.whatsappService.sendMetaMessage(
-                userPhone,
-                {
-                  bodyText: acceptMsg,
-                  interactiveType: 'button',
-                  buttons: [
-                    { id: 'btn_eta_on_the_way', title: '🚗 On My Way' },
-                    { id: 'btn_eta_arrived', title: '📍 I Have Arrived' },
-                  ],
-                },
-                phoneNumberId,
-                salonId,
-              ).catch((err) => {
-                this.logger.error(`Failed to send WhatsApp quick booking accepted notification: ${err?.message || err}`);
-              });
+        const phoneNumberId = salon.whatsappAccount.phoneNumberId;
+        const tz = salon.timezone || 'Asia/Kolkata';
 
-              // Auto-reject competing quick bookings for the same stylist and overlapping time window!
-              const competing = await this.prisma.appointment.findMany({
-                where: {
-                  salonId,
-                  id: { not: appointment.id },
-                  stylistId: appointment.stylistId,
-                  status: AppointmentStatus.PENDING_ACCEPTANCE,
-                  startAt: { lt: updated.endAt },
-                  endAt: { gt: updated.startAt },
-                },
-                include: { salonUser: { include: { user: true } } },
-              });
-
-              for (const comp of competing) {
-                if (comp.salonUser?.user?.phone) {
-                  const compPhone = comp.salonUser.user.phone;
-                  const compMsg = `❌ *SLOT NO LONGER AVAILABLE*\n\nHi *${comp.salonUser.user.name || 'Customer'}*, another client was just confirmed for this slot. Please tap below to view upcoming openings:`;
-                  await this.whatsappService.sendMetaMessage(
-                    compPhone,
-                    {
-                      bodyText: compMsg,
-                      interactiveType: 'button',
-                      buttons: [
-                        { id: 'btn_book', title: '📅 View Slots' },
-                        { id: 'btn_start', title: '🏠 Main Menu' },
-                      ],
-                    },
-                    phoneNumberId,
-                    salonId,
-                  ).catch((err) => {
-                    this.logger.error(`Failed to send WhatsApp slot taken notification: ${err?.message || err}`);
-                  });
-
-                  await this.prisma.conversation.updateMany({
-                    where: {
-                      salonId,
-                      customerPhone: { in: [compPhone, compPhone.replace('+', ''), `+${compPhone.replace('+', '')}`] },
-                    },
-                    data: {
-                      state: 'START',
-                      activeAppointmentId: null,
-                      selectedServiceId: null,
-                      selectedStaffId: null,
-                      selectedDate: null,
-                      selectedStartTime: null,
-                    },
-                  }).catch(() => { });
-                }
-
-                // Cleanly delete competing unconfirmed appointment from database
-                await this.prisma.appointment.delete({
-                  where: { id: comp.id },
-                }).catch((err) => {
-                  this.logger.error(`Failed to purge competing quick booking ${comp.id}: ${err?.message}`);
-                });
-              }
-            } else if (dto.status === AppointmentStatus.REJECTED || dto.status === AppointmentStatus.CANCELLED) {
-              const declineMsg = `❌ *QUICK BOOKING DECLINED*\n\nHi *${userName}*, *${salon.name}* is currently unable to accept this quick booking request. Please speak to salon reception or book another slot.`;
-              await this.whatsappService.sendMetaMessage(
-                userPhone,
-                {
-                  bodyText: declineMsg,
-                  interactiveType: 'button',
-                  buttons: [
-                    { id: 'btn_book', title: '📅 View Slots' },
-                    { id: 'btn_start', title: '🏠 Main Menu' },
-                  ],
-                },
-                phoneNumberId,
-                salonId,
-              ).catch((err) => {
-                this.logger.error(`Failed to send WhatsApp quick booking declined notification: ${err?.message || err}`);
-              });
-
-              // Cleanly delete declined unconfirmed quick booking from database
-              await this.prisma.appointment.delete({
-                where: { id: appointment.id },
-              }).catch((err) => {
-                this.logger.error(`Failed to delete declined quick booking ${appointment.id}: ${err?.message}`);
-              });
-            }
-
-          } else if (dto.status === AppointmentStatus.CHECKED_IN) {
-            const welcomeMsg = `👋 *WELCOME TO ${salon.name.toUpperCase()}!*\n\nHi *${userName}*, you are checked in! Your stylist *${updated.stylist?.name || 'Stylist'}* will call you to the chair shortly.`;
-            await this.whatsappService.sendMetaMessage(
-              userPhone,
-              {
-                bodyText: welcomeMsg,
-                interactiveType: 'button',
-                buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
-              },
-              phoneNumberId,
-              salonId,
-            ).catch((err) => {
-              this.logger.error(`Failed to send WhatsApp CHECKED_IN notification: ${err?.message || err}`);
-            });
-          } else if (dto.status === AppointmentStatus.SEATED_IN_CHAIR) {
+        if (dto.status === AppointmentStatus.CHECKED_IN) {
+          const welcomeMsg = `👋 *WELCOME TO ${salon.name.toUpperCase()}!*\n\nHi *${userName}*, you are checked in! Your stylist *${updated.stylist?.name || 'Stylist'}* will call you to the chair shortly.`;
+          await this.whatsappService.sendMetaMessage(
+            userPhone,
+            {
+              bodyText: welcomeMsg,
+              interactiveType: 'button',
+              buttons: [{ id: 'btn_start', title: '🏠 Main Menu' }],
+            },
+            phoneNumberId,
+            salonId,
+          ).catch((err) => {
+            this.logger.error(`Failed to send WhatsApp CHECKED_IN notification: ${err?.message || err}`);
+          });
+        } else if (dto.status === AppointmentStatus.SEATED_IN_CHAIR) {
+          if (this.templates) {
             const seatedMsg = this.templates.buildSeatedInChairReply(
               salon.name,
               updated.stylist?.name || 'Stylist',
               updated.serviceNameSnapshot || 'Hair & Grooming',
             );
-            await this.whatsappService.sendMetaMessage(
-              userPhone,
-              seatedMsg,
-              phoneNumberId,
-              salonId,
-            ).catch((err) => {
+            await this.whatsappService.sendMetaMessage(userPhone, seatedMsg, phoneNumberId, salonId).catch((err) => {
               this.logger.error(`Failed to send WhatsApp SEATED_IN_CHAIR notification: ${err?.message || err}`);
             });
-          } else if (dto.status === AppointmentStatus.COMPLETED) {
+          }
+        } else if (dto.status === AppointmentStatus.COMPLETED) {
+          if (this.templates) {
             const receiptMsg = this.templates.buildCompletedReceiptReply({
               salonName: salon.name,
               serviceName: updated.serviceNameSnapshot || 'Hair & Grooming',
@@ -303,12 +220,7 @@ export class AppointmentStatusService {
               price: updated.price ? Number(updated.price) : 0,
               customerName: userName,
             });
-            await this.whatsappService.sendMetaMessage(
-              userPhone,
-              receiptMsg,
-              phoneNumberId,
-              salonId,
-            ).catch((err) => {
+            await this.whatsappService.sendMetaMessage(userPhone, receiptMsg, phoneNumberId, salonId).catch((err) => {
               this.logger.error(`Failed to send WhatsApp COMPLETED receipt notification: ${err?.message || err}`);
             });
           }
@@ -317,10 +229,6 @@ export class AppointmentStatusService {
         this.logger.error(`Background WhatsApp notification error: ${bgErr?.message || bgErr}`);
       }
     });
-
-
-
-    return formatted;
   }
 
   /**

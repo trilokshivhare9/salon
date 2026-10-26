@@ -17,6 +17,25 @@ export class PlatformAdminPortal {
       this.render();
     } catch (err) {
       console.error(err);
+      const isConnectionIssue = (typeof navigator !== 'undefined' && !navigator.onLine) || err.status === 0;
+
+      if (isConnectionIssue) {
+        this.container.innerHTML = `
+          <div style="min-height: 80vh; display: flex; align-items: center; justify-content: center; padding: 24px;">
+            <div class="glass-panel text-center" style="max-width: 440px; text-align: center; padding: 40px;">
+              <div style="font-size: 2.5rem; margin-bottom: 12px;">📶</div>
+              <h3 style="color: #f59e0b; margin-bottom: 8px;">Connection Unavailable</h3>
+              <p style="color: var(--text-secondary); font-size: 0.88rem; margin-bottom: 20px;">
+                ${err.message || 'Unable to reach the platform server. Please check your network connection.'}
+              </p>
+              <button class="btn btn-primary" id="btn-admin-retry" style="width: 100%;">Try Again</button>
+            </div>
+          </div>
+        `;
+        document.getElementById('btn-admin-retry')?.addEventListener('click', () => this.init());
+        return;
+      }
+
       this.container.innerHTML = `
         <div style="min-height: 80vh; display: flex; align-items: center; justify-content: center; padding: 24px;">
           <div class="glass-panel text-center" style="max-width: 440px; text-align: center; padding: 40px;">

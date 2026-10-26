@@ -189,12 +189,12 @@ export async function runHardeningPass() {
       let cancelSuccess = false;
       let cancelError = '';
       try {
-        await appointmentsService.cancelAppointment(
-          salonA.id,
-          cancelAppt.id,
-          'Boundary Test Cancel',
-          role.adminId,
-        );
+        await appointmentsService.cancelBooking(salonA.id, cancelAppt.id, {
+          source: 'ADMIN_DASHBOARD',
+          fault: 'CLIENT',
+          reason: 'Boundary Test Cancel',
+          adminId: role.adminId,
+        });
         cancelSuccess = true;
       } catch (err: any) {
         cancelSuccess = false;

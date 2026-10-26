@@ -166,13 +166,13 @@ export class WhatsAppTemplateService {
 
     const buttons = hasActiveAppointment
       ? [
-          { id: WhatsAppButtonId.CHECK_LAST_BOOKING, title: '📋 Check Booking' },
-          { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
-        ]
+        { id: WhatsAppButtonId.CHECK_LAST_BOOKING, title: '📋 Check Booking' },
+        { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
+      ]
       : [
-          { id: WhatsAppButtonId.BOOK, title: '📅 Book Slot' },
-          { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
-        ];
+        { id: WhatsAppButtonId.BOOK, title: '📅 Book Slot' },
+        { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
+      ];
 
     return {
       bodyText: `📍 *${name} Info*\n\n🏠 *Address:* ${address}\n📞 *Phone:* ${phone}\n🕒 *Hours:* ${hours}${mapsLine}\n\nWe look forward to styling you!`,
@@ -312,6 +312,11 @@ export class WhatsAppTemplateService {
     return {
       bodyText: `👤 *What is your name?*\n\nTo complete your booking for *${details.serviceName}* on *${details.dateStr} at ${details.timeStr}*, please reply with your *full name*:`,
     };
+  }
+
+  // 8C. No Immediate Slot Notice (Quick-to-Normal Pivot)
+  buildNoImmediateSlotNotice(serviceName?: string, earliestTime?: string): string {
+    return `⚡ *No Quick Booking slot available right now.*\n\nYou can choose a time slot for today from the list below:`;
   }
 
   // 9. Booking Confirmation Prompt Template
@@ -542,6 +547,47 @@ export class WhatsAppTemplateService {
       interactiveType: 'button' as const,
       buttons: [
         { id: WhatsAppButtonId.CANCEL_PENDING_QUICK, title: '❌ Cancel Request' },
+        { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
+      ],
+    };
+  }
+
+  buildQuickBookAcceptedReply(appointment: any, timezone?: string, salon?: any) {
+    const tz = timezone || TimeUtility.DEFAULT_TIMEZONE;
+    const startTimeVal = appointment?.startTime || appointment?.startAt;
+    const time = startTimeVal ? TimeUtility.formatTime12h(startTimeVal, tz) : '';
+    const serviceName = appointment?.service?.name || appointment?.serviceNameSnapshot || 'Hair & Grooming';
+    const stylistName = appointment?.stylist?.name || 'Rahul Sharma';
+    const salonName = salon?.name || appointment?.salon?.name || 'Our Salon';
+    const customerName = appointment?.salonUser?.user?.name || appointment?.customerName || 'Customer';
+    const bookingNumber = appointment?.bookingNumber ? `\n• *Booking #:* *${appointment.bookingNumber}*` : '';
+
+    return {
+      bodyText:
+        `🎉 *QUICK BOOKING ACCEPTED!*\n\n` +
+        `Hi *${customerName}*, your quick booking check-in at *${salonName}* has been accepted!\n` +
+        bookingNumber +
+        `\n• *Service:* *${serviceName}*` +
+        `\n• *Time:* *${time}*` +
+        `\n• *Specialist:* *${stylistName}*` +
+        `\n• *Status:* *Checked In*` +
+        `\n\nPlease take a seat! ${stylistName} will call you to the chair shortly.`,
+      interactiveType: 'button' as const,
+      buttons: [
+        { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
+      ],
+    };
+  }
+
+  buildQuickBookDeclinedReply(salonName: string, reason?: string) {
+    const reasonText = reason ? ` (${reason})` : '';
+    return {
+      bodyText:
+        `❌ *QUICK BOOKING DECLINED*\n\n` +
+        `We are sorry, but *${salonName}* is currently unable to accept quick bookings at this moment${reasonText}. Please speak to salon reception or book a regular appointment.`,
+      interactiveType: 'button' as const,
+      buttons: [
+        { id: WhatsAppButtonId.BOOK, title: '📅 Book Appointment' },
         { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
       ],
     };

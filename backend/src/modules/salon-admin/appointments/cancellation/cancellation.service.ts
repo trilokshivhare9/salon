@@ -402,6 +402,18 @@ export class CancellationService {
         });
         break;
 
+      case 'SALON_REJECTED':
+        if (this.templates?.buildQuickBookDeclinedReply) {
+          payload = this.templates.buildQuickBookDeclinedReply(salon.name, context.reason);
+        }
+        break;
+
+      case 'SYSTEM_CAPACITY_CONFLICT':
+        if (this.templates?.buildPendingRequestCancelledReply) {
+          payload = this.templates.buildPendingRequestCancelledReply();
+        }
+        break;
+
       default:
         return;
     }
@@ -498,6 +510,12 @@ Would you like to move your *${currentSlotTimeStr}* appointment earlier to *${fr
   }
 
   async getAppointmentById(salonId: string, id: string) {
-    return this.modifierService.getAppointment(salonId, id);
+    if (this.modifierService && typeof this.modifierService.getAppointment === 'function') {
+      return this.modifierService.getAppointment(salonId, id);
+    }
+    return this.prisma.appointment.findFirst({
+      where: { id, salonId },
+      include: appointmentInclude,
+    });
   }
 }

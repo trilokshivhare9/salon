@@ -2,8 +2,9 @@ import { HttpClient, API_BASE, ApiError } from './network/http-client.js';
 import { SalonSession, PlatformSession, SessionRealm } from './network/session-manager.js';
 import { SalonRepository } from './repositories/salon-repository.js';
 import { ENDPOINTS } from './network/endpoints.js';
+import { NetworkHealth, ConnectionState } from './network/network-health.js';
 
-export { API_BASE, ApiError, SalonRepository, ENDPOINTS };
+export { API_BASE, ApiError, SalonRepository, ENDPOINTS, NetworkHealth, ConnectionState };
 
 // Dual-Realm Session Bindings
 export const PlatformRealm = PlatformSession;
@@ -107,6 +108,7 @@ export class SalonAuth {
         }).catch(() => { });
       }
     } finally {
+      SalonRepository.clear();
       SalonRealm.clear();
       if (authChannel) authChannel.postMessage({ type: 'SALON_LOGOUT', timestamp: Date.now() });
     }
@@ -208,8 +210,8 @@ export class ApiClient {
 
   static clearSession() {
     PlatformRealm.clear();
-    SalonRealm.clear();
     SalonRepository.clear();
+    SalonRealm.clear();
     this.invalidateCache();
   }
 
@@ -357,6 +359,23 @@ export class ApiClient {
     return this.request(ENDPOINTS.APPOINTMENTS.STATUS(id), {
       method: 'PATCH',
       body: JSON.stringify({ status, reason, reasonCategory }),
+    });
+  }
+
+  static async acceptQuickBooking(id) {
+    this.invalidateCache('/reports');
+    this.invalidateCache('/appointments');
+    return this.request(ENDPOINTS.APPOINTMENTS.ACCEPT_QUICK_BOOKING(id), {
+      method: 'POST',
+    });
+  }
+
+  static async declineQuickBooking(id, reason = '') {
+    this.invalidateCache('/reports');
+    this.invalidateCache('/appointments');
+    return this.request(ENDPOINTS.APPOINTMENTS.DECLINE_QUICK_BOOKING(id), {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
     });
   }
 

@@ -14,6 +14,23 @@ class SalonRepositoryEngine {
   constructor() {
     this.memoryStore = new Map();
     this.subscribers = new Map();
+
+    // Cross-tab synchronization: Invalidate in-memory cache if another tab updates localStorage
+    if (typeof window !== 'undefined') {
+      window.addEventListener('storage', (event) => {
+        if (event.key && event.key.startsWith('ss_')) {
+          this.memoryStore.delete(event.key);
+          const parts = event.key.split('_');
+          const entity = parts.slice(2).join('_');
+          if (entity && event.newValue) {
+            try {
+              const parsed = JSON.parse(event.newValue);
+              this.emit(`${entity}:updated`, parsed);
+            } catch (_) {}
+          }
+        }
+      });
+    }
   }
 
   getStorageKey(entity) {
@@ -75,8 +92,8 @@ class SalonRepositoryEngine {
   hasCachedWorkspace() {
     const user = SalonSession.getUser();
     if (!user) return false;
-    const profile = this.readLocal('profile');
-    return !!profile;
+    const profile = this.readLocal('profile') || user?.salon;
+    return !!(profile && (profile.id || profile.name));
   }
 
   getCachedWorkspace() {
@@ -109,6 +126,7 @@ class SalonRepositoryEngine {
 
     const fresh = await HttpClient.request(ENDPOINTS.SALONS.PROFILE);
     this.writeLocal('profile', fresh);
+    this.emit('profile:updated', fresh);
     return fresh;
   }
 
@@ -128,6 +146,7 @@ class SalonRepositoryEngine {
     const fresh = await HttpClient.request(ENDPOINTS.STAFF.LIST());
     const list = Array.isArray(fresh) ? fresh : [];
     this.writeLocal('staff', list);
+    this.emit('staff:updated', list);
     return list;
   }
 
@@ -146,6 +165,7 @@ class SalonRepositoryEngine {
     const fresh = await HttpClient.request(ENDPOINTS.SERVICES.LIST());
     const list = Array.isArray(fresh) ? fresh : [];
     this.writeLocal('services', list);
+    this.emit('services:updated', list);
     return list;
   }
 
@@ -153,7 +173,10 @@ class SalonRepositoryEngine {
     const cached = this.readLocal('categories');
     if (cached && Array.isArray(cached) && !bypassCache) {
       HttpClient.request(ENDPOINTS.SERVICES.CATEGORIES).then((fresh) => {
-        if (Array.isArray(fresh)) this.writeLocal('categories', fresh);
+        if (Array.isArray(fresh)) {
+          this.writeLocal('categories', fresh);
+          this.emit('categories:updated', fresh);
+        }
       }).catch(() => {});
       return cached;
     }
@@ -161,6 +184,7 @@ class SalonRepositoryEngine {
     const fresh = await HttpClient.request(ENDPOINTS.SERVICES.CATEGORIES);
     const list = Array.isArray(fresh) ? fresh : [];
     this.writeLocal('categories', list);
+    this.emit('categories:updated', list);
     return list;
   }
 
@@ -168,7 +192,10 @@ class SalonRepositoryEngine {
     const cached = this.readLocal('working_hours');
     if (cached && Array.isArray(cached) && !bypassCache) {
       HttpClient.request(ENDPOINTS.SALONS.WORKING_HOURS).then((fresh) => {
-        if (Array.isArray(fresh)) this.writeLocal('working_hours', fresh);
+        if (Array.isArray(fresh)) {
+          this.writeLocal('working_hours', fresh);
+          this.emit('working_hours:updated', fresh);
+        }
       }).catch(() => {});
       return cached;
     }
@@ -176,6 +203,7 @@ class SalonRepositoryEngine {
     const fresh = await HttpClient.request(ENDPOINTS.SALONS.WORKING_HOURS);
     const list = Array.isArray(fresh) ? fresh : [];
     this.writeLocal('working_hours', list);
+    this.emit('working_hours:updated', list);
     return list;
   }
 
@@ -226,14 +254,23 @@ class SalonRepositoryEngine {
     else if (entity === 'closures') this.getSalonClosures(true);
   }
 
-  clear() {
+  clear(explicitSalonId = null) {
     this.memoryStore.clear();
     const user = SalonSession.getUser();
-    const salonId = user?.salonId || user?.salon?.id;
-    if (salonId) {
-      ['profile', 'staff', 'services', 'categories', 'working_hours', 'breaks', 'closures'].forEach((e) => {
-        try { localStorage.removeItem(`ss_${salonId}_${e}`); } catch (_) {}
-      });
+    const salonId = explicitSalonId || user?.salonId || user?.salon?.id;
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        const keysToRemove = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && k.startsWith('ss_')) {
+            if (!salonId || k.startsWith(`ss_${salonId}_`)) {
+              keysToRemove.push(k);
+            }
+          }
+        }
+        keysToRemove.forEach((k) => localStorage.removeItem(k));
+      } catch (_) {}
     }
   }
 }

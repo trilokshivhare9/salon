@@ -15,6 +15,7 @@ export interface NextActionInput {
   clientEtaStatus?: ClientEtaStatus | null;
   proposedStartAt?: Date | null;
   expiresAt?: Date | null;
+  createdAt?: Date | null;
 }
 
 export interface NextActionResult {
@@ -115,9 +116,9 @@ export class AppointmentNextActionService {
       }
 
       case AppointmentStatus.PENDING_ACCEPTANCE: {
-        // Quick booking awaiting salon acceptance: 5-minute auto-decline cutoff
-        const fiveMinFromNow = now + 5 * 60 * 1000;
-        const cutoffTime = Math.min(fiveMinFromNow, startMs);
+        // Quick booking awaiting salon acceptance: 5-minute auto-decline cutoff from creation
+        const createdAtMs = input.createdAt ? new Date(input.createdAt).getTime() : now;
+        const cutoffTime = createdAtMs + 5 * 60 * 1000;
         if (now >= cutoffTime) {
           return { nextActionAt: new Date(now), nextActionType: AppointmentActionType.CUTOFF_5M };
         }

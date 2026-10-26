@@ -1,16 +1,16 @@
 import { Injectable, Logger, Inject, forwardRef, Optional } from '@nestjs/common';
 import { PrismaService } from '../../../../database/prisma.service';
-import { AppointmentsService } from '../../../salon-admin/appointments/appointments.service';
+import { QuickBookingService } from '../../../salon-admin/quick-booking/quick-booking.service';
 import { AvailabilityService } from '../../../salon-admin/availability/availability.service';
 import { WhatsAppSenderService, WhatsAppButtonId } from '../services/whatsapp-sender.service';
 import { WhatsAppTemplateService } from '../services/whatsapp-template.service';
 import { WhatsAppSessionService } from '../services/whatsapp-session.service';
 import { WhatsAppService } from '../whatsapp.service';
 import { ConversationState, AppointmentStatus, BookingSource } from '@prisma/client';
-import { DateTime } from 'luxon';
 import { TimeUtility } from '../../../../common/utils/time.utility';
 import { ActionContext, ActionResult } from './shared/action-context';
 import { ActionUtils } from './shared/action-utils';
+import { SlotWindowType } from '../services/time-slot-window.engine';
 
 @Injectable()
 export class QuickBookingAction {
@@ -21,9 +21,8 @@ export class QuickBookingAction {
     private readonly sender: WhatsAppSenderService,
     private readonly templates: WhatsAppTemplateService,
     private readonly session: WhatsAppSessionService,
+    private readonly quickBookingService: QuickBookingService,
     private readonly availabilityService: AvailabilityService,
-    @Inject(forwardRef(() => AppointmentsService))
-    private readonly appointmentsService: AppointmentsService,
     @Inject(forwardRef(() => WhatsAppService))
     @Optional() private readonly whatsAppService?: WhatsAppService,
   ) {}
@@ -74,7 +73,8 @@ export class QuickBookingAction {
     }
 
     // PILLAR 1: Fail-Fast Gatekeeper - Verify Salon is operational right now for Quick Booking
-    const operatingStatus = await this.availabilityService.getQuickBookingOperatingStatus(salonId, tz);
+    const operatingStatus = await this.quickBookingService.getOperatingStatus(salonId, tz);
+
     if (!operatingStatus.isOpen) {
       this.logger.log(
         `[QuickBookingAction] Quick booking gatekeeper blocked entry for salon=${salonId} reason=${operatingStatus.reason}`,
@@ -107,9 +107,10 @@ export class QuickBookingAction {
     const { cleanNumber, phoneNumberId, salonId, salon, conversation, tz } = ctx;
     this.logger.log(`[QuickBookingAction] Evaluating earliest slot for service=${svcId}`);
 
-    const earliest = await this.availabilityService.findEarliestAvailableSlotToday(salonId, svcId);
+    // Delegate slot & specialist resolution to QuickBookingService
+    const slotResult = await this.quickBookingService.findNextAvailableSlot(salonId, svcId, null, tz);
 
-    if (!earliest) {
+    if (!slotResult || !slotResult.isAvailable) {
       const reply = `⚠️ *No slots available today* for *${selectedService.name}*.\n\nAll appointments for today are fully booked or the salon is closed. Would you like to book for an upcoming day with normal booking, or pick another service?`;
       await this.sendMessage(
         cleanNumber,
@@ -128,21 +129,80 @@ export class QuickBookingAction {
       return { replyMessage: reply, state: ConversationState.SELECT_SERVICE };
     }
 
-    const dateIso = TimeUtility.toDbDate(earliest.dateStr);
-    const startDt = TimeUtility.toTimestamp(earliest.dateStr, earliest.startTime, tz);
-    const assignedStylistId =
-      earliest.eligibleStaffIds && earliest.eligibleStaffIds.length > 0 ? earliest.eligibleStaffIds[0] : null;
-    const stylist = assignedStylistId ? (salon.stylists || []).find((s: any) => s.id === assignedStylistId) : null;
+    // Dynamic Pivot: If earliest available slot is > 15 minutes away, Quick Booking does not apply.
+    // Present today's available time slots and transition the customer into standard Advance Booking.
+    if (!slotResult.isImmediateWindow) {
+      this.logger.log(
+        `[QuickBookingAction] Nearest slot (${slotResult.displayTime}) is ${slotResult.leadTimeMinutes}m away (> 15m). Shifting customer to normal advance booking for today.`,
+      );
+
+      const todayStr = TimeUtility.getTodayDate(tz);
+      const availability = await this.availabilityService.getAvailableSlots(
+        salonId,
+        svcId,
+        todayStr,
+      );
+
+      const slotRows = (availability.availableSlots || []).map((s: any) => ({
+        timeStr: s.startTime,
+        displayTime: ActionUtils.formatTime12h(s.startTime),
+      }));
+
+      if (!slotRows.length) {
+        const reply = `⚠️ *No more slots available today* for *${selectedService.name}*.\n\nAll appointments for today are fully booked or the salon is closed. Would you like to book for an upcoming day with normal booking, or pick another service?`;
+        await this.sendMessage(
+          cleanNumber,
+          {
+            bodyText: reply,
+            interactiveType: 'button',
+            buttons: [
+              { id: WhatsAppButtonId.SERVICES, title: '✂️ Other Service' },
+              { id: WhatsAppButtonId.BOOK, title: '📅 Normal Booking' },
+              { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
+            ],
+          },
+          phoneNumberId,
+          salonId,
+        );
+        return { replyMessage: reply, state: ConversationState.SELECT_SERVICE };
+      }
+
+      const nowDt = TimeUtility.now(tz);
+      const nowMinutes = nowDt.hour * 60 + nowDt.minute;
+
+      const slotMenu = this.templates.buildTimeSlotMenu(slotRows, false, SlotWindowType.EARLIEST, {
+        isToday: true,
+        nowMinutes,
+        salonName: salon.name,
+      });
+
+      slotMenu.bodyText = this.templates.buildNoImmediateSlotNotice(
+        selectedService.name,
+        slotResult.displayTime || 'later today',
+      );
+
+      // Transition session state to SELECT_TIME and clear quickCodeVerifiedAt to revert session to NORMAL booking
+      await this.session.updateConversationState(conversation.id, ConversationState.SELECT_TIME, undefined, {
+        selectedServiceId: svcId,
+        selectedDate: TimeUtility.toDbDate(todayStr),
+        selectedStartTime: null,
+        selectedStaffId: null,
+        quickCodeVerifiedAt: null,
+      });
+
+      await this.sendMessage(cleanNumber, slotMenu, phoneNumberId, salonId);
+      return { replyMessage: slotMenu.bodyText, state: ConversationState.SELECT_TIME };
+    }
 
     await this.session.updateConversationState(conversation.id, ConversationState.QUICK_BOOK_CONFIRM, undefined, {
       selectedServiceId: svcId,
-      selectedDate: dateIso,
-      selectedStartTime: startDt,
-      selectedStaffId: assignedStylistId,
+      selectedDate: slotResult.dateIso,
+      selectedStartTime: slotResult.startDt,
+      selectedStaffId: slotResult.assignedStylistId,
     });
 
-    const time12h = earliest.displayTime || ActionUtils.formatTime12h(earliest.startTime, tz);
-    const dateFriendly = ActionUtils.formatDateFriendly(earliest.dateStr, tz);
+    const time12h = slotResult.displayTime;
+    const dateFriendly = ActionUtils.formatDateFriendly(slotResult.dateStr!, tz);
 
     const prompt = this.templates.buildQuickBookConfirmationPrompt({
       salonName: salon.name,
@@ -151,7 +211,7 @@ export class QuickBookingAction {
       duration: selectedService.durationMinutes,
       dateFormatted: dateFriendly,
       timeFormatted: time12h,
-      stylistName: stylist?.name || 'First Available Specialist',
+      stylistName: slotResult.stylistName || 'First Available Specialist',
     });
 
     await this.sendMessage(cleanNumber, prompt, phoneNumberId, salonId);
@@ -159,7 +219,9 @@ export class QuickBookingAction {
   }
 
   /**
-   * Confirms Quick Booking and creates appointment with initialStatus: PENDING_ACCEPTANCE
+   * Confirms Quick Booking via WhatsApp interaction:
+   * Delegates slot validation and appointment creation to QuickBookingService,
+   * updates the user's session, and sends the interactive WhatsApp reply.
    */
   async confirmQuickBook(ctx: ActionContext): Promise<ActionResult> {
     const { cleanNumber, phoneNumberId, salonId, user, conversation, tz } = ctx;
@@ -184,94 +246,113 @@ export class QuickBookingAction {
       }
     }
 
-    const todayDateStr = TimeUtility.getTodayDate(tz);
-    let slotTime = conversation.selectedStartTime
-      ? TimeUtility.formatTime24h(conversation.selectedStartTime, tz)
-      : TimeUtility.now(tz).toFormat('HH:mm');
-
-    // Real slot check for quick booking today if slotTime was not resolved
-    if (!conversation.selectedStartTime && conversation.selectedServiceId) {
-      try {
-        const avail = await this.availabilityService.getAvailableSlots(
-          salonId,
-          conversation.selectedServiceId,
-          todayDateStr,
-          conversation.selectedStaffId || undefined,
-        );
-        if (avail.availableSlots && avail.availableSlots.length > 0) {
-          slotTime = avail.availableSlots[0].startTime;
-        }
-      } catch (e) {
-        // Keep current time fallback
-      }
+    if (!conversation.selectedServiceId) {
+      const reply = `⚠️ *No service selected.*\n\nPlease choose a service first.`;
+      await this.sendMessage(
+        cleanNumber,
+        {
+          bodyText: reply,
+          interactiveType: 'button',
+          buttons: [{ id: WhatsAppButtonId.SERVICES, title: '✂️ Services' }],
+        },
+        phoneNumberId,
+        salonId,
+      );
+      return { replyMessage: reply, state: ConversationState.SELECT_SERVICE };
     }
 
-    const isPastSlot = TimeUtility.isPastTimeToday(slotTime, tz);
+    const slotTime = conversation.selectedStartTime
+      ? TimeUtility.formatTime24h(conversation.selectedStartTime, tz)
+      : undefined;
 
-    const refreshToNextSlot = async (oldTimeStrFormatted: string): Promise<ActionResult> => {
-      try {
-        if (!conversation.selectedServiceId) {
-          throw new Error('No service selected');
-        }
+    // Contact QuickBookingService to execute business logic:
+    const result = await this.quickBookingService.confirmQuickBooking(salonId, {
+      customerPhone: cleanNumber,
+      customerName: user.name || 'Customer',
+      serviceId: conversation.selectedServiceId,
+      stylistId: conversation.selectedStaffId || undefined,
+      startTime: slotTime,
+      source: BookingSource.QUICK_BOOK,
+    });
 
-        const earliest = await this.availabilityService.findEarliestAvailableSlotToday(
-          salonId,
-          conversation.selectedServiceId,
-        );
+    if (!result.success) {
+      // If slot was refreshed to the next available opening:
+      if (result.slotRefreshed && result.refreshedSlot && result.refreshedSlot.isAvailable) {
+        const fresh = result.refreshedSlot;
 
-        if (earliest) {
-          const newStartDt = TimeUtility.toTimestamp(earliest.dateStr, earliest.startTime, tz);
-          const assignedStylistId =
-            earliest.eligibleStaffIds && earliest.eligibleStaffIds.length > 0
-              ? earliest.eligibleStaffIds[0]
-              : null;
-          const stylist = assignedStylistId
-            ? (ctx.salon?.stylists || []).find((s: any) => s.id === assignedStylistId)
-            : null;
-
-          await this.session.updateConversationState(
-            conversation.id,
-            ConversationState.QUICK_BOOK_CONFIRM,
-            undefined,
-            {
-              selectedDate: TimeUtility.toDbDate(earliest.dateStr),
-              selectedStartTime: newStartDt,
-              selectedStaffId: assignedStylistId,
-            },
+        // If refreshed opening pushed beyond 15m, pivot customer to today's Advance Booking
+        if (!fresh.isImmediateWindow) {
+          this.logger.log(
+            `[QuickBookingAction] Refreshed slot is ${fresh.leadTimeMinutes}m away (> 15m). Pivoting customer to normal advance booking for today.`,
           );
 
-          const newTimeFormatted =
-            earliest.displayTime || ActionUtils.formatTime12h(earliest.startTime, tz);
-          const service = (ctx.salon?.services || []).find(
-            (s: any) => s.id === conversation.selectedServiceId,
-          );
-          const diffMins = Math.max(
-            0,
-            Math.round((newStartDt.getTime() - Date.now()) / (1000 * 60)),
+          const todayStr = TimeUtility.getTodayDate(tz);
+          const availability = await this.availabilityService.getAvailableSlots(
+            salonId,
+            conversation.selectedServiceId,
+            todayStr,
           );
 
-          const autoRefreshPrompt = this.templates.buildSlotAutoRefreshedReply({
-            oldTimeStr: oldTimeStrFormatted,
-            newTimeStr: newTimeFormatted,
-            serviceName: service?.name || 'Selected Service',
-            stylistName: stylist?.name,
-            minutesUntilNewSlot: diffMins,
+          const slotRows = (availability.availableSlots || []).map((s: any) => ({
+            timeStr: s.startTime,
+            displayTime: ActionUtils.formatTime12h(s.startTime),
+          }));
+
+          const nowDt = TimeUtility.now(tz);
+          const nowMinutes = nowDt.hour * 60 + nowDt.minute;
+
+          const slotMenu = this.templates.buildTimeSlotMenu(slotRows, false, SlotWindowType.EARLIEST, {
+            isToday: true,
+            nowMinutes,
+            salonName: ctx.salon?.name,
           });
 
-          await this.sendMessage(cleanNumber, autoRefreshPrompt, phoneNumberId, salonId);
-          return {
-            replyMessage: autoRefreshPrompt.bodyText,
-            state: ConversationState.QUICK_BOOK_CONFIRM,
-          };
+          const service = (ctx.salon?.services || []).find((s: any) => s.id === conversation.selectedServiceId);
+          slotMenu.bodyText = this.templates.buildNoImmediateSlotNotice(
+            service?.name || 'Selected Service',
+            fresh.displayTime || 'later today',
+          );
+
+          await this.session.updateConversationState(conversation.id, ConversationState.SELECT_TIME, undefined, {
+            selectedServiceId: conversation.selectedServiceId,
+            selectedDate: TimeUtility.toDbDate(todayStr),
+            selectedStartTime: null,
+            selectedStaffId: null,
+            quickCodeVerifiedAt: null,
+          });
+
+          await this.sendMessage(cleanNumber, slotMenu, phoneNumberId, salonId);
+          return { replyMessage: slotMenu.bodyText, state: ConversationState.SELECT_TIME };
         }
-      } catch (e: any) {
-        this.logger.error(`[QuickBookingAction] Error during auto-refresh slot lookup: ${e?.message}`);
+
+        await this.session.updateConversationState(
+          conversation.id,
+          ConversationState.QUICK_BOOK_CONFIRM,
+          undefined,
+          {
+            selectedDate: fresh.dateIso,
+            selectedStartTime: fresh.startDt,
+            selectedStaffId: fresh.assignedStylistId,
+          },
+        );
+
+        const service = (ctx.salon?.services || []).find((s: any) => s.id === conversation.selectedServiceId);
+        const diffMins = Math.max(0, Math.round((fresh.startDt!.getTime() - Date.now()) / (1000 * 60)));
+
+        const autoRefreshPrompt = this.templates.buildSlotAutoRefreshedReply({
+          oldTimeStr: slotTime ? ActionUtils.formatTime12h(slotTime, tz) : 'Previous Time',
+          newTimeStr: fresh.displayTime!,
+          serviceName: service?.name || 'Selected Service',
+          stylistName: fresh.stylistName,
+          minutesUntilNewSlot: diffMins,
+        });
+
+        await this.sendMessage(cleanNumber, autoRefreshPrompt, phoneNumberId, salonId);
+        return { replyMessage: autoRefreshPrompt.bodyText, state: ConversationState.QUICK_BOOK_CONFIRM };
       }
 
-      // If no new slot is available today:
-      const service = (ctx.salon?.services || []).find(
-        (s: any) => s.id === conversation.selectedServiceId,
-      );
+      // No more slots available today:
+      const service = (ctx.salon?.services || []).find((s: any) => s.id === conversation.selectedServiceId);
       const noMoreSlotsReply = {
         bodyText: `⚠️ *No more slots available today* for *${service?.name || 'this service'}*.\n\nAll appointments for today are fully booked or the salon is closed. Would you like to book for an upcoming day with normal booking, or pick another service?`,
         interactiveType: 'button' as const,
@@ -284,60 +365,18 @@ export class QuickBookingAction {
       await this.session.updateConversationState(conversation.id, ConversationState.START, null);
       await this.sendMessage(cleanNumber, noMoreSlotsReply, phoneNumberId, salonId);
       return { replyMessage: noMoreSlotsReply.bodyText, state: ConversationState.START };
-    };
-
-    if (isPastSlot) {
-      this.logger.log(`[QuickBookingAction] Slot ${slotTime} has passed by clock, triggering live auto-refresh`);
-      return refreshToNextSlot(TimeUtility.formatTime12h(slotTime));
     }
 
-    try {
-      const newAppt = await this.appointmentsService.createAppointment(
-        salonId,
-        {
-          customerPhone: cleanNumber,
-          customerName: user.name || 'Customer',
-          serviceIds: [conversation.selectedServiceId],
-          stylistId: conversation.selectedStaffId || undefined,
-          date: todayDateStr,
-          startTime: slotTime,
-          source: BookingSource.QUICK_BOOK,
-        },
-        undefined,
-        { initialStatus: AppointmentStatus.PENDING_ACCEPTANCE } as any,
-      );
+    // Success! Update WhatsApp conversation state & notify customer
+    await this.session.updateConversationState(
+      conversation.id,
+      ConversationState.COMPLETED,
+      result.appointment?.id,
+      ActionUtils.getClearDraftData(),
+    );
 
-      await this.session.updateConversationState(
-        conversation.id,
-        ConversationState.COMPLETED,
-        newAppt?.id,
-        ActionUtils.getClearDraftData(),
-      );
-
-      const pendingReply = this.templates.buildQuickBookPendingReply(newAppt);
-      await this.sendMessage(cleanNumber, pendingReply, phoneNumberId, salonId);
-      return { replyMessage: pendingReply.bodyText, state: ConversationState.COMPLETED };
-    } catch (err: any) {
-      this.logger.warn(`[QuickBookingAction] Failed creating quick book appt: ${err?.message}`);
-      if (
-        conversation.selectedServiceId &&
-        (err?.message?.includes('no longer available') ||
-          err?.status === 409 ||
-          err?.name === 'ConflictException')
-      ) {
-        return refreshToNextSlot(TimeUtility.formatTime12h(slotTime));
-      }
-
-      const errorMsg = {
-        bodyText: `⚠️ *Slot Unavailable*\n\nThat quick booking slot was just taken or expired. Please tap below to pick the next available slot!`,
-        interactiveType: 'button' as const,
-        buttons: [
-          { id: WhatsAppButtonId.QUICK_BOOK, title: '⚡ Quick Book' },
-          { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },
-        ],
-      };
-      await this.sendMessage(cleanNumber, errorMsg, phoneNumberId, salonId);
-      return { replyMessage: errorMsg.bodyText, state: ConversationState.START };
-    }
+    const pendingReply = this.templates.buildQuickBookPendingReply(result.appointment);
+    await this.sendMessage(cleanNumber, pendingReply, phoneNumberId, salonId);
+    return { replyMessage: pendingReply.bodyText, state: ConversationState.COMPLETED };
   }
 }

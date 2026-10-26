@@ -13,11 +13,12 @@ import { AppointmentQueueService } from './queue/queue.service';
 import { AppointmentsController } from './appointments.controller';
 import { AvailabilityModule } from '../availability/availability.module';
 import { WhatsAppModule } from '../../channels/whatsapp/whatsapp.module';
+import { QuickBookingModule } from '../quick-booking/quick-booking.module';
 
 import { ScheduleConflictResolutionEngine } from './conflicts/schedule-conflict-resolution.engine';
 
 @Module({
-  imports: [AvailabilityModule, forwardRef(() => WhatsAppModule)],
+  imports: [AvailabilityModule, forwardRef(() => WhatsAppModule), forwardRef(() => QuickBookingModule)],
   controllers: [AppointmentsController],
   providers: [
     AppointmentsService,

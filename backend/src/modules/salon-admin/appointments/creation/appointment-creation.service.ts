@@ -109,72 +109,7 @@ export class AppointmentCreationService {
     return false;
   }
 
-  /**
-   * Dedicated Quick Booking Creation:
-   * Fast-tracks slot resolution for today and initiates booking with PENDING_ACCEPTANCE status.
-   */
-  async createQuickBooking(
-    salonId: string,
-    dto: {
-      customerPhone: string;
-      customerName?: string;
-      serviceId?: string;
-      serviceIds?: string[];
-      stylistId?: string;
-      startTime?: string;
-      notes?: string;
-    },
-  ) {
-    const serviceIds = dto.serviceIds && dto.serviceIds.length > 0
-      ? dto.serviceIds
-      : dto.serviceId
-        ? [dto.serviceId]
-        : [];
 
-    if (serviceIds.length === 0) {
-      throw new BadRequestException('At least one service must be selected for quick booking.');
-    }
-
-    const salon = await this.prisma.salon.findUnique({
-      where: { id: salonId },
-      select: { timezone: true, status: true },
-    });
-    if (!salon || salon.status !== 'ACTIVE') {
-      throw new NotFoundException('Salon is inactive or not found.');
-    }
-
-    const tz = salon.timezone || 'Asia/Kolkata';
-    const todayDateStr = DateTime.now().setZone(tz).toISODate()!;
-    let slotTime = dto.startTime;
-
-    if (!slotTime) {
-      const earliest = await this.availabilityService.findEarliestAvailableSlotToday(
-        salonId,
-        serviceIds,
-        dto.stylistId || null,
-      );
-      if (!earliest) {
-        throw new ConflictException('No available time slots remain for today.');
-      }
-      slotTime = earliest.startTime;
-    }
-
-    return this.createAppointment(
-      salonId,
-      {
-        customerPhone: dto.customerPhone,
-        customerName: dto.customerName || 'Walk-in / WhatsApp Customer',
-        serviceIds,
-        stylistId: dto.stylistId,
-        date: todayDateStr,
-        startTime: slotTime,
-        source: BookingSource.QUICK_BOOK,
-        notes: dto.notes,
-      },
-      undefined,
-      { initialStatus: AppointmentStatus.PENDING_ACCEPTANCE },
-    );
-  }
 
   /**
    * Master Appointment Creation Engine:
