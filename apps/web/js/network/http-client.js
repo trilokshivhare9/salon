@@ -12,14 +12,13 @@
 
 import { SalonSession, PlatformSession } from './session-manager.js';
 import { ENDPOINTS } from './endpoints.js';
+import { NetworkHealth, ConnectionState } from './network-health.js';
 
-const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-const forceCloud = new URLSearchParams(window.location.search).get('cloud') === '1' || localStorage.getItem('use_cloud_backend') === 'true';
-const useLocal = (isLocalhost && !forceCloud) || new URLSearchParams(window.location.search).get('local') === '1' || localStorage.getItem('use_local_backend') === 'true';
+export let API_BASE = NetworkHealth.getApiBase();
 
-export const API_BASE = useLocal
-  ? `http://${window.location.hostname || 'localhost'}:3000/api/v1`
-  : 'https://salon-api-tuwo.onrender.com/api/v1';
+NetworkHealth.on('targetChanged', ({ apiBase }) => {
+  API_BASE = apiBase;
+});
 
 // In-flight GET request deduplication pool
 const inFlightRequests = new Map();
@@ -77,6 +76,11 @@ export class HttpClient {
   }
 
   static async _execute(endpoint, options, session, retriesRemaining, isGet) {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      NetworkHealth.recordFailure(new Error('No internet connection'), endpoint, 0);
+      throw new ApiError('You are currently offline. Please check your internet connection.', 0);
+    }
+
     const token = session.getAccessToken();
 
     const headers = {
@@ -133,8 +137,13 @@ export class HttpClient {
 
       if (!response.ok) {
         const message = data.message || `Request failed with status ${response.status}`;
+        if (response.status >= 500) {
+          NetworkHealth.recordFailure(new Error(message), endpoint, response.status);
+        }
         throw new ApiError(message, response.status, data);
       }
+
+      NetworkHealth.recordSuccess(endpoint);
 
       // Standardize response unwrapping
       return data.data !== undefined ? data.data : data;
@@ -142,14 +151,37 @@ export class HttpClient {
     } catch (err) {
       clearTimeout(timeoutId);
 
-      // Network Offline / Abort retry logic for GET
-      if (isGet && retriesRemaining > 0 && (err.name === 'AbortError' || err.message?.includes('Failed to fetch'))) {
-        console.warn(`[HttpClient] Network hiccup on ${endpoint}. Retrying...`);
-        await new Promise((r) => setTimeout(r, 800));
+      if (err instanceof ApiError) {
+        throw err;
+      }
+
+      const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+      const isConnectionDown = err.name === 'TypeError' || err.message?.includes('Failed to fetch') || err.message?.includes('NetworkError');
+      const isTimeout = err.name === 'AbortError';
+
+      // Record failure with NetworkHealth immediately
+      NetworkHealth.recordFailure(err, endpoint, 0);
+
+      // Transient Network Offline / Abort retry logic for GET (only retry once if transient)
+      if (isGet && retriesRemaining > 0 && (isTimeout || (!isOffline && isConnectionDown && retriesRemaining > 1))) {
+        console.warn(`[HttpClient] Network retry on ${endpoint} (${retriesRemaining} left)...`);
+        await new Promise((r) => setTimeout(r, 500));
         return this.request(endpoint, options, session, retriesRemaining - 1);
       }
 
-      throw err;
+      if (isOffline) {
+        throw new ApiError('You are currently offline. Please check your internet connection.', 0, { originalError: err.message });
+      }
+
+      if (isConnectionDown) {
+        throw new ApiError('Unable to reach the salon service. Please check your connection and try again.', 0, { originalError: err.message });
+      }
+
+      if (isTimeout) {
+        throw new ApiError('The server took too long to respond. Please try again.', 408, { originalError: err.message });
+      }
+
+      throw new ApiError(err.message || 'An unexpected network error occurred.', 500, { originalError: err });
     }
   }
 

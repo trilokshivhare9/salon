@@ -1,4 +1,4 @@
-import { ApiClient, formatTime12h, SalonRepository } from './api.js';
+import { ApiClient, formatTime12h, SalonRepository, NetworkHealth, ConnectionState } from './api.js';
 import * as IndianFestivals from '@aryanjsx/indian-festivals';
 import { RealtimeNotifier } from './realtime.js';
 import { QueueSyncManager } from './queue/queue-sync.js';
@@ -6,6 +6,7 @@ import { SoundManager } from './sound.js';
 import { Icons } from './icons.js';
 import { LeaveManagementUI } from './leave-management.js';
 import { LocationPicker } from './location-picker.js';
+import { HomeManager } from './modules/home/home-manager.js';
 import { StaffManager } from './modules/staff/staff-manager.js';
 import {
   CalendarView,
@@ -180,6 +181,7 @@ export class SalonDashboard {
     };
     this.calNavDate = null;
     this.queueSummary = null;
+    this.recentAppointments = [];
     this.queueSync = new QueueSyncManager({
       selectedDate: this.selectedDate,
       statusFilter: this.queueFilter,
@@ -212,6 +214,54 @@ export class SalonDashboard {
     this.staffManager = new StaffManager(this);
     this.aiScanner = new ServicesAiScannerModal(this);
     this.aiScanner.init();
+    this.homeManager = new HomeManager({
+      onOpenQrModal: () => this.showQRCodeModal(),
+      onOpenQuickRequests: () => this.openQuickRequestsModal(),
+      onSeatWalkIn: (stylistId) => this.showWalkInModal(stylistId),
+      onViewFullQueue: () => this.switchTab('queue'),
+      onOpenWalkIn: () => this.showWalkInModal(),
+      onOpenClosures: () => {
+        this.switchTab('profile');
+        this.switchProfileSubtab('closures');
+      },
+      onOpenServices: () => this.switchTab('services'),
+      onViewStaff: () => this.switchTab('staff'),
+      onCopyLink: () => {
+        const slug = this.salonProfile?.slug || 'salon';
+        const url = `${window.location.origin}/#book/${slug}`;
+        navigator.clipboard.writeText(url);
+        if (typeof showNotification === 'function') {
+          showNotification('📋 Booking link copied to clipboard!', 'success');
+        } else {
+          alert(`Booking link copied:\n${url}`);
+        }
+      },
+      onFilterQueue: (filter) => {
+        this.queueFilter = filter;
+        this.switchTab('queue');
+      },
+      onUpdateStatus: async (id, status) => {
+        try {
+          await ApiClient.updateAppointmentStatus(id, status);
+          if (typeof showNotification === 'function') {
+            showNotification(`Updated appointment status to ${status}`, 'success');
+          }
+          if (this.activeTab === 'home') {
+            const fresh = await ApiClient.getDashboardSummary(this.selectedDate, true).catch(() => null);
+            if (fresh) this.summaryData = fresh;
+            this.refreshActiveTab();
+          } else {
+            await this.loadData(true);
+            this.refreshActiveTab();
+          }
+        } catch (err) {
+          console.error('[Dashboard] Status update failed:', err);
+          if (typeof showNotification === 'function') {
+            showNotification(err.message || 'Status update failed', 'error');
+          }
+        }
+      },
+    });
   }
 
   /**
@@ -266,10 +316,31 @@ export class SalonDashboard {
   }
 
   openQuickRequestsModal() {
-    const todayAppts = this.summaryData?.todayAppointments || [];
-    const pendingRequests = todayAppts.filter(
+    const pool = (Array.isArray(this.summaryData?.quickRequests) && this.summaryData.quickRequests.length > 0)
+      ? this.summaryData.quickRequests
+      : (this.summaryData?.todayAppointments || this.queueSync?.items || []);
+    const pendingRequests = pool.filter(
       (a) => a.status === 'PENDING_ACCEPTANCE' || (a.source === 'QUICK_BOOK' && a.status === 'PENDING_ACCEPTANCE')
     );
+
+    // Group pending requests by stylist
+    const stylistGroups = [];
+    const stylistGroupMap = new Map();
+
+    for (const req of pendingRequests) {
+      const sId = req.stylist?.id || req.staff?.id || 'unassigned';
+      if (!stylistGroupMap.has(sId)) {
+        const group = {
+          stylist: req.stylist?.id
+            ? req.stylist
+            : (req.staff?.id ? req.staff : { id: 'unassigned', name: 'Any Specialist', colorCode: '#94a3b8' }),
+          requests: [],
+        };
+        stylistGroupMap.set(sId, group);
+        stylistGroups.push(group);
+      }
+      stylistGroupMap.get(sId).requests.push(req);
+    }
 
     let modal = document.getElementById('modal-quick-requests');
     if (modal) modal.remove();
@@ -278,75 +349,242 @@ export class SalonDashboard {
     modal.id = 'modal-quick-requests';
     modal.className = 'modal-backdrop';
     modal.style.cssText = `
-      position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-      background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(8px);
-      z-index: 99999; display: flex; align-items: center; justify-content: center; padding: 16px;
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0; width: 100%; height: 100%;
+      background: rgba(8, 6, 14, 0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      z-index: 99999; display: flex; align-items: center; justify-content: center;
+      padding: 16px; box-sizing: border-box; overflow-y: auto;
     `;
 
-    const listHtml = pendingRequests.length === 0
-      ? `
-        <div style="text-align: center; padding: 40px 20px; color: #94a3b8;">
-          <div style="font-size: 2.5rem; margin-bottom: 12px;">⚡</div>
-          <h4 style="color: #f8fafc; margin-bottom: 6px; font-weight: 700;">No Pending Requests</h4>
-          <p style="font-size: 0.88rem; margin: 0;">There are no active quick booking check-in requests waiting for approval.</p>
-        </div>
-      `
-      : pendingRequests.map((req) => {
+    const renderReqCard = (req) => {
         const clientName = req.customer?.name || req.customerPhone || 'In-Salon Client';
         const clientPhone = req.customer?.phone || req.customerPhone || '';
         const reqServices = getApptServices(req);
         const serviceName = reqServices.length > 0
           ? reqServices.map((s) => `${s.name}${s.isAddon ? ' (Add-on)' : ''}`).join(' + ')
           : (req.serviceNameSnapshot || req.service?.name || 'Quick Service');
-        const timeStr = req.startTime ? formatTime12h(req.startTime) : 'Today';
+        const rawTime = req.startTime || req.startAt;
+        const timeStr = rawTime
+          ? (typeof formatTime12h === 'function' ? formatTime12h(rawTime) : new Date(rawTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }))
+          : 'Today';
         const specialist = req.staff?.name || req.stylist?.name || 'Any Specialist';
-        const price = req.price ? `₹${req.price}` : '';
+        const finalPrice = req.totalPrice !== undefined ? req.totalPrice : req.price;
+        const price = finalPrice ? `₹${Number(finalPrice).toLocaleString('en-IN')}` : '';
+
+        // Clean customer initials
+        const nameParts = clientName.trim().split(/\s+/);
+        const initials = nameParts.length >= 2
+          ? (nameParts[0][0] + nameParts[nameParts.length - 1][0]).toUpperCase()
+          : (clientName.substring(0, 2) || 'CL').toUpperCase();
+
+        // High quality channel badge (compact)
+        let channelBadge = '';
+        if (req.source === 'WHATSAPP') {
+          channelBadge = `
+            <span style="display: inline-flex; align-items: center; gap: 3px; background: rgba(34, 197, 94, 0.15); border: 1px solid rgba(34, 197, 94, 0.35); color: #4ade80; font-size: 0.66rem; font-weight: 700; padding: 1px 7px; border-radius: 9999px;">
+              ${Icons.messageCircle ? Icons.messageCircle({ size: 11, color: '#4ade80' }) : '💬'}
+              <span>WhatsApp</span>
+            </span>
+          `;
+        } else if (req.source === 'QUICK_BOOK') {
+          channelBadge = `
+            <span style="display: inline-flex; align-items: center; gap: 3px; background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.35); color: #fbbf24; font-size: 0.66rem; font-weight: 700; padding: 1px 7px; border-radius: 9999px;">
+              ${Icons.qrCode ? Icons.qrCode({ size: 11, color: '#fbbf24' }) : '📱'}
+              <span>Store QR</span>
+            </span>
+          `;
+        } else {
+          channelBadge = `
+            <span style="display: inline-flex; align-items: center; gap: 3px; background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.35); color: #38bdf8; font-size: 0.66rem; font-weight: 700; padding: 1px 7px; border-radius: 9999px;">
+              ${Icons.user ? Icons.user({ size: 11, color: '#38bdf8' }) : '📲'}
+              <span>App</span>
+            </span>
+          `;
+        }
 
         return `
-          <div class="quick-req-card" style="background: rgba(30, 41, 59, 0.85); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 12px; padding: 16px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 10px;">
-            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-              <div>
-                <div style="font-weight: 700; color: #f8fafc; font-size: 1rem; display: flex; align-items: center; gap: 8px;">
-                  <span>${clientName}</span>
+          <div class="quick-req-card" style="background: #1e172e; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 11px; padding: 10px 12px; margin-bottom: 8px; box-sizing: border-box; width: 100%; display: block; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);">
+            
+            <!-- Row 1: Header (Avatar, Name, Badge & Price/Time) -->
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px;">
+              
+              <!-- Avatar + Name & Phone -->
+              <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+                <div style="width: 32px; height: 32px; border-radius: 8px; background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 0.78rem; color: #ffffff; flex-shrink: 0;">
+                  ${initials}
                 </div>
-                <div style="color: #94a3b8; font-size: 0.82rem; margin-top: 2px;">📞 ${clientPhone}</div>
+
+                <div style="min-width: 0;">
+                  <div style="display: flex; align-items: center; gap: 6px;">
+                    <span style="font-weight: 700; color: #ffffff; font-size: 0.92rem; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px;">
+                      ${clientName}
+                    </span>
+                    ${channelBadge}
+                  </div>
+                  ${clientPhone ? `
+                    <div style="margin-top: 1px;">
+                      <a href="tel:${clientPhone}" style="color: #94a3b8; font-size: 0.72rem; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; font-weight: 500;">
+                        ${Icons.phone ? Icons.phone({ size: 10, color: '#94a3b8' }) : '📞'}
+                        <span>${clientPhone}</span>
+                      </a>
+                    </div>
+                  ` : ''}
+                </div>
               </div>
-              <div style="text-align: right;">
-                <div style="font-weight: 700; color: #34d399; font-size: 1rem;">${price}</div>
-                <div style="color: #cbd5e1; font-size: 0.82rem; font-weight: 600;">🕒 ${timeStr}</div>
+
+              <!-- Price & Time -->
+              <div style="text-align: right; flex-shrink: 0;">
+                <div style="font-weight: 800; color: #34d399; font-size: 1.1rem; font-family: var(--font-heading, sans-serif); line-height: 1;">
+                  ${price}
+                </div>
+                <div style="display: inline-flex; align-items: center; gap: 3px; color: #cbd5e1; font-size: 0.70rem; font-weight: 600; margin-top: 2px;">
+                  ${Icons.clock ? Icons.clock({ size: 11, color: '#94a3b8' }) : '🕒'}
+                  <span>${timeStr}</span>
+                </div>
               </div>
+
             </div>
-            <div style="font-size: 0.85rem; color: #e2e8f0; background: rgba(15, 23, 42, 0.6); padding: 8px 12px; border-radius: 8px; display: flex; justify-content: space-between;">
-              <span><strong>Service:</strong> ${serviceName}</span>
-              <span><strong>Specialist:</strong> ${specialist}</span>
+
+            <!-- Row 2: Service & Specialist Box (Inline Horizontal Strip) -->
+            <div style="background: rgba(0, 0, 0, 0.22); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 7px; padding: 5px 9px; margin-bottom: 7px; font-size: 0.76rem; display: flex; flex-direction: column; gap: 3px;">
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;">
+                <div style="display: inline-flex; align-items: center; gap: 5px; min-width: 0;">
+                  <span style="color: #fbbf24; font-weight: 700; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.04em;">Service:</span>
+                  <span style="color: #ffffff; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${serviceName}</span>
+                </div>
+                <div style="display: inline-flex; align-items: center; gap: 5px; min-width: 0;">
+                  <span style="color: #c084fc; font-weight: 700; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.04em;">Specialist:</span>
+                  <span style="color: #f1f5f9; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${specialist}</span>
+                </div>
+              </div>
+              ${req.notes ? `
+                <div style="font-size: 0.70rem; color: #94a3b8; font-style: italic; border-top: 1px dashed rgba(255, 255, 255, 0.07); padding-top: 2px; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                  "${req.notes}"
+                </div>
+              ` : ''}
             </div>
-            <div style="display: flex; gap: 10px; margin-top: 4px;">
-              <button class="btn btn-success btn-sm btn-accept-quick-req" data-id="${req.id}" style="flex: 1; padding: 10px; font-weight: 700; gap: 6px; display: flex; align-items: center; justify-content: center; background: #10b981; border: none; border-radius: 8px; color: #fff; cursor: pointer;">
-                ✅ Accept & Check In
+
+            <!-- Row 3: Action Buttons (Compact & Prominent) -->
+            <div style="display: flex; gap: 8px; width: 100%;">
+              <button type="button" class="btn-accept-quick-req" data-id="${req.id}" style="flex: 1; padding: 7px 10px; font-weight: 700; font-size: 0.80rem; letter-spacing: 0.01em; display: flex; align-items: center; justify-content: center; gap: 6px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; border-radius: 8px; color: #ffffff; cursor: pointer; box-shadow: 0 3px 10px rgba(16, 185, 129, 0.3); transition: all 0.2s ease;">
+                ${Icons.check ? Icons.check({ size: 14, color: '#ffffff', strokeWidth: 2.5 }) : '✓'}
+                <span>Accept & Check In</span>
               </button>
-              <button class="btn btn-danger btn-sm btn-decline-quick-req" data-id="${req.id}" style="flex: 1; padding: 10px; font-weight: 700; gap: 6px; display: flex; align-items: center; justify-content: center; background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 8px; color: #f87171; cursor: pointer;">
-                ❌ Decline
+              <button type="button" class="btn-decline-quick-req" data-id="${req.id}" style="flex: 1; padding: 7px 10px; font-weight: 700; font-size: 0.80rem; display: flex; align-items: center; justify-content: center; gap: 6px; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 8px; color: #f87171; cursor: pointer; transition: all 0.2s ease;">
+                ${Icons.x ? Icons.x({ size: 14, color: '#f87171', strokeWidth: 2.5 }) : '✕'}
+                <span>Decline</span>
               </button>
             </div>
+
           </div>
         `;
-      }).join('');
+    };
+
+    const listHtml = pendingRequests.length === 0
+      ? `
+        <div style="text-align: center; padding: 48px 20px; color: #94a3b8; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+          <div style="width: 56px; height: 56px; border-radius: 16px; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.25); display: flex; align-items: center; justify-content: center; margin-bottom: 14px;">
+            ${Icons.check ? Icons.check({ size: 28, color: '#34d399', strokeWidth: 2.5 }) : '✓'}
+          </div>
+          <h4 style="color: #f8fafc; margin: 0 0 6px 0; font-size: 1.08rem; font-weight: 700;">All Caught Up!</h4>
+          <p style="font-size: 0.84rem; color: #94a3b8; margin: 0; max-width: 280px; line-height: 1.4;">
+            There are no pending quick booking check-in requests waiting for approval right now.
+          </p>
+        </div>
+      `
+      : stylistGroups.map((group) => {
+          const sName = group.stylist?.name || 'Any Specialist';
+          const sColor = group.stylist?.colorCode || '#8b5cf6';
+          const sInitial = (sName.charAt(0) || 'S').toUpperCase();
+          const reqCount = group.requests.length;
+
+          return `
+            <div class="stylist-request-group" style="margin-bottom: 14px;">
+              <!-- Stylist Group Header Banner -->
+              <div style="display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; margin-bottom: 8px; border-radius: 9px; background: rgba(255, 255, 255, 0.04); border-left: 3px solid ${sColor};">
+                <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+                  <div style="width: 24px; height: 24px; border-radius: 6px; background: ${sColor}33; border: 1px solid ${sColor}88; display: flex; align-items: center; justify-content: center; font-size: 0.72rem; font-weight: 800; color: #ffffff; flex-shrink: 0;">
+                    ${sInitial}
+                  </div>
+                  <div style="min-width: 0;">
+                    <span style="font-weight: 700; font-size: 0.86rem; color: #f8fafc;">
+                      ${sName}
+                    </span>
+                  </div>
+                </div>
+                <span style="font-size: 0.72rem; font-weight: 700; color: #fbbf24; background: rgba(245, 158, 11, 0.12); padding: 2px 8px; border-radius: 6px; border: 1px solid rgba(245, 158, 11, 0.25); flex-shrink: 0;">
+                  ${reqCount} ${reqCount === 1 ? 'Request' : 'Requests'}
+                </span>
+              </div>
+
+              <!-- Cards for this stylist -->
+              <div style="display: flex; flex-direction: column; gap: 6px;">
+                ${group.requests.map((req) => renderReqCard(req)).join('')}
+              </div>
+            </div>
+          `;
+        }).join('');
 
     modal.innerHTML = `
-      <div class="modal-card" style="background: #0f172a; border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 16px; max-width: 520px; width: 100%; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);">
-        <div style="padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center; background: rgba(245, 158, 11, 0.08);">
-          <div style="display: flex; align-items: center; gap: 10px;">
-            <span style="font-size: 1.4rem;">⚡</span>
-            <div>
-              <h3 style="margin: 0; color: #f8fafc; font-size: 1.1rem; font-weight: 700;">Quick Booking Requests</h3>
-              <span style="font-size: 0.78rem; color: #fbbf24;">Pending Salon Check-in Approval</span>
+      <style>
+        .quick-req-card {
+          transition: transform 0.15s ease, border-color 0.15s ease;
+        }
+        .quick-req-card:hover {
+          border-color: rgba(245, 158, 11, 0.45) !important;
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5) !important;
+        }
+        .btn-accept-quick-req:hover {
+          filter: brightness(1.1);
+          transform: translateY(-1px);
+        }
+        .btn-decline-quick-req:hover {
+          background: rgba(239, 68, 68, 0.22) !important;
+          border-color: rgba(239, 68, 68, 0.5) !important;
+        }
+        #btn-close-quick-requests-modal:hover {
+          background: rgba(255, 255, 255, 0.16) !important;
+          color: #ffffff !important;
+        }
+      </style>
+      <div class="modal-card" style="background: #140f20; border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 16px; max-width: 500px; width: 100%; max-height: 85vh; display: flex; flex-direction: column; box-shadow: 0 25px 60px rgba(0, 0, 0, 0.75); margin: auto; overflow: hidden;">
+        
+        <!-- Header -->
+        <div style="padding: 13px 16px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); display: flex; justify-content: space-between; align-items: center; gap: 12px; background: rgba(245, 158, 11, 0.05); flex-shrink: 0;">
+          
+          <!-- Left: Icon + Title & Subtitle -->
+          <div style="display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1;">
+            <div style="width: 32px; height: 32px; border-radius: 8px; background: rgba(245, 158, 11, 0.16); border: 1px solid rgba(245, 158, 11, 0.35); display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+              ${Icons.zap ? Icons.zap({ size: 16, color: '#fbbf24' }) : '⚡'}
+            </div>
+            <div style="min-width: 0;">
+              <h3 style="margin: 0; color: #ffffff; font-size: 1.02rem; font-weight: 800; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                Quick Booking Requests
+              </h3>
+              <div style="font-size: 0.70rem; color: #94a3b8; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                Review and approve incoming WhatsApp & QR appointments
+              </div>
             </div>
           </div>
-          <button id="btn-close-quick-requests-modal" style="background: none; border: none; color: #94a3b8; font-size: 1.4rem; cursor: pointer; padding: 4px;">✕</button>
+
+          <!-- Right: Pending Badge + Close Button -->
+          <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+            ${pendingRequests.length > 0 ? `
+              <span style="background: rgba(245, 158, 11, 0.16); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.38); font-size: 0.68rem; font-weight: 700; padding: 3px 8px; border-radius: 9999px; white-space: nowrap; display: inline-flex; align-items: center; flex-shrink: 0; line-height: 1.2;">
+                ${pendingRequests.length} Pending
+              </span>
+            ` : ''}
+            <button id="btn-close-quick-requests-modal" type="button" aria-label="Close" style="width: 28px; height: 28px; border-radius: 50%; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.12); color: #94a3b8; font-size: 0.9rem; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.15s ease;">
+              ✕
+            </button>
+          </div>
+
         </div>
-        <div style="padding: 16px 20px; overflow-y: auto; flex: 1;">
+
+        <!-- Body: Block display with smooth vertical scroll, cards never squish -->
+        <div style="padding: 10px 12px; overflow-y: auto; flex: 1; -webkit-overflow-scrolling: touch; display: block;">
           ${listHtml}
         </div>
+
       </div>
     `;
 
@@ -364,7 +602,7 @@ export class SalonDashboard {
         btn.disabled = true;
         btn.innerText = 'Accepting...';
         try {
-          await ApiClient.updateAppointmentStatus(id, 'CHECKED_IN');
+          await ApiClient.acceptQuickBooking(id);
           this.showToast('Quick booking accepted & customer checked in!', 'success');
           modal.remove();
           await this.refreshCurrentView(true);
@@ -372,7 +610,7 @@ export class SalonDashboard {
         } catch (err) {
           this.showToast(`Error accepting booking: ${err.message}`, 'danger');
           btn.disabled = false;
-          btn.innerText = '✅ Accept & Check In';
+          btn.innerText = '✓ Accept & Check In';
         }
       });
     });
@@ -384,7 +622,7 @@ export class SalonDashboard {
         btn.disabled = true;
         btn.innerText = 'Declining...';
         try {
-          await ApiClient.updateAppointmentStatus(id, 'CANCELLED');
+          await ApiClient.declineQuickBooking(id);
           this.showToast('Quick booking declined.', 'warning');
           modal.remove();
           await this.refreshCurrentView(true);
@@ -392,7 +630,7 @@ export class SalonDashboard {
         } catch (err) {
           this.showToast(`Error declining booking: ${err.message}`, 'danger');
           btn.disabled = false;
-          btn.innerText = '❌ Decline';
+          btn.innerText = '✕ Decline';
         }
       });
     });
@@ -440,6 +678,9 @@ export class SalonDashboard {
         }
       } catch (_) { }
 
+      // Listen for network state changes and server health events
+      this.initNetworkListeners();
+
       const hasCache = SalonRepository.hasCachedWorkspace();
 
       if (hasCache) {
@@ -469,13 +710,30 @@ export class SalonDashboard {
         this.loadData(true).then(() => {
           this.refreshActiveTab();
           this.updateQuickRequestsBadge();
+          this.updateOfflineBanner();
         }).catch((err) => {
           console.warn('[Dashboard] Background revalidation warning:', err);
+          this.updateOfflineBanner();
         });
       } else {
-        // COLD BOOT: Show loading indicator only on brand new login
+        // COLD BOOT: Show loading indicator with strict timeout guard
         this.renderLoading();
-        await this.loadData();
+
+        // Timeout guard: never trap the user for more than 3.5 seconds
+        const loadPromise = this.loadData();
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Initial data load timeout')), 3500));
+
+        try {
+          await Promise.race([loadPromise, timeoutPromise]);
+        } catch (err) {
+          console.warn('[Dashboard] Cold boot load error/timeout:', err);
+        }
+
+        // If backend is unreachable and we have no cached salon profile, show server unreachable diagnostic screen
+        if (NetworkHealth.isServerUnreachable() && (!this.salonProfile || !this.salonProfile.id)) {
+          this.renderServerUnreachable(NetworkHealth.getLastError());
+          return;
+        }
 
         try {
           const savedStaffJson = sessionStorage.getItem('active_staff_workspace');
@@ -533,6 +791,15 @@ export class SalonDashboard {
           if (syncResult && syncResult.handled && syncResult.mutated && syncResult.isCurrentDate) {
             // Handled completely in memory without redundant HTTP requests!
             this.updateQuickRequestsBadge();
+            // Re-sync Home pulse in background so revenue and floor metrics stay 100% accurate
+            if (this.activeTab === 'home') {
+              ApiClient.getDashboardSummary(this.selectedDate, true).then((fresh) => {
+                if (fresh) {
+                  this.summaryData = fresh;
+                  this.refreshActiveTab();
+                }
+              }).catch(() => {});
+            }
             return;
           }
 
@@ -545,13 +812,29 @@ export class SalonDashboard {
             if (payload?.type === 'SERVICE_UPDATED') {
               this.servicesList = await ApiClient.getServices(true).catch(() => this.servicesList);
             }
+            // If currently on Home tab, refresh the Home feed directly so Staff & Services summaries update instantly
+            if (this.activeTab === 'home') {
+              const fresh = await ApiClient.getDashboardSummary(this.selectedDate, true).catch(() => null);
+              if (fresh) this.summaryData = fresh;
+              this.refreshActiveTab();
+              return;
+            }
             if (this.activeTab === 'staff' || this.activeTab === 'services') {
               this.render();
             }
             return;
           }
 
-          // 3. Fallback for other events
+          // 3. Fallback for other events: If on Home tab, execute fast single-call sync
+          if (this.activeTab === 'home') {
+            const fresh = await ApiClient.getDashboardSummary(this.selectedDate, true).catch(() => null);
+            if (fresh) this.summaryData = fresh;
+            this.updateQuickRequestsBadge();
+            this.refreshActiveTab();
+            return;
+          }
+
+          // Multi-tab deep reload
           await this.loadData(true);
           this.updateQuickRequestsBadge();
           this.refreshActiveTab();
@@ -730,7 +1013,7 @@ export class SalonDashboard {
   async refreshCurrentView(force = true) {
     const tab = this.activeTab || 'queue';
     try {
-      if (tab === 'queue') {
+      if (tab === 'queue' || tab === 'dashboard') {
         await Promise.all([
           this.queueSync.fetchQueue(force).catch(() => {}),
           ApiClient.getDashboardSummary(this.selectedDate, force).then((s) => {
@@ -780,46 +1063,51 @@ export class SalonDashboard {
     if (fullReload) {
       try {
         this.queueSync.setDate(this.selectedDate);
+        const bypass = !!fullReload;
         // Stage 1: Critical Core Data (Immediate display — fast path without cache-busting penalty)
-        const [summary, staff, services, profile] = await Promise.all([
-          ApiClient.getDashboardSummary(this.selectedDate, false).catch((err) => {
+        const [summary, staff, services, profile, queueRes, recentApptsRes] = await Promise.all([
+          ApiClient.getDashboardSummary(this.selectedDate, bypass).catch((err) => {
             console.warn('[Dashboard] Summary fetch error:', err);
             return fallbackSummary;
           }),
-          ApiClient.getStaff(false).catch((err) => {
+          ApiClient.getStaff(bypass).catch((err) => {
             console.warn('[Dashboard] Staff fetch error:', err);
             return this.staffList || [];
           }),
-          ApiClient.getServices(false).catch((err) => {
+          ApiClient.getServices(bypass).catch((err) => {
             console.warn('[Dashboard] Services fetch error:', err);
             return this.servicesList || [];
           }),
-          ApiClient.getSalonProfile(false).catch((err) => {
+          ApiClient.getSalonProfile(bypass).catch((err) => {
             console.warn('[Dashboard] Profile fetch error:', err);
             return this.salonProfile || {};
           }),
-          this.queueSync.fetchQueue(false).catch((err) => {
+          this.queueSync.fetchQueue(bypass).catch((err) => {
             console.warn('[Dashboard] Queue fetch error:', err);
             return null;
           }),
+          ApiClient.getAppointments({ limit: 10 }).catch(() => []),
         ]);
 
         this.summaryData = summary || fallbackSummary;
         if (Array.isArray(this.queueSync.items)) {
           this.summaryData.todayAppointments = this.queueSync.items;
         }
+        this.recentAppointments = Array.isArray(recentApptsRes)
+          ? recentApptsRes
+          : (Array.isArray(recentApptsRes?.data) ? recentApptsRes.data : (Array.isArray(recentApptsRes?.items) ? recentApptsRes.items : []));
         this.staffList = Array.isArray(staff) ? staff : [];
         this.servicesList = Array.isArray(services) ? services : [];
         this.salonProfile = profile || {};
 
         // Stage 2: Background Non-Blocking Enrichment (Hydrates categories, calendar, hours, breaks asynchronously)
         Promise.all([
-          ApiClient.getServiceCategories(false).catch(() => this.categoriesList || []),
+          ApiClient.getServiceCategories(bypass).catch(() => this.categoriesList || []),
           ApiClient.getCalendarSchedule({
             month: `${this.calYear}-${String(this.calMonth + 1).padStart(2, '0')}`,
-          }, false).catch(() => null),
-          ApiClient.getSalonWorkingHours(false).catch(() => this.salonWorkingHours || []),
-          ApiClient.getSalonBreaks(false).catch(() => this.salonBreaks || []),
+          }, bypass).catch(() => null),
+          ApiClient.getSalonWorkingHours(bypass).catch(() => this.salonWorkingHours || []),
+          ApiClient.getSalonBreaks(bypass).catch(() => this.salonBreaks || []),
         ]).then(([categories, calendarScheduleRes, workingHours, salonBreaks]) => {
           this.categoriesList = Array.isArray(categories) ? categories : [];
           const calData = calendarScheduleRes?.data || calendarScheduleRes;
@@ -862,6 +1150,134 @@ export class SalonDashboard {
   }
 
 
+  initNetworkListeners() {
+    if (this._networkListenersInitialized) return;
+    this._networkListenersInitialized = true;
+
+    NetworkHealth.on('stateChanged', () => {
+      this.updateOfflineBanner();
+    });
+
+    NetworkHealth.on('serverRestored', () => {
+      showNotification('🟢 Salon server reconnected! Syncing live data...', 'info');
+      this.loadData(true).then(() => {
+        this.refreshActiveTab();
+        this.updateQuickRequestsBadge();
+        this.updateOfflineBanner();
+      }).catch((err) => console.warn('[Dashboard] Sync on restore error:', err));
+    });
+  }
+
+  updateOfflineBanner() {
+    const slot = document.getElementById('salon-offline-banner-slot');
+    if (!slot) return;
+
+    if (!NetworkHealth.isServerUnreachable()) {
+      slot.innerHTML = '';
+      slot.style.display = 'none';
+      return;
+    }
+
+    const isDeviceOffline = (typeof navigator !== 'undefined' && !navigator.onLine) || NetworkHealth.getState() === ConnectionState.OFFLINE;
+    const label = isDeviceOffline ? 'No Internet' : 'Offline Mode';
+    const subLabel = isDeviceOffline ? 'Check connection' : 'Showing saved data';
+    const dotColor = isDeviceOffline ? '#ef4444' : '#f59e0b';
+    const labelColor = isDeviceOffline ? '#fca5a5' : '#fbbf24';
+
+    slot.style.display = 'block';
+    slot.innerHTML = `
+      <div id="salon-offline-pill" style="display: flex; align-items: center; justify-content: center; margin: 4px auto 14px auto; max-width: max-content;">
+        <div style="background: rgba(28, 23, 38, 0.92); backdrop-filter: blur(14px); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 9999px; padding: 5px 14px; display: inline-flex; align-items: center; gap: 8px; font-size: 0.76rem; color: #f1f5f9; box-shadow: 0 4px 18px rgba(0,0,0,0.4);">
+          <span style="width: 7px; height: 7px; border-radius: 50%; background: ${dotColor}; display: inline-block; box-shadow: 0 0 8px ${dotColor};"></span>
+          <span style="font-weight: 700; color: ${labelColor};">${label}</span>
+          <span style="color: #475569;">•</span>
+          <span style="color: #94a3b8;">${subLabel}</span>
+          <button type="button" id="btn-banner-retry" style="background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); color: #fff; padding: 2px 10px; border-radius: 9999px; font-size: 0.70rem; cursor: pointer; margin-left: 2px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; transition: background 0.15s ease;">
+            <span>Sync</span>
+          </button>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('btn-banner-retry')?.addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      btn.textContent = 'Syncing...';
+      const isAlive = await NetworkHealth.checkHealth();
+      if (isAlive) {
+        showNotification('Connected to salon server!', 'info');
+        this.loadData(true).then(() => {
+          this.refreshActiveTab();
+          this.updateQuickRequestsBadge();
+          this.updateOfflineBanner();
+        });
+      } else {
+        btn.disabled = false;
+        btn.textContent = 'Sync';
+        showNotification(isDeviceOffline ? 'Still no internet connection. Please check your Wi-Fi or mobile data.' : 'Still offline. Data will sync automatically once connected.', 'warning');
+      }
+    });
+  }
+
+  renderServerUnreachable(errorDetails = null) {
+    const isDeviceOffline = (typeof navigator !== 'undefined' && !navigator.onLine) || NetworkHealth.getState() === ConnectionState.OFFLINE;
+    const title = isDeviceOffline ? 'No Internet Connection' : 'Unable to Connect';
+    const desc = isDeviceOffline 
+      ? 'Your device is currently offline. Please check your Wi-Fi or mobile data connection.'
+      : "We're having trouble reaching the salon service. Please check your connection and try again.";
+    const btnLabel = isDeviceOffline ? 'Check Connection' : 'Try Again';
+
+    this.container.innerHTML = `
+      <div style="min-height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 24px; background: #0c0f17; color: #fff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+        <div style="width: 100%; max-width: 400px; text-align: center;">
+          
+          <div style="display: inline-flex; align-items: center; justify-content: center; width: 60px; height: 60px; border-radius: 20px; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.3); margin-bottom: 20px; font-size: 26px;">
+            ${isDeviceOffline ? '📶' : '📡'}
+          </div>
+
+          <h2 style="font-size: 1.45rem; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 8px; color: #fff;">
+            ${title}
+          </h2>
+          <p style="color: #94a3b8; font-size: 0.88rem; line-height: 1.5; margin-bottom: 24px;">
+            ${desc}
+          </p>
+
+          <div style="display: flex; flex-direction: column; gap: 10px;">
+            <button type="button" id="btn-unreachable-retry" class="btn btn-primary" style="width: 100%; padding: 13px; font-weight: 700; font-size: 0.92rem; justify-content: center;">
+              <span>${btnLabel}</span>
+            </button>
+
+            <button type="button" id="btn-unreachable-logout" style="width: 100%; padding: 10px; background: transparent; border: none; color: #94a3b8; font-size: 0.82rem; cursor: pointer; margin-top: 4px;">
+              Sign in with another account
+            </button>
+          </div>
+
+        </div>
+      </div>
+    `;
+
+    document.getElementById('btn-unreachable-retry')?.addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      btn.textContent = 'Connecting...';
+      const isAlive = await NetworkHealth.checkHealth();
+      if (isAlive) {
+        showNotification('Connection restored!', 'info');
+        this.init();
+      } else {
+        btn.disabled = false;
+        btn.textContent = btnLabel;
+        showNotification(isDeviceOffline ? 'Still offline. Please check your Wi-Fi.' : 'Could not connect. Please try again in a moment.', 'warning');
+      }
+    });
+
+    document.getElementById('btn-unreachable-logout')?.addEventListener('click', async () => {
+      await ApiClient.logout();
+      window.location.hash = '#login';
+      window.location.reload();
+    });
+  }
+
   renderLoading() {
     // If persistent shell is already mounted, NEVER wipe the DOM during background syncs!
     if (this.container && this.container.querySelector('.portal-header')) {
@@ -869,13 +1285,18 @@ export class SalonDashboard {
     }
 
     this.container.innerHTML = `
-      <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #0c0f17; color: #fff; font-family: sans-serif; gap: 16px;">
+      <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #0c0f17; color: #fff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; gap: 16px;">
         <div style="width: 46px; height: 46px; border: 3px solid rgba(168, 85, 247, 0.2); border-top-color: #a855f7; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
         <div style="font-size: 0.95rem; font-weight: 700; color: #e2e8f0; letter-spacing: -0.01em;">StyleSlot Operations</div>
-        <div style="font-size: 0.78rem; color: #94a3b8;">Loading secure salon workspace...</div>
+        <div style="font-size: 0.78rem; color: #94a3b8;" id="loading-status-text">Connecting to salon workspace...</div>
       </div>
       <style>@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }</style>
     `;
+
+    setTimeout(() => {
+      const el = document.getElementById('loading-status-text');
+      if (el) el.textContent = 'Verifying server connection...';
+    }, 1800);
   }
 
 
@@ -898,6 +1319,7 @@ export class SalonDashboard {
     const existingHeader = this.container?.querySelector('.portal-header');
     if (existingTabContent && existingHeader) {
       this.refreshActiveTab();
+      this.updateOfflineBanner();
       return;
     }
 
@@ -965,6 +1387,9 @@ export class SalonDashboard {
             <span id="ptr-text">Pull to refresh</span>
           </div>
         </div>
+
+        <!-- Universal Offline / Reconnecting Banner Slot -->
+        <div id="salon-offline-banner-slot" style="display: none;"></div>
 
         <!-- Setup Required Onboarding Banner (Only for genuinely inactive/unconfigured salons) -->
         ${isSetupRequired ? `
@@ -1069,6 +1494,7 @@ export class SalonDashboard {
 
 
     this.attachEventListeners();
+    this.updateOfflineBanner();
     if (window.history && window.history.replaceState) {
       try {
         const newHash = this.activeTab === 'dashboard' ? '#admin' : `#admin/${this.activeTab}`;
@@ -1103,12 +1529,6 @@ export class SalonDashboard {
   // =========================================================================
   renderDashboardTab() {
     const summary = this.summaryData || {};
-    const statusCounts = summary.statusCounts || { total: 0, booked: 0, confirmed: 0, checkedIn: 0, onTheWay: 0, inService: 0, seatedInChair: 0, completed: 0, cancelled: 0, noShow: 0, rejected: 0 };
-    const waitingDisplayCount = (statusCounts.checkedIn || 0) + (statusCounts.onTheWay || 0);
-    const inChairDisplayCount = (statusCounts.inService || 0) + (statusCounts.seatedInChair || 0);
-    const bookedConfirmedCount = (statusCounts.confirmed || 0) + (statusCounts.booked || 0);
-    const todayRevenue = summary.todayRevenue || 0;
-    const todayAppointments = summary.todayAppointments || [];
     const profile = this.salonProfile || {};
     const todayClosure = this.getTodayClosure();
 
@@ -1124,336 +1544,21 @@ export class SalonDashboard {
     else if (diffDays === -1) labelPrefix = "YESTERDAY'S";
     else if (diffDays !== 0) {
       const formatted = selDate.toLocaleDateString('en-US', { day: '2-digit', month: 'short' }).toUpperCase();
-      labelPrefix = `${formatted}`;
+      labelPrefix = formatted;
     }
 
-    return `
-      ${todayClosure ? `
-        <div style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: var(--radius-md); padding: 14px 18px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; box-shadow: 0 8px 24px rgba(239, 68, 68, 0.15);">
-          <div style="display: flex; align-items: center; gap: 10px; color: #f87171; font-size: 0.88rem; font-weight: 700;">
-            <span style="font-size: 1.2rem;">🚨</span>
-            <span>STORE CLOSED TODAY (${todayClosure.closureType}): ${todayClosure.reason}</span>
-          </div>
-          <button class="btn btn-secondary btn-sm btn-open-closures-modal" style="border-color: rgba(239, 68, 68, 0.4); color: #f87171; font-size: 0.78rem;">
-            Manage Closures & Holidays →
-          </button>
-        </div>
-      ` : ''}
-
-      ${(profile.status === 'INACTIVE' || summary.status === 'INACTIVE') ? `
-        <div style="background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; border-radius: 14px; padding: 16px 20px; margin-bottom: 24px; color: #fca5a5; display: flex; align-items: center; justify-content: space-between; gap: 16px; box-shadow: 0 10px 25px rgba(239, 68, 68, 0.15);">
-          <div style="display: flex; align-items: center; gap: 14px;">
-            <span style="font-size: 1.6rem;">⚠️</span>
-            <div>
-              <div style="font-weight: 700; font-size: 1rem; color: #fee2e2; margin-bottom: 2px;">Salon Account is INACTIVE</div>
-              <div style="font-size: 0.85rem; color: #fca5a5; line-height: 1.4;">
-                Automated WhatsApp booking response is paused. To activate your account, ensure your salon catalog has at least <strong>1 Active Stylist</strong> and <strong>1 Active Service</strong>.
-              </div>
-            </div>
-          </div>
-          <button type="button" class="btn btn-primary btn-sm" id="btn-goto-services-banner" style="white-space: nowrap; font-size: 0.85rem; padding: 8px 16px;">Set Up Catalog →</button>
-        </div>
-      ` : ''}
-
-      <!-- Reception Desk Walk-In Quick Bar -->
-      <div class="reception-quick-bar">
-        <div class="reception-quick-left">
-          <span class="reception-quick-badge">
-            <span class="reception-pulse-dot"></span> RECEPTION DESK
-          </span>
-          <span style="font-size: 0.8rem; font-weight: 600; color: #cbd5e1;">Walk-in client waiting? Scan QR to join active queue:</span>
-          <span class="reception-quick-url" style="font-family: monospace; font-size: 0.76rem; color: #a5b4fc; background: rgba(0,0,0,0.3); padding: 2px 8px; border-radius: 4px;">/#book/${profile.slug || 'glamour-studio'}</span>
-        </div>
-        <div class="reception-quick-actions" style="display: flex; align-items: center; gap: 8px;">
-          <button type="button" class="btn btn-secondary btn-sm" id="btn-quick-copy" style="height: 30px; padding: 0 10px; font-size: 0.72rem; border-radius: 6px;">
-            ${Icons.copy({ size: 12 })} <span>Copy Link</span>
-          </button>
-          <button type="button" class="btn btn-primary btn-sm" id="btn-quick-standee" style="height: 30px; padding: 0 12px; font-size: 0.72rem; border-radius: 6px; font-weight: 700; background: linear-gradient(135deg, #8B3DFF 0%, #9D5CFF 100%);">
-            ${Icons.qrCode ? Icons.qrCode({ size: 12 }) : '🖨️'} <span>Print Acrylic Standee</span>
-          </button>
-        </div>
-      </div>
-
-      <!-- Grand Executive Cockpit Hero Banner -->
-      <div class="dashboard-hero-banner">
-        <div class="hero-main-row">
-          <div class="hero-revenue-col">
-            <div class="hero-label">
-              ${Icons.sparkles({ size: 14, color: '#fbbf24' })}
-              <span>${labelPrefix} REVENUE TAKE</span>
-            </div>
-            <div class="hero-revenue-val">₹${todayRevenue.toLocaleString()}</div>
-            <div class="hero-revenue-sub">
-              Collected from <strong>${statusCounts.completed}</strong> completed visits • <strong>${statusCounts.inService}</strong> currently in chair
-            </div>
-          </div>
-
-          <!-- Floor Telemetry Chips -->
-          <div class="hero-telemetry-chips">
-            <div class="telemetry-chip">
-              <span class="telemetry-chip-val" style="color: #c7d2fe;">${statusCounts.total}</span>
-              <span class="telemetry-chip-lbl">Bookings</span>
-            </div>
-            <div class="telemetry-chip">
-              <span class="telemetry-chip-val" style="color: #fbbf24;">${waitingDisplayCount}</span>
-              <span class="telemetry-chip-lbl">Waiting</span>
-            </div>
-            <div class="telemetry-chip">
-              <span class="telemetry-chip-val" style="color: #c084fc;">${inChairDisplayCount}</span>
-              <span class="telemetry-chip-lbl">In Chair</span>
-            </div>
-            <div class="telemetry-chip">
-              <span class="telemetry-chip-val" style="color: #34d399;">${statusCounts.completed}</span>
-              <span class="telemetry-chip-lbl">Done</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Live Station Occupancy Strip -->
-        <div class="stations-strip-panel">
-          <div class="stations-strip-header">
-            <span>Live Station Occupancy</span>
-            <span style="color: #34d399; font-size: 0.72rem; display: flex; align-items: center; gap: 4px;">
-              <span class="q-live-dot"></span> Real-Time Floor Radar
-            </span>
-          </div>
-          <div class="stations-cards-grid">
-            ${(this.staffList && this.staffList.length > 0)
-        ? this.staffList.map((st, idx) => {
-          const todayAppts = (todayAppointments || []).filter((a) => (a.staff?.id || a.staffId) === st.id);
-          const inService = todayAppts.find((a) => a.status === 'SEATED_IN_CHAIR' || a.status === 'IN_SERVICE');
-          const isOccupied = !!inService;
-          const _stDateIso = (this.selectedDate || new Date().toISOString().split('T')[0]);
-          const _stAbsent = (st.absences || []).some((ab) => {
-            if (ab.status !== 'ACTIVE') return false;
-            const sDate = (ab.startDate || '').split('T')[0];
-            const eDate = (ab.endDate || sDate).split('T')[0];
-            return _stDateIso >= sDate && _stDateIso <= eDate;
-          });
-          const _stStatusColor = todayClosure ? '#f87171' : _stAbsent ? '#fb7185' : isOccupied ? '#c084fc' : '#34d399';
-          const _stStatusLabel = todayClosure ? '🚨 Store Closed Today' : _stAbsent ? '🚫 Absent Today' : isOccupied ? `In Chair: ${inService.customer?.name || inService.customerName || inService.user?.name || 'Client'}` : '🟢 Ready for Walk-In';
-          return `
-                    <div class="station-card ${_stAbsent || todayClosure ? 'absent' : isOccupied ? 'occupied' : 'ready'}" style="${_stAbsent || todayClosure ? 'opacity: 0.7;' : ''}">
-                      <div class="station-num-badge">#${idx + 1}</div>
-                      <div style="flex: 1; min-width: 0;">
-                        <div style="font-weight: 700; font-size: 0.85rem; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                          ${st.name}
-                        </div>
-                        <div style="font-size: 0.72rem; color: ${_stStatusColor}; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                          ${_stStatusLabel}
-                        </div>
-                      </div>
-                    </div>
-                  `;
-        }).join('')
-        : `
-                <div style="color: var(--text-muted); font-size: 0.82rem; padding: 6px 0;">
-                  No stylists registered yet. Add staff to activate live floor stations.
-                </div>
-              `
-      }
-          </div>
-        </div>
-      </div>
-
-      <!-- Bento KPI Metrics Grid -->
-      <div class="stats-grid">
-
-        <!-- 1. Revenue Hero Card (Champagne Gold) -->
-        <div class="stat-card stat-card-revenue">
-          <div class="stat-card-header">
-            <span class="stat-label">${labelPrefix} REVENUE</span>
-            <div class="stat-icon-wrapper" style="background: rgba(245,158,11,0.15); border-color: rgba(245,158,11,0.3);">
-              ${Icons.trendingUp({ size: 18, color: '#fbbf24' })}
-            </div>
-          </div>
-          <div class="stat-value">₹${todayRevenue.toLocaleString()}</div>
-          <div class="stat-sub">
-            <span>Collected from completed appointments</span>
-          </div>
-        </div>
-
-        <!-- 2. Today's Bookings Card -->
-        <div class="stat-card">
-          <div class="stat-card-header">
-            <span class="stat-label">${labelPrefix} BOOKINGS</span>
-            <div class="stat-icon-wrapper" style="background: rgba(139, 61, 255,0.12); border-color: rgba(139, 61, 255,0.25);">
-              ${Icons.calendar({ size: 18, color: '#A855F7' })}
-            </div>
-          </div>
-          <div class="stat-value" style="color: #c7d2fe;">${statusCounts.total}</div>
-          <div class="stat-sub">
-            <span>Confirmed: <strong style="color: #fff;">${bookedConfirmedCount}</strong></span>
-            <span>•</span>
-            <span>Waiting: <strong style="color: #fbbf24;">${waitingDisplayCount}</strong></span>
-          </div>
-        </div>
-
-        <!-- 3. In Chair Active Stations -->
-        <div class="stat-card">
-          <div class="stat-card-header">
-            <span class="stat-label">ACTIVE CHAIRS</span>
-            <div class="stat-icon-wrapper" style="background: rgba(139,92,246,0.12); border-color: rgba(139,92,246,0.25);">
-              ${Icons.armchair({ size: 18, color: '#c084fc' })}
-            </div>
-          </div>
-          <div class="stat-value" style="color: #c084fc;">${inChairDisplayCount}</div>
-          <div class="stat-sub">
-            <span class="q-live-dot" style="width: 6px; height: 6px; display: inline-block;"></span>
-            <span>Active stations currently occupied</span>
-          </div>
-        </div>
-
-        <!-- 4. Completed Visits -->
-        <div class="stat-card">
-          <div class="stat-card-header">
-            <span class="stat-label">COMPLETED VISITS</span>
-            <div class="stat-icon-wrapper" style="background: rgba(16,185,129,0.12); border-color: rgba(16,185,129,0.25);">
-              ${Icons.checkCircle2({ size: 18, color: '#34d399' })}
-            </div>
-          </div>
-          <div class="stat-value" style="color: #34d399;">${statusCounts.completed}</div>
-          <div class="stat-sub">
-            <span>Freed up station capacity</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- WhatsApp Monthly Free Quota Tracker -->
-      <div class="glass-panel" style="margin-bottom: 24px; padding: 20px 24px; border: 1px solid rgba(37,211,102,0.2); background: linear-gradient(135deg, rgba(37,211,102,0.04) 0%, rgba(22, 14, 28,0.85) 60%);">
-        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 14px;">
-          <div style="display: flex; align-items: center; gap: 14px;">
-            <div style="width: 44px; height: 44px; border-radius: 12px; background: rgba(37,211,102,0.12); border: 1px solid rgba(37,211,102,0.25); display: flex; align-items: center; justify-content: center;">
-              ${Icons.messageCircle({ size: 24, color: '#25D366' })}
-            </div>
-            <div>
-              <div style="font-weight: 800; font-size: 1.05rem; color: #fff; letter-spacing: -0.01em;">WhatsApp Booking Quota</div>
-              <div style="font-size: 0.78rem; color: var(--text-muted);">1,000 free customer booking sessions included every month by Meta</div>
-            </div>
-          </div>
-          <span class="badge ${this.summaryData.whatsappQuota?.percentUsed >= 90 ? 'badge-cancelled' : this.summaryData.whatsappQuota?.percentUsed >= 75 ? 'badge-in_service' : 'badge-completed'}" style="font-size: 0.78rem; padding: 6px 14px;">
-            ${(this.summaryData.whatsappQuota?.remaining !== undefined ? this.summaryData.whatsappQuota.remaining : 1000)} Free Chats Left
-          </span>
-        </div>
-
-        <!-- Progress Bar -->
-        <div style="width: 100%; height: 7px; background: rgba(255, 255, 255, 0.08); border-radius: 8px; overflow: hidden; margin-bottom: 10px;">
-          <div style="width: ${Math.max(2, this.summaryData.whatsappQuota?.percentUsed || 0)}%; height: 100%; background: ${this.summaryData.whatsappQuota?.percentUsed >= 90 ? 'linear-gradient(90deg, #f43f5e, #fb7185)' : this.summaryData.whatsappQuota?.percentUsed >= 75 ? 'linear-gradient(90deg, #f59e0b, #fbbf24)' : 'linear-gradient(90deg, #10b981, #34d399)'}; border-radius: 8px; transition: width 0.4s ease;"></div>
-        </div>
-
-        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.78rem; color: var(--text-secondary); flex-wrap: wrap; gap: 8px;">
-          <div><strong style="color: #fff;">${this.summaryData.whatsappQuota?.used || 0}</strong> / ${this.summaryData.whatsappQuota?.limit || 1000} chats used this month (${this.summaryData.whatsappQuota?.percentUsed || 0}%)</div>
-          <div style="display: flex; align-items: center; gap: 5px;">
-            ${Icons.refreshCw({ size: 13, color: '#A855F7' })}
-            <span>Free quota resets on: <strong style="color: #a5b4fc;">${this.summaryData.whatsappQuota?.resetsOn || '1st of next month'}</strong></span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Fast Action Command Launchpad -->
-      <div class="glass-panel" style="margin-bottom: 24px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px;">
-          <h3 style="font-size: 1.15rem; display: flex; align-items: center; gap: 8px;">
-            ${Icons.zap({ size: 18, color: '#fbbf24' })}
-            <span>Fast Store Actions</span>
-          </h3>
-          <span style="font-size: 0.78rem; color: var(--text-muted);">Instant floor operations</span>
-        </div>
-
-        <div class="action-tiles-grid">
-          <!-- Action 1: Walk-In -->
-          <div class="action-tile" id="card-action-walkin">
-            <div class="action-tile-icon" style="background: rgba(139, 61, 255,0.15); border: 1px solid rgba(139, 61, 255,0.3);">
-              ${Icons.zap({ size: 22, color: '#a5b4fc' })}
-            </div>
-            <div class="action-tile-title">Fast Walk-In</div>
-            <div class="action-tile-desc">Register client in 10s and assign an available stylist chair</div>
-          </div>
-
-          <!-- Action 2: WhatsApp Booking QR -->
-          <div class="action-tile" id="card-action-qr">
-            <div class="action-tile-icon" style="background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.3);">
-              ${Icons.qrCode({ size: 22, color: '#34d399' })}
-            </div>
-            <div class="action-tile-title">Booking QR Poster</div>
-            <div class="action-tile-desc">Display printable WhatsApp booking QR code for store walk-ins</div>
-          </div>
-
-          <!-- Action 3: Live Queue -->
-          <div class="action-tile" id="card-action-queue">
-            <div class="action-tile-icon" style="background: rgba(139,92,246,0.15); border: 1px solid rgba(139,92,246,0.3);">
-              ${Icons.queue({ size: 22, color: '#c084fc' })}
-            </div>
-            <div class="action-tile-title">Chair Queue (${todayAppointments.length})</div>
-            <div class="action-tile-desc">Manage check-ins, occupied chairs, and real-time station timers</div>
-          </div>
-
-          <!-- Action 4: Share Store Link -->
-          <div class="action-tile" id="card-action-copy">
-            <div class="action-tile-icon" style="background: rgba(14,165,233,0.15); border: 1px solid rgba(14,165,233,0.3);">
-              ${Icons.copy({ size: 22, color: '#38bdf8' })}
-            </div>
-            <div class="action-tile-title">Share Booking Link</div>
-            <div class="action-tile-desc">Copy direct booking URL for Instagram bio, Google Maps, or WhatsApp</div>
-          </div>
-
-
-        </div>
-      </div>
-
-
-      <!-- Stylists & Live Station Overview -->
-      <div class="glass-panel">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
-          <div>
-            <h3 style="font-size: 1.15rem; display: flex; align-items: center; gap: 8px;">
-              ${Icons.users({ size: 18, color: '#A855F7' })}
-              <span>Stylist Floor Status (${((sl, d) => sl.filter(s => s.status === 'ACTIVE' && !(s.absences || []).some(ab => {
-        const s = (ab.startDate || '').split('T')[0];
-        const e = (ab.endDate || s).split('T')[0];
-        return s <= d && e >= d && ab.status === 'ACTIVE';
-      })).length)(this.staffList, this.selectedDate || new Date().toISOString().split('T')[0])} Available Today)</span>
-            </h3>
-            <p style="font-size: 0.82rem; color: var(--text-secondary);">Current station occupancy and working specialists.</p>
-          </div>
-          <button class="btn btn-secondary btn-sm" id="btn-goto-staff" style="gap: 6px;">
-            <span>Manage Specialists</span>
-            ${Icons.arrowRight({ size: 14 })}
-          </button>
-        </div>
-        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px;">
-          ${this.staffList.map((st) => {
-        const activeBookings = todayAppointments.filter((a) => a.staffId === st.id && (a.status === 'IN_PROGRESS' || a.status === 'CHECKED_IN'));
-        const isBusy = activeBookings.length > 0;
-        const _fsDateIso = (this.selectedDate || new Date().toISOString().split('T')[0]);
-        const _fsAbsent = (st.absences || []).some((ab) => {
-          if (ab.status !== 'ACTIVE') return false;
-          const sDate = (ab.startDate || '').split('T')[0];
-          const eDate = (ab.endDate || sDate).split('T')[0];
-          return _fsDateIso >= sDate && _fsDateIso <= eDate;
-        });
-        const _fsBorderColor = _fsAbsent ? '#fb7185' : isBusy ? '#8b5cf6' : '#10b981';
-        const _fsStatusColor = _fsAbsent ? '#fb7185' : isBusy ? '#c084fc' : '#34d399';
-        const _fsStatusLabel = _fsAbsent ? '🚫 Absent Today' : isBusy ? 'Serving in Chair' : 'Ready for Walk-in';
-        return `
-              <div class="staff-card" style="display: flex; align-items: center; gap: 14px; padding: 16px; ${_fsAbsent ? 'opacity: 0.55;' : ''}">
-                <div class="staff-avatar" style="width: 44px; height: 44px; font-size: 1.1rem; border-radius: 12px; border: 2px solid ${_fsBorderColor}; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.05); font-weight: 800; color: #fff;">
-                  ${st.profileImageUrl ? `<img src="${st.profileImageUrl}" alt="${st.name}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 10px;" />` : st.name.charAt(0).toUpperCase()}
-                </div>
-                <div style="flex: 1;">
-                  <div style="font-weight: 700; color: #fff; font-size: 0.95rem;">${st.name}</div>
-                  <div style="font-size: 0.78rem; display: flex; align-items: center; gap: 6px; margin-top: 2px; color: ${_fsStatusColor}; font-weight: 600;">
-                    <span class="q-live-dot" style="width: 5px; height: 5px; background: ${_fsBorderColor}; box-shadow: 0 0 8px ${_fsBorderColor};"></span>
-                    <span>${_fsStatusLabel}</span>
-                  </div>
-                </div>
-              </div>
-            `;
-      }).join('')}
-        </div>
-      </div>
-
-    `;
+    return this.homeManager.getHtml({
+      salonProfile: profile,
+      summaryData: summary,
+      todayAppointments: summary.todayAppointments || this.queueSync?.items || [],
+      recentAppointments: this.recentAppointments || [],
+      staffList: this.staffList || [],
+      servicesList: this.servicesList || [],
+      categoriesList: this.categoriesList || [],
+      todayClosure,
+      selectedDate: this.selectedDate || todayISO,
+      labelPrefix,
+    });
   }
 
   renderCalendarPopoverContent() {
@@ -8785,7 +8890,17 @@ export class SalonDashboard {
         }
 
         try {
-          await ApiClient.updateAppointmentStatus(id, status);
+          if (prevStatus === 'PENDING_ACCEPTANCE') {
+            if (status === 'CHECKED_IN' || status === 'CONFIRMED') {
+              await ApiClient.acceptQuickBooking(id);
+            } else if (status === 'REJECTED' || status === 'CANCELLED') {
+              await ApiClient.declineQuickBooking(id);
+            } else {
+              await ApiClient.updateAppointmentStatus(id, status);
+            }
+          } else {
+            await ApiClient.updateAppointmentStatus(id, status);
+          }
         } catch (err) {
           if (targetItem && prevStatus) {
             targetItem.status = prevStatus;
@@ -9180,31 +9295,10 @@ export class SalonDashboard {
     const tabContent = document.getElementById('tab-content');
     if (!tabContent) return;
 
-    // Dashboard Quick Action Cards & Reception Quick Bar
-    document.getElementById('btn-quick-copy')?.addEventListener('click', () => {
-      const slug = this.salonProfile?.slug || 'glamour-studio';
-      const url = `${window.location.origin}/#book/${slug}`;
-      navigator.clipboard.writeText(url);
-      this.showToast('Booking link copied to clipboard!', 'success');
-    });
-    document.getElementById('btn-quick-standee')?.addEventListener('click', () => {
-      this.showStandeePrintModal();
-    });
-    document.getElementById('btn-goto-services-banner')?.addEventListener('click', () => this.switchTab('services'));
-    document.getElementById('card-action-walkin')?.addEventListener('click', () => this.showWalkInModal());
-    document.getElementById('card-action-qr')?.addEventListener('click', () => this.showQRCodeModal());
-    document.getElementById('card-action-queue')?.addEventListener('click', () => {
-      this.switchTab('queue');
-    });
-    document.getElementById('card-action-copy')?.addEventListener('click', () => {
-      const slug = this.salonProfile?.slug || 'glamour-studio';
-      const url = `${window.location.origin}/#book/${slug}`;
-      navigator.clipboard.writeText(url);
-      alert(`Booking link copied to clipboard:\n${url}`);
-    });
-    document.getElementById('btn-goto-staff')?.addEventListener('click', () => {
-      this.switchTab('staff');
-    });
+    // Home Dashboard Event Delegation
+    if (this.activeTab === 'dashboard') {
+      this.homeManager.attachEventListeners(tabContent);
+    }
 
     // Queue Screen Interactive Listeners (Date Popover, Filter Drawer, Chips)
     this.setupQueueTabListeners(tabContent);
@@ -9227,7 +9321,17 @@ export class SalonDashboard {
         }
 
         try {
-          await ApiClient.updateAppointmentStatus(id, status);
+          if (prevStatus === 'PENDING_ACCEPTANCE') {
+            if (status === 'CHECKED_IN' || status === 'CONFIRMED') {
+              await ApiClient.acceptQuickBooking(id);
+            } else if (status === 'REJECTED' || status === 'CANCELLED') {
+              await ApiClient.declineQuickBooking(id);
+            } else {
+              await ApiClient.updateAppointmentStatus(id, status);
+            }
+          } else {
+            await ApiClient.updateAppointmentStatus(id, status);
+          }
         } catch (err) {
           if (targetItem && prevStatus) {
             targetItem.status = prevStatus;

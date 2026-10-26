@@ -27,12 +27,20 @@ export class BookingWizard {
       this.state.salon = await ApiClient.getPublicSalon(this.slug);
       this.render();
     } catch (err) {
+      const isConnectionIssue = (typeof navigator !== 'undefined' && !navigator.onLine) || err.status === 0;
       this.container.innerHTML = `
-        <div class="glass-panel text-center" style="text-align: center; padding: 40px;">
-          <h2 style="color: var(--danger); margin-bottom: 12px;">Salon Not Found</h2>
-          <p style="color: var(--text-secondary);">The requested salon booking link is invalid or inactive.</p>
+        <div class="glass-panel text-center" style="text-align: center; padding: 40px; max-width: 440px; margin: 40px auto;">
+          <div style="font-size: 2.2rem; margin-bottom: 12px;">${isConnectionIssue ? '📶' : '🔍'}</div>
+          <h2 style="color: ${isConnectionIssue ? '#f59e0b' : 'var(--danger)'}; margin-bottom: 12px;">
+            ${isConnectionIssue ? 'Connection Unavailable' : 'Salon Not Found'}
+          </h2>
+          <p style="color: var(--text-secondary); line-height: 1.5; margin-bottom: 20px;">
+            ${isConnectionIssue ? (err.message || 'Unable to connect to the booking service. Please check your internet connection.') : 'The requested salon booking link is invalid or inactive.'}
+          </p>
+          ${isConnectionIssue ? '<button type="button" id="btn-booking-retry" class="btn btn-primary" style="padding: 10px 24px; border-radius: 9999px;">Try Again</button>' : ''}
         </div>
       `;
+      document.getElementById('btn-booking-retry')?.addEventListener('click', () => this.init());
     }
   }
 

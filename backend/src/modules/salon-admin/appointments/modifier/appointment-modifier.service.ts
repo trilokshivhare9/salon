@@ -135,6 +135,7 @@ export class AppointmentModifierService {
       proposedStartAt: effectiveProposedStartAt,
       expiresAt: effectiveExpiresAt,
       bookingType: appointment.bookingType,
+      createdAt: appointment.createdAt,
     });
 
     // Build single atomic update payload

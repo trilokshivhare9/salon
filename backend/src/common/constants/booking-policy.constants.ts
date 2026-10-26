@@ -22,6 +22,18 @@ export const BOOKING_POLICY = {
 } as const;
 
 /**
+ * Universal Quick Booking Policy Constants
+ * Single source of truth for walk-in immediate windows and dynamic booking pivots.
+ */
+export const QUICK_BOOKING_POLICY = {
+  /**
+   * Maximum lead time (in minutes) from now for a slot to qualify as an immediate Quick Booking.
+   * If the nearest available slot exceeds 15 minutes, customer is dynamically pivoted to Advance Booking for today.
+   */
+  IMMEDIATE_WINDOW_MINUTES: 15,
+} as const;
+
+/**
  * Appointment Lifecycle Action Types
  * Single source of truth for all scheduled lifecycle event types
  * stored in PostgreSQL (next_action_type) and Redis (reminders:schedule).

@@ -18,7 +18,7 @@ import { QuickBookingAction } from './actions/quick-booking.action';
 import { BookingAction } from './actions/booking.action';
 
 @Module({
-  imports: [AvailabilityModule, forwardRef(() => AppointmentsModule), QuickBookingModule],
+  imports: [AvailabilityModule, forwardRef(() => AppointmentsModule), forwardRef(() => QuickBookingModule)],
   controllers: [WhatsAppController],
   providers: [
     WhatsAppService,

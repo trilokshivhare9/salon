@@ -15,6 +15,7 @@ import { AppointmentsService } from '../../salon-admin/appointments/appointments
 import { CancellationService } from '../../salon-admin/appointments/cancellation/cancellation.service';
 import { RescheduleService } from '../../salon-admin/appointments/reschedule/reschedule.service';
 import { QuickCodeService } from '../../salon-admin/quick-booking/quick-code.service';
+import { QuickBookingService } from '../../salon-admin/quick-booking/quick-booking.service';
 import { WhatsAppSenderService, InteractiveButton, InteractiveListRow } from './services/whatsapp-sender.service';
 import { WhatsAppTemplateService } from './services/whatsapp-template.service';
 import { WhatsAppSessionService, BookingLifecycleStage } from './services/whatsapp-session.service';
@@ -43,6 +44,7 @@ export class WhatsAppService {
     @Inject(forwardRef(() => RescheduleService))
     @Optional() private rescheduleService?: RescheduleService,
     @Optional() private quickCodeService?: QuickCodeService,
+    @Optional() private quickBookingService?: QuickBookingService,
     @Optional() private whatsAppSenderService?: WhatsAppSenderService,
     @Optional() private whatsAppTemplateService?: WhatsAppTemplateService,
     @Optional() private whatsAppSessionService?: WhatsAppSessionService,
@@ -90,8 +92,8 @@ export class WhatsAppService {
         this.whatsAppSenderService,
         this.whatsAppTemplateService,
         this.whatsAppSessionService,
+        this.quickBookingService as any,
         this.availabilityService as any,
-        this.appointmentsService as any,
         this,
       );
       const bookingAction = new BookingAction(

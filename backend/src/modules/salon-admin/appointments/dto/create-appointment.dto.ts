@@ -122,6 +122,7 @@ export type CancellationSource =
   | 'SYSTEM_SALON_DEACTIVATION'  // Super Admin deactivated salon
   | 'SYSTEM_STORE_CLOSURE'       // Emergency salon closure
   | 'SYSTEM_MOVE_UP'             // Express Move-Up replaced old slot
+  | 'SYSTEM_CAPACITY_CONFLICT'   // Slot taken by another accepted quick booking
   | 'SALON_REJECTED';            // Salon rejected quick booking request
 
 /**

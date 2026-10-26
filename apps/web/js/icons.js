@@ -29,6 +29,15 @@ export const Icons = {
     <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
   `, opts),
 
+  bot: (opts) => svg(`
+    <path d="M12 8V4H8"/>
+    <rect width="16" height="12" x="4" y="8" rx="2"/>
+    <path d="M2 14h2"/>
+    <path d="M20 14h2"/>
+    <path d="M15 13v2"/>
+    <path d="M9 13v2"/>
+  `, opts),
+
   // Navigation & Tabs
   home: (opts) => svg(`
     <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>

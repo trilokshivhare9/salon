@@ -130,6 +130,31 @@ export class AppointmentsController {
     return this.appointmentsService.updateStatus(salonId, appointmentId, dto, adminId);
   }
 
+  @Post(':id/accept-quick-booking')
+  async acceptQuickBooking(
+    @CurrentSalonId() salonId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') appointmentId: string,
+  ) {
+    const adminId = (user?.role === AdminRole.SALON_OWNER || user?.role === AdminRole.SUPER_ADMIN)
+      ? user.id
+      : undefined;
+    return this.appointmentsService.acceptQuickBooking(salonId, appointmentId, adminId);
+  }
+
+  @Post(':id/decline-quick-booking')
+  async declineQuickBooking(
+    @CurrentSalonId() salonId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') appointmentId: string,
+    @Body('reason') reason?: string,
+  ) {
+    const adminId = (user?.role === AdminRole.SALON_OWNER || user?.role === AdminRole.SUPER_ADMIN)
+      ? user.id
+      : undefined;
+    return this.appointmentsService.declineQuickBooking(salonId, appointmentId, adminId, reason);
+  }
+
   @Post(':id/cancel')
   async cancelBooking(
     @CurrentSalonId() salonId: string,

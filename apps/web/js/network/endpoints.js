@@ -99,6 +99,8 @@ export const ENDPOINTS = {
     DETAIL: (id) => `/appointments/${id}`,
     CREATE: '/appointments',
     STATUS: (id) => `/appointments/${id}/status`,
+    ACCEPT_QUICK_BOOKING: (id) => `/appointments/${id}/accept-quick-booking`,
+    DECLINE_QUICK_BOOKING: (id) => `/appointments/${id}/decline-quick-booking`,
     CANCEL: (id) => `/appointments/${id}/cancel`,
     RESCHEDULE: (id) => `/appointments/${id}/reschedule`,
     PROPOSE_RESCHEDULE: (id) => `/appointments/${id}/propose-reschedule`,
