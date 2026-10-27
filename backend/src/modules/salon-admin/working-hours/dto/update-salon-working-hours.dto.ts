@@ -30,21 +30,21 @@ export class SalonDayScheduleDto {
   @IsOptional()
   isOpen?: boolean;
 
-  @ApiProperty({ example: '09:00', description: 'Opening time (HH:mm format, 24-hour)' })
+  @ApiPropertyOptional({ example: '09:00', description: 'Opening time (HH:mm format, 24-hour)' })
   @IsString()
-  @IsNotEmpty()
+  @IsOptional()
   @Matches(/^([01]\d|2[0-3]):([0-5]\d)$/, {
     message: 'startTime must be in valid HH:mm 24-hour format (e.g. "09:00")',
   })
-  startTime: string;
+  startTime?: string;
 
-  @ApiProperty({ example: '21:00', description: 'Closing time (HH:mm format, 24-hour)' })
+  @ApiPropertyOptional({ example: '21:00', description: 'Closing time (HH:mm format, 24-hour)' })
   @IsString()
-  @IsNotEmpty()
+  @IsOptional()
   @Matches(/^([01]\d|2[0-3]):([0-5]\d)$/, {
     message: 'endTime must be in valid HH:mm 24-hour format (e.g. "21:00")',
   })
-  endTime: string;
+  endTime?: string;
 
   // Backward-compatible optional fields
   @ApiPropertyOptional()

@@ -28,10 +28,12 @@ import {
   renderServiceDurationOptions,
 } from './constants.js';
 import { AppointmentStatus, StatusPredicates } from './constants/appointment-status.js';
+import { LoadingOverlay } from './modules/shared/loading-overlay.js';
 
 export {
   SERVICE_DURATION_OPTIONS,
   renderServiceDurationOptions,
+  LoadingOverlay,
 };
 
 function showNotification(msg, type = 'info') {
@@ -313,6 +315,14 @@ export class SalonDashboard {
 
   showToast(msg, type = 'info') {
     showNotification(msg, type);
+  }
+
+  showScheduleSavingIndicator(text = 'Saving...') {
+    LoadingOverlay.show(text);
+  }
+
+  hideScheduleSavingIndicator(success = true, text = 'Saved') {
+    LoadingOverlay.hide(150);
   }
 
   openQuickRequestsModal() {
@@ -3391,6 +3401,8 @@ export class SalonDashboard {
   autoSaveStaffSchedule(staffId, immediate = false) {
     if (!this.currentStaffHoursState || this.currentStaffHoursState.staffId !== staffId) return;
 
+    this.showScheduleSavingIndicator('Saving...');
+
     const statusBadge = document.getElementById('stylist-schedule-autosave-status') || document.querySelector('.workspace-live-status');
     if (statusBadge) {
       statusBadge.innerHTML = `<span class="autosave-dot saving"></span><span class="autosave-text">Saving...</span>`;
@@ -3496,6 +3508,8 @@ export class SalonDashboard {
         if (statusBadge) {
           statusBadge.innerHTML = `<span class="autosave-dot"></span><span class="autosave-text">✓ Auto-saved</span>`;
         }
+        this.hideScheduleSavingIndicator(true, 'Staff schedule saved');
+
         if (updated?.affectedBookingsCount > 0) {
           this.showToast?.(updated.message || `${updated.affectedBookingsCount} booking(s) automatically sent reschedule request via WhatsApp.`, 'info');
         }
@@ -3521,6 +3535,7 @@ export class SalonDashboard {
         if (statusBadge) {
           statusBadge.innerHTML = `<span class="autosave-dot error"></span><span class="autosave-text" title="${err.message || 'Error'}">⚠️ Save error</span>`;
         }
+        this.hideScheduleSavingIndicator(false, err.message || 'Save error');
         this.showToast?.(`Schedule save warning: ${err.message || 'Validation error'}`, 'warning');
       }
     };
@@ -5434,8 +5449,10 @@ export class SalonDashboard {
     });
   }
 
-  autoSaveSalonSchedule(immediate = false) {
+  autoSaveSalonSchedule(immediate = false, deltaPayload = null) {
     if (!this.currentSalonHoursState) return;
+
+    this.showScheduleSavingIndicator('Saving...');
 
     const statusBadge = document.getElementById('salon-schedule-autosave-status');
     if (statusBadge) {
@@ -5449,49 +5466,36 @@ export class SalonDashboard {
 
     const doSave = async () => {
       this.syncSalonRoutineBreaksToDays();
-      const daysArr = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
-      const hoursPayload = [];
+      let hoursPayload = deltaPayload;
 
-      for (const day of daysArr) {
-        const d = this.currentSalonHoursState?.days ? this.currentSalonHoursState.days[day] : null;
-        const isOpen = d ? Boolean(d.isOpen) : true;
-        let start = d?.startTime || '09:00';
-        let end = d?.endTime || '21:00';
+      if (!hoursPayload || !hoursPayload.length) {
+        const daysArr = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+        hoursPayload = [];
 
-        const breaks = (d?.breaks || [])
-          .map((b) => ({
-            id: b.id,
-            title: (b.title || 'Facility Break').trim(),
-            startTime: b.startTime,
-            endTime: b.endTime,
-          }))
-          .filter((b) => b.startTime && b.endTime && b.startTime < b.endTime);
+        for (const day of daysArr) {
+          const d = this.currentSalonHoursState?.days ? this.currentSalonHoursState.days[day] : null;
+          const isOpen = d ? Boolean(d.isOpen) : true;
+          let start = d?.startTime || '09:00';
+          let end = d?.endTime || '21:00';
 
-        // Harmonize operating window with breaks so breaks are never dropped
-        breaks.forEach((b) => {
-          if (b.startTime < start) start = b.startTime;
-          if (b.endTime > end) end = b.endTime;
-        });
-
-        if (d) {
-          d.startTime = start;
-          d.endTime = end;
+          hoursPayload.push({
+            dayOfWeek: day,
+            isClosed: !isOpen,
+            startTime: start,
+            endTime: end,
+          });
         }
-
-        hoursPayload.push({
-          dayOfWeek: day,
-          isClosed: !isOpen,
-          startTime: start,
-          endTime: end,
-          breaks,
-        });
       }
 
       try {
         const updated = await ApiClient.updateSalonWorkingHours(hoursPayload);
-        if (Array.isArray(updated)) {
-          this.salonWorkingHours = updated;
-          this.salonBreaks = updated.flatMap((h) =>
+        const hoursList = Array.isArray(updated)
+          ? updated
+          : (Array.isArray(updated?.hours) ? updated.hours : null);
+
+        if (hoursList) {
+          this.salonWorkingHours = hoursList;
+          this.salonBreaks = hoursList.flatMap((h) =>
             (h.breaks || []).map((b) => ({ ...b, dayOfWeek: h.dayOfWeek })),
           );
         }
@@ -5499,6 +5503,8 @@ export class SalonDashboard {
         if (statusBadge) {
           statusBadge.innerHTML = `<span class="autosave-dot"></span><span class="autosave-text">Auto-saved</span>`;
         }
+        this.hideScheduleSavingIndicator(true, 'Salon schedule saved');
+
         if (updated?.affectedBookingsCount > 0) {
           this.showToast?.(updated.message || `${updated.affectedBookingsCount} booking(s) automatically sent reschedule request via WhatsApp.`, 'info');
         }
@@ -5507,6 +5513,7 @@ export class SalonDashboard {
         if (statusBadge) {
           statusBadge.innerHTML = `<span class="autosave-dot error"></span><span class="autosave-text" title="${err.message || 'Error'}">⚠️ Save error</span>`;
         }
+        this.hideScheduleSavingIndicator(false, err.message || 'Save error');
         this.showToast?.(`Salon schedule save error: ${err.message || 'Validation error'}`, 'warning');
       }
     };
@@ -5569,10 +5576,17 @@ export class SalonDashboard {
       }
 
       const daysArr = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+      const changedDays = [];
       daysArr.forEach((dKey) => {
         if (this.currentSalonHoursState?.days[dKey] && this.currentSalonHoursState.days[dKey].isOpen) {
           this.currentSalonHoursState.days[dKey].startTime = sVal;
           this.currentSalonHoursState.days[dKey].endTime = eVal;
+          changedDays.push({
+            dayOfWeek: dKey,
+            isClosed: false,
+            startTime: sVal,
+            endTime: eVal,
+          });
         }
       });
 
@@ -5586,7 +5600,7 @@ export class SalonDashboard {
         rowsContainer.innerHTML = this.renderSalonRosterRowsHtml();
         this.attachSalonRosterListeners();
       }
-      this.autoSaveSalonSchedule(immediate);
+      this.autoSaveSalonSchedule(immediate, changedDays);
     };
 
     bulkStartInp?.addEventListener('input', () => handleBulkLiveChange(false));
@@ -5605,7 +5619,7 @@ export class SalonDashboard {
     const rowsContainer = document.getElementById('salon-roster-rows-container');
     if (!rowsContainer) return;
 
-    // 1. Instant Open/Closed Toggle Switch
+    // 1. Instant Open/Closed Toggle Switch (Sends single-day delta)
     rowsContainer.querySelectorAll('.salon-roster-switch-input').forEach((toggle) => {
       toggle.onclick = (e) => {
         e.stopPropagation();
@@ -5630,7 +5644,12 @@ export class SalonDashboard {
 
         rowsContainer.innerHTML = this.renderSalonRosterRowsHtml();
         this.attachSalonRosterListeners();
-        this.autoSaveSalonSchedule(true);
+
+        // ⚡ Delta save: send ONLY this single day's isClosed status!
+        this.autoSaveSalonSchedule(true, [{
+          dayOfWeek: day,
+          isClosed: !isOpen,
+        }]);
       };
     });
 
@@ -5890,11 +5909,18 @@ export class SalonDashboard {
         return;
       }
       const daysArr = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+      const allDaysPayload = [];
       daysArr.forEach((dKey) => {
         if (this.currentSalonHoursState.days[dKey]) {
           this.currentSalonHoursState.days[dKey].isOpen = isOpen;
           this.currentSalonHoursState.days[dKey].startTime = sVal;
           this.currentSalonHoursState.days[dKey].endTime = eVal;
+          allDaysPayload.push({
+            dayOfWeek: dKey,
+            isClosed: !isOpen,
+            startTime: sVal,
+            endTime: eVal,
+          });
         }
       });
       if (isOpen) {
@@ -5906,7 +5932,7 @@ export class SalonDashboard {
         rowsContainer.innerHTML = this.renderSalonRosterRowsHtml();
         this.attachSalonRosterListeners();
       }
-      this.autoSaveSalonSchedule(true);
+      this.autoSaveSalonSchedule(true, allDaysPayload);
       this.showToast(`Applied ${dayData.friendlyDay} hours to all 7 days (auto-saved)`, 'success');
     });
 
@@ -5930,7 +5956,13 @@ export class SalonDashboard {
         rowsContainer.innerHTML = this.renderSalonRosterRowsHtml();
         this.attachSalonRosterListeners();
       }
-      this.autoSaveSalonSchedule(true);
+      // ⚡ Send ONLY this single day's updated values!
+      this.autoSaveSalonSchedule(true, [{
+        dayOfWeek: dayKey,
+        isClosed: !isOpen,
+        startTime: sVal,
+        endTime: eVal,
+      }]);
       this.showToast(`${dayData.friendlyDay} salon hours updated (auto-saved)`, 'success');
     });
   }
@@ -7519,7 +7551,7 @@ export class SalonDashboard {
 
     try {
       this.showToast(`Updating routine for ${friendlyName}...`, 'info');
-      await ApiClient.updateSalonWorkingHours(updatedPayload);
+      await ApiClient.updateSalonWorkingHours([{ dayOfWeek, isClosed: newIsClosed }]);
       this.showToast(
         newIsClosed
           ? `Salon closed every ${friendlyName} (Weekly Off set).`
