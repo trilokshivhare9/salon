@@ -78,28 +78,15 @@ export class TimeSlotWindowEngine {
 
     // Edge Case: 10 or fewer slots total -> Show all directly in 1 section
     if (slots.length <= 10) {
-      const hasQuick = Boolean(
-        options?.isToday &&
-        options.nowMinutes !== undefined &&
-        slots.some((s) => {
-          const diff = this.parseMinutes(s.timeStr) - (options.nowMinutes || 0);
-          return diff >= 0 && diff < 15;
-        })
-      );
-
       const rows: InteractiveSectionRow[] = slots.map((s) => ({
         id: `${prefix}${s.timeStr}`,
         title: s.displayTime,
         description: this.getSlotSubtitle(s, options),
       }));
 
-      let body = options?.isReschedule
+      const body = options?.isReschedule
         ? 'Please pick a new appointment time slot below:'
         : 'Please pick an available time slot below:';
-
-      if (hasQuick) {
-        body += '\n\n⚡ *Quick Booking Notice:*\nSlots starting in *less than 15 minutes* are sent as an express *Quick Booking Request* (our salon team will review & confirm your chair immediately!).';
-      }
 
       return {
         headerText: '🕒 Select Time Slot',
@@ -230,22 +217,9 @@ export class TimeSlotWindowEngine {
     // Flat rows array ensuring total <= 10 for backwards compatibility
     const allRows = [...mappedSlotRows, ...navigationRows].slice(0, 10);
 
-    const hasQuickSlots = Boolean(
-      options?.isToday &&
-      options.nowMinutes !== undefined &&
-      slotRowsToDisplay.some((s) => {
-        const diff = this.parseMinutes(s.timeStr) - (options.nowMinutes || 0);
-        return diff >= 0 && diff < 15;
-      })
-    );
-
-    let bodyText = activeWindow === SlotWindowType.EARLIEST
+    const bodyText = activeWindow === SlotWindowType.EARLIEST
       ? (options?.isReschedule ? 'Please pick a new appointment time slot below, or jump to afternoon/evening:' : 'Please pick an available time slot below, or jump to afternoon/evening:')
       : `Showing ${primarySectionTitle.toLowerCase()}. Pick an available slot or switch time:`;
-
-    if (hasQuickSlots) {
-      bodyText += '\n\n⚡ *Quick Booking Notice:*\nSlots starting in *less than 15 minutes* are sent as an express *Quick Booking Request* (our salon team will review & confirm your chair immediately!).';
-    }
 
     return {
       headerText: '🕒 Select Time Slot',
