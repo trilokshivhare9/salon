@@ -114,113 +114,163 @@ export class SalonWorkingHoursService {
       throw new NotFoundException('Salon not found.');
     }
 
-    // Validation
+    // 1. Fetch current existing working hours to merge partial updates & detect diffs
+    const existingHours = await this.prisma.salonWorkingHours.findMany({
+      where: { salonId },
+    });
+    const existingMap = new Map(existingHours.map((h) => [h.dayOfWeek, h]));
+
+    // 2. Validate & normalize incoming days (merge omitted fields with existing values)
+    const normalizedDaysToUpdate: Array<{
+      dayOfWeek: DayOfWeek;
+      isClosed: boolean;
+      startTime: string;
+      endTime: string;
+      hasChanged: boolean;
+    }> = [];
+
     for (const item of dto.hours) {
+      const current = existingMap.get(item.dayOfWeek);
+
       const isClosed =
         item.isClosed !== undefined
           ? item.isClosed
           : item.isOpen !== undefined
           ? !item.isOpen
-          : false;
+          : (current?.isClosed ?? false);
 
-      if (!isClosed && item.startTime >= item.endTime) {
+      const startTime = item.startTime || current?.startTime || '09:00';
+      const endTime = item.endTime || current?.endTime || '21:00';
+
+      if (!isClosed && startTime >= endTime) {
         throw new BadRequestException(
-          `Shift start time (${item.startTime}) must be earlier than shift end time (${item.endTime}) on ${item.dayOfWeek}.`,
+          `Shift start time (${startTime}) must be earlier than shift end time (${endTime}) on ${item.dayOfWeek}.`,
         );
       }
+
+      const hasChanged =
+        !current ||
+        current.isClosed !== isClosed ||
+        current.startTime !== startTime ||
+        current.endTime !== endTime;
+
+      normalizedDaysToUpdate.push({
+        dayOfWeek: item.dayOfWeek,
+        isClosed,
+        startTime,
+        endTime,
+        hasChanged,
+      });
     }
 
     const lockKey = this.hashToSignedInt32(`salon_hours_${salonId}`);
 
-    return this.prisma.$transaction(async (tx) => {
-      // 1. Acquire advisory lock
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
+    // 3. Fast Atomic Database Transaction (Persists hours & staff propagation in < 20ms)
+    const { updatedHoursList, propagationResult, changedDaysForConflict } =
+      await this.prisma.$transaction(
+        async (tx) => {
+          // Acquire advisory lock
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
 
-      const updatedHoursList: any[] = [];
+          const updatedList: any[] = [];
+          const changedList: typeof normalizedDaysToUpdate = [];
 
-      for (const item of dto.hours) {
-        const isClosed =
-          item.isClosed !== undefined
-            ? item.isClosed
-            : item.isOpen !== undefined
-            ? !item.isOpen
-            : false;
+          for (const item of normalizedDaysToUpdate) {
+            const updated = await tx.salonWorkingHours.upsert({
+              where: {
+                salonId_dayOfWeek: {
+                  salonId,
+                  dayOfWeek: item.dayOfWeek,
+                },
+              },
+              create: {
+                salonId,
+                dayOfWeek: item.dayOfWeek,
+                isClosed: item.isClosed,
+                startTime: item.startTime,
+                endTime: item.endTime,
+              },
+              update: {
+                isClosed: item.isClosed,
+                startTime: item.startTime,
+                endTime: item.endTime,
+              },
+            });
 
-        const updated = await tx.salonWorkingHours.upsert({
-          where: {
-            salonId_dayOfWeek: {
+            updatedList.push(updated);
+
+            if (item.hasChanged) {
+              changedList.push(item);
+            }
+          }
+
+          // Cascade & propagate to staff members ONLY for the updated days
+          const propResult =
+            await this.propagationEngine.propagateSalonHoursToStylists(
+              tx,
               salonId,
-              dayOfWeek: item.dayOfWeek,
-            },
-          },
-          create: {
-            salonId,
-            dayOfWeek: item.dayOfWeek,
-            isClosed,
-            startTime: item.startTime,
-            endTime: item.endTime,
-          },
-          update: {
-            isClosed,
-            startTime: item.startTime,
-            endTime: item.endTime,
-          },
-        });
+              updatedList,
+            );
 
-        updatedHoursList.push(updated);
-      }
-
-      // 2. Cascade & propagate to staff members
-      const propagationResult = await this.propagationEngine.propagateSalonHoursToStylists(
-        tx,
-        salonId,
-        updatedHoursList,
+          return {
+            updatedHoursList: updatedList,
+            propagationResult: propResult,
+            changedDaysForConflict: changedList,
+          };
+        },
+        { maxWait: 10000, timeout: 20000 },
       );
 
-      // 3. Emit real-time update
-      this.appointmentsService.emitSalonEvent(salonId, 'STAFF_UPDATED', {
-        salonId,
-        action: 'SALON_HOURS_UPDATED',
-        updatedDays: updatedHoursList.map((h) => h.dayOfWeek),
-        propagationResult,
-      });
+    // 4. Emit real-time update event after transaction commit
+    this.appointmentsService.emitSalonEvent(salonId, 'STAFF_UPDATED', {
+      salonId,
+      action: 'SALON_HOURS_UPDATED',
+      updatedDays: updatedHoursList.map((h) => h.dayOfWeek),
+      propagationResult,
+    });
 
-      // 4. Resolve conflicts for any closed or shortened days seamlessly
-      let totalAffected = 0;
-      let totalRescheduled = 0;
+    // 5. Conflict Resolution OUTSIDE transaction: single batch call for all changed days!
+    let totalAffected = 0;
+    let totalRescheduled = 0;
 
-      for (const item of dto.hours) {
-        const isClosed =
-          item.isClosed !== undefined
-            ? item.isClosed
-            : item.isOpen !== undefined
-            ? !item.isOpen
-            : false;
-
+    if (changedDaysForConflict.length > 0) {
+      try {
         const res = await this.appointmentsService.resolveScheduleConflicts({
           salonId,
           scope: 'SALON',
-          dayOfWeek: item.dayOfWeek,
-          shiftHours: { startTime: item.startTime, endTime: item.endTime },
-          isClosedOrOff: isClosed,
-          reason: isClosed ? `Salon closed on ${item.dayOfWeek}` : `Salon facility hours updated on ${item.dayOfWeek}`,
+          daysConfig: changedDaysForConflict.map((item) => ({
+            dayOfWeek: item.dayOfWeek,
+            startTime: item.startTime,
+            endTime: item.endTime,
+            isClosedOrOff: item.isClosed,
+          })),
+          reason: 'Salon facility hours updated',
         });
-        totalAffected += res.totalAffected;
-        totalRescheduled += res.rescheduledCount;
+        totalAffected = res.totalAffected;
+        totalRescheduled = res.rescheduledCount;
+      } catch (conflictErr: any) {
+        this.logger.error(
+          `[ConflictResolver] Error resolving schedule conflicts: ${conflictErr.message}`,
+          conflictErr.stack,
+        );
       }
+    }
 
-      const statusMsg = totalAffected > 0
+    const statusMsg =
+      totalAffected > 0
         ? `Salon facility hours updated. ${totalAffected} active booking(s) automatically sent reschedule request via WhatsApp.`
         : 'Salon facility operating hours updated successfully.';
 
-      return {
-        success: true,
-        message: statusMsg,
-        hours: updatedHoursList,
-        propagationResult,
-        affectedBookingsCount: totalAffected,
-        rescheduledCount: totalRescheduled,
-      };
-    });
+    // 6. Return complete fresh 7-day schedule with activeStaffCount & breaks
+    const allWorkingHours = await this.getSalonWorkingHours(salonId);
+
+    return {
+      success: true,
+      message: statusMsg,
+      hours: allWorkingHours,
+      propagationResult,
+      affectedBookingsCount: totalAffected,
+      rescheduledCount: totalRescheduled,
+    };
   }
 }

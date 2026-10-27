@@ -118,38 +118,107 @@ export class StaffWorkingHoursService {
     staffId: string,
     dto: UpdateStaffWorkingHoursDto,
   ) {
-    const stylist = await this.prisma.stylist.findFirst({
-      where: { id: staffId, salonId },
-    });
+    const [stylist, salonHours, currentStaffHours] = await Promise.all([
+      this.prisma.stylist.findFirst({
+        where: { id: staffId, salonId },
+      }),
+      this.prisma.salonWorkingHours.findMany({
+        where: { salonId },
+      }),
+      this.prisma.stylistWorkingHours.findMany({
+        where: { stylistId: staffId, salonId },
+      }),
+    ]);
+
     if (!stylist) {
       throw new NotFoundException('Stylist not found in this salon.');
     }
 
-    const salonHours = await this.prisma.salonWorkingHours.findMany({
-      where: { salonId },
-    });
     const salonMap = new Map<DayOfWeek, any>(salonHours.map((sh) => [sh.dayOfWeek, sh]));
+    const currentStaffMap = new Map<DayOfWeek, any>(
+      currentStaffHours.map((ch) => [ch.dayOfWeek, ch]),
+    );
 
-    // 1. Validate facility boundaries & time ranges
-    for (const item of dto.hours) {
+    // 1. Delta merge incoming payload against existing staff records & salon facility rules
+    const mergedList = dto.hours.map((item) => {
       const salonDay = salonMap.get(item.dayOfWeek);
-      const isWorking = item.isWorking !== undefined ? item.isWorking : true;
+      const existing = currentStaffMap.get(item.dayOfWeek);
 
-      if (isWorking && salonDay?.isClosed) {
+      const isWorking =
+        item.isWorking !== undefined
+          ? item.isWorking
+          : existing
+            ? existing.isWorking
+            : true;
+
+      const startTime =
+        item.startTime || existing?.startTime || salonDay?.startTime || '09:00';
+      const endTime =
+        item.endTime || existing?.endTime || salonDay?.endTime || '21:00';
+
+      // Check if differs from salon facility schedule
+      const isDifferentFromSalon =
+        !salonDay ||
+        isWorking !== !salonDay.isClosed ||
+        (startTime !== salonDay.startTime && !salonDay.isClosed) ||
+        (endTime !== salonDay.endTime && !salonDay.isClosed);
+
+      // Shifts that match salon facility operating hours are never customized
+      // An explicit day off when salon is open is ALWAYS customized
+      const isCustomized =
+        !isWorking && !salonDay?.isClosed
+          ? true
+          : item.isCustomized !== undefined
+            ? item.isCustomized
+            : isDifferentFromSalon;
+
+      const finalStartTime =
+        !isCustomized && salonDay?.startTime ? salonDay.startTime : startTime;
+      const finalEndTime =
+        !isCustomized && salonDay?.endTime ? salonDay.endTime : endTime;
+      const finalIsWorking =
+        isWorking === false
+          ? false
+          : !isCustomized && salonDay
+            ? !salonDay.isClosed
+            : isWorking;
+
+      const hasChanged =
+        !existing ||
+        existing.isWorking !== finalIsWorking ||
+        existing.startTime !== finalStartTime ||
+        existing.endTime !== finalEndTime ||
+        existing.isCustomized !== isCustomized;
+
+      return {
+        dayOfWeek: item.dayOfWeek,
+        salonWorkingHoursId: salonDay?.id || null,
+        isWorking: finalIsWorking,
+        isCustomized,
+        startTime: finalStartTime,
+        endTime: finalEndTime,
+        hasChanged,
+        salonDay,
+      };
+    });
+
+    // 2. Validate facility boundaries & time ranges on merged values
+    for (const item of mergedList) {
+      if (item.isWorking && item.salonDay?.isClosed) {
         throw new BadRequestException(
           `Facility Boundary Error: Salon is closed on ${item.dayOfWeek}. Stylists cannot be scheduled to work when the salon is closed.`,
         );
       }
 
-      if (isWorking && item.startTime && item.endTime) {
+      if (item.isWorking) {
         if (item.startTime >= item.endTime) {
           throw new BadRequestException(
             `Shift start time (${item.startTime}) must be earlier than shift end time (${item.endTime}) on ${item.dayOfWeek}.`,
           );
         }
 
-        const salonStart = salonDay?.startTime || '09:00';
-        const salonEnd = salonDay?.endTime || '21:00';
+        const salonStart = item.salonDay?.startTime || '09:00';
+        const salonEnd = item.salonDay?.endTime || '21:00';
 
         if (item.startTime < salonStart || item.endTime > salonEnd) {
           throw new BadRequestException(
@@ -159,109 +228,132 @@ export class StaffWorkingHoursService {
       }
     }
 
-    // 2. Persist in transaction
-    const result = await this.prisma.$transaction(async (tx) => {
-      const updatedHoursList: any[] = [];
+    // 3. Persist in transaction with timeout safeguards
+    const { updatedHoursList, changedDaysForConflict } =
+      await this.prisma.$transaction(
+        async (tx) => {
+          const updatedList: any[] = [];
+          const changedList: typeof mergedList = [];
 
-      for (const item of dto.hours) {
-        const salonDay = salonMap.get(item.dayOfWeek);
-        const isWorking = item.isWorking !== undefined ? item.isWorking : true;
-        const startTime = item.startTime || salonDay?.startTime || '09:00';
-        const endTime = item.endTime || salonDay?.endTime || '21:00';
+          for (const item of mergedList) {
+            const updated = await tx.stylistWorkingHours.upsert({
+              where: {
+                stylistId_dayOfWeek: {
+                  stylistId: staffId,
+                  dayOfWeek: item.dayOfWeek,
+                },
+              },
+              create: {
+                salonId,
+                stylistId: staffId,
+                salonWorkingHoursId: item.salonWorkingHoursId,
+                dayOfWeek: item.dayOfWeek,
+                isWorking: item.isWorking,
+                isCustomized: item.isCustomized,
+                startTime: item.startTime,
+                endTime: item.endTime,
+              },
+              update: {
+                salonId,
+                salonWorkingHoursId: item.salonWorkingHoursId,
+                isWorking: item.isWorking,
+                isCustomized: item.isCustomized,
+                startTime: item.startTime,
+                endTime: item.endTime,
+              },
+            });
 
-        // Check if differs from salon facility schedule
-        const isDifferentFromSalon =
-          !salonDay ||
-          isWorking !== !salonDay.isClosed ||
-          (startTime !== salonDay.startTime && !salonDay.isClosed) ||
-          (endTime !== salonDay.endTime && !salonDay.isClosed);
+            updatedList.push(updated);
+            if (item.hasChanged) {
+              changedList.push(item);
+            }
+          }
 
-        // Shifts that match salon facility operating hours are never customized
-        // An explicit day off when salon is open is ALWAYS customized
-        const isCustomized = !isWorking && !salonDay?.isClosed
-          ? true
-          : (item.isCustomized === false ? false : isDifferentFromSalon);
+          // Accurately determine followsSalonSchedule across all 7 days in the database
+          const mergedCustomMap = new Map<DayOfWeek, boolean>(
+            mergedList.map((m) => [m.dayOfWeek, m.isCustomized]),
+          );
+          const allWeekDays: DayOfWeek[] = [
+            'MONDAY',
+            'TUESDAY',
+            'WEDNESDAY',
+            'THURSDAY',
+            'FRIDAY',
+            'SATURDAY',
+            'SUNDAY',
+          ];
+          const hasAnyCustomizedDay = allWeekDays.some((day) => {
+            if (mergedCustomMap.has(day)) return mergedCustomMap.get(day);
+            const ex = currentStaffMap.get(day);
+            return ex ? ex.isCustomized : false;
+          });
 
-        const finalStartTime = !isCustomized && salonDay?.startTime ? salonDay.startTime : startTime;
-        const finalEndTime = !isCustomized && salonDay?.endTime ? salonDay.endTime : endTime;
-        const finalIsWorking = isWorking === false ? false : (!isCustomized && salonDay ? !salonDay.isClosed : isWorking);
+          const followsSalonSchedule =
+            dto.followsSalonSchedule !== undefined
+              ? dto.followsSalonSchedule
+              : !hasAnyCustomizedDay;
 
-        const updated = await tx.stylistWorkingHours.upsert({
-          where: {
-            stylistId_dayOfWeek: {
-              stylistId: staffId,
-              dayOfWeek: item.dayOfWeek,
-            },
-          },
-          create: {
-            salonId,
-            stylistId: staffId,
-            salonWorkingHoursId: salonDay?.id || null,
-            dayOfWeek: item.dayOfWeek,
-            isWorking: finalIsWorking,
-            isCustomized,
-            startTime: finalStartTime,
-            endTime: finalEndTime,
-          },
-          update: {
-            salonId,
-            salonWorkingHoursId: salonDay?.id || null,
-            isWorking: finalIsWorking,
-            isCustomized,
-            startTime: finalStartTime,
-            endTime: finalEndTime,
-          },
-        });
+          await tx.stylist.update({
+            where: { id: staffId },
+            data: { followsSalonSchedule },
+          });
 
-        updatedHoursList.push(updated);
-      }
+          return {
+            updatedHoursList: updatedList,
+            changedDaysForConflict: changedList,
+          };
+        },
+        { maxWait: 10000, timeout: 20000 },
+      );
 
-      // Update followsSalonSchedule flag
-      const followsSalonSchedule =
-        dto.followsSalonSchedule !== undefined
-          ? dto.followsSalonSchedule
-          : updatedHoursList.every((h) => !h.isCustomized);
-
-      await tx.stylist.update({
-        where: { id: staffId },
-        data: { followsSalonSchedule },
-      });
-
-      return updatedHoursList;
-    });
-
+    // 4. Emit real-time update event
     this.appointmentsService.emitSalonEvent(salonId, 'STAFF_UPDATED', {
       staffId,
       action: 'WORKING_HOURS_UPDATED',
     });
 
-    // Resolve any conflicting bookings in background and send WhatsApp reschedule proposal
+    // 5. Conflict Resolution OUTSIDE transaction: single batch call ONLY for days that actually changed!
     let totalAffected = 0;
     let totalRescheduled = 0;
-    for (const item of dto.hours) {
-      const isWorking = item.isWorking !== undefined ? item.isWorking : true;
-      const res = await this.appointmentsService.resolveScheduleConflicts({
-        salonId,
-        scope: 'STYLIST',
-        stylistId: staffId,
-        dayOfWeek: item.dayOfWeek,
-        shiftHours: { startTime: item.startTime, endTime: item.endTime },
-        isClosedOrOff: !isWorking,
-        reason: !isWorking ? `Stylist marked off on ${item.dayOfWeek}` : `Stylist shift updated on ${item.dayOfWeek}`,
-      });
-      totalAffected += res.totalAffected;
-      totalRescheduled += res.rescheduledCount;
+
+    if (changedDaysForConflict.length > 0) {
+      try {
+        const res = await this.appointmentsService.resolveScheduleConflicts({
+          salonId,
+          scope: 'STYLIST',
+          stylistId: staffId,
+          daysConfig: changedDaysForConflict.map((item) => ({
+            dayOfWeek: item.dayOfWeek,
+            startTime: item.startTime,
+            endTime: item.endTime,
+            isClosedOrOff: !item.isWorking,
+          })),
+          reason: `Working hours updated for stylist ${stylist.name}`,
+        });
+        totalAffected = res.totalAffected;
+        totalRescheduled = res.rescheduledCount;
+      } catch (conflictErr: any) {
+        this.logger.error(
+          `[ConflictResolver] Error resolving schedule conflicts for stylist ${staffId}: ${conflictErr.message}`,
+          conflictErr.stack,
+        );
+      }
     }
 
-    const statusMsg = totalAffected > 0
-      ? `Working hours saved for ${stylist.name}. ${totalAffected} booking(s) automatically sent reschedule request via WhatsApp.`
-      : `Working hours updated successfully for ${stylist.name}.`;
+    const statusMsg =
+      totalAffected > 0
+        ? `Working hours saved for ${stylist.name}. ${totalAffected} booking(s) automatically sent reschedule request via WhatsApp.`
+        : `Working hours updated successfully for ${stylist.name}.`;
+
+    // 6. Return fresh full 7-day schedule with breaks and indicators
+    const allStaffHours = await this.getStaffWorkingHours(salonId, staffId);
 
     return {
       success: true,
       message: statusMsg,
       stylistId: staffId,
-      hours: result,
+      hours: allStaffHours.hours,
+      followsSalonSchedule: allStaffHours.followsSalonSchedule,
       affectedBookingsCount: totalAffected,
       rescheduledCount: totalRescheduled,
     };

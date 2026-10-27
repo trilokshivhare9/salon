@@ -8,11 +8,19 @@ import { AvailabilityService } from '../../availability/availability.service';
 import { AppointmentStatusService } from '../status/appointment-status.service';
 import { CancellationService } from '../cancellation/cancellation.service';
 
+export interface ScheduleConflictDayConfig {
+  dayOfWeek: DayOfWeek;
+  startTime?: string;
+  endTime?: string;
+  isClosedOrOff: boolean;
+}
+
 export interface ScheduleConflictQuery {
   salonId: string;
   scope: 'SALON' | 'STYLIST';
   stylistId?: string;
   dayOfWeek?: DayOfWeek;
+  daysConfig?: ScheduleConflictDayConfig[];
   dateRange?: {
     startDate: Date | string;
     endDate: Date | string;
@@ -28,7 +36,7 @@ export interface ScheduleConflictQuery {
     startTime?: string;
     endTime?: string;
   };
-  isClosedOrOff: boolean;
+  isClosedOrOff?: boolean;
   reason?: string;
   adminId?: string;
 }
@@ -114,6 +122,14 @@ export class ScheduleConflictResolutionEngine {
 
     const conflictingAppts: any[] = [];
 
+    // Pre-index batch days if provided for O(1) weekday lookup:
+    const daysConfigMap = new Map<DayOfWeek, ScheduleConflictDayConfig>();
+    if (query.daysConfig && query.daysConfig.length > 0) {
+      for (const d of query.daysConfig) {
+        daysConfigMap.set(d.dayOfWeek, d);
+      }
+    }
+
     for (const appt of futureAppointments) {
       const apptStartDt = DateTime.fromJSDate(appt.startAt, { zone: tz });
       const apptEndDt = DateTime.fromJSDate(appt.endAt, { zone: tz });
@@ -122,7 +138,22 @@ export class ScheduleConflictResolutionEngine {
       const apptStartStr = apptStartDt.toFormat('HH:mm');
       const apptEndStr = apptEndDt.toFormat('HH:mm');
 
-      // Scenario A: Recurring Weekly Day change (e.g. Day Off, shift reduced, or break)
+      // Scenario A1: Batch of Days (Bulk or Single Working Hours update)
+      if (daysConfigMap.size > 0) {
+        const dayRule = daysConfigMap.get(apptDayOfWeek);
+        if (dayRule) {
+          if (dayRule.isClosedOrOff) {
+            conflictingAppts.push(appt);
+          } else if (dayRule.startTime && dayRule.endTime) {
+            if (apptStartStr < dayRule.startTime || apptEndStr > dayRule.endTime) {
+              conflictingAppts.push(appt);
+            }
+          }
+        }
+        continue;
+      }
+
+      // Scenario A: Recurring Weekly Day change (Single Day - backward compatibility)
       if (query.dayOfWeek) {
         if (apptDayOfWeek !== query.dayOfWeek) continue;
 

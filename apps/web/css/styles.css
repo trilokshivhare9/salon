@@ -6015,6 +6015,71 @@ a:hover {
   }
 }
 
+/* Clean, Lightweight Full-Screen Auto-Save Loading Overlay */
+.schedule-fullscreen-overlay {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 99999999;
+  background: rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.schedule-fullscreen-overlay.is-active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.schedule-overlay-simple {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 20px;
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 9999px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  color: #ffffff;
+  transform: scale(0.95);
+  transition: transform 0.15s ease;
+}
+
+.schedule-fullscreen-overlay.is-active .schedule-overlay-simple {
+  transform: scale(1);
+}
+
+.schedule-clean-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: #a855f7;
+  border-radius: 50%;
+  animation: schedule-clean-spin 0.65s linear infinite;
+  flex-shrink: 0;
+}
+
+.schedule-overlay-text {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #f8fafc;
+  letter-spacing: 0.2px;
+  margin: 0;
+  white-space: nowrap;
+}
+
+@keyframes schedule-clean-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
 /* Segmented Pill Switcher [ ⏰ Shift Hours | ☕ Daily Breaks ] */
 .stylist-schedule-segmented-tabs {
   display: flex;

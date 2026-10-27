@@ -912,13 +912,19 @@ export class ApiClient {
     this.invalidateCache('/reports');
 
     const sanitizedHours = (hours || []).map((h) => {
-      const isClosed = h.isClosed !== undefined ? Boolean(h.isClosed) : (h.isOpen !== undefined ? !h.isOpen : false);
-      return {
-        dayOfWeek: h.dayOfWeek,
-        isClosed,
-        startTime: h.startTime || h.openTime || '09:00',
-        endTime: h.endTime || h.closeTime || '21:00',
-      };
+      const item = { dayOfWeek: h.dayOfWeek };
+      if (h.isClosed !== undefined) {
+        item.isClosed = Boolean(h.isClosed);
+      } else if (h.isOpen !== undefined) {
+        item.isClosed = !h.isOpen;
+      }
+      if (h.startTime || h.openTime) {
+        item.startTime = h.startTime || h.openTime;
+      }
+      if (h.endTime || h.closeTime) {
+        item.endTime = h.endTime || h.closeTime;
+      }
+      return item;
     });
 
     const res = await this.request(ENDPOINTS.SALONS.WORKING_HOURS, {
