@@ -241,87 +241,50 @@ export class StaffProfileHub {
    * Computes qualified services & category breakdown metrics
    */
   static computeServicesSummary(ctx, staff) {
-    const allServices = ctx?.servicesList || [];
-    const categories = ctx?.categoriesList || [];
-
-    const rawServices = staff.services || [];
+    const allServices = Array.isArray(ctx?.servicesList) ? ctx.servicesList : [];
+    const rawServices = Array.isArray(staff?.services) ? staff.services : [];
     const assignedIds = new Set(
       rawServices
         .map((s) => (typeof s === 'string' ? s : s.serviceId || s.id || s.service?.id))
         .filter(Boolean)
     );
 
-    const assignedServices = allServices.filter((s) => assignedIds.has(s.id));
-    const totalAssigned = assignedServices.length;
-
-    // Category breakdown
-    const categoryCounts = {};
-    assignedServices.forEach((srv) => {
-      const catId = srv.categoryId || srv.category?.id || 'other';
-      categoryCounts[catId] = (categoryCounts[catId] || 0) + 1;
-    });
-
-    const categoryIcons = {
-      hair: '✂️',
-      cut: '✂️',
-      style: '✂️',
-      color: '🎨',
-      colour: '🎨',
-      spa: '💆',
-      massage: '💆',
-      facial: '🧖',
-      beard: '🧔',
-      shave: '🪒',
-      nails: '💅',
-      bridal: '👰',
-    };
-
-    const chipColors = ['chip-purple', 'chip-indigo', 'chip-teal', 'chip-pink'];
-
-    const categoryPills = categories
-      .filter((cat) => (categoryCounts[cat.id] || 0) > 0)
-      .map((cat, idx) => {
-        const nameLower = cat.name.toLowerCase();
-        let icon = '✂️';
-        for (const [key, ic] of Object.entries(categoryIcons)) {
-          if (nameLower.includes(key)) {
-            icon = ic;
-            break;
-          }
-        }
-        // Shorten category display name to fit in one line (e.g. "Spa & Massage" -> "Spa", "Nails & Beauty" -> "Nails")
-        const shortName = cat.name.split(/[\s&/]+/)[0] || cat.name;
-        return {
-          id: cat.id,
-          name: shortName,
-          fullName: cat.name,
-          icon,
-          count: categoryCounts[cat.id] || 0,
-          colorClass: chipColors[idx % chipColors.length],
-        };
-      });
-
-    // Fallback if no categories or sample
-    if (categoryPills.length === 0 && totalAssigned > 0) {
-      categoryPills.push(
-        { id: 'hair', name: 'Hair', icon: '✂️', count: Math.ceil(totalAssigned / 2), colorClass: 'chip-purple' },
-        { id: 'color', name: 'Color', icon: '🎨', count: Math.floor(totalAssigned / 3), colorClass: 'chip-indigo' },
-        { id: 'spa', name: 'Spa', icon: '💆', count: Math.max(1, totalAssigned - Math.ceil(totalAssigned / 2) - Math.floor(totalAssigned / 3)), colorClass: 'chip-teal' }
-      );
+    let assignedServices = allServices.filter((s) => assignedIds.has(s.id));
+    if (assignedServices.length === 0 && rawServices.length > 0 && typeof rawServices[0] === 'object' && rawServices[0].name) {
+      assignedServices = rawServices;
     }
 
-    const categoryNamesSummary = totalAssigned > 0
-      ? (categoryPills.map((c) => c.name).join(', ') || 'Assigned Services')
-      : 'No services assigned';
+    const totalAssigned = assignedServices.length > 0 ? assignedServices.length : assignedIds.size;
+    let totalServices = allServices.length;
+    if (totalServices < totalAssigned) {
+      totalServices = totalAssigned;
+    }
 
-    const primaryCategoryName = totalAssigned > 0
-      ? (categoryPills[0]?.name ? `${categoryPills[0].name} & Styling` : 'Active Stylist')
-      : 'General Staff';
+    const coveragePercent = totalServices > 0 ? Math.round((totalAssigned / totalServices) * 100) : 0;
+
+    // Subtitle strictly showing total assigned vs total salon services (concise, 1-line)
+    let servicesSummaryText = 'No services assigned';
+    if (totalServices > 0) {
+      if (totalAssigned === totalServices) {
+        servicesSummaryText = `All ${totalServices} services enabled for booking`;
+      } else if (totalAssigned === 0) {
+        servicesSummaryText = `0 of ${totalServices} services assigned`;
+      } else {
+        servicesSummaryText = `${totalAssigned} of ${totalServices} services enabled for booking`;
+      }
+    } else if (totalAssigned > 0) {
+      servicesSummaryText = `${totalAssigned} active services assigned`;
+    }
+
+    const primaryCategoryName = totalServices > 0
+      ? `${totalAssigned} of ${totalServices} Services`
+      : `${totalAssigned} Assigned`;
 
     return {
       totalAssigned,
-      categoryPills,
-      categoryNamesSummary,
+      totalServices,
+      coveragePercent,
+      categoryNamesSummary: servicesSummaryText,
       primaryCategoryName,
     };
   }
@@ -545,11 +508,11 @@ export class StaffProfileHub {
             <div class="metric-sub ${schedule.isOnLeaveToday ? 'sub-rose' : 'sub-cyan'}">${schedule.shiftSubtitle}</div>
           </div>
 
-          <!-- Card 2: Specialties -->
+          <!-- Card 2: Services -->
           <div class="metric-stat-card">
             <div class="metric-header">
               <span class="dot-purple">●</span>
-              <span>Specialties</span>
+              <span>Services</span>
             </div>
             <div class="metric-value">${services.totalAssigned} Assigned</div>
             <div class="metric-sub sub-purple">${services.primaryCategoryName}</div>
@@ -622,33 +585,38 @@ export class StaffProfileHub {
               <div class="feature-title-col">
                 <div class="feature-title-row">
                   <span class="feature-title-text">Assigned Services</span>
-                  <span class="feature-pill-badge badge-purple">${services.totalAssigned} Active</span>
+                  <span class="feature-pill-badge badge-purple">${services.totalAssigned}/${services.totalServices}</span>
                 </div>
                 <div class="feature-subtitle">${services.categoryNamesSummary}</div>
               </div>
             </div>
             <div class="card-header-actions">
+              <button type="button" class="btn-manage-services-action" id="btn-card-manage-services">
+                <span>Manage</span>
+              </button>
               <div class="btn-card-chevron">${chevronSvg}</div>
             </div>
           </div>
 
-          <div class="card-services-pills-row">
-            <div class="cat-breakdown-row">
-              ${services.categoryPills
-                .map(
-                  (c) => `
-                <div class="cat-breakdown-chip ${c.colorClass}">
-                  <span>${c.icon}</span>
-                  <span>${c.name} (${c.count})</span>
-                </div>
-              `
-                )
-                .join('')}
+          <div class="services-stat-strip">
+            <div class="services-bar-track">
+              <div class="services-bar-fill" style="width: ${services.coveragePercent}%;"></div>
             </div>
-            <button type="button" class="feature-footer-link link-purple" id="btn-manage-services-link">
-              <span>Manage</span>
-              <span>→</span>
-            </button>
+            <div class="services-stat-metrics">
+              <div class="stat-metric-item">
+                <span class="stat-dot dot-purple">●</span>
+                <span class="stat-label">Assigned:</span>
+                <strong class="stat-val font-purple">${services.totalAssigned}</strong>
+              </div>
+              <div class="stat-metric-item">
+                <span class="stat-dot dot-muted">●</span>
+                <span class="stat-label">Total Catalog:</span>
+                <strong class="stat-val">${services.totalServices}</strong>
+              </div>
+              <div class="stat-metric-item stat-pct">
+                <span class="stat-pct-badge">${services.coveragePercent}% Active</span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -750,6 +718,15 @@ export class StaffProfileHub {
       };
     }
 
+    // 5. Direct links in card headers / footers
+    const manageServicesBtn = container.querySelector('#btn-card-manage-services');
+    if (manageServicesBtn) {
+      manageServicesBtn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        manager.navigateTo('services');
+      };
+    }
     const manageServicesLink = container.querySelector('#btn-manage-services-link');
     if (manageServicesLink) {
       manageServicesLink.onclick = (e) => {
