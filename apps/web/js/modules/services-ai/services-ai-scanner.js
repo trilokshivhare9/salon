@@ -10,6 +10,7 @@ export class ServicesAiScannerModal {
   constructor(app) {
     this.app = app;
     this.extractedServices = [];
+    this.collapsedCategories = new Set();
     this.modalEl = null;
     this.cameraInput = null;
     this.galleryInput = null;
@@ -143,9 +144,18 @@ export class ServicesAiScannerModal {
 
       this.extractedServices = response.services.map((item, idx) => ({
         ...item,
+        name: (item.name || '').trim(),
+        category: (item.category || 'General').trim() || 'General',
+        price: Math.max(0, parseInt(item.price, 10) || 0),
+        durationMinutes: Math.max(30, Math.round((parseInt(item.durationMinutes, 10) || 30) / 15) * 15),
+        targetGender: item.targetGender || 'UNISEX',
         tempId: `item_${Date.now()}_${idx}`,
         selected: true,
+        isEditing: false,
       }));
+
+      this.collapsedCategories = new Set();
+      this.renamingCategory = null;
 
       // Cache existing categories for quick selection
       this.existingCategories = (this.app?.categories || []).map((c) => c.name || c);
@@ -234,6 +244,78 @@ export class ServicesAiScannerModal {
   /**
    * Renders the interactive Review & Edit modal
    */
+  /**
+   * Groups extracted services by category name
+   */
+  groupServicesByCategory() {
+    const caseMap = new Map();
+    for (const item of this.extractedServices) {
+      const rawCat = (item.category || 'General').trim() || 'General';
+      const key = rawCat.toLowerCase();
+      if (!caseMap.has(key)) {
+        caseMap.set(key, { name: rawCat, items: [] });
+      }
+      caseMap.get(key).items.push(item);
+    }
+    const groups = new Map();
+    for (const { name, items } of caseMap.values()) {
+      groups.set(name, items);
+    }
+    return groups;
+  }
+
+  /**
+   * Returns all unique category names detected by AI or stored in app (deduplicated)
+   */
+  getAllAvailableCategories() {
+    const seen = new Map();
+    if (Array.isArray(this.extractedServices)) {
+      this.extractedServices.forEach((s) => {
+        const cat = (s.category || '').trim();
+        if (cat && !seen.has(cat.toLowerCase())) {
+          seen.set(cat.toLowerCase(), cat);
+        }
+      });
+    }
+    if (Array.isArray(this.existingCategories)) {
+      this.existingCategories.forEach((c) => {
+        const name = (typeof c === 'string' ? c : c?.name || '').trim();
+        if (name && !seen.has(name.toLowerCase())) {
+          seen.set(name.toLowerCase(), name);
+        }
+      });
+    }
+    if (seen.size === 0) {
+      ['Hair Styling', 'Hair Coloring', 'Beard & Shave', 'Facial & Skin', 'General'].forEach((c) => {
+        seen.set(c.toLowerCase(), c);
+      });
+    }
+    return Array.from(seen.values());
+  }
+
+  getGenderLabel(gender) {
+    switch (gender) {
+      case 'FEMALE': return '👩 Women';
+      case 'MALE': return '👤 Men';
+      case 'KIDS': return '👶 Kids';
+      case 'UNISEX':
+      default: return '👥 Unisex';
+    }
+  }
+
+  escapeHtml(str) {
+    if (!str && str !== 0) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  /**
+   * Renders the interactive Review & Edit modal
+   */
   showReviewDialog() {
     const existing = document.getElementById('ai-scan-review-modal');
     if (existing) existing.remove();
@@ -248,23 +330,28 @@ export class ServicesAiScannerModal {
         <!-- Header -->
         <div class="ai-review-header">
           <div class="ai-review-title-group">
-            <div class="ai-badge-chip">✨ AI Extracted</div>
-            <h2>Review & Edit Services</h2>
-            <p>Verify detected services or tweak pricing before adding to your menu.</p>
+            <div class="ai-title-row">
+              <span class="ai-badge-chip">✨ AI EXTRACTED</span>
+            </div>
+            <h2>Review Services</h2>
+            <p>Verify detected services or tweak pricing before adding to menu.</p>
           </div>
-          <button type="button" class="btn-ai-modal-close" id="btn-close-ai-review">✕</button>
+          <button type="button" class="btn-ai-modal-close" id="btn-close-ai-review" aria-label="Close modal">✕</button>
         </div>
 
         <!-- Toolbar -->
         <div class="ai-review-toolbar">
           <label class="ai-select-all-label">
             <input type="checkbox" id="ai-chk-select-all" checked>
-            <span>Select All (<strong id="ai-selected-tally">${this.extractedServices.length}</strong>/${this.extractedServices.length})</span>
+            <span>All (<strong id="ai-selected-tally">${this.extractedServices.length}</strong>/${this.extractedServices.length})</span>
           </label>
 
-          <button type="button" class="btn-add-manual-ai-row" id="btn-add-manual-row">
-            + Add Another Service
-          </button>
+          <div class="ai-toolbar-actions">
+            <button type="button" class="btn-ai-toggle-all-cats" id="btn-toggle-all-cats">
+              <span class="toggle-icon">⌃</span>
+              <span class="toggle-text">Collapse All</span>
+            </button>
+          </div>
         </div>
 
         <!-- Scrollable Services Table / List -->
@@ -276,7 +363,7 @@ export class ServicesAiScannerModal {
         <div class="ai-review-footer">
           <button type="button" class="btn-ai-discard" id="btn-discard-ai-review">Discard</button>
           <button type="button" class="btn-ai-confirm-import" id="btn-confirm-ai-import">
-            ✨ Import <span id="ai-import-count">${this.extractedServices.length}</span> Services
+            <span class="import-sparkle">✨</span> Import <span id="ai-import-count">${this.extractedServices.length}</span> Services
           </button>
         </div>
       </div>
@@ -286,92 +373,281 @@ export class ServicesAiScannerModal {
     this.modalEl = modal;
 
     this.attachReviewEvents();
+    this.updateTally();
   }
 
+  /**
+   * Helper to return clean gender chip HTML matching the reference design
+   */
+  getGenderChipHtml(gender) {
+    const g = (gender || 'UNISEX').toUpperCase();
+    if (g === 'FEMALE') {
+      return `<span class="gender-icon female">♀</span> Women`;
+    }
+    if (g === 'MALE') {
+      return `<span class="gender-icon male">♂</span> Men`;
+    }
+    if (g === 'KIDS') {
+      return `<span class="gender-icon kids">👶</span> Kids`;
+    }
+    return `<span class="gender-icon unisex">👥</span> Unisex`;
+  }
+
+  /**
+   * Helper to return category icon matching the reference design
+   */
+  getCategoryIcon(categoryName) {
+    const cat = (categoryName || '').toLowerCase();
+    if (cat.includes('color') || cat.includes('dye') || cat.includes('tint') || cat.includes('highlight') || cat.includes('foil')) {
+      return `🧴`;
+    }
+    if (cat.includes('beard') || cat.includes('shave')) {
+      return `🪒`;
+    }
+    if (cat.includes('face') || cat.includes('skin') || cat.includes('facial')) {
+      return `✨`;
+    }
+    if (cat.includes('nail') || cat.includes('pedi') || cat.includes('mani')) {
+      return `💅`;
+    }
+    if (cat.includes('wax') || cat.includes('thread')) {
+      return `🍯`;
+    }
+    if (cat.includes('massage') || cat.includes('spa')) {
+      return `💆`;
+    }
+    return `✂️`;
+  }
+
+  /**
+   * Renders grouped categories and their clean service info cards
+   */
   renderReviewItemsHtml() {
     if (!this.extractedServices || this.extractedServices.length === 0) {
       return `
-        <div class="ai-empty-review text-center" style="padding: 40px; color: var(--text-secondary);">
-          <p>No services selected. Click "+ Add Another Service" to create one.</p>
+        <div class="ai-empty-review text-center" style="padding: 44px 20px; color: #94a3b8;">
+          <div style="font-size: 2.2rem; margin-bottom: 10px;">📋</div>
+          <h4 style="color: #fff; margin-bottom: 6px; font-weight: 700; font-size: 1.05rem;">No services detected</h4>
+          <p style="font-size: 0.85rem; margin: 0; color: #64748b;">Please scan a rate card image to review services.</p>
         </div>
       `;
     }
 
-    const durationOptions = [30, 45, 60, 75, 90, 105, 120, 150, 180];
+    const categoriesMap = this.groupServicesByCategory();
+    let html = '';
+
+    for (const [categoryName, services] of categoriesMap.entries()) {
+      const isCollapsed = this.collapsedCategories.has(categoryName);
+      const isRenaming = this.renamingCategory === categoryName;
+      const catSelectedCount = services.filter((s) => s.selected).length;
+      const allSelected = catSelectedCount === services.length && services.length > 0;
+      const isPartial = catSelectedCount > 0 && catSelectedCount < services.length;
+
+      html += `
+        <div class="ai-category-group" data-category="${this.escapeHtml(categoryName)}">
+          ${isRenaming ? `
+            <div class="ai-category-header is-renaming" data-category="${this.escapeHtml(categoryName)}">
+              <div class="ai-cat-icon-box">
+                <span>${this.getCategoryIcon(categoryName)}</span>
+              </div>
+              <div class="ai-cat-rename-input-wrap">
+                <input type="text" class="ai-input-cat-rename" value="${this.escapeHtml(categoryName)}" data-old-category="${this.escapeHtml(categoryName)}" placeholder="Category title..." maxlength="50" autofocus />
+              </div>
+              <div class="ai-cat-rename-btns">
+                <button type="button" class="btn-ai-cat-rename-cancel" data-old-category="${this.escapeHtml(categoryName)}" title="Cancel (Esc)">✕</button>
+                <button type="button" class="btn-ai-cat-rename-save" data-old-category="${this.escapeHtml(categoryName)}" title="Save (Enter)">✓</button>
+              </div>
+            </div>
+          ` : `
+            <div class="ai-category-header" data-category="${this.escapeHtml(categoryName)}">
+              <div class="ai-category-header-left">
+                <svg class="ai-cat-chevron ${isCollapsed ? 'is-collapsed' : ''}" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="6 9 12 15 18 9"></polyline>
+                </svg>
+                <div class="ai-cat-icon-box">
+                  <span>${this.getCategoryIcon(categoryName)}</span>
+                </div>
+                <span class="ai-cat-title" title="Click pencil or double-click to rename">${this.escapeHtml(categoryName)}</span>
+                <span class="ai-cat-count-num">(${services.length})</span>
+                <button type="button" class="btn-ai-cat-rename" data-category="${this.escapeHtml(categoryName)}" title="Rename category" aria-label="Rename category">
+                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                  </svg>
+                </button>
+              </div>
+
+              <div class="ai-category-header-right">
+                <span class="ai-cat-tally-pill"><strong class="cat-sel-count">${catSelectedCount}</strong>/${services.length}</span>
+                <input type="checkbox" class="ai-cat-chk" data-category="${this.escapeHtml(categoryName)}" ${allSelected ? 'checked' : ''} ${isPartial ? 'data-indeterminate="true"' : ''}>
+              </div>
+            </div>
+          `}
+
+          <div class="ai-category-services-body ${isCollapsed ? 'is-collapsed' : ''}" data-category-body="${this.escapeHtml(categoryName)}">
+            ${services.map((item) => this.renderServiceCardHtml(item)).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    return html;
+  }
+
+  /**
+   * Renders an individual service as a card matching the pixel-perfect reference image
+   */
+  renderServiceCardHtml(item) {
+    const durationOptions = [15, 30, 45, 60, 75, 90, 105, 120, 150, 180];
     const genderOptions = [
       { val: 'UNISEX', label: '👥 Unisex' },
-      { val: 'MALE', label: '👤 Men' },
       { val: 'FEMALE', label: '👩 Women' },
+      { val: 'MALE', label: '👤 Men' },
       { val: 'KIDS', label: '👶 Kids' },
     ];
 
-    return this.extractedServices.map((item, idx) => `
-      <div class="ai-review-row ${item.selected ? 'is-selected' : 'is-unselected'}" data-temp-id="${item.tempId}">
-        <div class="ai-row-col-chk">
-          <input type="checkbox" class="ai-item-chk" data-temp-id="${item.tempId}" ${item.selected ? 'checked' : ''}>
-        </div>
+    if (item.isEditing) {
+      // All AI-detected & available categories for dropdown
+      const availableCategories = this.getAllAvailableCategories();
+      const currentCat = (item.category || 'General').trim() || 'General';
+      if (!availableCategories.some((c) => c.toLowerCase() === currentCat.toLowerCase())) {
+        availableCategories.unshift(currentCat);
+      }
 
-        <div class="ai-row-main-grid">
-          <!-- 1. Service Name -->
-          <div class="ai-field-group field-name">
-            <label>Service Name</label>
-            <input type="text" class="ai-input ai-input-name" data-temp-id="${item.tempId}" value="${(item.name || '').replace(/"/g, '&quot;')}" placeholder="e.g. Haircut">
-          </div>
+      // ACTIVE INLINE EDIT FORM
+      return `
+        <div class="ai-service-card is-editing" data-temp-id="${item.tempId}">
+          <div class="ai-edit-inline-panel">
+            <div class="ai-edit-top-row">
+              <span class="ai-edit-label">✏️ Edit Service: <strong>${this.escapeHtml(item.name || 'New Service')}</strong></span>
+              <button type="button" class="btn-ai-card-cancel-x" data-temp-id="${item.tempId}" title="Cancel editing">✕</button>
+            </div>
 
-          <!-- 2. Category -->
-          <div class="ai-field-group field-category">
-            <label>Category</label>
-            <input type="text" class="ai-input ai-input-category" data-temp-id="${item.tempId}" value="${(item.category || 'General').replace(/"/g, '&quot;')}" list="ai-category-suggestions" placeholder="Category">
-          </div>
+            <div class="ai-edit-fields-grid">
+              <!-- 1. Service Name -->
+              <div class="ai-field-group field-full">
+                <label>Service Name</label>
+                <input type="text" class="ai-input ai-input-name" data-temp-id="${item.tempId}" value="${this.escapeHtml(item.name || '')}" placeholder="e.g. Women's Haircut">
+              </div>
 
-          <!-- 3. Target Gender -->
-          <div class="ai-field-group field-gender">
-            <label>Audience</label>
-            <select class="ai-input ai-select-gender" data-temp-id="${item.tempId}">
-              ${genderOptions.map((g) => `
-                <option value="${g.val}" ${item.targetGender === g.val ? 'selected' : ''}>${g.label}</option>
-              `).join('')}
-            </select>
-          </div>
+              <!-- 2. Custom Luxury Category Dropdown -->
+              <div class="ai-field-group field-full">
+                <label>Category</label>
+                <div class="ai-cat-dropdown-wrap" data-temp-id="${item.tempId}">
+                  <input type="hidden" class="ai-category-field-val" data-temp-id="${item.tempId}" value="${this.escapeHtml(currentCat)}" />
+                  
+                  <div class="ai-cat-dropdown-trigger" data-temp-id="${item.tempId}" tabindex="0">
+                    <div class="ai-cat-trigger-content">
+                      <span class="ai-cat-trigger-icon">${this.getCategoryIcon(currentCat)}</span>
+                      <span class="ai-cat-trigger-text">${this.escapeHtml(currentCat)}</span>
+                    </div>
+                    <span class="ai-cat-trigger-arrow">▾</span>
+                  </div>
 
-          <!-- 4. Duration (15m increments) -->
-          <div class="ai-field-group field-duration">
-            <label>Duration</label>
-            <select class="ai-input ai-select-duration" data-temp-id="${item.tempId}">
-              ${durationOptions.map((d) => `
-                <option value="${d}" ${item.durationMinutes === d ? 'selected' : ''}>${d} mins</option>
-              `).join('')}
-            </select>
-          </div>
+                  <div class="ai-cat-dropdown-menu" data-temp-id="${item.tempId}" style="display: none;">
+                    <div class="ai-cat-options-scroll">
+                      ${availableCategories.map((c) => {
+                        const isSelected = c.toLowerCase() === currentCat.toLowerCase();
+                        return `
+                          <div class="ai-cat-opt ${isSelected ? 'is-selected' : ''}" data-value="${this.escapeHtml(c)}" data-temp-id="${item.tempId}">
+                            <span class="ai-cat-opt-icon">${this.getCategoryIcon(c)}</span>
+                            <span class="ai-cat-opt-name">${this.escapeHtml(c)}</span>
+                            ${isSelected ? '<span class="ai-cat-opt-check">✓</span>' : ''}
+                          </div>
+                        `;
+                      }).join('')}
+                    </div>
+                    <div class="ai-cat-dropdown-divider"></div>
+                    <div class="ai-cat-opt opt-new-cat" data-value="__NEW__" data-temp-id="${item.tempId}">
+                      <span class="ai-cat-opt-icon">✨</span>
+                      <span class="ai-cat-opt-name">+ Create New Category...</span>
+                    </div>
+                  </div>
 
-          <!-- 5. Price -->
-          <div class="ai-field-group field-price">
-            <label>Price (₹)</label>
-            <div class="ai-price-input-wrap">
-              <span class="ai-currency-symbol">₹</span>
-              <input type="number" class="ai-input ai-input-price" data-temp-id="${item.tempId}" value="${item.price || 0}" min="0" step="10">
+                  <input type="text" class="ai-input ai-input-new-category" data-temp-id="${item.tempId}" placeholder="Enter new category title..." style="display: none; margin-top: 6px;">
+                </div>
+              </div>
+
+              <!-- 3. Audience -->
+              <div class="ai-field-group">
+                <label>Audience</label>
+                <select class="ai-input ai-select-gender" data-temp-id="${item.tempId}">
+                  ${genderOptions.map((g) => `
+                    <option value="${g.val}" ${item.targetGender === g.val ? 'selected' : ''}>${g.label}</option>
+                  `).join('')}
+                </select>
+              </div>
+
+              <!-- 4. Duration -->
+              <div class="ai-field-group">
+                <label>Duration</label>
+                <select class="ai-input ai-select-duration" data-temp-id="${item.tempId}">
+                  ${durationOptions.map((d) => `
+                    <option value="${d}" ${item.durationMinutes === d ? 'selected' : ''}>${d}m</option>
+                  `).join('')}
+                </select>
+              </div>
+
+              <!-- 5. Price -->
+              <div class="ai-field-group field-full">
+                <label>Price (₹)</label>
+                <div class="ai-price-input-wrap">
+                  <span class="ai-currency-symbol">₹</span>
+                  <input type="number" class="ai-input ai-input-price" data-temp-id="${item.tempId}" value="${item.price || 0}" min="0" step="10">
+                </div>
+              </div>
+            </div>
+
+            <div class="ai-edit-actions-row">
+              <button type="button" class="btn-ai-edit-cancel" data-temp-id="${item.tempId}">Cancel</button>
+              <button type="button" class="btn-ai-edit-save" data-temp-id="${item.tempId}">✓ Done</button>
             </div>
           </div>
+        </div>
+      `;
+    }
 
-          <!-- 6. Delete Action -->
-          <div class="ai-field-group field-delete">
-            <button type="button" class="btn-ai-row-delete" data-temp-id="${item.tempId}" title="Remove this item">✕</button>
+    // PIXEL-PERFECT SERVICE CARD (Matching the image)
+    return `
+      <div class="ai-service-card ${item.selected ? 'is-selected' : 'is-unselected'}" data-temp-id="${item.tempId}">
+        <div class="ai-card-col-chk">
+          <input type="checkbox" class="ai-item-chk" data-temp-id="${item.tempId}" ${item.selected ? 'checked' : ''} aria-label="Select ${this.escapeHtml(item.name)}">
+        </div>
+
+        <div class="ai-card-main-content">
+          <div class="ai-card-service-name">${this.escapeHtml(item.name || 'Untitled Service')}</div>
+          <div class="ai-card-meta-row">
+            <span class="ai-meta-chip">
+              ${this.getGenderChipHtml(item.targetGender)}
+            </span>
+            <span class="meta-dot">·</span>
+            <span class="ai-meta-duration"><span class="clock-icon">🕒</span> ${item.durationMinutes || 30}m</span>
           </div>
         </div>
+
+        <div class="ai-card-right">
+          <span class="ai-card-price">₹${item.price || 0}</span>
+          <button type="button" class="btn-ai-service-edit" data-temp-id="${item.tempId}" title="Edit service">Edit</button>
+          <button type="button" class="btn-ai-service-delete" data-temp-id="${item.tempId}" title="Remove service">✕</button>
+        </div>
       </div>
-    `).join('') + `
-      <datalist id="ai-category-suggestions">
-        <option value="Hair & Styling"></option>
-        <option value="Beard & Shave"></option>
-        <option value="Facial & Skin"></option>
-        <option value="Nails & Pedicure"></option>
-        <option value="Waxing & Threading"></option>
-        <option value="Massage & Spa"></option>
-        ${this.existingCategories.map((c) => `<option value="${c}"></option>`).join('')}
-      </datalist>
     `;
   }
 
+  /**
+   * Refreshes the scrollable review list HTML in place
+   */
+  refreshReviewList() {
+    const listContainer = this.modalEl?.querySelector('#ai-review-list-items');
+    if (listContainer) {
+      listContainer.innerHTML = this.renderReviewItemsHtml();
+      this.updateTally();
+    }
+  }
+
+  /**
+   * Attaches event delegation for review modal interactions
+   */
   attachReviewEvents() {
     if (!this.modalEl) return;
 
@@ -382,93 +658,482 @@ export class ServicesAiScannerModal {
     modal.querySelector('#btn-close-ai-review').addEventListener('click', closeModal);
     modal.querySelector('#btn-discard-ai-review').addEventListener('click', closeModal);
 
-    // Select All Toggle
+    // 1. Overall Select All Toggle
     const selectAllChk = modal.querySelector('#ai-chk-select-all');
     selectAllChk?.addEventListener('change', (e) => {
       const isChecked = e.target.checked;
       this.extractedServices.forEach((s) => (s.selected = isChecked));
       modal.querySelectorAll('.ai-item-chk').forEach((chk) => (chk.checked = isChecked));
-      modal.querySelectorAll('.ai-review-row').forEach((row) => {
-        row.classList.toggle('is-selected', isChecked);
-        row.classList.toggle('is-unselected', !isChecked);
+      modal.querySelectorAll('.ai-cat-chk').forEach((chk) => {
+        chk.checked = isChecked;
+        chk.indeterminate = false;
+      });
+      modal.querySelectorAll('.ai-service-row, .ai-service-card').forEach((card) => {
+        card.classList.toggle('is-selected', isChecked);
+        card.classList.toggle('is-unselected', !isChecked);
       });
       this.updateTally();
     });
 
-    // Row Checkboxes
+    // 2. Category Select-All Checkbox
+    modal.addEventListener('change', (e) => {
+      if (e.target.classList.contains('ai-cat-chk')) {
+        const cat = e.target.getAttribute('data-category');
+        const isChecked = e.target.checked;
+        this.extractedServices
+          .filter((s) => ((s.category || 'General').trim() || 'General') === cat)
+          .forEach((s) => (s.selected = isChecked));
+
+        const catGroup = e.target.closest('.ai-category-group');
+        if (catGroup) {
+          catGroup.querySelectorAll('.ai-item-chk').forEach((chk) => (chk.checked = isChecked));
+          catGroup.querySelectorAll('.ai-service-row, .ai-service-card').forEach((card) => {
+            card.classList.toggle('is-selected', isChecked);
+            card.classList.toggle('is-unselected', !isChecked);
+          });
+        }
+        this.updateTally();
+      }
+    });
+
+    // 3. Individual Service Checkbox
     modal.addEventListener('change', (e) => {
       if (e.target.classList.contains('ai-item-chk')) {
         const tempId = e.target.getAttribute('data-temp-id');
         const item = this.extractedServices.find((s) => s.tempId === tempId);
-        if (item) item.selected = e.target.checked;
-        const row = modal.querySelector(`.ai-review-row[data-temp-id="${tempId}"]`);
-        row?.classList.toggle('is-selected', e.target.checked);
-        row?.classList.toggle('is-unselected', !e.target.checked);
-        this.updateTally();
+        if (item) {
+          item.selected = e.target.checked;
+          const card = e.target.closest('.ai-service-row, .ai-service-card');
+          card?.classList.toggle('is-selected', e.target.checked);
+          card?.classList.toggle('is-unselected', !e.target.checked);
+          this.updateTally();
+        }
       }
     });
 
-    // Input changes (sync to in-memory array)
-    modal.addEventListener('input', (e) => {
-      const tempId = e.target.getAttribute('data-temp-id');
-      if (!tempId) return;
-      const item = this.extractedServices.find((s) => s.tempId === tempId);
-      if (!item) return;
-
-      if (e.target.classList.contains('ai-input-name')) item.name = e.target.value;
-      if (e.target.classList.contains('ai-input-category')) item.category = e.target.value;
-      if (e.target.classList.contains('ai-input-price')) item.price = Math.max(0, parseInt(e.target.value, 10) || 0);
-    });
-
-    modal.addEventListener('change', (e) => {
-      const tempId = e.target.getAttribute('data-temp-id');
-      if (!tempId) return;
-      const item = this.extractedServices.find((s) => s.tempId === tempId);
-      if (!item) return;
-
-      if (e.target.classList.contains('ai-select-gender')) item.targetGender = e.target.value;
-      if (e.target.classList.contains('ai-select-duration')) item.durationMinutes = parseInt(e.target.value, 10) || 30;
-    });
-
-    // Delete Row
+    // Custom Category Dropdown Trigger Toggle
     modal.addEventListener('click', (e) => {
-      const delBtn = e.target.closest('.btn-ai-row-delete');
-      if (delBtn) {
-        const tempId = delBtn.getAttribute('data-temp-id');
-        this.extractedServices = this.extractedServices.filter((s) => s.tempId !== tempId);
-        const row = modal.querySelector(`.ai-review-row[data-temp-id="${tempId}"]`);
-        row?.remove();
+      const trigger = e.target.closest('.ai-cat-dropdown-trigger');
+      if (trigger) {
+        e.stopPropagation();
+        const wrap = trigger.closest('.ai-cat-dropdown-wrap');
+        const menu = wrap?.querySelector('.ai-cat-dropdown-menu');
+        const wasOpen = menu && menu.style.display !== 'none';
+
+        // Close any other open dropdowns first
+        modal.querySelectorAll('.ai-cat-dropdown-menu').forEach((m) => (m.style.display = 'none'));
+        modal.querySelectorAll('.ai-cat-dropdown-trigger').forEach((t) => t.classList.remove('is-active'));
+
+        if (!wasOpen && menu) {
+          menu.style.display = 'block';
+          trigger.classList.add('is-active');
+        }
+        return;
+      }
+
+      // Option Selected in Custom Category Dropdown
+      const opt = e.target.closest('.ai-cat-opt');
+      if (opt) {
+        e.stopPropagation();
+        const wrap = opt.closest('.ai-cat-dropdown-wrap');
+        if (!wrap) return;
+
+        const val = opt.getAttribute('data-value');
+        const hiddenVal = wrap.querySelector('.ai-category-field-val');
+        const triggerText = wrap.querySelector('.ai-cat-trigger-text');
+        const triggerIcon = wrap.querySelector('.ai-cat-trigger-icon');
+        const menu = wrap.querySelector('.ai-cat-dropdown-menu');
+        const triggerBtn = wrap.querySelector('.ai-cat-dropdown-trigger');
+        const newInput = wrap.querySelector('.ai-input-new-category');
+
+        if (val === '__NEW__') {
+          if (hiddenVal) hiddenVal.value = '__NEW__';
+          if (triggerText) triggerText.textContent = '+ Create New Category...';
+          if (triggerIcon) triggerIcon.textContent = '✨';
+          if (newInput) {
+            newInput.style.display = 'block';
+            newInput.focus();
+          }
+        } else {
+          if (hiddenVal) hiddenVal.value = val;
+          if (triggerText) triggerText.textContent = val;
+          if (triggerIcon) triggerIcon.textContent = this.getCategoryIcon(val);
+          if (newInput) newInput.style.display = 'none';
+        }
+
+        wrap.querySelectorAll('.ai-cat-opt').forEach((o) => {
+          const isCurrent = o.getAttribute('data-value') === val;
+          o.classList.toggle('is-selected', isCurrent);
+          let check = o.querySelector('.ai-cat-opt-check');
+          if (isCurrent && !check && val !== '__NEW__') {
+            const chkSpan = document.createElement('span');
+            chkSpan.className = 'ai-cat-opt-check';
+            chkSpan.textContent = '✓';
+            o.appendChild(chkSpan);
+          } else if (!isCurrent && check) {
+            check.remove();
+          }
+        });
+
+        if (menu) menu.style.display = 'none';
+        if (triggerBtn) triggerBtn.classList.remove('is-active');
+        return;
+      }
+
+      // Close dropdowns when clicking outside
+      if (!e.target.closest('.ai-cat-dropdown-wrap')) {
+        modal.querySelectorAll('.ai-cat-dropdown-menu').forEach((m) => (m.style.display = 'none'));
+        modal.querySelectorAll('.ai-cat-dropdown-trigger').forEach((t) => t.classList.remove('is-active'));
+      }
+    });
+
+    // Helper to commit category rename across all services in that category
+    const saveCategoryRename = (oldCat) => {
+      const input = modal.querySelector(`.ai-input-cat-rename[data-old-category="${oldCat}"]`);
+      const newCat = (input?.value || '').trim();
+      if (!newCat) {
+        this.app?.showToast?.('Category title cannot be empty', 'warning');
+        input?.focus();
+        return;
+      }
+
+      if (newCat.toLowerCase() !== oldCat.toLowerCase()) {
+        // Update all services that belong to this category
+        this.extractedServices.forEach((s) => {
+          const sCat = ((s.category || 'General').trim() || 'General');
+          if (sCat.toLowerCase() === oldCat.toLowerCase()) {
+            s.category = newCat;
+          }
+        });
+
+        // Update collapsed categories state
+        if (this.collapsedCategories.has(oldCat)) {
+          this.collapsedCategories.delete(oldCat);
+          this.collapsedCategories.add(newCat);
+        }
+
+        // Update existingCategories cache
+        if (Array.isArray(this.existingCategories)) {
+          const idx = this.existingCategories.findIndex((c) => (c || '').toLowerCase() === oldCat.toLowerCase());
+          if (idx !== -1) {
+            this.existingCategories[idx] = newCat;
+          } else {
+            this.existingCategories.push(newCat);
+          }
+        }
+
+        this.app?.showToast?.(`Category renamed to "${newCat}"`, 'success');
+      }
+
+      this.renamingCategory = null;
+      this.refreshReviewList();
+    };
+
+    // Category Rename Trigger Click / Save / Cancel / Outside Click
+    modal.addEventListener('click', (e) => {
+      const renameBtn = e.target.closest('.btn-ai-cat-rename');
+      if (renameBtn) {
+        e.stopPropagation();
+        const cat = renameBtn.getAttribute('data-category');
+        this.renamingCategory = cat;
+        this.refreshReviewList();
+        const input = modal.querySelector(`.ai-input-cat-rename[data-old-category="${cat}"]`);
+        if (input) {
+          input.focus();
+          input.select();
+        }
+        return;
+      }
+
+      const saveCatBtn = e.target.closest('.btn-ai-cat-rename-save');
+      if (saveCatBtn) {
+        e.stopPropagation();
+        const oldCat = saveCatBtn.getAttribute('data-old-category');
+        saveCategoryRename(oldCat);
+        return;
+      }
+
+      const cancelCatBtn = e.target.closest('.btn-ai-cat-rename-cancel');
+      if (cancelCatBtn) {
+        e.stopPropagation();
+        this.renamingCategory = null;
+        this.refreshReviewList();
+        return;
+      }
+
+      // If user clicks outside category rename form, cancel rename
+      if (this.renamingCategory && !e.target.closest('.ai-category-header.is-renaming, .btn-ai-cat-rename')) {
+        this.renamingCategory = null;
+        this.refreshReviewList();
+      }
+    });
+
+    // Double-click category title to trigger rename
+    modal.addEventListener('dblclick', (e) => {
+      const titleEl = e.target.closest('.ai-cat-title');
+      if (titleEl) {
+        const header = titleEl.closest('.ai-category-header');
+        const cat = header?.getAttribute('data-category');
+        if (cat) {
+          this.renamingCategory = cat;
+          this.refreshReviewList();
+          const input = modal.querySelector(`.ai-input-cat-rename[data-old-category="${cat}"]`);
+          if (input) {
+            input.focus();
+            input.select();
+          }
+        }
+      }
+    });
+
+    // Enter / Escape in category rename input
+    modal.addEventListener('keydown', (e) => {
+      if (e.target.classList.contains('ai-input-cat-rename')) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const oldCat = e.target.getAttribute('data-old-category');
+          saveCategoryRename(oldCat);
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          this.renamingCategory = null;
+          this.refreshReviewList();
+        }
+      }
+    });
+
+    // 4. Category Collapsible Header Click
+    modal.addEventListener('click', (e) => {
+      const header = e.target.closest('.ai-category-header');
+      if (!header) return;
+
+      // Do not collapse if header is in rename mode or clicked on controls
+      if (header.classList.contains('is-renaming')) return;
+      if (e.target.closest('.ai-cat-select-label, .ai-cat-chk, .ai-cat-tally-pill, .btn-ai-cat-rename, .ai-cat-rename-btns, .ai-input-cat-rename')) return;
+
+      const cat = header.getAttribute('data-category');
+      if (!cat) return;
+
+      if (this.collapsedCategories.has(cat)) {
+        this.collapsedCategories.delete(cat);
+      } else {
+        this.collapsedCategories.add(cat);
+      }
+
+      const isNowCollapsed = this.collapsedCategories.has(cat);
+      const catGroup = header.closest('.ai-category-group');
+      const body = catGroup?.querySelector('.ai-category-services-body');
+      const chevron = header.querySelector('.ai-cat-chevron');
+      const collapseBtn = header.querySelector('.btn-ai-cat-collapse');
+
+      body?.classList.toggle('is-collapsed', isNowCollapsed);
+      chevron?.classList.toggle('is-collapsed', isNowCollapsed);
+      collapseBtn?.classList.toggle('is-collapsed', isNowCollapsed);
+
+      this.updateToggleAllCatsButton();
+    });
+
+    // 5. Toggle All Categories Button
+    modal.querySelector('#btn-toggle-all-cats')?.addEventListener('click', () => {
+      const categoriesMap = this.groupServicesByCategory();
+      const allCats = Array.from(categoriesMap.keys());
+      const anyOpen = allCats.some((c) => !this.collapsedCategories.has(c));
+
+      if (anyOpen) {
+        // Collapse all
+        allCats.forEach((c) => this.collapsedCategories.add(c));
+      } else {
+        // Expand all
+        this.collapsedCategories.clear();
+      }
+
+      this.refreshReviewList();
+    });
+
+    // 6. Service Edit Button Click / Row Click -> Switches row to Edit Mode
+    modal.addEventListener('click', (e) => {
+      const editTrigger = e.target.closest('.btn-ai-service-edit, .ai-price-clickable, .ai-row-main');
+      if (!editTrigger) return;
+
+      // Do not trigger edit if user clicked a checkbox, delete button, or if already editing
+      if (e.target.closest('.ai-item-chk, .btn-ai-service-delete')) return;
+      const row = editTrigger.closest('.ai-service-row, .ai-service-card');
+      if (!row || row.classList.contains('is-editing')) return;
+
+      const tempId = row.getAttribute('data-temp-id') || editTrigger.getAttribute('data-temp-id');
+      const item = this.extractedServices.find((s) => s.tempId === tempId);
+      if (!item) return;
+
+      // Save draft for cancel
+      item._draft = {
+        name: item.name,
+        category: item.category,
+        targetGender: item.targetGender,
+        durationMinutes: item.durationMinutes,
+        price: item.price,
+      };
+      item.isEditing = true;
+
+      row.outerHTML = this.renderServiceCardHtml(item);
+      const newCard = modal.querySelector(`.ai-service-row[data-temp-id="${tempId}"], .ai-service-card[data-temp-id="${tempId}"]`);
+      newCard?.querySelector('.ai-input-name')?.focus();
+    });
+
+    // 7. Service Edit Cancel Button Click -> Reverts back to Row
+    modal.addEventListener('click', (e) => {
+      const cancelBtn = e.target.closest('.btn-ai-edit-cancel, .btn-ai-card-cancel-x');
+      if (!cancelBtn) return;
+
+      const tempId = cancelBtn.getAttribute('data-temp-id');
+      const item = this.extractedServices.find((s) => s.tempId === tempId);
+      if (!item) return;
+
+      if (item._draft) {
+        item.name = item._draft.name;
+        item.category = item._draft.category;
+        item.targetGender = item._draft.targetGender;
+        item.durationMinutes = item._draft.durationMinutes;
+        item.price = item._draft.price;
+        delete item._draft;
+      }
+      item.isEditing = false;
+      this.renamingCategory = null;
+
+      const card = modal.querySelector(`.ai-service-row[data-temp-id="${tempId}"], .ai-service-card[data-temp-id="${tempId}"]`);
+      if (card) {
+        card.outerHTML = this.renderServiceCardHtml(item);
         this.updateTally();
       }
     });
 
-    // Add Manual Row
-    modal.querySelector('#btn-add-manual-row')?.addEventListener('click', () => {
-      const newRow = {
-        name: '',
-        category: this.existingCategories[0] || 'Hair & Styling',
-        price: 250,
-        durationMinutes: 30,
-        targetGender: 'UNISEX',
-        tempId: `manual_${Date.now()}`,
-        selected: true,
-      };
-      this.extractedServices.unshift(newRow);
-      const listContainer = modal.querySelector('#ai-review-list-items');
-      if (listContainer) {
-        listContainer.innerHTML = this.renderReviewItemsHtml();
+    // 8. Service Edit Save Button Click -> Commits changes and moves under selected category
+    modal.addEventListener('click', (e) => {
+      const saveBtn = e.target.closest('.btn-ai-edit-save');
+      if (!saveBtn) return;
+
+      const tempId = saveBtn.getAttribute('data-temp-id');
+      const item = this.extractedServices.find((s) => s.tempId === tempId);
+      if (!item) return;
+
+      const card = modal.querySelector(`.ai-service-row[data-temp-id="${tempId}"], .ai-service-card[data-temp-id="${tempId}"]`);
+      if (!card) return;
+
+      const nameInput = card.querySelector('.ai-input-name');
+      const catValInput = card.querySelector('.ai-category-field-val');
+      const catNewInput = card.querySelector('.ai-input-new-category');
+      const genderInput = card.querySelector('.ai-select-gender');
+      const durationInput = card.querySelector('.ai-select-duration');
+      const priceInput = card.querySelector('.ai-input-price');
+
+      const name = (nameInput?.value || '').trim();
+      if (!name) {
+        this.app?.showToast?.('Please enter a service name', 'warning');
+        nameInput?.focus();
+        return;
       }
+
+      let chosenCategory = catValInput?.value;
+      if (chosenCategory === '__NEW__') {
+        chosenCategory = (catNewInput?.value || '').trim();
+        if (!chosenCategory) {
+          this.app?.showToast?.('Please enter a category name', 'warning');
+          catNewInput?.focus();
+          return;
+        }
+      }
+      chosenCategory = (chosenCategory || 'General').trim() || 'General';
+
+      // Match canonical casing against available categories
+      const available = this.getAllAvailableCategories();
+      const matched = available.find((c) => c.toLowerCase() === chosenCategory.toLowerCase());
+      if (matched) {
+        chosenCategory = matched;
+      }
+
+      const prevCategory = (item.category || 'General').trim() || 'General';
+
+      item.name = name;
+      item.category = chosenCategory;
+      item.targetGender = genderInput?.value || 'UNISEX';
+      item.durationMinutes = parseInt(durationInput?.value, 10) || 30;
+      item.price = Math.max(0, parseInt(priceInput?.value, 10) || 0);
+      item.isEditing = false;
+      delete item._draft;
+
+      // Ensure destination category is expanded so user sees the moved service
+      this.collapsedCategories.delete(chosenCategory);
+
+      // Clear any stale rename state
+      this.renamingCategory = null;
+
+      // Re-group and refresh list to place service under the chosen category
+      this.refreshReviewList();
+
+      // Visual feedback: highlight and smoothly scroll to moved card
+      setTimeout(() => {
+        const updatedCard = modal.querySelector(`.ai-service-card[data-temp-id="${tempId}"]`);
+        if (updatedCard) {
+          updatedCard.classList.add('ai-card-just-moved');
+          updatedCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          setTimeout(() => updatedCard.classList.remove('ai-card-just-moved'), 1800);
+        }
+      }, 50);
+
+      if (prevCategory.toLowerCase() !== chosenCategory.toLowerCase()) {
+        this.app?.showToast?.(`Moved "${item.name}" to ${chosenCategory}`, 'success');
+      }
+    });
+
+    // 9. Delete Service Button Click
+    modal.addEventListener('click', (e) => {
+      const delBtn = e.target.closest('.btn-ai-service-delete');
+      if (!delBtn) return;
+
+      const tempId = delBtn.getAttribute('data-temp-id');
+      this.extractedServices = this.extractedServices.filter((s) => s.tempId !== tempId);
+
+      const card = modal.querySelector(`.ai-service-row[data-temp-id="${tempId}"], .ai-service-card[data-temp-id="${tempId}"]`);
+      const catGroup = card?.closest('.ai-category-group');
+      card?.remove();
+
+      // If category has no services left, remove the category group
+      if (catGroup && catGroup.querySelectorAll('.ai-service-row, .ai-service-card').length === 0) {
+        catGroup.remove();
+      }
+
+      // If no services left in total, show empty state
+      if (this.extractedServices.length === 0) {
+        this.refreshReviewList();
+      }
+
       this.updateTally();
     });
 
-    // Confirm & Import All
+    // 10. Confirm & Import All
     modal.querySelector('#btn-confirm-ai-import')?.addEventListener('click', () => this.executeImport());
   }
 
+  /**
+   * Updates all UI tallies and indeterminate checkbox states
+   */
   updateTally() {
     if (!this.modalEl) return;
-    const selectedCount = this.extractedServices.filter((s) => s.selected).length;
     const totalCount = this.extractedServices.length;
+    const selectedCount = this.extractedServices.filter((s) => s.selected).length;
+
+    // Overall select all checkbox
+    const selectAllChk = this.modalEl.querySelector('#ai-chk-select-all');
+    if (selectAllChk) {
+      if (selectedCount === totalCount && totalCount > 0) {
+        selectAllChk.checked = true;
+        selectAllChk.indeterminate = false;
+      } else if (selectedCount > 0) {
+        selectAllChk.checked = false;
+        selectAllChk.indeterminate = true;
+      } else {
+        selectAllChk.checked = false;
+        selectAllChk.indeterminate = false;
+      }
+    }
 
     const tallyEl = this.modalEl.querySelector('#ai-selected-tally');
     if (tallyEl) tallyEl.textContent = selectedCount;
@@ -476,10 +1141,64 @@ export class ServicesAiScannerModal {
     const importCountEl = this.modalEl.querySelector('#ai-import-count');
     if (importCountEl) importCountEl.textContent = selectedCount;
 
+    const footerSelCountEl = this.modalEl.querySelector('#ai-footer-sel-count');
+    if (footerSelCountEl) footerSelCountEl.textContent = selectedCount;
+
     const importBtn = this.modalEl.querySelector('#btn-confirm-ai-import');
     if (importBtn) {
       importBtn.disabled = selectedCount === 0;
       importBtn.style.opacity = selectedCount === 0 ? '0.5' : '1';
+    }
+
+    // Category tallies
+    const categoriesMap = this.groupServicesByCategory();
+    const catGroups = this.modalEl.querySelectorAll('.ai-category-group');
+    catGroups.forEach((group) => {
+      const catName = group.getAttribute('data-category');
+      const services = categoriesMap.get(catName) || [];
+      const catSelectedCount = services.filter((s) => s.selected).length;
+      const catChk = group.querySelector('.ai-cat-chk');
+      const countEl = group.querySelector('.cat-sel-count');
+
+      if (countEl) countEl.textContent = catSelectedCount;
+      if (catChk) {
+        if (catSelectedCount === services.length && services.length > 0) {
+          catChk.checked = true;
+          catChk.indeterminate = false;
+        } else if (catSelectedCount > 0) {
+          catChk.checked = false;
+          catChk.indeterminate = true;
+        } else {
+          catChk.checked = false;
+          catChk.indeterminate = false;
+        }
+      }
+    });
+
+    this.updateToggleAllCatsButton();
+  }
+
+  /**
+   * Updates the "Collapse All" / "Expand All" toolbar button text
+   */
+  updateToggleAllCatsButton() {
+    const btn = this.modalEl?.querySelector('#btn-toggle-all-cats');
+    if (!btn) return;
+    const categoriesMap = this.groupServicesByCategory();
+    const allCats = Array.from(categoriesMap.keys());
+    if (allCats.length <= 1) {
+      btn.style.display = 'none';
+      return;
+    }
+    btn.style.display = 'inline-flex';
+    const anyOpen = allCats.some((c) => !this.collapsedCategories.has(c));
+    const textEl = btn.querySelector('.toggle-text');
+    const iconEl = btn.querySelector('.toggle-icon');
+    if (textEl) {
+      textEl.textContent = anyOpen ? 'Collapse All' : 'Expand All';
+    }
+    if (iconEl) {
+      iconEl.textContent = anyOpen ? '⌃' : '⌄';
     }
   }
 
@@ -487,6 +1206,34 @@ export class ServicesAiScannerModal {
    * Submits selected services to backend /api/v1/services/bulk-import
    */
   async executeImport() {
+    // Auto-commit any currently open edit cards before importing
+    if (this.modalEl) {
+      const editingCards = this.modalEl.querySelectorAll('.ai-service-row.is-editing, .ai-service-card.is-editing');
+      editingCards.forEach((card) => {
+        const tempId = card.getAttribute('data-temp-id');
+        const item = this.extractedServices.find((s) => s.tempId === tempId);
+        if (item) {
+          const nameInput = card.querySelector('.ai-input-name');
+          const catValInput = card.querySelector('.ai-category-field-val');
+          const catNewInput = card.querySelector('.ai-input-new-category');
+          const genderInput = card.querySelector('.ai-select-gender');
+          const durationInput = card.querySelector('.ai-select-duration');
+          const priceInput = card.querySelector('.ai-input-price');
+
+          if (nameInput && nameInput.value.trim()) item.name = nameInput.value.trim();
+          let catVal = catValInput?.value;
+          if (catVal === '__NEW__') {
+            catVal = catNewInput?.value?.trim();
+          }
+          if (catVal) item.category = catVal;
+          if (genderInput) item.targetGender = genderInput.value;
+          if (durationInput) item.durationMinutes = parseInt(durationInput.value, 10) || 30;
+          if (priceInput) item.price = Math.max(0, parseInt(priceInput.value, 10) || 0);
+          item.isEditing = false;
+        }
+      });
+    }
+
     const selected = this.extractedServices.filter((s) => s.selected && s.name.trim().length > 0);
     if (selected.length === 0) {
       this.app?.showToast?.('Please select at least one valid service to import.', 'warning');

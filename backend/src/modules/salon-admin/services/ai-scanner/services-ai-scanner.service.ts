@@ -43,30 +43,30 @@ export class ServicesAiScannerService {
       }
     }
 
-    // 2. Prepare structured system prompt
+    // 2. Prepare structured system prompt with strict anti-hallucination & grounding constraints
     const prompt = `
 You are an expert salon menu data extraction assistant.
-Analyze this salon menu / rate card / price list image carefully and extract all services into a JSON array.
+Analyze this salon menu / rate card / price list image carefully and extract ONLY the services and categories that are physically printed and visible in the image into a JSON array.
 
-RULES:
-1. Extract EVERY service listed on the card (haircuts, styling, beard, facial, cleanup, waxing, threading, manicure, pedicure, coloring, massage, spa, etc.).
-2. For each service provide:
-   - "name": Clean, concise service title (e.g. "Classic Haircut", "Beard Styling", "Charcoal D-Tan Facial").
-   - "category": Logical salon category (e.g. "Hair", "Beard", "Facial & Skin", "Nails & Pedicure", "Waxing", "Massage & Spa", or use the category header from the card).
-   - "price": Number in local currency (remove symbols like ₹, $, Rs, commas). Must be an integer >= 0.
-   - "durationMinutes": Duration in minutes. MUST BE A MULTIPLE OF 15 AND AT LEAST 30 (e.g. 30, 45, 60, 75, 90). If duration is not stated on the card, estimate based on industry standards: quick haircut/beard = 30, facial/manicure = 45, coloring/smoothening = 60 or 90.
-   - "targetGender": Must be strictly one of: "MALE", "FEMALE", "UNISEX", "KIDS". Look for column headers like "Men", "Gents", "Women", "Ladies", "Kids". If not specified or suitable for both, use "UNISEX".
-   - "description": Brief 1-sentence description if mentioned on card, or empty string.
+CRITICAL GROUNDING & ANTI-HALLUCINATION RULES:
+1. STRICT EXTRACTION ONLY: Extract ONLY services and categories that are explicitly printed on this menu card.
+2. DO NOT INVENT OR ASSUME: Never hallucinate, guess, or add any services, packages, prices, or categories that do not appear in the image, even if they are standard salon offerings.
+3. EXACT CATEGORIES: Use the EXACT category/section headers printed on the menu card (e.g. "HAIR STYLING", "HAIR COLORING", "SKIN CARE"). If services are grouped under a printed section header, all those services must use that exact header as their "category". Never invent generic categories if a header is present. If the card has no section headings at all, use "General".
+4. ACCURATE NAMES: Use the exact service name as printed on the card. Do NOT rephrase or merge unrelated services.
+5. PRICES: Extract the exact numeric price printed next to the service (remove currency symbols like ₹, $, Rs, commas). Must be an integer >= 0. If a price is unreadable or not listed, set price to 0. Do NOT guess or invent prices.
+6. DURATION: Duration in minutes. MUST BE A MULTIPLE OF 15 AND AT LEAST 30 (e.g. 30, 45, 60, 75, 90). If duration is printed on the card, use it. If not printed, estimate based on industry standards: quick haircut/beard = 30, facial/manicure = 45, coloring/smoothening = 60 or 90.
+7. TARGET GENDER: Must be strictly one of: "MALE", "FEMALE", "UNISEX", "KIDS". Look for column headers or labels like "Men", "Gents", "Women", "Ladies", "Kids". If not specified or suitable for both, use "UNISEX".
+8. DESCRIPTION: Extract brief 1-sentence description ONLY if explicitly printed beneath the service. If no description is on the card, set to "". Do NOT write or invent your own descriptions.
 
 Return ONLY a valid JSON array of objects adhering to this schema:
 [
   {
-    "name": "Service Name",
-    "category": "Category Name",
+    "name": "Exact Service Name From Card",
+    "category": "Exact Category Header From Card",
     "price": 300,
     "durationMinutes": 30,
     "targetGender": "UNISEX",
-    "description": "Short description"
+    "description": ""
   }
 ]
 `;

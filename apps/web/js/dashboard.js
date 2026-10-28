@@ -22,6 +22,7 @@ import { StaffApplyLeaveDialog } from './modules/staff/index.js';
 import { SalonDayOffView } from './modules/salon-settings/salon-day-off-view.js';
 import { PersonalProfileView } from './modules/salon-settings/personal-profile-view.js';
 import { BookingQrView } from './modules/salon-settings/booking-qr-view.js';
+import { PasswordSecurityView } from './modules/salon-settings/password-security-view.js';
 import { ServicesAiScannerModal } from './modules/services-ai/services-ai-scanner.js';
 import {
   SERVICE_DURATION_OPTIONS,
@@ -7143,130 +7144,10 @@ export class SalonDashboard {
       `;
     }
 
-    // SECTION 3: PASSWORD & SECURITY
+    // SECTION 3: PASSWORD & SECURITY (Modular PasswordSecurityView)
     if (subtab === 'security') {
       return `
-        <div class="settings-panel-card">
-          <div class="settings-panel-header" style="margin-bottom: 12px; padding-bottom: 10px;">
-            <div class="settings-header-left">
-              <div class="settings-header-icon" style="background: rgba(244, 63, 94, 0.15); color: #fb7185;">
-                ${Icons.lock({ size: 20 })}
-              </div>
-              <div>
-                <h3 class="settings-panel-title">Password & Security</h3>
-                <p class="settings-panel-subtitle">Update login credentials and manage active authenticated sessions.</p>
-              </div>
-            </div>
-            <span class="badge badge-completed" style="font-size: 0.68rem; padding: 3px 8px; border-radius: 6px;">
-              🛡️ Encrypted & Protected
-            </span>
-          </div>
-
-          <div id="prof-pwd-alert"></div>
-
-          <form id="form-change-password" class="settings-panel-body" onsubmit="return false;" style="gap: 12px;">
-            <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 12px; padding: 12px 14px;">
-              <div style="font-size: 0.72rem; font-weight: 800; color: #a5b4fc; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 6px; margin-bottom: 10px;">
-                ${Icons.key ? Icons.key({ size: 13, color: '#A855F7' }) : Icons.lock({ size: 13, color: '#A855F7' })}
-                <span>Change Account Password</span>
-              </div>
-
-              <div class="form-group" style="margin-bottom: 10px;">
-                <label class="form-label" for="prof-current-password">Current Password *</label>
-                <div class="pwd-field-wrap">
-                  <input type="password" class="form-control" id="prof-current-password" placeholder="Enter existing password" required autocomplete="current-password" style="height: 38px;" />
-                  <button type="button" class="pwd-toggle-btn" data-target="prof-current-password" title="Toggle visibility">
-                    ${Icons.eye({ size: 15 })}
-                  </button>
-                </div>
-              </div>
-
-              <div class="form-group" style="margin-bottom: 10px;">
-                <label class="form-label" for="prof-new-password">New Password *</label>
-                <div class="pwd-field-wrap">
-                  <input type="password" class="form-control" id="prof-new-password" placeholder="Create strong new password" required autocomplete="new-password" style="height: 38px;" />
-                  <button type="button" class="pwd-toggle-btn" data-target="prof-new-password" title="Toggle visibility">
-                    ${Icons.eye({ size: 15 })}
-                  </button>
-                </div>
-
-                <div class="pwd-strength-container" style="margin-top: 6px;">
-                  <div class="pwd-strength-bar">
-                    <div class="pwd-strength-fill" id="prof-strength-fill"></div>
-                  </div>
-                  <div class="pwd-strength-text" style="font-size: 0.7rem; display: flex; justify-content: space-between; margin-top: 3px;">
-                    <span id="prof-strength-label">Password strength: Empty</span>
-                    <span style="color: #94a3b8;">Min 8 characters</span>
-                  </div>
-                  <!-- 3-Column Compact Password Requirements Checklist -->
-                  <div class="pwd-req-list" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 6px; margin-top: 6px; font-size: 0.7rem;">
-                    <div class="pwd-req-item" id="req-length"><span class="pwd-req-dot"></span> 8+ Chars</div>
-                    <div class="pwd-req-item" id="req-mixed"><span class="pwd-req-dot"></span> Upper & Lower</div>
-                    <div class="pwd-req-item" id="req-digit"><span class="pwd-req-dot"></span> Num / Symbol</div>
-                  </div>
-                </div>
-              </div>
-
-              <div class="form-group" style="margin-bottom: 4px;">
-                <label class="form-label" for="prof-confirm-password">Confirm New Password *</label>
-                <div class="pwd-field-wrap">
-                  <input type="password" class="form-control" id="prof-confirm-password" placeholder="Re-type new password" required autocomplete="new-password" style="height: 38px;" />
-                  <button type="button" class="pwd-toggle-btn" data-target="prof-confirm-password" title="Toggle visibility">
-                    ${Icons.eye({ size: 15 })}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <!-- Full-Width Tactile Update Password Button -->
-            <div style="margin-top: 2px;">
-              <button type="submit" class="btn btn-primary" id="btn-submit-change-password" style="width: 100%; min-height: 42px; height: 42px; padding: 0 20px; font-weight: 700; font-size: 0.86rem; border-radius: 9px; background: linear-gradient(135deg, #8B3DFF 0%, #9D5CFF 100%); box-shadow: 0 4px 14px rgba(139, 61, 255, 0.35); display: flex; align-items: center; justify-content: center; gap: 8px;">
-                ${Icons.shield({ size: 16 })}
-                <span>Update Account Password</span>
-              </button>
-            </div>
-          </form>
-
-          <!-- Active Session & Device Controls (ZERO Developer Jargon!) -->
-          <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 12px; padding: 12px 14px; margin-top: 12px;">
-            <div style="font-size: 0.72rem; font-weight: 800; color: #38bdf8; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
-              ${Icons.shield({ size: 14, color: '#38bdf8' })}
-              <span>Session & Device Security</span>
-            </div>
-
-            <div class="settings-info-card" style="background: transparent; border: none; padding: 0;">
-              <div class="settings-info-row" style="padding: 7px 0;">
-                <span class="settings-info-label">Active Browser Session</span>
-                <span class="settings-info-value"><span class="badge badge-completed">🟢 Active & Encrypted</span></span>
-              </div>
-              <div class="settings-info-row" style="padding: 7px 0;">
-                <span class="settings-info-label">Encryption Standard</span>
-                <span class="settings-info-value" style="color: #cbd5e1;">TLS 1.3 / 256-Bit SSL</span>
-              </div>
-              <div class="settings-info-row" style="padding: 7px 0;">
-                <span class="settings-info-label">Recovery Verification</span>
-                <span class="settings-info-value" style="color: #cbd5e1;">Verified Email OTP</span>
-              </div>
-              <div class="settings-info-row" style="padding: 7px 0;">
-                <span class="settings-info-label">Auto-Lock Protection</span>
-                <span class="settings-info-value" style="color: #34d399;">✓ Protected & Monitored</span>
-              </div>
-            </div>
-
-            <!-- Sign-Out Controls -->
-            <div style="margin-top: 10px; padding: 12px; background: rgba(239, 68, 68, 0.05); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 10px; display: flex; flex-direction: column; gap: 8px;">
-              <div>
-                <h4 style="font-size: 0.8rem; font-weight: 700; color: #f87171; margin: 0 0 2px 0;">Sign-Out Controls</h4>
-                <p style="font-size: 0.72rem; color: #94a3b8; margin: 0;">Logged in on a public or shared computer? Revoke access immediately across all other devices.</p>
-              </div>
-
-              <button type="button" class="btn btn-secondary btn-sm" id="btn-prof-logout-all" style="width: 100%; border-color: rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.1); color: #fca5a5; min-height: 36px; height: 36px; font-size: 0.76rem; font-weight: 700; justify-content: center; border-radius: 8px;">
-                ${Icons.refreshCw({ size: 13 })}
-                <span>Log Out All Other Devices</span>
-              </button>
-            </div>
-          </div>
-        </div>
+        <div id="password-security-mount-point" class="password-security-view-root"></div>
       `;
     }
 
@@ -7787,128 +7668,10 @@ export class SalonDashboard {
 
 
 
-    // 5. Subtab: Security Form (Password change & Live strength meter)
-    const formPwd = document.getElementById('form-change-password');
-    if (formPwd) {
-      // Toggle eye buttons
-      formPwd.querySelectorAll('.pwd-toggle-btn').forEach((btn) => {
-        btn.onclick = () => {
-          const targetId = btn.getAttribute('data-target');
-          const input = document.getElementById(targetId);
-          if (input) {
-            const isPassword = input.type === 'password';
-            input.type = isPassword ? 'text' : 'password';
-            btn.innerHTML = isPassword ? Icons.eyeOff({ size: 16 }) : Icons.eye({ size: 16 });
-          }
-        };
-      });
-
-      // Password strength live evaluator
-      const newPwdInput = document.getElementById('prof-new-password');
-      const fillBar = document.getElementById('prof-strength-fill');
-      const label = document.getElementById('prof-strength-label');
-      const reqLen = document.getElementById('req-length');
-      const reqMix = document.getElementById('req-mixed');
-      const reqDigit = document.getElementById('req-digit');
-
-      newPwdInput?.addEventListener('input', () => {
-        const val = newPwdInput.value;
-        const hasLen = val.length >= 8;
-        const hasMix = /[a-z]/.test(val) && /[A-Z]/.test(val);
-        const hasDigit = /[0-9]/.test(val) || /[^a-zA-Z0-9]/.test(val);
-
-        reqLen?.classList.toggle('met', hasLen);
-        reqMix?.classList.toggle('met', hasMix);
-        reqDigit?.classList.toggle('met', hasDigit);
-
-        let score = 0;
-        if (hasLen) score += 35;
-        if (hasMix) score += 35;
-        if (hasDigit) score += 30;
-
-        if (fillBar) fillBar.style.width = `${val ? Math.max(score, 10) : 0}%`;
-
-        if (!val) {
-          if (label) label.textContent = 'Password strength: Empty';
-          if (fillBar) fillBar.style.backgroundColor = 'transparent';
-        } else if (score < 40) {
-          if (label) label.textContent = 'Password strength: Weak';
-          if (fillBar) fillBar.style.backgroundColor = '#fb7185';
-        } else if (score < 80) {
-          if (label) label.textContent = 'Password strength: Moderate';
-          if (fillBar) fillBar.style.backgroundColor = '#fbbf24';
-        } else {
-          if (label) label.textContent = 'Password strength: Strong';
-          if (fillBar) fillBar.style.backgroundColor = '#34d399';
-        }
-      });
-
-      // Submit password change
-      formPwd.onsubmit = async (e) => {
-        e.preventDefault();
-        const currentPassword = document.getElementById('prof-current-password')?.value;
-        const newPassword = document.getElementById('prof-new-password')?.value;
-        const confirmPassword = document.getElementById('prof-confirm-password')?.value;
-        const alertBox = document.getElementById('prof-pwd-alert');
-        const submitBtn = document.getElementById('btn-submit-change-password');
-
-        if (!currentPassword || !newPassword) {
-          if (alertBox) alertBox.innerHTML = `<div style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171; padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; font-size: 0.85rem;">Please fill in all password fields.</div>`;
-          return;
-        }
-
-        if (newPassword.length < 8) {
-          if (alertBox) alertBox.innerHTML = `<div style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171; padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; font-size: 0.85rem;">New password must be at least 8 characters long.</div>`;
-          return;
-        }
-
-        if (newPassword !== confirmPassword) {
-          if (alertBox) alertBox.innerHTML = `<div style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171; padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; font-size: 0.85rem;">New passwords do not match. Please verify.</div>`;
-          return;
-        }
-
-        const originalBtnHtml = submitBtn ? submitBtn.innerHTML : '';
-        if (submitBtn) {
-          submitBtn.disabled = true;
-          submitBtn.innerHTML = `<span>Updating Password...</span>`;
-        }
-
-        try {
-          const res = await ApiClient.changePassword(currentPassword, newPassword);
-          if (alertBox) {
-            alertBox.innerHTML = `<div style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.3); color: #34d399; padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; font-size: 0.85rem;">${res.message || 'Password changed successfully!'}</div>`;
-          }
-          this.showToast('Password updated successfully!', 'success');
-          formPwd.reset();
-          if (fillBar) fillBar.style.width = '0%';
-          if (label) label.textContent = 'Password strength: Empty';
-          reqLen?.classList.remove('met');
-          reqMix?.classList.remove('met');
-          reqDigit?.classList.remove('met');
-        } catch (err) {
-          if (alertBox) {
-            alertBox.innerHTML = `<div style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171; padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; font-size: 0.85rem;">${err.message || 'Failed to update password.'}</div>`;
-          }
-        } finally {
-          if (submitBtn) {
-            submitBtn.disabled = false;
-            submitBtn.innerHTML = originalBtnHtml;
-          }
-        }
-      };
-
-      // Logout All Devices listener
-      document.getElementById('btn-prof-logout-all')?.addEventListener('click', async () => {
-        if (!confirm('Are you sure you want to log out from all other devices?')) return;
-        try {
-          await ApiClient.logoutAllDevices();
-          this.showToast('Logged out from other devices.', 'info');
-          window.location.hash = '#login';
-          window.location.reload();
-        } catch (err) {
-          this.showToast(err.message || 'Logout failed.', 'error');
-        }
-      });
+    // 5. Subtab: Security Form (Modular PasswordSecurityView)
+    const secMount = document.getElementById('password-security-mount-point');
+    if (secMount) {
+      PasswordSecurityView.init(secMount, this);
     }
 
     // 6. Common / Shared Tool Card listeners
