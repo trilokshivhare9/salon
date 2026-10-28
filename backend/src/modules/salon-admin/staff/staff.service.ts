@@ -13,7 +13,7 @@ import {
   CreateStaffBreakDto,
   UpdateStaffBreakDto,
 } from './dto/create-staff.dto';
-import { StylistStatus, ServiceStatus, SalonStatus, DayOfWeek, AppointmentStatus } from '@prisma/client';
+import { StylistStatus, ServiceStatus, SalonStatus, DayOfWeek, AppointmentStatus, ConversationState } from '@prisma/client';
 import { AppointmentsService } from '../appointments/appointments.service';
 import { StylistStatusEngine, StylistOperationalStatus } from './engines/stylist-status.engine';
 import { TimeUtility } from '../../../common/utils/time.utility';
@@ -675,10 +675,15 @@ export class StaffService {
         where: { salonId, stylistId: staffId },
       });
 
-      // 2. Clear active conversation reference if any
+      // 2. Reset active conversations referencing this deleted stylist
       await tx.conversation.updateMany({
         where: { salonId, selectedStaffId: staffId },
-        data: { selectedStaffId: null },
+        data: {
+          state: ConversationState.START,
+          selectedStaffId: null,
+          selectedDate: null,
+          selectedStartTime: null,
+        },
       });
 
       // 3. Delete the stylist record (Prisma cascades stylist_services and stylist_working_hours)

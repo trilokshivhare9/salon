@@ -9,7 +9,7 @@ import { WorkspaceHeader } from '../shared/workspace-header.js';
 export class StaffScheduleView {
   static render(ctx, staff) {
     const headerHtml = WorkspaceHeader.render({
-      backLabel: `Back to ${staff.name}`,
+      backLabel: 'Back',
       backActionId: 'btn-back-to-profile',
       breadcrumbs: [],
       statusText: '<span id="stylist-schedule-autosave-status"><span class="autosave-dot"></span><span class="autosave-text">Auto-saved</span></span>',

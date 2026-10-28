@@ -258,7 +258,8 @@ export class QuickBookingAction {
         phoneNumberId,
         salonId,
       );
-      return { replyMessage: reply, state: ConversationState.SELECT_SERVICE };
+      // Informational reply only (offers the Services entry button): step is unchanged.
+      return { replyMessage: reply, state: conversation.state };
     }
 
     const slotTime = conversation.selectedStartTime

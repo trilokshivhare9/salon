@@ -1,160 +1,54 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { PrismaService } from '../../../../src/database/prisma.service';
-import { WhatsAppService } from '../../../../src/modules/channels/whatsapp/whatsapp.service';
-import { WhatsAppTemplateService } from '../../../../src/modules/channels/whatsapp/services/whatsapp-template.service';
-import { AppointmentsService } from '../../../../src/modules/salon-admin/appointments/appointments.service';
-import { AvailabilityService } from '../../../../src/modules/salon-admin/availability/availability.service';
-import { ConfigService } from '@nestjs/config';
-import { AppointmentStatus, BookingSource, ConversationState } from '@prisma/client';
-import { QuickCodeService } from '../../../../src/modules/salon-admin/quick-booking/quick-code.service';
+/**
+ * Smart Action Guard & Lifecycle Intelligence (Edge Case Audits)
+ *
+ * Ported from the real development database onto the shared in-memory harness.
+ * Previously this spec wrote real appointments/conversations into the first ACTIVE salon
+ * of the dev DB, and the cases polluted each other (EC-3 left a CONFIRMED appointment that
+ * changed EC-6's lifecycle). Each case now seeds its own isolated world.
+ *
+ * All original assertions are kept unchanged.
+ */
+import { AppointmentStatus, ConversationState } from '@prisma/client';
+import { createWhatsAppHarness, STYLIST_ALICE, SVC_HAIRCUT } from './harness/whatsapp-harness';
+
+jest.setTimeout(30000);
+
+const appointment = (overrides: Record<string, any>) => ({
+  id: `appt-audit-${Math.random().toString(36).slice(2, 8)}`,
+  appointmentNumber: `AUDIT-${Date.now()}`,
+  stylistId: STYLIST_ALICE,
+  serviceId: SVC_HAIRCUT,
+  serviceNameSnapshot: 'Men Haircut',
+  durationMinutes: 30,
+  price: 350,
+  createdAt: new Date(Date.now() - 3600 * 1000),
+  ...overrides,
+});
 
 describe('Smart Action Guard & Lifecycle Intelligence (Edge Case Audits)', () => {
-  let whatsAppService: WhatsAppService;
-  let templateService: WhatsAppTemplateService;
-  let prisma: PrismaService;
-
-  let testSalon: any;
-  let testUser: any;
-  let salonUser: any;
-  let testService: any;
-  let testStylist: any;
-  const testPhone = '919988776655';
-
-  beforeAll(async () => {
-    const moduleRef: TestingModule = await Test.createTestingModule({
-      providers: [
-        PrismaService,
-        WhatsAppService,
-        WhatsAppTemplateService,
-        {
-          provide: QuickCodeService,
-          useValue: {
-            verifyCode: jest.fn(),
-            getOrCreateTodayCode: jest.fn(),
-          },
-        },
-        {
-          provide: ConfigService,
-          useValue: { get: jest.fn() },
-        },
-        {
-          provide: AvailabilityService,
-          useValue: { getAvailableSlots: jest.fn() },
-        },
-        {
-          provide: AppointmentsService,
-          useValue: {
-            updateStatus: jest.fn().mockResolvedValue(true),
-            updateEtaStatus: jest.fn().mockResolvedValue(true),
-            triggerSmartMoveUpBroadcast: jest.fn().mockResolvedValue(true),
-            getAppointmentById: jest.fn().mockResolvedValue(null),
-          },
-        },
-      ],
-    }).compile();
-
-    whatsAppService = moduleRef.get<WhatsAppService>(WhatsAppService);
-    templateService = moduleRef.get<WhatsAppTemplateService>(WhatsAppTemplateService);
-    prisma = moduleRef.get<PrismaService>(PrismaService);
-
-    jest.spyOn(whatsAppService, 'sendMetaMessage').mockImplementation(async () => true as any);
-
-    testSalon = await prisma.salon.findFirst({
-      where: { status: 'ACTIVE' },
-      include: { services: true, stylists: true },
-    });
-
-    if (testSalon) {
-      testService = testSalon.services?.[0];
-      testStylist = testSalon.stylists?.[0];
-
-      testUser = await prisma.user.upsert({
-        where: { phone: testPhone },
-        update: {},
-        create: {
-          phone: testPhone,
-          name: 'Audit Client',
-        },
-      });
-
-      salonUser = await prisma.salonUser.upsert({
-        where: { salonId_userId: { salonId: testSalon.id, userId: testUser.id } },
-        update: {},
-        create: {
-          salonId: testSalon.id,
-          userId: testUser.id,
-        },
-      });
-    }
-  });
-
-  afterAll(async () => {
-    if (testSalon && testUser) {
-      await prisma.appointment.deleteMany({
-        where: { salonId: testSalon.id, salonUserId: salonUser?.id },
-      });
-      await prisma.conversation.deleteMany({
-        where: { salonId: testSalon.id, customerPhone: testPhone },
-      });
-    }
-  });
-
   // ---------------------------------------------------------------------------
   // EDGE CASE 1: Tapping remind_confirm on Auto-Canceled Appointment
   // ---------------------------------------------------------------------------
   it('EC-1: Tapping remind_confirm on Auto-Canceled appointment gives clear cancellation reason & offers New Booking (NEVER Continue Booking)', async () => {
-    if (!testSalon || !testUser || !salonUser) return;
-
-    // Create an auto-canceled appointment
-    const canceledAppt = await prisma.appointment.create({
-      data: {
-        appointmentNumber: `AUDIT-CANCEL-${Date.now()}`,
-        salonId: testSalon.id,
-        salonUserId: salonUser.id,
-        stylistId: testStylist?.id || null,
-        serviceId: testService?.id || null,
-        serviceNameSnapshot: testService?.name || 'Haircut',
-        durationMinutes: 30,
-        price: 350,
-        status: AppointmentStatus.CANCELLED,
-        cancellationReason: 'GHOSTED_2H_REMINDER',
-        cancelledBy: 'SYSTEM',
-        startAt: new Date(Date.now() + 3600000),
-        endAt: new Date(Date.now() + 5400000),
-        appointmentDate: new Date(),
-        source: BookingSource.WHATSAPP,
-      },
+    const canceled = appointment({
+      status: AppointmentStatus.CANCELLED,
+      cancellationReason: 'GHOSTED_2H_REMINDER',
+      cancelledBy: 'SYSTEM',
+      startAt: new Date(Date.now() + 3600000),
+      endAt: new Date(Date.now() + 5400000),
+    });
+    const h = await createWhatsAppHarness({
+      conversation: { state: ConversationState.START, activeAppointmentId: canceled.id },
+      appointments: [canceled],
     });
 
-    // Conversation state set to START
-    await prisma.conversation.upsert({
-      where: { salonId_customerPhone: { salonId: testSalon.id, customerPhone: testPhone } },
-      update: { state: ConversationState.START, activeAppointmentId: canceledAppt.id },
-      create: {
-        salonId: testSalon.id,
-        customerPhone: testPhone,
-        state: ConversationState.START,
-        activeAppointmentId: canceledAppt.id,
-      },
-    });
-
-    const sendMetaSpy = jest.spyOn(whatsAppService, 'sendMetaMessage');
-    sendMetaSpy.mockClear();
-
-    const result = await whatsAppService.handleIncomingMessage(
-      testSalon.id,
-      testPhone,
-      'remind_confirm',
-      'remind_confirm',
-    );
+    const { result, messages } = await h.tap('remind_confirm');
 
     expect(result.replyMessage).toContain('APPOINTMENT ALREADY CANCELED');
     expect(result.replyMessage).toContain('automatically canceled');
     expect(result.replyMessage).not.toContain('Continue Booking');
-
-    expect(sendMetaSpy).toHaveBeenCalled();
-    const payload = sendMetaSpy.mock.calls[0][1];
-    expect(payload.buttons).toEqual([
+    expect(messages).toHaveLength(1);
+    expect(messages[0].buttons).toEqual([
       { id: 'btn_book_now', title: '📅 Book New Slot' },
       { id: 'btn_start', title: '🏠 Main Menu' },
     ]);
@@ -164,52 +58,22 @@ describe('Smart Action Guard & Lifecycle Intelligence (Edge Case Audits)', () =>
   // EDGE CASE 2: Tapping remind_confirm on Completed Appointment
   // ---------------------------------------------------------------------------
   it('EC-2: Tapping remind_confirm on Completed appointment gives friendly visit completed notice', async () => {
-    if (!testSalon || !testUser || !salonUser) return;
-
-    const completedAppt = await prisma.appointment.create({
-      data: {
-        appointmentNumber: `AUDIT-COMP-${Date.now()}`,
-        salonId: testSalon.id,
-        salonUserId: salonUser.id,
-        stylistId: testStylist?.id || null,
-        serviceId: testService?.id || null,
-        serviceNameSnapshot: testService?.name || 'Haircut',
-        durationMinutes: 30,
-        price: 350,
-        status: AppointmentStatus.COMPLETED,
-        startAt: new Date(Date.now() - 3600000),
-        endAt: new Date(Date.now() - 1800000),
-        appointmentDate: new Date(),
-        source: BookingSource.WHATSAPP,
-      },
+    const completed = appointment({
+      status: AppointmentStatus.COMPLETED,
+      startAt: new Date(Date.now() - 3600000),
+      endAt: new Date(Date.now() - 1800000),
+    });
+    const h = await createWhatsAppHarness({
+      conversation: { state: ConversationState.START, activeAppointmentId: completed.id },
+      appointments: [completed],
     });
 
-    await prisma.conversation.upsert({
-      where: { salonId_customerPhone: { salonId: testSalon.id, customerPhone: testPhone } },
-      update: { state: ConversationState.START, activeAppointmentId: completedAppt.id },
-      create: {
-        salonId: testSalon.id,
-        customerPhone: testPhone,
-        state: ConversationState.START,
-        activeAppointmentId: completedAppt.id,
-      },
-    });
-
-    const sendMetaSpy = jest.spyOn(whatsAppService, 'sendMetaMessage');
-    sendMetaSpy.mockClear();
-
-    const result = await whatsAppService.handleIncomingMessage(
-      testSalon.id,
-      testPhone,
-      'remind_confirm',
-      'remind_confirm',
-    );
+    const { result, messages } = await h.tap('remind_confirm');
 
     expect(result.replyMessage).toContain('VISIT COMPLETED');
     expect(result.replyMessage).not.toContain('Continue Booking');
-
-    const payload = sendMetaSpy.mock.calls[0][1];
-    expect(payload.buttons).toEqual([
+    expect(messages).toHaveLength(1);
+    expect(messages[0].buttons).toEqual([
       { id: 'btn_book_now', title: '📅 Book Again' },
       { id: 'btn_start', title: '🏠 Main Menu' },
     ]);
@@ -219,51 +83,30 @@ describe('Smart Action Guard & Lifecycle Intelligence (Edge Case Audits)', () =>
   // EDGE CASE 3: Idempotent Confirmation (Already Confirmed)
   // ---------------------------------------------------------------------------
   it('EC-3: Tapping remind_confirm on Already Confirmed appointment confirms without errors', async () => {
-    if (!testSalon || !testUser || !salonUser) return;
-
-    const confirmedAppt = await prisma.appointment.create({
-      data: {
-        appointmentNumber: `AUDIT-CONF-${Date.now()}`,
-        salonId: testSalon.id,
-        salonUserId: salonUser.id,
-        stylistId: testStylist?.id || null,
-        serviceId: testService?.id || null,
-        serviceNameSnapshot: testService?.name || 'Haircut',
-        durationMinutes: 30,
-        price: 350,
-        status: AppointmentStatus.CONFIRMED,
-        startAt: new Date(Date.now() + 7200000),
-        endAt: new Date(Date.now() + 9000000),
-        appointmentDate: new Date(),
-        source: BookingSource.WHATSAPP,
-      },
+    const confirmed = appointment({
+      status: AppointmentStatus.CONFIRMED,
+      startAt: new Date(Date.now() + 7200000),
+      endAt: new Date(Date.now() + 9000000),
+    });
+    const h = await createWhatsAppHarness({
+      conversation: { state: ConversationState.START, activeAppointmentId: confirmed.id },
+      appointments: [confirmed],
     });
 
-    await prisma.conversation.upsert({
-      where: { salonId_customerPhone: { salonId: testSalon.id, customerPhone: testPhone } },
-      update: { state: ConversationState.START, activeAppointmentId: confirmedAppt.id },
-      create: {
-        salonId: testSalon.id,
-        customerPhone: testPhone,
-        state: ConversationState.START,
-        activeAppointmentId: confirmedAppt.id,
-      },
-    });
+    const { result, error } = await h.tap('remind_confirm');
 
-    const result = await whatsAppService.handleIncomingMessage(
-      testSalon.id,
-      testPhone,
-      'remind_confirm',
-      'remind_confirm',
-    );
-
+    expect(error).toBeUndefined();
     expect(result.replyMessage).toContain('APPOINTMENT ALREADY CONFIRMED');
   });
 
   // ---------------------------------------------------------------------------
   // EDGE CASE 4: 2-Hour Reminder Prompt Wording & Warning Notice
   // ---------------------------------------------------------------------------
-  it('EC-4: build2HourReminderPrompt includes "✅ Confirm Booking" button and 1-hour auto-cancel warning', () => {
+  it('EC-4: build2HourReminderPrompt includes "✅ Confirm Booking" button and 1-hour auto-cancel warning', async () => {
+    const h = await createWhatsAppHarness();
+    const templateService = (h.whatsAppService as any).templateService ?? (h.whatsAppService as any).whatsAppTemplateService;
+    expect(templateService).toBeDefined();
+
     const prompt = templateService.build2HourReminderPrompt(
       'Glamour Salon',
       'Trilok',
@@ -277,7 +120,6 @@ describe('Smart Action Guard & Lifecycle Intelligence (Edge Case Audits)', () =>
 
     expect(prompt.bodyText).toContain('Action Required within 1 Hour:');
     expect(prompt.bodyText).toContain('automatically canceled with a penalty strike');
-
     const confirmBtn = prompt.buttons.find((b: any) => b.id === 'remind_confirm');
     expect(confirmBtn).toBeDefined();
     expect(confirmBtn?.title).toBe('✅ Confirm Booking');
@@ -287,93 +129,64 @@ describe('Smart Action Guard & Lifecycle Intelligence (Edge Case Audits)', () =>
   // EDGE CASE 5: Tapping Funnel Action on Stale Draft (> 30 mins)
   // ---------------------------------------------------------------------------
   it('EC-5: Tapping funnel action after 35 mins resets cleanly with SESSION EXPIRED and clears dirty columns', async () => {
-    if (!testSalon || !testUser) return;
-
-    // Simulate stale draft with dirty columns updated 35 minutes ago
     const staleDate = new Date(Date.now() - 35 * 60 * 1000);
-    await prisma.conversation.upsert({
-      where: { salonId_customerPhone: { salonId: testSalon.id, customerPhone: testPhone } },
-      update: {
+    const h = await createWhatsAppHarness({
+      conversation: {
         state: ConversationState.SELECT_TIME,
-        selectedServiceId: testService?.id || 'dummy_svc',
+        selectedServiceId: SVC_HAIRCUT,
         selectedDate: staleDate,
         updatedAt: staleDate,
         activeAppointmentId: null,
       },
-      create: {
-        salonId: testSalon.id,
-        customerPhone: testPhone,
-        state: ConversationState.SELECT_TIME,
-        selectedServiceId: testService?.id || 'dummy_svc',
-        selectedDate: staleDate,
-        updatedAt: staleDate,
-      },
     });
 
-    const sendMetaSpy = jest.spyOn(whatsAppService, 'sendMetaMessage');
-    sendMetaSpy.mockClear();
-
-    const result = await whatsAppService.handleIncomingMessage(
-      testSalon.id,
-      testPhone,
-      'slot_14:00',
-      'slot_14:00',
-    );
+    const { result } = await h.tap('slot_14:00');
 
     expect(result.replyMessage).toContain('SESSION EXPIRED');
-
-    // Verify conversation columns were wiped
-    const updatedConv = await prisma.conversation.findUnique({
-      where: { salonId_customerPhone: { salonId: testSalon.id, customerPhone: testPhone } },
-    });
-    expect(updatedConv?.selectedServiceId).toBeNull();
-    expect(updatedConv?.selectedDate).toBeNull();
-    expect(updatedConv?.state).toBe(ConversationState.START);
+    expect(h.conversation.selectedServiceId).toBeNull();
+    expect(h.conversation.selectedDate).toBeNull();
+    expect(h.conversation.state).toBe(ConversationState.START);
   });
 
   // ---------------------------------------------------------------------------
   // EDGE CASE 6: Tapping Resume Booking on Stale Draft
   // ---------------------------------------------------------------------------
-  it('EC-6: Tapping btn_resume_booking on stale/dead draft resets cleanly without resurrecting old slots', async () => {
-    if (!testSalon || !testUser) return;
-
+  const staleDraft = () => {
     const staleDate = new Date(Date.now() - 40 * 60 * 1000);
-    await prisma.conversation.upsert({
-      where: { salonId_customerPhone: { salonId: testSalon.id, customerPhone: testPhone } },
-      update: {
-        state: ConversationState.SELECT_TIME,
-        selectedServiceId: testService?.id || 'dummy_svc',
-        selectedDate: staleDate,
-        updatedAt: staleDate,
-        activeAppointmentId: null,
-      },
-      create: {
-        salonId: testSalon.id,
-        customerPhone: testPhone,
-        state: ConversationState.SELECT_TIME,
-        selectedServiceId: testService?.id || 'dummy_svc',
-        selectedDate: staleDate,
-        updatedAt: staleDate,
-      },
+    return {
+      state: ConversationState.SELECT_TIME,
+      selectedServiceId: SVC_HAIRCUT,
+      selectedDate: staleDate,
+      updatedAt: staleDate,
+      activeAppointmentId: null,
+    };
+  };
+
+  // Path the original (real-DB) test actually exercised: the customer has a past booking.
+  it('EC-6a: Tapping btn_resume_booking on stale draft (customer has a past booking) resets cleanly', async () => {
+    const past = appointment({
+      status: AppointmentStatus.COMPLETED,
+      startAt: new Date(Date.now() - 3 * 24 * 3600 * 1000),
+      endAt: new Date(Date.now() - 3 * 24 * 3600 * 1000 + 1800000),
     });
+    const h = await createWhatsAppHarness({ conversation: staleDraft(), appointments: [past] });
 
-    const sendMetaSpy = jest.spyOn(whatsAppService, 'sendMetaMessage');
-    sendMetaSpy.mockClear();
+    const { result } = await h.tap('btn_resume_booking');
 
-    const result = await whatsAppService.handleIncomingMessage(
-      testSalon.id,
-      testPhone,
-      'btn_resume_booking',
-      'btn_resume_booking',
-    );
-
-    // Must show standard welcome message, not "Please pick an available time slot"
     expect(result.replyMessage).not.toContain('Please pick an available time slot');
+    expect(h.conversation.selectedServiceId).toBeNull();
+    expect(h.conversation.state).toBe(ConversationState.START);
+  });
 
-    const updatedConv = await prisma.conversation.findUnique({
-      where: { salonId_customerPhone: { salonId: testSalon.id, customerPhone: testPhone } },
-    });
-    expect(updatedConv?.selectedServiceId).toBeNull();
-    expect(updatedConv?.state).toBe(ConversationState.START);
+  // FIXED in Phase 1: the "no bookings" branch of handleCheckLastBooking now resets
+  // START + clears the draft, same as its "has bookings" branch.
+  it('EC-6b: Tapping btn_resume_booking on stale draft (customer has NO bookings) resets cleanly', async () => {
+    const h = await createWhatsAppHarness({ conversation: staleDraft() });
+
+    const { result } = await h.tap('btn_resume_booking');
+
+    expect(result.replyMessage).not.toContain('Please pick an available time slot');
+    expect(h.conversation.selectedServiceId).toBeNull();
+    expect(h.conversation.state).toBe(ConversationState.START);
   });
 });

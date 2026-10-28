@@ -499,30 +499,39 @@ export class StaffProfileHub {
         <!-- 3. Key Metrics 3-Stat Strip -->
         <div class="staff-metrics-strip">
           <!-- Card 1: Today's Shift -->
-          <div class="metric-stat-card">
+          <div class="metric-stat-card" data-open-workspace="schedule" role="button" tabindex="0" title="View Weekly Schedule & Shift Hours">
             <div class="metric-header">
-              <span class="${schedule.isOnLeaveToday ? 'dot-rose' : (schedule.isSalonClosedToday ? 'dot-amber' : (schedule.isScheduledToday ? 'dot-cyan' : 'dot-gray'))}">●</span>
-              <span>Today's Shift</span>
+              <div class="metric-header-left">
+                <span class="${schedule.isOnLeaveToday ? 'dot-rose' : (schedule.isSalonClosedToday ? 'dot-amber' : (schedule.isScheduledToday ? 'dot-cyan' : 'dot-gray'))}">●</span>
+                <span>Today's Shift</span>
+              </div>
+              <span class="metric-card-chevron">›</span>
             </div>
             <div class="metric-value ${schedule.isOnLeaveToday ? 'val-duty-leave' : ''}">${schedule.todayShiftText}</div>
             <div class="metric-sub ${schedule.isOnLeaveToday ? 'sub-rose' : 'sub-cyan'}">${schedule.shiftSubtitle}</div>
           </div>
 
           <!-- Card 2: Services -->
-          <div class="metric-stat-card">
+          <div class="metric-stat-card" data-open-workspace="services" role="button" tabindex="0" title="View & Manage Qualified Services">
             <div class="metric-header">
-              <span class="dot-purple">●</span>
-              <span>Services</span>
+              <div class="metric-header-left">
+                <span class="dot-purple">●</span>
+                <span>Services</span>
+              </div>
+              <span class="metric-card-chevron">›</span>
             </div>
             <div class="metric-value">${services.totalAssigned} Assigned</div>
             <div class="metric-sub sub-purple">${services.primaryCategoryName}</div>
           </div>
 
           <!-- Card 3: Status -->
-          <div class="metric-stat-card">
+          <div class="metric-stat-card" data-open-workspace="leaves" role="button" tabindex="0" title="View Duty Status & Leave History">
             <div class="metric-header">
-              <span class="${leaves.dutyDotClass}">●</span>
-              <span>Status</span>
+              <div class="metric-header-left">
+                <span class="${leaves.dutyDotClass}">●</span>
+                <span>Status</span>
+              </div>
+              <span class="metric-card-chevron">›</span>
             </div>
             <div class="metric-value ${leaves.dutyClass}">${leaves.dutyStatus}</div>
             <div class="metric-sub ${leaves.dutySubClass}">${leaves.dutySub}</div>
@@ -696,14 +705,24 @@ export class StaffProfileHub {
       };
     }
 
-    // 4. Feature Card Clicks (whole card acts as navigation button)
-    container.querySelectorAll('.hub-feature-card').forEach((card) => {
+    // 4. Metric Stat Cards & Feature Card Clicks (whole card acts as navigation button)
+    container.querySelectorAll('.metric-stat-card[data-open-workspace], .hub-feature-card[data-open-workspace]').forEach((card) => {
       card.onclick = (e) => {
-        // Prevent opening if clicking "+ Leave" action button directly
-        if (e.target.closest('#btn-card-add-leave') || e.target.closest('a')) return;
+        // Prevent opening if clicking "+ Leave" action button directly or links
+        if (e.target.closest('#btn-card-add-leave') || e.target.closest('a') || e.target.closest('button')) return;
         const workspace = card.getAttribute('data-open-workspace');
         if (workspace) {
           manager.navigateTo(workspace);
+        }
+      };
+      card.onkeydown = (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          if (e.target.closest('#btn-card-add-leave') || e.target.closest('a') || e.target.closest('button')) return;
+          e.preventDefault();
+          const workspace = card.getAttribute('data-open-workspace');
+          if (workspace) {
+            manager.navigateTo(workspace);
+          }
         }
       };
     });

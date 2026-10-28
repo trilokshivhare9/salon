@@ -1,94 +1,31 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { PrismaService } from '../../../../src/database/prisma.service';
-import { WhatsAppService } from '../../../../src/modules/channels/whatsapp/whatsapp.service';
-import { AppointmentsService } from '../../../../src/modules/salon-admin/appointments/appointments.service';
-import { AvailabilityService } from '../../../../src/modules/salon-admin/availability/availability.service';
-import { ConfigService } from '@nestjs/config';
+/**
+ * Smart WhatsApp Stale Button Fallbacks (Flow Matrix Tests)
+ *
+ * Ported from the real development database onto the shared in-memory harness.
+ * Messages are now captured at the lowest send point, so replies sent directly by the
+ * session layer (e.g. the lifecycle "expired" reply) are observed too — the old spy on
+ * WhatsAppService.sendMetaMessage missed them.
+ */
 import { ConversationState } from '@prisma/client';
-import { QuickCodeService } from '../../../../src/modules/salon-admin/quick-booking/quick-code.service';
+import { createWhatsAppHarness } from './harness/whatsapp-harness';
+
+jest.setTimeout(30000);
 
 describe('Smart WhatsApp Stale Button Fallbacks (Flow Matrix Tests)', () => {
-  let whatsAppService: WhatsAppService;
-  let prisma: PrismaService;
-
-  let testSalon: any;
-  const testCustomerPhone = '919999111122';
-
-  beforeAll(async () => {
-    const moduleRef: TestingModule = await Test.createTestingModule({
-      providers: [
-        PrismaService,
-        WhatsAppService,
-        {
-          provide: QuickCodeService,
-          useValue: {
-            verifyCode: jest.fn(),
-            getOrCreateTodayCode: jest.fn(),
-          },
-        },
-        {
-          provide: ConfigService,
-          useValue: { get: jest.fn() },
-        },
-        {
-          provide: AvailabilityService,
-          useValue: { getAvailableSlots: jest.fn() },
-        },
-        {
-          provide: AppointmentsService,
-          useValue: {
-            updateStatus: jest.fn().mockResolvedValue(true),
-            triggerSmartMoveUpBroadcast: jest.fn().mockResolvedValue(true),
-            getAppointmentById: jest.fn().mockResolvedValue(null),
-          },
-        },
-      ],
-    }).compile();
-
-    whatsAppService = moduleRef.get<WhatsAppService>(WhatsAppService);
-    prisma = moduleRef.get<PrismaService>(PrismaService);
-
-    // Mock sendMetaMessage to capture payload sent to WhatsApp
-    jest.spyOn(whatsAppService, 'sendMetaMessage').mockImplementation(async () => true as any);
-
-    testSalon = await prisma.salon.findFirst({
-      where: { status: 'ACTIVE' },
-    });
-  });
-
   // ---------------------------------------------------------------------------
   // SCENARIO 1: Mid-Booking Flow Stale Button Tap
   // ---------------------------------------------------------------------------
   it('TC-STALE-001: User taps old button while mid-booking -> Sends "continue booking or start new"', async () => {
-    if (!testSalon) return;
-
-    // Set conversation state to active booking step (e.g. SELECT_SERVICE)
-    await prisma.conversation.upsert({
-      where: { salonId_customerPhone: { salonId: testSalon.id, customerPhone: testCustomerPhone } },
-      update: { state: ConversationState.SELECT_SERVICE },
-      create: {
-        salonId: testSalon.id,
-        customerPhone: testCustomerPhone,
-        state: ConversationState.SELECT_SERVICE,
-      },
+    const h = await createWhatsAppHarness({
+      conversation: { state: ConversationState.SELECT_SERVICE, updatedAt: new Date() },
     });
 
-    const sendMetaSpy = jest.spyOn(whatsAppService, 'sendMetaMessage');
-    sendMetaSpy.mockClear();
-
-    // Customer taps an invalid/stale button for SELECT_SERVICE state (e.g., date_old_2026)
-    const result = await whatsAppService.handleIncomingMessage(
-      testSalon.id,
-      testCustomerPhone,
-      'date_old_2026',
-      'date_old_2026',
-    );
+    // Customer taps a stale button that does not belong to SELECT_SERVICE
+    const { result, messages } = await h.tap('date_old_2026');
 
     expect(result.replyMessage).toContain('Expired option');
-
-    expect(sendMetaSpy).toHaveBeenCalled();
-    const payload = sendMetaSpy.mock.calls[0][1];
-    expect(payload.buttons).toEqual([
+    expect(messages).toHaveLength(1);
+    expect(messages[0].buttons).toEqual([
       { id: 'btn_resume_booking', title: '▶️ Continue Booking' },
       { id: 'btn_new_booking', title: '📅 New Booking' },
     ]);
@@ -98,36 +35,20 @@ describe('Smart WhatsApp Stale Button Fallbacks (Flow Matrix Tests)', () => {
   // SCENARIO 2: Idle / Completed / Post-Booking Stale Button Tap
   // ---------------------------------------------------------------------------
   it('TC-STALE-002: User taps old button after booking is done/idle -> Sends "check last booking or start new"', async () => {
-    if (!testSalon) return;
-
-    // Set conversation state to START (idle state)
-    await prisma.conversation.upsert({
-      where: { salonId_customerPhone: { salonId: testSalon.id, customerPhone: testCustomerPhone } },
-      update: { state: ConversationState.START },
-      create: {
-        salonId: testSalon.id,
-        customerPhone: testCustomerPhone,
-        state: ConversationState.START,
-      },
+    const h = await createWhatsAppHarness({
+      conversation: { state: ConversationState.START, updatedAt: new Date() },
     });
 
-    const sendMetaSpy = jest.spyOn(whatsAppService, 'sendMetaMessage');
-    sendMetaSpy.mockClear();
-
     // Customer taps an old reminder button when NO active appointment exists
-    const result = await whatsAppService.handleIncomingMessage(
-      testSalon.id,
-      testCustomerPhone,
-      'remind_confirm',
-      'remind_confirm',
-    );
+    const { result, messages } = await h.tap('remind_confirm');
 
     expect(result.replyMessage).toContain('This option has expired. You can check your last booking or start a new one.');
-
-    expect(sendMetaSpy).toHaveBeenCalled();
-    const payload = sendMetaSpy.mock.calls[0][1];
-    expect(payload.buttons).toEqual([
-      { id: 'btn_resume_booking', title: '📋 Check Last Booking' },
+    expect(messages).toHaveLength(1);
+    // CONTRACT: the "check last booking" button got its own dedicated ID
+    // (WhatsAppButtonId.CHECK_LAST_BOOKING = 'btn_last_booking') instead of reusing
+    // 'btn_resume_booking', so it can no longer be confused with resuming a draft.
+    expect(messages[0].buttons).toEqual([
+      { id: 'btn_last_booking', title: '📋 Check Booking' },
       { id: 'btn_new_booking', title: '📅 New Booking' },
     ]);
   });

@@ -10,7 +10,8 @@
  * - Compact horizontal round pill chips (border-radius: 999px) for services
  * - Debounced background auto-save via ApiClient without full page reloads
  */
-import { ApiClient } from '../../api.js';
+import { ApiClient, SalonRepository } from '../../api.js';
+import { LoadingOverlay } from '../shared/loading-overlay.js';
 
 export class StaffServicesView {
   static render(ctx, staff) {
@@ -26,17 +27,25 @@ export class StaffServicesView {
 
     return `
       <div class="staff-workspace-shell staff-services-workspace">
-        <!-- 1. Sleek Minimal Top Navigation (Back on left, Auto-saved & Tally on right) -->
+        <!-- 1. Sleek Minimal Top Navigation (Back on left, Tally & Save on right) -->
         <div class="services-minimal-nav">
-          <button type="button" class="btn-staff-back" id="btn-back-to-profile" aria-label="Back to ${staff.name}">
+          <button type="button" class="btn-staff-back" id="btn-back-to-profile" aria-label="Back to ${staff.name}" title="Back to ${staff.name}">
             <span class="back-chevron">‹</span>
-            <span>Back to ${staff.name}</span>
+            <span class="back-text">Back</span>
           </button>
 
           <div class="services-nav-right">
             <div class="workspace-tally-pill" id="services-tally-pill">
               ${totalAssigned}/${totalServices} Assigned
             </div>
+            <button type="button" class="btn-save-staff-services" id="btn-save-staff-services" disabled title="Save service assignments">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                <polyline points="7 3 7 8 15 8"></polyline>
+              </svg>
+              <span>Save</span>
+            </button>
           </div>
         </div>
 
@@ -233,6 +242,42 @@ export class StaffServicesView {
         .map((s) => (typeof s === 'string' ? s : s.serviceId || s.id || s.service?.id))
         .filter(Boolean)
     );
+    let initialAssignedIds = new Set(assignedServiceIds);
+
+    const isDirty = () => {
+      if (assignedServiceIds.size !== initialAssignedIds.size) return true;
+      for (const id of assignedServiceIds) {
+        if (!initialAssignedIds.has(id)) return true;
+      }
+      return false;
+    };
+
+    const saveBtn = container.querySelector('#btn-save-staff-services');
+
+    const updateSaveBtnState = () => {
+      if (!saveBtn) return;
+      const dirty = isDirty();
+      saveBtn.disabled = !dirty;
+      saveBtn.classList.toggle('is-active', dirty);
+
+      let diffCount = 0;
+      assignedServiceIds.forEach((id) => {
+        if (!initialAssignedIds.has(id)) diffCount++;
+      });
+      initialAssignedIds.forEach((id) => {
+        if (!assignedServiceIds.has(id)) diffCount++;
+      });
+
+      const label = dirty && diffCount > 0 ? `Save (${diffCount})` : 'Save';
+      saveBtn.innerHTML = `
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+          <polyline points="17 21 17 13 7 13 7 21"></polyline>
+          <polyline points="7 3 7 8 15 8"></polyline>
+        </svg>
+        <span>${label}</span>
+      `;
+    };
 
     // Recalculate and update tallies dynamically from the authoritative Set
     const updateCountsAndTally = () => {
@@ -416,59 +461,7 @@ export class StaffServicesView {
       };
     }
 
-    // Mutex & Sequential Queue for Immediate, Race-Free Server Persistence
-    let isSaving = false;
-    let pendingSave = false;
-
-    const executeSave = async () => {
-      if (isSaving) {
-        pendingSave = true;
-        return;
-      }
-
-      isSaving = true;
-      pendingSave = false;
-
-      // Extract current snapshot of assigned IDs
-      const payloadServiceIds = Array.from(assignedServiceIds);
-
-      try {
-        const updated = await ApiClient.assignStaffServices(staff.id, payloadServiceIds);
-        
-        // Only update local staff data if user hasn't made newer clicks while request was in-flight
-        if (!pendingSave) {
-          const savedServices = (updated && Array.isArray(updated.services))
-            ? updated.services
-            : payloadServiceIds.map((id) => ({ id, serviceId: id }));
-
-          staff.services = savedServices;
-
-          if (ctx && Array.isArray(ctx.staffList)) {
-            const idx = ctx.staffList.findIndex((s) => String(s.id) === String(staff.id));
-            if (idx !== -1) {
-              ctx.staffList[idx] = {
-                ...ctx.staffList[idx],
-                ...(updated || {}),
-                services: savedServices,
-              };
-            }
-          }
-        }
-      } catch (err) {
-        console.error('[StaffServicesView] Save error:', err);
-        if (ctx && typeof ctx.showToast === 'function') {
-          ctx.showToast(err.message || 'Failed to auto-save services to database', 'error');
-        }
-      } finally {
-        isSaving = false;
-        // If user made changes while request was in-flight, immediately save the latest snapshot!
-        if (pendingSave) {
-          executeSave();
-        }
-      }
-    };
-
-    // Toggle a single pill with immediate optimistic update and leading-edge save
+    // Toggle a single pill with immediate optimistic visual update (no auto-save)
     const togglePill = (pill) => {
       const serviceId = pill.getAttribute('data-service-id');
       if (!serviceId) return;
@@ -482,16 +475,6 @@ export class StaffServicesView {
         assignedServiceIds.delete(serviceId);
       }
 
-      // Optimistically sync in-memory staff object immediately
-      const latestServices = Array.from(assignedServiceIds).map((id) => ({ id, serviceId: id }));
-      staff.services = latestServices;
-      if (ctx && Array.isArray(ctx.staffList)) {
-        const idx = ctx.staffList.findIndex((s) => String(s.id) === String(staff.id));
-        if (idx !== -1) {
-          ctx.staffList[idx].services = latestServices;
-        }
-      }
-
       pill.classList.toggle('is-assigned', nextAssigned);
       pill.setAttribute('data-is-assigned', nextAssigned ? 'true' : 'false');
 
@@ -502,7 +485,7 @@ export class StaffServicesView {
       if (visual) visual.textContent = nextAssigned ? '✓' : '';
 
       updateCountsAndTally();
-      executeSave();
+      updateSaveBtnState();
     };
 
     // 1. Pill Click and Keyboard (Enter/Space) handlers
@@ -519,20 +502,79 @@ export class StaffServicesView {
       };
     });
 
-    // 2. Ensure any pending save is flushed on back navigation or browser reload/unload
-    const flushSave = () => {
-      if (pendingSave || isSaving) {
-        const finalIds = Array.from(assignedServiceIds);
-        ApiClient.assignStaffServices(staff.id, finalIds).catch(() => {});
-      }
-    };
+    // 2. Explicit Batch Save Handler with Universal Loading Overlay
+    if (saveBtn) {
+      saveBtn.onclick = async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (saveBtn.disabled || !isDirty()) return;
 
+        const payloadServiceIds = Array.from(assignedServiceIds);
+
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = `
+          <span style="display:inline-block; width:12px; height:12px; border:2px solid rgba(255,255,255,0.3); border-top-color:#fff; border-radius:50%; animation:schedule-clean-spin 0.65s linear infinite; vertical-align:middle; margin-right:4px;"></span>
+          <span>Saving...</span>
+        `;
+
+        LoadingOverlay.show('Saving qualified services...');
+
+        try {
+          const updated = await ApiClient.assignStaffServices(staff.id, payloadServiceIds);
+
+          const savedServices = (updated && Array.isArray(updated.services))
+            ? updated.services
+            : payloadServiceIds.map((id) => ({ id, serviceId: id }));
+
+          staff.services = savedServices;
+
+          if (ctx && Array.isArray(ctx.staffList)) {
+            const idx = ctx.staffList.findIndex((s) => String(s.id) === String(staff.id));
+            if (idx !== -1) {
+              ctx.staffList[idx] = {
+                ...ctx.staffList[idx],
+                ...(updated || {}),
+                services: savedServices,
+              };
+            }
+          }
+
+          SalonRepository.invalidate('staff');
+          SalonRepository.invalidate('services');
+
+          // Reset baseline to current state
+          initialAssignedIds = new Set(assignedServiceIds);
+          updateSaveBtnState();
+
+          if (ctx && typeof ctx.showToast === 'function') {
+            ctx.showToast(`Services for ${staff.name} saved successfully!`, 'success');
+          }
+        } catch (err) {
+          console.error('[StaffServicesView] Save error:', err);
+          updateSaveBtnState();
+          if (ctx && typeof ctx.showToast === 'function') {
+            ctx.showToast(err.message || 'Failed to save services. Please try again.', 'error');
+          }
+        } finally {
+          LoadingOverlay.hide(150);
+        }
+      };
+    }
+
+    // 3. Unsaved changes guard on Back button
     const backBtn = container.querySelector('#btn-back-to-profile');
     if (backBtn) {
-      backBtn.addEventListener('click', flushSave);
+      backBtn.addEventListener('click', (e) => {
+        if (isDirty()) {
+          const leave = confirm('You have unsaved changes to assigned services. Leave without saving?');
+          if (!leave) {
+            e.preventDefault();
+            e.stopPropagation();
+            return false;
+          }
+        }
+      }, true);
     }
-    window.addEventListener('beforeunload', flushSave);
-    window.addEventListener('pagehide', flushSave);
 
   }
 }

@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '../../../database/prisma.service';
 import { CreateServiceDto, UpdateServiceDto } from './dto/create-service.dto';
 import { BulkImportItemDto } from './ai-scanner/dto/bulk-import-services.dto';
-import { ServiceStatus, SalonStatus, StylistStatus, AppointmentStatus } from '@prisma/client';
+import { ServiceStatus, SalonStatus, StylistStatus, AppointmentStatus, ConversationState } from '@prisma/client';
 import { AppointmentsService } from '../appointments/appointments.service';
 
 @Injectable()
@@ -546,10 +546,19 @@ export class ServicesService {
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
-      // 1. Clear active conversation reference if any
+      // 1. Reset active conversations referencing this deleted service
       await tx.conversation.updateMany({
         where: { salonId, selectedServiceId: serviceId },
-        data: { selectedServiceId: null },
+        data: {
+          state: ConversationState.START,
+          selectedServiceId: null,
+          selectedStaffId: null,
+          selectedDate: null,
+          selectedStartTime: null,
+          selectedCategoryId: null,
+          tempBookingGender: null,
+          pendingAddonServiceId: null,
+        },
       });
 
       // 2. Disassociate cancelled/historical appointment service references (preserving immutable snapshots)

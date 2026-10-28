@@ -2,7 +2,7 @@ import { Injectable, Logger, Inject, forwardRef, Optional } from '@nestjs/common
 import { PrismaService } from '../../../../database/prisma.service';
 import { WhatsAppSenderService, WhatsAppButtonId } from './whatsapp-sender.service';
 import { WhatsAppTemplateService } from './whatsapp-template.service';
-import { WhatsAppSessionService } from './whatsapp-session.service';
+import { WhatsAppSessionService, BookingLifecycleStage } from './whatsapp-session.service';
 import { WhatsAppService } from '../whatsapp.service';
 import { ConversationState, AppointmentStatus } from '@prisma/client';
 import { TimeUtility } from '../../../../common/utils/time.utility';
@@ -59,6 +59,10 @@ export class WhatsAppActionHandlerService {
   /**
    * Main Smart Action Gateway & Guard Interceptor
    * Executes top-level validations and dispatches to dedicated domain action handlers.
+   *
+   * Single-writer guarantee (root cause R1): every handler returns the step the customer
+   * is now on. If the handler sent its reply but did not save, the gateway saves that
+   * returned step, so the saved step always matches the menu on the customer's screen.
    */
   async handleIncomingAction(
     salonId: string,
@@ -67,6 +71,42 @@ export class WhatsAppActionHandlerService {
     interactiveId?: string,
     phoneNumberId?: string,
     senderName?: string,
+  ): Promise<{ replyMessage: string; state: ConversationState; metadata?: any }> {
+    const trace: { conversationId?: string; loadedState?: ConversationState } = {};
+    const scope = { writtenConversationIds: new Set<string>() };
+
+    const result = await this.session.runWithWriteTracking(scope, () =>
+      this.routeIncomingAction(salonId, customerPhone, messageText, interactiveId, phoneNumberId, senderName, trace),
+    );
+
+    await this.persistReturnedState(trace, scope.writtenConversationIds, result?.state);
+    return result;
+  }
+
+  /**
+   * Saves the handler's returned step only when the handler did not save anything itself
+   * and the step actually changed. Handlers that saved keep full ownership of their write.
+   */
+  private async persistReturnedState(
+    trace: { conversationId?: string; loadedState?: ConversationState },
+    writtenConversationIds: Set<string>,
+    returnedState?: ConversationState,
+  ): Promise<void> {
+    if (!trace.conversationId || !returnedState) return;
+    if (writtenConversationIds.has(trace.conversationId)) return;
+    if (returnedState === trace.loadedState) return;
+
+    await this.session.updateConversationState(trace.conversationId, returnedState);
+  }
+
+  private async routeIncomingAction(
+    salonId: string,
+    customerPhone: string,
+    messageText: string,
+    interactiveId: string | undefined,
+    phoneNumberId: string | undefined,
+    senderName: string | undefined,
+    trace: { conversationId?: string; loadedState?: ConversationState },
   ): Promise<{ replyMessage: string; state: ConversationState; metadata?: any }> {
     const cleanNumber = this.sender.cleanPhone(customerPhone);
     const input = (interactiveId || messageText || '').trim();
@@ -86,6 +126,8 @@ export class WhatsAppActionHandlerService {
 
     // 2. Resolve Customer User & Session State
     const { user, salonUser, conversation } = await this.session.getOrCreateSession(salonId, cleanNumber, senderName);
+    trace.conversationId = conversation.id;
+    trace.loadedState = conversation.state as ConversationState;
 
     // 3. Blocked User Check (3 Penalty Strikes)
     if (salonUser?.isBookingBlocked) {
@@ -183,9 +225,8 @@ export class WhatsAppActionHandlerService {
         if (activeStatuses.includes(targetAppointment.status)) {
           activeAppointment = targetAppointment;
           if (conversation.activeAppointmentId !== targetAppointment.id) {
-            setImmediate(() => {
-              this.session.updateConversationState(conversation.id, conversation.state, targetAppointment.id).catch(() => {});
-            });
+            // Link only the appointment pointer; never re-save the step from this stale snapshot.
+            await this.session.linkActiveAppointment(conversation.id, targetAppointment.id).catch(() => {});
           }
         }
       }
@@ -196,7 +237,8 @@ export class WhatsAppActionHandlerService {
       if (!targetAppointment) {
         const expireReply = this.templates.buildExpiredActionReply(true);
         await this.sendMessage(cleanNumber, expireReply, phoneNumberId, salonId);
-        return { replyMessage: expireReply.bodyText, state: ConversationState.START };
+        // Informational reply only: the customer's current step is unchanged.
+        return { replyMessage: expireReply.bodyText, state: conversation.state };
       }
 
       if (targetAppointment.status === AppointmentStatus.CANCELLED) {
@@ -391,6 +433,41 @@ export class WhatsAppActionHandlerService {
     );
 
     if (!isValidAction) {
+      const isInteractiveButton =
+        input.startsWith('btn_') ||
+        input.startsWith('cat_') ||
+        input.startsWith('gender_select_') ||
+        input.startsWith('svc_') ||
+        input.startsWith('staff_') ||
+        input.startsWith('date_') ||
+        input.startsWith('slot_') ||
+        input.startsWith('window_') ||
+        input.startsWith('rdate_') ||
+        input.startsWith('rslot_') ||
+        input.startsWith('rwindow_') ||
+        input.startsWith('addon_') ||
+        input.startsWith('remind_') ||
+        input.startsWith('eta_') ||
+        input.startsWith('appt_') ||
+        input.startsWith('propose_') ||
+        input.startsWith('late_') ||
+        input.startsWith('move_up_') ||
+        ['quick_book_confirm', 'confirm', 'cat_back'].includes(input);
+
+      if (!isInteractiveButton && lifecycleStage === BookingLifecycleStage.PRE_BOOKING) {
+        this.logger.log(`[WhatsAppGateway] Free text "${input}" received during PRE_BOOKING for state ${conversation.state}. Prompting continue/new booking.`);
+        const resumePrompt = {
+          bodyText: `👋 You have a booking in progress.\n\nWould you like to continue where you left off or start a new booking?`,
+          interactiveType: 'button' as const,
+          buttons: [
+            { id: WhatsAppButtonId.RESUME_BOOKING, title: '▶️ Continue Booking' },
+            { id: WhatsAppButtonId.NEW_BOOKING, title: '📅 New Booking' },
+          ],
+        };
+        await this.sendMessage(cleanNumber, resumePrompt, phoneNumberId, salonId);
+        return { replyMessage: resumePrompt.bodyText, state: conversation.state };
+      }
+
       this.logger.warn(`[WhatsAppGateway] Stale button input "${input}" ignored for state ${conversation.state}`);
       const expireReply = await this.session.sendLifecycleExpirationResponse(
         cleanNumber,

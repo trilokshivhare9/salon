@@ -38,22 +38,90 @@ export {
 };
 
 function showNotification(msg, type = 'info') {
-  const toast = document.createElement('div');
-  const bg = (type === 'error' || type === 'danger')
-    ? '#ef4444'
-    : type === 'warning'
-      ? '#f59e0b'
-      : '#10b981';
-
   let cleanMsg = typeof msg === 'object' ? (msg.message || JSON.stringify(msg)) : String(msg || '');
   if (cleanMsg.length > 200) {
     cleanMsg = cleanMsg.slice(0, 200) + '...';
   }
 
-  toast.style.cssText = `position:fixed; bottom:24px; right:24px; z-index:999999; max-width:380px; word-break:break-word; padding:12px 18px; background:${bg}; color:#fff; font-weight:600; font-size:0.88rem; line-height:1.4; border-radius:10px; box-shadow:0 10px 25px rgba(0,0,0,0.5); font-family:sans-serif;`;
-  toast.textContent = cleanMsg;
-  document.body.appendChild(toast);
-  setTimeout(() => toast.remove(), 4000);
+  const isError = type === 'error' || type === 'danger';
+  const isWarning = type === 'warning';
+  const isSuccess = type === 'success';
+
+  const variant = isError ? 'danger' : (isWarning ? 'warning' : (isSuccess ? 'success' : 'info'));
+  const icon = isError ? '✕' : (isWarning ? '⚠️' : (isSuccess ? '✓' : '⚡'));
+  const badgeText = isError ? 'Error' : (isWarning ? 'Notice' : (isSuccess ? 'Success' : 'Salon Update'));
+
+  RealtimeNotifier.showLuxuryBanner({
+    badgeText,
+    title: cleanMsg,
+    clientName: cleanMsg,
+    icon,
+    variant,
+  });
+}
+
+// Global Service Description Expansion Handler (Module Top-Level, Available Immediately)
+window._expandedServiceDescIds = window._expandedServiceDescIds || new Set();
+
+window.toggleServiceDesc = function(targetId, btnEl, event) {
+  if (event && event._descHandled) return;
+  if (event) {
+    event._descHandled = true;
+    try {
+      if (typeof event.preventDefault === 'function') event.preventDefault();
+      if (typeof event.stopPropagation === 'function') event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
+    } catch (_) {}
+  }
+
+  const btn = (btnEl instanceof HTMLElement)
+    ? btnEl
+    : (event?.target ? event.target.closest('.btn-service-desc-more') : null);
+
+  const wrap = btn?.closest('.service-card-desc-wrap');
+  const textEl = (typeof targetId === 'string' && targetId ? document.getElementById(targetId) : null)
+    || wrap?.querySelector('.service-card-desc-text')
+    || btn?.previousElementSibling;
+
+  if (!textEl) return;
+
+  const rawId = textEl.id || (typeof targetId === 'string' ? targetId : '');
+  const serviceId = rawId.replace('svc-desc-', '');
+
+  const isCurrentlyExpanded = textEl.classList.contains('is-expanded') || textEl.getAttribute('data-expanded') === 'true';
+
+  if (isCurrentlyExpanded) {
+    if (serviceId) window._expandedServiceDescIds.delete(serviceId);
+    textEl.setAttribute('data-expanded', 'false');
+    textEl.classList.remove('is-expanded');
+    textEl.classList.add('is-clamped');
+    textEl.style.display = '-webkit-box';
+    textEl.style.webkitLineClamp = '1';
+    textEl.style.webkitBoxOrient = 'vertical';
+    textEl.style.overflow = 'hidden';
+    if (btn) btn.textContent = 'See more';
+  } else {
+    if (serviceId) window._expandedServiceDescIds.add(serviceId);
+    textEl.setAttribute('data-expanded', 'true');
+    textEl.classList.remove('is-clamped');
+    textEl.classList.add('is-expanded');
+    textEl.style.display = 'block';
+    textEl.style.webkitLineClamp = 'none';
+    textEl.style.webkitBoxOrient = 'unset';
+    textEl.style.overflow = 'visible';
+    if (btn) btn.textContent = 'See less';
+  }
+};
+
+// Immediate global delegation in capture phase (module top-level, catches all clicks)
+if (typeof document !== 'undefined' && !window._serviceDescListenerRegistered) {
+  window._serviceDescListenerRegistered = true;
+  document.addEventListener('click', (e) => {
+    const descBtn = e.target.closest('.btn-service-desc-more');
+    if (!descBtn) return;
+    const targetId = descBtn.getAttribute('data-target');
+    window.toggleServiceDesc(targetId, descBtn, e);
+  }, true);
 }
 
 export function getApptServices(appt) {
@@ -265,6 +333,7 @@ export class SalonDashboard {
         }
       },
     });
+
   }
 
   /**
@@ -315,6 +384,8 @@ export class SalonDashboard {
   }
 
   showToast(msg, type = 'info') {
+    this.lastLocalActionTimestamp = Date.now();
+    window.lastDashboardActionTimestamp = Date.now();
     showNotification(msg, type);
   }
 
@@ -1013,6 +1084,13 @@ export class SalonDashboard {
         this.attachTabEventListeners();
         if (targetTab === 'customers') this.loadCustomersTable();
         if (targetTab === 'whatsapp-logs') this.loadWhatsAppLogs();
+        if (targetTab === 'services') {
+          ApiClient.getServices(true).then((fresh) => {
+            if (Array.isArray(fresh)) {
+              this.servicesList = fresh;
+            }
+          }).catch(() => {});
+        }
       } catch (err) {
         console.error('[Dashboard] Error rendering tab:', targetTab, err);
       }
@@ -3031,6 +3109,15 @@ export class SalonDashboard {
                       ` : ''}
                     </div>
                     <div class="stylist-card-action">
+                      <button type="button" class="btn-delete-stylist stylist-action-del-btn" 
+                        data-staff-id="${st.id}" 
+                        data-staff-name="${(st.name || '').replace(/"/g, '&quot;')}" 
+                        title="Delete Stylist ${(st.name || '').replace(/"/g, '&quot;')}">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                          <polyline points="3 6 5 6 21 6"></polyline>
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        </svg>
+                      </button>
                       <span class="stylist-manage-btn">
                         <span>Manage</span>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -6323,6 +6410,7 @@ export class SalonDashboard {
         return '✂️';
       };
 
+
       const activeFilters = this.serviceFilters || { category: 'ALL', gender: 'ALL', staff: 'ALL' };
 
       // Clean up any drawer elements previously appended to document.body from past renders
@@ -6540,6 +6628,9 @@ export class SalonDashboard {
                 const gIcon = genderIcons[g] || '👥';
                 const catName = s.category || 'General';
                 const catIcon = getCatIcon(catName, s.name);
+                const descText = (s.description || '').trim();
+                const isLongDesc = descText.length > 42;
+                const isExpanded = Boolean(window._expandedServiceDescIds && window._expandedServiceDescIds.has(s.id));
 
                 return `
                   <div class="service-card-item" data-category="${catName.toUpperCase()}" data-name="${(s.name || '').toLowerCase()}" data-gender="${g}" data-staff-count="${count}">
@@ -6566,7 +6657,7 @@ export class SalonDashboard {
                           data-price="${s.price || 0}" 
                           data-duration="${s.durationMinutes || 30}" 
                           data-category="${(s.category || '').replace(/"/g, '&quot;')}" 
-                          data-desc="${(s.description || '').replace(/"/g, '&quot;')}" 
+                          data-desc="${descText.replace(/"/g, '&quot;')}" 
                           title="Edit Service">
                           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
@@ -6585,9 +6676,14 @@ export class SalonDashboard {
                       </div>
                     </div>
 
-                    <!-- Middle: Description (if available) -->
-                    ${s.description && s.description.trim() ? `
-                      <p class="service-card-desc" title="${s.description.replace(/"/g, '&quot;')}">${s.description}</p>
+                    <!-- Middle: Description with See more / See less (Full Width) -->
+                    ${descText ? `
+                      <div class="service-card-desc-wrap">
+                        <p class="service-card-desc-text ${isExpanded ? 'is-expanded' : 'is-clamped'}" id="svc-desc-${s.id}" data-expanded="${isExpanded ? 'true' : 'false'}" style="${isExpanded ? 'display:block !important;-webkit-line-clamp:none !important;overflow:visible !important;' : ''}" onclick="window.toggleServiceDesc('svc-desc-${s.id}', null, event)">${descText.replace(/"/g, '&quot;')}</p>
+                        ${isLongDesc ? `
+                          <button type="button" class="btn-service-desc-more" data-target="svc-desc-${s.id}" onclick="window.toggleServiceDesc('svc-desc-${s.id}', this, event)">${isExpanded ? 'See less' : 'See more'}</button>
+                        ` : ''}
+                      </div>
                     ` : ''}
 
                     <!-- Bottom: Duration & Stylist Assignment (Left) | Price (Right) -->
@@ -8337,6 +8433,7 @@ export class SalonDashboard {
     clearAllBtn?.addEventListener('click', resetAllFilters);
     resetEmptyBtn?.addEventListener('click', resetAllFilters);
 
+
     // Initial sync and filtering
     syncDrawerPills();
     filterServices();
@@ -8365,7 +8462,8 @@ export class SalonDashboard {
 
     // 2. Tap Stylist Card to open Executive Profile Hub
     root.querySelectorAll('.stylist-card[data-staff-id]').forEach((card) => {
-      card.addEventListener('click', () => {
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('.btn-delete-stylist')) return;
         const sId = card.getAttribute('data-staff-id');
         if (sId) {
           if (String(sId).startsWith('temp-')) {
@@ -8379,9 +8477,21 @@ export class SalonDashboard {
 
       card.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') {
+          if (e.target.closest('.btn-delete-stylist')) return;
           e.preventDefault();
           card.click();
         }
+      });
+    });
+
+    // 2b. Delete Stylist Action
+    root.querySelectorAll('.btn-delete-stylist').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const staffId = btn.getAttribute('data-staff-id');
+        const staffName = btn.getAttribute('data-staff-name') || 'Stylist';
+        this.showDeleteStaffModal(staffId, staffName);
       });
     });
 
@@ -8743,6 +8853,11 @@ export class SalonDashboard {
     // Staff Tab Master-Detail Workspace Listeners
     if (this.activeTab === 'staff') {
       this.attachStaffTabListeners(this.container);
+    }
+
+    // Services Tab Listeners
+    if (this.activeTab === 'services') {
+      this.attachServicesTabListeners(this.container);
     }
 
     // Mark Staff Absent / Leave
@@ -9950,6 +10065,8 @@ export class SalonDashboard {
         _isOptimistic: true,
       };
 
+      this.lastLocalActionTimestamp = Date.now();
+      window.lastDashboardActionTimestamp = Date.now();
       this.staffList = [optimisticStaff, ...this.staffList];
       modalContainer.innerHTML = '';
       this.showToast(`Stylist "${name}" added!`, 'success');
@@ -11873,46 +11990,152 @@ export class SalonDashboard {
 
   showDeleteStaffModal(staffId, staffName) {
     const modalContainer = document.getElementById('modal-container');
+    if (!modalContainer) return;
+
+    const targetStaff = (this.staffList || []).find((s) => String(s.id) === String(staffId)) || { name: staffName };
+    const initials = (targetStaff.name || staffName || 'ST')
+      .split(' ')
+      .map((n) => n[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2);
+
+    const servicesCount = (targetStaff.services || []).length;
+    
+    // Check if stylist has active / waiting queue appointments today
+    const queueItems = this.queueSync?.items || this.summaryData?.todayAppointments || [];
+    const activeAppts = queueItems.filter((a) => {
+      const aStaffId = a.stylistId || a.stylist?.id;
+      const status = (a.status || '').toUpperCase();
+      return String(aStaffId) === String(staffId) && !['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(status);
+    });
+    const hasActiveAppts = activeAppts.length > 0;
 
     modalContainer.innerHTML = `
-      <div class="modal-backdrop show">
-        <div class="modal-content" style="text-align: center;">
-          <div style="font-size: 3rem; margin-bottom: 8px;">🗑️</div>
-          <h3 style="color: var(--danger); margin-bottom: 8px;">Delete Stylist</h3>
-          <p style="color: var(--text-secondary); font-size: 0.88rem; margin-bottom: 20px;">
-            Are you sure you want to permanently delete <strong>${staffName}</strong>? All their shift schedules, breaks, and qualified service assignments will be removed.
-          </p>
+      <div class="modal-backdrop show" id="delete-staff-backdrop">
+        <div class="modal-content modal-content-sheet" style="max-width: 440px; background: linear-gradient(160deg, #171b2d 0%, #0e1220 100%); border: 1px solid rgba(239, 68, 68, 0.3); box-shadow: 0 24px 60px rgba(0,0,0,0.7), 0 0 30px rgba(239,68,68,0.15); border-radius: 16px; padding: 22px 24px;">
+          
+          <!-- Header: Danger Icon + Title -->
+          <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+            <div style="width: 44px; height: 44px; border-radius: 12px; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); display: flex; align-items: center; justify-content: center; color: #ef4444; flex-shrink: 0;">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                <line x1="10" y1="11" x2="10" y2="17"></line>
+                <line x1="14" y1="11" x2="14" y2="17"></line>
+              </svg>
+            </div>
+            <div>
+              <h3 style="font-size: 1.12rem; font-weight: 800; color: #ffffff; margin: 0; line-height: 1.2;">Delete Stylist</h3>
+              <p style="color: #94a3b8; font-size: 0.76rem; margin: 3px 0 0 0;">This action permanently removes the stylist record</p>
+            </div>
+          </div>
 
-          <div style="display: flex; gap: 10px;">
-            <button class="btn btn-secondary" style="flex: 1;" id="btn-cancel-delete-staff">Cancel</button>
-            <button class="btn btn-primary" style="flex: 1; background: var(--danger); border-color: var(--danger);" id="btn-confirm-delete-staff">
+          <!-- Stylist Profile Snapshot Card -->
+          <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 12px 14px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <div style="width: 36px; height: 36px; border-radius: 9px; background: linear-gradient(135deg, #a855f7 0%, #6366f1 100%); color: #fff; font-weight: 700; font-size: 0.85rem; display: flex; align-items: center; justify-content: center;">
+                ${initials}
+              </div>
+              <div>
+                <div style="font-weight: 700; color: #ffffff; font-size: 0.88rem;">${targetStaff.name || staffName}</div>
+                <div style="color: #94a3b8; font-size: 0.74rem;">${targetStaff.role || 'Hair & Beard Specialist'}</div>
+              </div>
+            </div>
+            <span style="font-size: 0.72rem; padding: 3px 8px; border-radius: 6px; background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.3); color: #d8b4fe; font-weight: 600;">
+              ${servicesCount} Services
+            </span>
+          </div>
+
+          ${hasActiveAppts ? `
+            <!-- Active Bookings Warning Alert -->
+            <div style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 10px; padding: 10px 12px; margin-bottom: 16px; display: flex; gap: 9px; align-items: flex-start;">
+              <span style="font-size: 1.1rem; line-height: 1;">⚠️</span>
+              <div style="font-size: 0.76rem; color: #fca5a5; line-height: 1.4;">
+                <strong>Active Appointments:</strong> This stylist currently has <strong>${activeAppts.length} active/pending client(s)</strong> in today's queue. Deleting will cancel or unassign these appointments.
+              </div>
+            </div>
+          ` : `
+            <p style="color: #94a3b8; font-size: 0.82rem; line-height: 1.45; margin: 0 0 18px 0;">
+              Are you sure you want to permanently delete <strong style="color: #ffffff;">${targetStaff.name || staffName}</strong>? All their routine break schedules, working hours, and service qualifications will be permanently deleted.
+            </p>
+          `}
+
+          <!-- Actions: Cancel vs Confirm Delete -->
+          <div style="display: flex; gap: 10px; align-items: center;">
+            <button type="button" class="btn btn-secondary" style="flex: 1; padding: 9px 14px; font-size: 0.84rem; font-weight: 600;" id="btn-cancel-delete-staff">
+              Cancel
+            </button>
+            <button type="button" class="btn btn-primary" style="flex: 1.2; padding: 9px 14px; font-size: 0.84rem; font-weight: 700; background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); border-color: #ef4444; box-shadow: 0 4px 14px rgba(239, 68, 68, 0.35);" id="btn-confirm-delete-staff">
               Yes, Delete Stylist
             </button>
           </div>
+
         </div>
       </div>
     `;
 
-    document.getElementById('btn-cancel-delete-staff')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
-
-    document.getElementById('btn-confirm-delete-staff')?.addEventListener('click', async () => {
-      const originalStaffList = [...this.staffList];
-      const targetStaff = this.staffList.find((s) => s.id === staffId);
-      
-      // 1. Optimistic removal (16ms)
-      this.staffList = this.staffList.filter((s) => s.id !== staffId);
+    const closeModal = () => {
       modalContainer.innerHTML = '';
+      document.removeEventListener('keydown', handleEsc);
+    };
+
+    const handleEsc = (e) => {
+      if (e.key === 'Escape') closeModal();
+    };
+    document.addEventListener('keydown', handleEsc);
+
+    document.getElementById('btn-cancel-delete-staff')?.addEventListener('click', closeModal);
+    document.getElementById('delete-staff-backdrop')?.addEventListener('click', (e) => {
+      if (e.target.id === 'delete-staff-backdrop') closeModal();
+    });
+
+    document.getElementById('btn-confirm-delete-staff')?.addEventListener('click', async (e) => {
+      const confirmBtn = e.currentTarget;
+      const originalStaffList = [...this.staffList];
+      
+      // Loading state on button
+      confirmBtn.disabled = true;
+      confirmBtn.innerHTML = `
+        <span style="display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 6px; vertical-align: middle;"></span>
+        Deleting...
+      `;
+
+      // Mark local action timestamp to suppress SSE self-echo notification
+      this.lastLocalActionTimestamp = Date.now();
+      window.lastDashboardActionTimestamp = Date.now();
+
+      // 1. Optimistic removal from in-memory state
+      this.staffList = this.staffList.filter((s) => String(s.id) !== String(staffId));
+      if (this.staffManager) {
+        this.staffManager.staffList = this.staffList;
+      }
+      closeModal();
       this.render();
 
       try {
         await ApiClient.deleteStaff(staffId);
-        this.showToast(`Stylist "${targetStaff?.name || 'Stylist'}" deleted`, 'success');
+        this.lastLocalActionTimestamp = Date.now();
+        window.lastDashboardActionTimestamp = Date.now();
+        this.showToast(`Stylist "${targetStaff?.name || staffName}" deleted successfully`, 'success');
+        
+        // Invalidate both staff & services caches so counts update across tabs
         SalonRepository.invalidate('staff');
+        SalonRepository.invalidate('services');
+        
+        // Re-fetch fresh staff & services silently
+        ApiClient.getStaff(true).catch(() => {});
+        ApiClient.getServices(true).then((fresh) => {
+          if (Array.isArray(fresh)) this.servicesList = fresh;
+        }).catch(() => {});
       } catch (err) {
-        // Rollback on failure
+        // Rollback state on error
         this.staffList = originalStaffList;
+        if (this.staffManager) {
+          this.staffManager.staffList = originalStaffList;
+        }
         this.render();
-        alert(`Failed to delete stylist: ${err.message}`);
+        this.showToast(err.message || 'Failed to delete stylist. Please try again.', 'error');
       }
     });
   }

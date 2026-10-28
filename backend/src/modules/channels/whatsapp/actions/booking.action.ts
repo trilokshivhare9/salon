@@ -179,14 +179,17 @@ export class BookingAction {
   private async handleStartBooking(ctx: ActionContext): Promise<ActionResult> {
     const { cleanNumber, phoneNumberId, salonId, salon, conversation } = ctx;
 
-    await this.session.updateConversationState(conversation.id, ConversationState.SELECT_CATEGORY, undefined, {
-      quickCodeVerifiedAt: null,
-    });
+    await this.session.updateConversationState(
+      conversation.id,
+      ConversationState.SELECT_CATEGORY,
+      undefined,
+      ActionUtils.getClearDraftData(),
+    );
 
-    let effectiveGender = conversation.tempBookingGender;
+    let effectiveGender: ServiceGender | null = null;
 
     // Auto-detect single-gender salon
-    if (!effectiveGender && salon.services && salon.services.length > 0) {
+    if (salon.services && salon.services.length > 0) {
       const activeTargetGenders = new Set(
         salon.services.map((s: any) => s.targetGender || s.gender).filter((g: any) => g && g !== 'UNISEX'),
       );
@@ -329,8 +332,45 @@ export class BookingAction {
     return { replyMessage: staffMenu.bodyText, state: ConversationState.SELECT_STAFF };
   }
 
+  private async handleMissingServiceFallback(ctx: ActionContext): Promise<ActionResult> {
+    const { cleanNumber, phoneNumberId, salonId, salon, conversation } = ctx;
+    const reply = `⚠️ The selected service is no longer available. Please select a service to continue:`;
+    const availableServices = conversation.selectedCategoryId
+      ? ActionUtils.filterCategoryServices(salon.services || [], conversation.selectedCategoryId, conversation.tempBookingGender)
+      : salon.services || [];
+    const servicesToOffer = availableServices.length > 0 ? availableServices : salon.services || [];
+
+    if (servicesToOffer.length > 0) {
+      await this.session.updateConversationState(conversation.id, ConversationState.SELECT_SERVICE, undefined, {
+        selectedServiceId: null,
+        selectedStaffId: null,
+        selectedDate: null,
+        selectedStartTime: null,
+      });
+      const serviceMenu = this.templates.buildServiceMenu(servicesToOffer, 'Services');
+      serviceMenu.bodyText = reply;
+      await this.sendMessage(cleanNumber, serviceMenu, phoneNumberId, salonId);
+      return { replyMessage: reply, state: ConversationState.SELECT_SERVICE };
+    }
+
+    await this.session.updateConversationState(
+      conversation.id,
+      ConversationState.SELECT_CATEGORY,
+      undefined,
+      ActionUtils.getClearDraftData(),
+    );
+    const categoryMenu = this.templates.buildCategoryMenu(salon.serviceCategories || []);
+    categoryMenu.bodyText = reply;
+    await this.sendMessage(cleanNumber, categoryMenu, phoneNumberId, salonId);
+    return { replyMessage: reply, state: ConversationState.SELECT_CATEGORY };
+  }
+
   private async handleStaffSelected(ctx: ActionContext): Promise<ActionResult> {
     const { input, cleanNumber, phoneNumberId, salonId, salon, conversation } = ctx;
+    if (!conversation.selectedServiceId || !(salon.services || []).some((s: any) => s.id === conversation.selectedServiceId)) {
+      return this.handleMissingServiceFallback(ctx);
+    }
+
     const staffId = input.replace('staff_', '');
     const selectedStaffId = staffId === 'any' ? null : staffId;
 
@@ -341,7 +381,7 @@ export class BookingAction {
     const horizon = salon.maxAdvanceDays || BOOKING_POLICY.MAX_ADVANCE_BOOKING_DAYS;
     const openDates = await this.availabilityService.findAvailableDates(
       salonId,
-      conversation.selectedServiceId!,
+      conversation.selectedServiceId,
       selectedStaffId,
       horizon,
     );
@@ -383,12 +423,16 @@ export class BookingAction {
 
   private async handleDateSelected(ctx: ActionContext): Promise<ActionResult> {
     const { input, cleanNumber, phoneNumberId, salonId, salon, conversation } = ctx;
+    if (!conversation.selectedServiceId || !(salon.services || []).some((s: any) => s.id === conversation.selectedServiceId)) {
+      return this.handleMissingServiceFallback(ctx);
+    }
+
     const tz = salon.timezone || TimeUtility.DEFAULT_TIMEZONE;
     const dateStr = input.replace('date_', '');
 
     const availability = await this.availabilityService.getAvailableSlots(
       salonId,
-      conversation.selectedServiceId!,
+      conversation.selectedServiceId,
       dateStr,
       conversation.selectedStaffId || undefined,
     );
@@ -405,7 +449,7 @@ export class BookingAction {
 
       const altDates = await this.availabilityService.findAvailableDates(
         salonId,
-        conversation.selectedServiceId!,
+        conversation.selectedServiceId,
         conversation.selectedStaffId,
         2,
       );
@@ -457,7 +501,11 @@ export class BookingAction {
   }
 
   private async handleSlotWindowSwitched(ctx: ActionContext): Promise<ActionResult> {
-    const { input, cleanNumber, phoneNumberId, salonId, conversation, tz } = ctx;
+    const { input, cleanNumber, phoneNumberId, salonId, salon, conversation, tz } = ctx;
+    if (!conversation.selectedServiceId || !(salon.services || []).some((s: any) => s.id === conversation.selectedServiceId)) {
+      return this.handleMissingServiceFallback(ctx);
+    }
+
     const targetWindow = input.replace('window_', '') as SlotWindowType;
 
     const datePart = conversation.selectedDate || new Date();
@@ -465,7 +513,7 @@ export class BookingAction {
 
     const availability = await this.availabilityService.getAvailableSlots(
       salonId,
-      conversation.selectedServiceId!,
+      conversation.selectedServiceId,
       dateStr,
       conversation.selectedStaffId || undefined,
     );
@@ -491,6 +539,9 @@ export class BookingAction {
     const { input, cleanNumber, phoneNumberId, salonId, salon, user, conversation, tz } = ctx;
     const timeStr = input.replace('slot_', '');
     const selectedService = (salon.services || []).find((s: any) => s.id === conversation.selectedServiceId);
+    if (!selectedService) {
+      return this.handleMissingServiceFallback(ctx);
+    }
     const selectedStaff = salon.stylists?.find((st: any) => st.id === conversation.selectedStaffId);
 
     const datePart = conversation.selectedDate || new Date();

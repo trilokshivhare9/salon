@@ -322,6 +322,13 @@ export class DraftRecoveryAction {
     });
 
     if (!lastAppointment) {
+      // Same reset as the "has bookings" branch below: the reply is a fresh start menu.
+      await this.session.updateConversationState(
+        conversation.id,
+        ConversationState.START,
+        null,
+        ActionUtils.getClearDraftData(),
+      );
       const noBookings = this.templates.buildNoBookingsReply(salon);
       await this.sendMessage(cleanNumber, noBookings, phoneNumberId, salonId);
       return { replyMessage: noBookings.bodyText, state: ConversationState.START };

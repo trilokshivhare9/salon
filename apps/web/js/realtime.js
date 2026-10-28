@@ -163,7 +163,15 @@ export class RealtimeNotifier {
   }
 
   // Luxury Glassmorphic In-App Banner with Mobile-First Capsule & Stack Limiter
-  showLuxuryBanner({ badgeText, title, clientName, details, specialist, icon = '⚡', variant = 'success', actionCallback, showActionBtn = false }) {
+  static showLuxuryBanner({ badgeText, title, clientName, details, specialist, icon = '⚡', variant = 'success', actionCallback, showActionBtn = false }) {
+    // Clear any existing app top notification toasts to avoid double snackbars
+    const existingToasts = document.querySelectorAll('.app-top-notification-toast');
+    existingToasts.forEach((el) => {
+      el.style.opacity = '0';
+      el.style.transform = 'translate(-50%, -24px)';
+      setTimeout(() => el.remove(), 180);
+    });
+
     let container = document.getElementById('live-banner-container');
     if (!container) {
       container = document.createElement('div');
@@ -188,7 +196,7 @@ export class RealtimeNotifier {
     let glowColor = 'rgba(16, 185, 129, 0.25)';
     let badgeBg = 'rgba(16, 185, 129, 0.15)';
 
-    if (variant === 'danger') {
+    if (variant === 'danger' || variant === 'error') {
       accentColor = '#f43f5e'; // Rose
       glowColor = 'rgba(244, 63, 94, 0.25)';
       badgeBg = 'rgba(244, 63, 94, 0.15)';
@@ -285,6 +293,10 @@ export class RealtimeNotifier {
 
     // Auto-dismiss after 4.5 seconds
     dismissTimer = setTimeout(dismissBanner, 4500);
+  }
+
+  showLuxuryBanner(options) {
+    return RealtimeNotifier.showLuxuryBanner(options);
   }
 
   connect() {
@@ -465,10 +477,13 @@ export class RealtimeNotifier {
           }
         } else if (payload.type === 'STAFF_UPDATED') {
           // Check for self-action suppression:
-          // If the user recently triggered an admin action on staff (within last 4 seconds),
+          // If the user recently triggered an admin action on staff (within last 7 seconds),
           // suppress the incoming toast to prevent self-echo notification storms.
-          const isLocalStaffAction = window.salonDashboard?.lastLocalActionTimestamp &&
-            (Date.now() - window.salonDashboard.lastLocalActionTimestamp < 4000);
+          const lastStaffAction = window.lastDashboardActionTimestamp ||
+            window.salonDashboard?.lastLocalActionTimestamp ||
+            window.dashboardApp?.lastLocalActionTimestamp;
+          const isLocalStaffAction = lastStaffAction &&
+            (Date.now() - lastStaffAction < 7000);
 
           if (!isLocalStaffAction) {
             const action = payload.data?.action || 'UPDATED';
@@ -496,8 +511,11 @@ export class RealtimeNotifier {
           }
         } else if (payload.type === 'SERVICE_UPDATED') {
           // Check for self-action suppression:
-          const isLocalServiceAction = window.salonDashboard?.lastLocalActionTimestamp &&
-            (Date.now() - window.salonDashboard.lastLocalActionTimestamp < 4000);
+          const lastSvcAction = window.lastDashboardActionTimestamp ||
+            window.salonDashboard?.lastLocalActionTimestamp ||
+            window.dashboardApp?.lastLocalActionTimestamp;
+          const isLocalServiceAction = lastSvcAction &&
+            (Date.now() - lastSvcAction < 7000);
 
           if (!isLocalServiceAction) {
             const action = payload.data?.action || 'UPDATED';

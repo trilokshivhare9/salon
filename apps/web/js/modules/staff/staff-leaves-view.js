@@ -9,7 +9,7 @@ import { CalendarView } from '../calendar/calendar-view.js';
 export class StaffLeavesView {
   static render(ctx, staff) {
     const headerHtml = WorkspaceHeader.render({
-      backLabel: `Back to ${staff.name}`,
+      backLabel: 'Back',
       backActionId: 'btn-back-to-profile',
       breadcrumbs: [],
       statusText: '<span class="status-autosave-dot">●</span> Live Calendar',
