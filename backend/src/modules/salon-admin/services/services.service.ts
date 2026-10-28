@@ -1,7 +1,8 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../../database/prisma.service';
 import { CreateServiceDto, UpdateServiceDto } from './dto/create-service.dto';
-import { ServiceStatus, SalonStatus, StylistStatus, AppointmentStatus } from '@prisma/client';
+import { BulkImportItemDto } from './ai-scanner/dto/bulk-import-services.dto';
+import { ServiceStatus, SalonStatus, StylistStatus, AppointmentStatus, ConversationState } from '@prisma/client';
 import { AppointmentsService } from '../appointments/appointments.service';
 
 @Injectable()
@@ -259,6 +260,125 @@ export class ServicesService {
     return service;
   }
 
+  /**
+   * High-performance batched bulk creation of services.
+   * - Pre-fetches active stylists once (1 query)
+   * - Resolves/creates categories in batch with an in-memory map (1-2 queries)
+   * - Performs atomic bulk insert in a single transaction (1 transaction)
+   * - Emits a single consolidated BULK_IMPORT real-time event
+   */
+  async bulkCreateServices(salonId: string, items: BulkImportItemDto[]) {
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      throw new BadRequestException('No services provided for bulk import.');
+    }
+
+    // Step 1: Pre-fetch active salon stylists once
+    const activeStylists = await this.prisma.stylist.findMany({
+      where: { salonId, status: StylistStatus.ACTIVE },
+      select: { id: true },
+    });
+    const stylistIds = activeStylists.map((s) => s.id);
+
+    // Step 2: Deduplicate unique category names and resolve/create in batch
+    const uniqueCategoryNames = Array.from(
+      new Set(
+        items
+          .map((item) => (item.category?.trim() || 'General'))
+          .filter((cat) => cat.length > 0),
+      ),
+    );
+
+    // Fetch existing categories matching any of these names
+    const existingCats = await this.prisma.serviceCategory.findMany({
+      where: {
+        salonId,
+        name: { in: uniqueCategoryNames, mode: 'insensitive' },
+      },
+    });
+
+    const categoryMap = new Map<string, { id: string; name: string }>();
+    for (const cat of existingCats) {
+      categoryMap.set(cat.name.toUpperCase(), { id: cat.id, name: cat.name });
+    }
+
+    // Identify categories that need to be created
+    for (const catName of uniqueCategoryNames) {
+      if (!categoryMap.has(catName.toUpperCase())) {
+        const createdCat = await this.prisma.serviceCategory.create({
+          data: {
+            salonId,
+            name: catName,
+            icon: '✂️',
+            sortOrder: 0,
+          },
+        });
+        categoryMap.set(catName.toUpperCase(), { id: createdCat.id, name: createdCat.name });
+      }
+    }
+
+    // Step 3: Atomic database transaction to insert all services & assignments
+    const importedServices = await this.prisma.$transaction(async (tx) => {
+      const createdList = [];
+
+      for (const item of items) {
+        const catKey = (item.category?.trim() || 'General').toUpperCase();
+        const resolvedCategory = categoryMap.get(catKey);
+
+        const validDuration = Math.max(30, Math.round((item.durationMinutes || 30) / 15) * 15);
+        const validPrice = Math.max(0, item.price || 0);
+
+        const createdService = await tx.service.create({
+          data: {
+            salonId,
+            name: item.name.trim(),
+            description: item.description?.trim(),
+            price: validPrice,
+            durationMinutes: validDuration,
+            category: resolvedCategory ? resolvedCategory.name : 'General',
+            categoryId: resolvedCategory ? resolvedCategory.id : null,
+            targetGender: item.targetGender || 'UNISEX',
+            status: ServiceStatus.ACTIVE,
+          },
+        });
+
+        createdList.push(createdService);
+      }
+
+      // Step 3b: Bulk create stylist assignments in a single query
+      if (stylistIds.length > 0 && createdList.length > 0) {
+        const allAssignments = createdList.flatMap((svc) =>
+          stylistIds.map((stId) => ({
+            salonId,
+            stylistId: stId,
+            serviceId: svc.id,
+          })),
+        );
+
+        await tx.stylistService.createMany({
+          data: allAssignments,
+          skipDuplicates: true,
+        });
+      }
+
+      return createdList;
+    });
+
+    // Step 4: Sync salon active status
+    setImmediate(() => this.syncSalonActiveStatus(salonId));
+
+    // Step 5: Emit a SINGLE consolidated real-time event
+    this.appointmentsService.emitSalonEvent(salonId, 'SERVICE_UPDATED', {
+      action: 'BULK_IMPORT',
+      count: importedServices.length,
+      categoryCount: uniqueCategoryNames.length,
+    });
+
+    return {
+      importedCount: importedServices.length,
+      services: importedServices,
+    };
+  }
+
   async updateService(salonId: string, serviceId: string, dto: UpdateServiceDto) {
     await this.getServiceById(salonId, serviceId);
 
@@ -426,10 +546,19 @@ export class ServicesService {
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
-      // 1. Clear active conversation reference if any
+      // 1. Reset active conversations referencing this deleted service
       await tx.conversation.updateMany({
         where: { salonId, selectedServiceId: serviceId },
-        data: { selectedServiceId: null },
+        data: {
+          state: ConversationState.START,
+          selectedServiceId: null,
+          selectedStaffId: null,
+          selectedDate: null,
+          selectedStartTime: null,
+          selectedCategoryId: null,
+          tempBookingGender: null,
+          pendingAddonServiceId: null,
+        },
       });
 
       // 2. Disassociate cancelled/historical appointment service references (preserving immutable snapshots)

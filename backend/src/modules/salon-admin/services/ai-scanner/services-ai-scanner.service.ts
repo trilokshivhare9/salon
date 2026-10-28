@@ -56,17 +56,17 @@ CRITICAL GROUNDING & ANTI-HALLUCINATION RULES:
 5. PRICES: Extract the exact numeric price printed next to the service (remove currency symbols like ₹, $, Rs, commas). Must be an integer >= 0. If a price is unreadable or not listed, set price to 0. Do NOT guess or invent prices.
 6. DURATION: Duration in minutes. MUST BE A MULTIPLE OF 15 AND AT LEAST 30 (e.g. 30, 45, 60, 75, 90). If duration is printed on the card, use it. If not printed, estimate based on industry standards: quick haircut/beard = 30, facial/manicure = 45, coloring/smoothening = 60 or 90.
 7. TARGET GENDER: Must be strictly one of: "MALE", "FEMALE", "UNISEX", "KIDS". Look for column headers or labels like "Men", "Gents", "Women", "Ladies", "Kids". If not specified or suitable for both, use "UNISEX".
-8. DESCRIPTION: Extract brief 1-sentence description ONLY if explicitly printed beneath the service. If no description is on the card, set to "". Do NOT write or invent your own descriptions.
+8. DESCRIPTION: Provide a crisp, appealing, 1-sentence professional salon description for EVERY service (e.g. for "Women's Haircut": "Professional hair wash, precision haircut, and custom styled blow-dry finish", for "Men's Haircut": "Precision scissors and clipper cut tailored to your style with a clean finish", for "Full Perm": "Chemical curl texturing treatment for long-lasting volume and bounce"). If a description is explicitly printed on the card, use it; if no description is printed on the card, generate an accurate 1-sentence salon service description tailored to the service. EVERY service MUST have a non-empty description.
 
 Return ONLY a valid JSON array of objects adhering to this schema:
 [
   {
-    "name": "Exact Service Name From Card",
-    "category": "Exact Category Header From Card",
+    "name": "Women's Haircut",
+    "category": "HAIR STYLING",
     "price": 300,
     "durationMinutes": 30,
-    "targetGender": "UNISEX",
-    "description": ""
+    "targetGender": "FEMALE",
+    "description": "Professional wash, precision haircut, and custom styled blow-dry finish"
   }
 ]
 `;
@@ -189,14 +189,53 @@ Return ONLY a valid JSON array of objects adhering to this schema:
         let category = (item.category || 'General').toString().trim();
         if (!category) category = 'General';
 
+        let description = item.description ? item.description.toString().trim() : '';
+        if (!description) {
+          description = this.generateSmartDefaultDescription(item.name.trim(), category, gender);
+        }
+
         return {
           name: item.name.trim(),
           category,
           price,
           durationMinutes: duration,
           targetGender: gender as ServiceGender,
-          description: item.description ? item.description.toString().trim() : undefined,
+          description,
         };
       });
+  }
+
+  private generateSmartDefaultDescription(name: string, category: string, gender: string): string {
+    const lowerName = name.toLowerCase();
+    const lowerCat = category.toLowerCase();
+
+    if (lowerName.includes('haircut') || lowerName.includes('cut')) {
+      if (gender === 'FEMALE') return 'Professional wash, custom precision haircut, and styled blow-dry finish.';
+      if (gender === 'MALE') return 'Precision scissors and clipper cut tailored to your style with a clean finish.';
+      if (gender === 'KIDS') return 'Gentle, kid-friendly haircut with quick styling and fun care.';
+      return 'Expert precision haircut with consultation and professional styling finish.';
+    }
+    if (lowerName.includes('shave') || lowerName.includes('beard') || lowerName.includes('trim')) {
+      return 'Hot towel prep, precision beard shaping, and soothing aftershave care.';
+    }
+    if (lowerName.includes('color') || lowerName.includes('highlight') || lowerName.includes('foil')) {
+      return 'Custom professional hair coloring with vibrant gloss and conditioning care.';
+    }
+    if (lowerName.includes('facial') || lowerName.includes('clean') || lowerCat.includes('skin')) {
+      return 'Deep pore cleansing, gentle exfoliation, and rejuvenating hydration facial.';
+    }
+    if (lowerName.includes('straight') || lowerName.includes('perm') || lowerName.includes('relaxer') || lowerName.includes('smoothen')) {
+      return 'Professional texturizing treatment for sleek, smooth, and long-lasting results.';
+    }
+    if (lowerName.includes('spa') || lowerName.includes('massage')) {
+      return 'Relaxing therapeutic treatment designed to rejuvenate and relieve stress.';
+    }
+    if (lowerName.includes('wax') || lowerName.includes('thread')) {
+      return 'Smooth and precise hair removal treatment with soothing skin calm lotion.';
+    }
+    if (lowerName.includes('manicure') || lowerName.includes('pedicure') || lowerName.includes('nail')) {
+      return 'Nail shaping, cuticle care, scrub, massage, and professional polish finish.';
+    }
+    return `Professional ${name} service customized to your preferences with salon-grade care.`;
   }
 }

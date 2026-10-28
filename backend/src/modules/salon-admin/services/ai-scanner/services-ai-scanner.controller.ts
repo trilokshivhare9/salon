@@ -64,34 +64,15 @@ export class ServicesAiScannerController {
       throw new BadRequestException('No services provided for import.');
     }
 
-    this.logger.log(`[Bulk Import] Importing ${dto.services.length} services for salon [${salonId}]...`);
+    this.logger.log(`[Bulk Import] Fast-batch importing ${dto.services.length} services for salon [${salonId}]...`);
 
-    const imported = [];
-    const errors = [];
-
-    for (const item of dto.services) {
-      try {
-        const created = await this.servicesService.createService(salonId, {
-          name: item.name,
-          category: item.category,
-          price: item.price,
-          durationMinutes: item.durationMinutes,
-          targetGender: item.targetGender,
-          description: item.description,
-        });
-        imported.push(created);
-      } catch (err: any) {
-        this.logger.error(`Failed to import service [${item.name}]: ${err.message}`);
-        errors.push({ name: item.name, error: err.message });
-      }
-    }
+    const result = await this.servicesService.bulkCreateServices(salonId, dto.services);
 
     return {
       success: true,
-      importedCount: imported.length,
-      failedCount: errors.length,
-      services: imported,
-      errors: errors.length > 0 ? errors : undefined,
+      importedCount: result.importedCount,
+      failedCount: 0,
+      services: result.services,
     };
   }
 }

@@ -4058,7 +4058,38 @@ a:hover {
 .stylist-card-action {
   display: flex;
   align-items: center;
+  gap: 6px;
   flex-shrink: 0;
+}
+
+.stylist-action-del-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 25px;
+  height: 25px;
+  padding: 0;
+  border-radius: 6px;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.22);
+  color: #f87171;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  outline: none !important;
+  box-shadow: none !important;
+  flex-shrink: 0;
+}
+
+.stylist-action-del-btn:hover {
+  background: rgba(239, 68, 68, 0.22);
+  border-color: rgba(239, 68, 68, 0.55);
+  color: #ffffff;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 10px rgba(239, 68, 68, 0.35);
+}
+
+.stylist-action-del-btn:active {
+  transform: translateY(0);
 }
 
 .stylist-manage-btn {
@@ -4994,20 +5025,86 @@ a:hover {
 
 /* Minimal Top Navigation */
 .services-minimal-nav {
+  position: sticky;
+  top: 0;
+  z-index: 25;
+  background: rgba(11, 15, 25, 0.94);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 2px 8px 2px;
-  gap: 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  margin-bottom: 6px;
+  padding: 8px 6px;
+  gap: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 8px;
+  min-height: 48px;
+  box-sizing: border-box;
+}
+
+.services-minimal-nav .btn-staff-back {
+  max-width: 175px;
+  flex-shrink: 1;
+  min-width: 0;
 }
 
 .services-nav-right {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+}
+
+/* Save Staff Services Button in Minimal Top Nav */
+.btn-save-staff-services {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 12px;
+  height: 30px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #64748b;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: not-allowed;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+.btn-save-staff-services svg {
+  flex-shrink: 0;
+  transition: transform 0.18s ease;
+}
+
+/* Active / Dirty state: clean, high-end emerald CTA without radioactive neon haze */
+.btn-save-staff-services.is-active,
+.btn-save-staff-services:not(:disabled) {
+  opacity: 1;
+  cursor: pointer;
+  background: #10b981;
+  color: #ffffff;
+  border: 1px solid #059669;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.28);
+}
+
+.btn-save-staff-services:not(:disabled):hover {
+  background: #059669;
+  border-color: #047857;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.36);
+  transform: translateY(-1px);
+}
+
+.btn-save-staff-services:not(:disabled):active {
+  transform: translateY(0);
+  box-shadow: 0 1px 4px rgba(16, 185, 129, 0.2);
 }
 
 .services-live-autosave {
@@ -5033,14 +5130,21 @@ a:hover {
 }
 
 .workspace-tally-pill {
-  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  font-size: 0.74rem;
   font-weight: 600;
   color: #c084fc;
   background: rgba(168, 85, 247, 0.12);
   border: 1px solid rgba(168, 85, 247, 0.28);
-  padding: 3px 9px;
+  padding: 0 10px;
   border-radius: 999px;
   white-space: nowrap;
+  flex-shrink: 0;
+  user-select: none;
+  box-sizing: border-box;
 }
 
 .btn-services-toggle-all {
@@ -14162,26 +14266,49 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .btn-staff-back {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  background: none;
-  border: none;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   color: #cbd5e1;
-  font-size: 13px;
+  font-size: 0.78rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s ease;
-  padding: 2px 4px;
-  border-radius: 6px;
+  transition: all 0.16s ease;
+  padding: 5px 12px;
+  height: 30px;
+  border-radius: 999px;
+  white-space: nowrap;
+  user-select: none;
+  box-sizing: border-box;
 }
 
 .btn-staff-back:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.16);
   color: #ffffff;
-  transform: translateX(-2px);
+  transform: translateX(-1px);
 }
 
 .btn-staff-back .back-chevron {
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+  margin-right: 1px;
+  transition: transform 0.16s ease, color 0.16s ease;
+}
+
+.btn-staff-back:hover .back-chevron {
+  transform: translateX(-2px);
+  color: #ffffff;
+}
+
+.btn-staff-back .back-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* iOS-Style Active / Inactive Status Toggle Pill */
@@ -14492,22 +14619,67 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   background: rgba(15, 20, 36, 0.85);
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 10px;
-  padding: 8px 6px 6px 6px;
+  padding: 8px 7px 7px 7px;
   display: flex;
   flex-direction: column;
   gap: 1px;
   min-width: 0;
   text-align: left;
+  cursor: pointer;
+  transition: all 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+  position: relative;
+  outline: none;
+}
+
+.metric-stat-card:hover {
+  background: rgba(24, 32, 56, 0.95);
+  border-color: rgba(255, 255, 255, 0.16);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+}
+
+.metric-stat-card:focus-visible {
+  border-color: rgba(168, 85, 247, 0.6);
+  box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.25);
+}
+
+.metric-stat-card:active {
+  transform: translateY(0);
+  background: rgba(15, 20, 36, 0.98);
 }
 
 .metric-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 4px;
   font-size: 9.5px;
   font-weight: 500;
   color: #94a3b8;
   white-space: nowrap;
+}
+
+.metric-header-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.metric-card-chevron {
+  font-size: 11px;
+  line-height: 1;
+  color: #64748b;
+  opacity: 0.55;
+  transition: all 0.16s ease;
+  margin-left: auto;
+}
+
+.metric-stat-card:hover .metric-card-chevron {
+  color: #cbd5e1;
+  opacity: 1;
+  transform: translateX(1.5px);
 }
 
 .metric-header .dot-cyan {
@@ -15913,20 +16085,19 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 .service-card-item {
-  background: linear-gradient(145deg, rgba(22, 27, 44, 0.85) 0%, rgba(15, 18, 30, 0.9) 100%);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
-  padding: 16px 18px 14px 18px;
+  background: linear-gradient(145deg, #161b2e 0%, #111524 100%);
+  border: 1px solid #202742;
+  border-radius: 12px;
+  padding: 12px 14px 10px 14px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  gap: 10px;
-  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  gap: 6px;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
   position: relative;
   overflow: hidden;
+  box-sizing: border-box;
 }
 
 .service-card-item::before {
@@ -15942,10 +16113,10 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 .service-card-item:hover {
-  background: linear-gradient(145deg, rgba(28, 34, 56, 0.95) 0%, rgba(18, 22, 38, 0.95) 100%);
+  background: linear-gradient(145deg, #1c2238 0%, #141828 100%);
   border-color: rgba(168, 85, 247, 0.45);
   transform: translateY(-2px);
-  box-shadow: 0 12px 30px -6px rgba(0, 0, 0, 0.6), 0 0 20px -3px rgba(168, 85, 247, 0.22);
+  box-shadow: 0 10px 24px -4px rgba(0, 0, 0, 0.5), 0 0 16px -2px rgba(168, 85, 247, 0.2);
 }
 
 .service-card-item:hover::before {
@@ -15957,34 +16128,34 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
 }
 
 .service-card-brand {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
   flex: 1;
 }
 
 .service-card-icon-badge {
-  width: 42px;
-  height: 42px;
-  border-radius: 12px;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
   background: linear-gradient(135deg, rgba(168, 85, 247, 0.22), rgba(99, 102, 241, 0.18));
   border: 1px solid rgba(168, 85, 247, 0.35);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.25rem;
+  font-size: 1.1rem;
   flex-shrink: 0;
   box-shadow: 0 2px 8px rgba(168, 85, 247, 0.18);
   transition: transform 0.2s ease;
 }
 
 .service-card-item:hover .service-card-icon-badge {
-  transform: scale(1.05);
+  transform: scale(1.04);
 }
 
 .service-card-headings {
@@ -15992,35 +16163,36 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .service-card-name {
-  font-size: 0.98rem;
+  font-size: 0.92rem;
   font-weight: 700;
   color: #ffffff;
   letter-spacing: -0.01em;
   margin: 0;
-  line-height: 1.35;
+  line-height: 1.28;
   word-break: break-word;
 }
 
 .service-card-pills-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   flex-wrap: wrap;
+  margin-top: 1px;
 }
 
 .service-card-cat-pill {
   display: inline-flex;
   align-items: center;
-  padding: 2.5px 8px;
-  border-radius: 6px;
+  padding: 2px 7px;
+  border-radius: 5px;
   background: rgba(168, 85, 247, 0.12);
   border: 1px solid rgba(168, 85, 247, 0.3);
   color: #d8b4fe;
-  font-size: 0.69rem;
+  font-size: 0.67rem;
   font-weight: 600;
   line-height: 1.2;
 }
@@ -16029,9 +16201,9 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2.5px 8px;
-  border-radius: 6px;
-  font-size: 0.69rem;
+  padding: 2px 7px;
+  border-radius: 5px;
+  font-size: 0.67rem;
   font-weight: 600;
   line-height: 1.2;
 }
@@ -16064,14 +16236,14 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .service-card-actions {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   flex-shrink: 0;
 }
 
 .service-action-icon-btn {
   width: 28px;
   height: 28px;
-  border-radius: 8px;
+  border-radius: 7px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.09);
   color: #94a3b8;
@@ -16097,17 +16269,76 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   transform: translateY(-1px);
 }
 
-/* Description paragraph */
-.service-card-desc {
-  font-size: 0.77rem;
+/* Full-width Service Description with See More */
+.service-card-desc-wrap {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 1px 0 2px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.service-card-desc-text {
+  font-size: 0.74rem;
   color: #94a3b8;
-  line-height: 1.45;
-  margin: 4px 0 2px 0;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.4;
+  word-break: break-word;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+}
+
+.service-card-desc-text.is-clamped {
+  display: -webkit-box !important;
+  -webkit-line-clamp: 1 !important;
+  -webkit-box-orient: vertical !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  width: 100%;
+  cursor: pointer;
+}
+
+.service-card-desc-text.is-expanded {
+  display: block !important;
+  -webkit-line-clamp: none !important;
+  -webkit-box-orient: unset !important;
+  overflow: visible !important;
+  text-overflow: unset !important;
+  white-space: normal !important;
+  width: 100% !important;
+  max-height: none !important;
+}
+
+.btn-service-desc-more {
+  background: transparent;
+  border: none;
+  padding: 2px 6px 2px 0;
+  margin: 1px 0 0 0;
+  color: #c084fc;
+  font-size: 0.69rem;
+  font-weight: 600;
+  cursor: pointer;
+  line-height: 1.2;
+  transition: color 0.15s ease;
+  user-select: none;
+  outline: none !important;
+  box-shadow: none !important;
+  -webkit-tap-highlight-color: transparent;
+  display: inline-block;
+}
+
+.btn-service-desc-more:hover {
+  color: #e9d5ff;
+  text-decoration: underline;
+}
+
+.btn-service-desc-more:focus,
+.btn-service-desc-more:focus-visible,
+.btn-service-desc-more:active {
+  outline: none !important;
+  box-shadow: none !important;
 }
 
 /* Footer: Duration + Stylists (Left) | Price (Right) */
@@ -16115,16 +16346,16 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding-top: 10px;
-  margin-top: 4px;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  gap: 8px;
+  padding-top: 8px;
+  margin-top: 2px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .service-card-meta-group {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   flex-wrap: wrap;
 }
 
@@ -16132,11 +16363,11 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 3px 9px;
-  border-radius: 7px;
+  padding: 2.5px 8px;
+  border-radius: 6px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  font-size: 0.72rem;
+  font-size: 0.69rem;
   color: #cbd5e1;
   font-weight: 500;
   line-height: 1.2;
@@ -16154,10 +16385,10 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .service-staff-pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 9px;
-  border-radius: 7px;
-  font-size: 0.71rem;
+  gap: 5px;
+  padding: 2.5px 8px;
+  border-radius: 6px;
+  font-size: 0.69rem;
   font-weight: 600;
   line-height: 1.2;
 }
@@ -16189,27 +16420,28 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   background: #64748b;
 }
 
-/* Price Display (Right) */
+/* Price Display (Right in Vibrant Green) */
 .service-card-price-wrap {
   display: flex;
   align-items: baseline;
   flex-shrink: 0;
+  gap: 1px;
 }
 
 .service-card-currency {
-  font-size: 0.85rem;
-  font-weight: 700;
-  color: #c084fc;
-  margin-right: 2px;
+  font-size: 0.88rem;
+  font-weight: 800;
+  color: #00e676;
+  margin-right: 1px;
 }
 
 .service-card-amount {
-  font-size: 1.28rem;
+  font-size: 1.15rem;
   font-weight: 800;
-  color: #ffffff;
-  font-family: var(--font-heading);
-  letter-spacing: -0.02em;
+  color: #00e676;
+  letter-spacing: -0.01em;
   line-height: 1;
+  font-variant-numeric: tabular-nums;
 }
 
 /* =============================================================
@@ -17068,6 +17300,11 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   align-items: center;
   justify-content: center;
   padding: 16px;
+  padding-top: max(16px, env(safe-area-inset-top));
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+  padding-left: max(12px, env(safe-area-inset-left));
+  padding-right: max(12px, env(safe-area-inset-right));
+  box-sizing: border-box;
 }
 
 .ai-review-backdrop {
@@ -17509,13 +17746,15 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   flex-shrink: 0;
   min-height: min-content;
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  gap: 5px;
   padding: 9px 12px;
   background: #161b2e;
   border: 1px solid #202742;
   border-radius: 10px;
   transition: all 0.15s ease;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .ai-service-card:hover {
@@ -17525,6 +17764,13 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
 .ai-service-card.is-unselected {
   opacity: 0.45;
+}
+
+.ai-card-top-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
 }
 
 .ai-card-col-chk {
@@ -17616,6 +17862,70 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .ai-meta-duration .clock-icon {
   font-size: 0.68rem;
   opacity: 0.85;
+}
+
+/* Service Card Description with Full-Width Show More */
+.ai-card-desc-wrap {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 1px;
+  padding-left: 26px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.ai-card-desc-text {
+  font-size: 0.72rem;
+  color: #94a3b8;
+  line-height: 1.4;
+  word-break: break-word;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.ai-card-desc-text.is-clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+}
+
+.ai-card-desc-text.is-expanded {
+  display: block;
+  width: 100%;
+}
+
+.btn-ai-desc-more {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  color: #c084fc;
+  font-size: 0.68rem;
+  font-weight: 600;
+  cursor: pointer;
+  line-height: 1.2;
+  transition: color 0.15s ease;
+  user-select: none;
+  outline: none !important;
+  box-shadow: none !important;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.btn-ai-desc-more:focus,
+.btn-ai-desc-more:focus-visible,
+.btn-ai-desc-more:active {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.btn-ai-desc-more:hover {
+  color: #e9d5ff;
+  text-decoration: underline;
 }
 
 .ai-card-right {
@@ -17752,6 +18062,28 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 .ai-input:focus {
+  border-color: #8b5cf6;
+  background: #0d1424;
+}
+
+.ai-input-desc {
+  width: 100%;
+  background: #090e1a;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: #f1f5f9;
+  font-size: 0.8rem;
+  padding: 6px 10px;
+  outline: none;
+  resize: vertical;
+  min-height: 52px;
+  font-family: inherit;
+  box-sizing: border-box;
+  line-height: 1.4;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.ai-input-desc:focus {
   border-color: #8b5cf6;
   background: #0d1424;
 }
@@ -18056,12 +18388,15 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
 @media (max-width: 640px) {
   .ai-review-modal-overlay {
-    padding: 4px;
+    padding: 6px;
+    padding-top: max(14px, env(safe-area-inset-top, 44px));
+    padding-bottom: max(10px, env(safe-area-inset-bottom, 20px));
+    box-sizing: border-box;
   }
 
   .ai-review-container {
-    max-height: 98vh;
-    height: 98vh;
+    max-height: calc(100vh - max(28px, env(safe-area-inset-top, 44px)) - max(16px, env(safe-area-inset-bottom, 20px)));
+    height: 100%;
     border-radius: 14px;
   }
 
@@ -18092,7 +18427,11 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
   .ai-service-card {
     padding: 8px 10px;
-    gap: 8px;
+    gap: 4px;
+  }
+
+  .ai-card-desc-wrap {
+    padding-left: 24px;
   }
 
   .ai-card-service-name {
@@ -18313,4 +18652,16 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   background: rgba(244, 63, 94, 0.12);
   border: 1px solid rgba(244, 63, 94, 0.3);
   color: #fb7185;
+}
+
+/* Top Toast Animation */
+@keyframes topToastEnter {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -24px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
 }

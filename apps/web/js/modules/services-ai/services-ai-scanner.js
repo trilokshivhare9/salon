@@ -149,6 +149,7 @@ export class ServicesAiScannerModal {
         price: Math.max(0, parseInt(item.price, 10) || 0),
         durationMinutes: Math.max(30, Math.round((parseInt(item.durationMinutes, 10) || 30) / 15) * 15),
         targetGender: item.targetGender || 'UNISEX',
+        description: (item.description || '').trim() || this.generateDefaultDescription(item.name, item.category, item.targetGender),
         tempId: `item_${Date.now()}_${idx}`,
         selected: true,
         isEditing: false,
@@ -314,9 +315,53 @@ export class ServicesAiScannerModal {
   }
 
   /**
+   * Generates a smart, appealing 1-sentence salon service description if not detected.
+   */
+  generateDefaultDescription(name, category, gender) {
+    const lowerName = (name || '').toLowerCase();
+    const lowerCat = (category || '').toLowerCase();
+
+    if (lowerName.includes('haircut') || lowerName.includes('cut')) {
+      if (gender === 'FEMALE') return 'Professional wash, precision haircut, and custom styled blow-dry finish.';
+      if (gender === 'MALE') return 'Precision scissors and clipper cut tailored to your style with a clean finish.';
+      if (gender === 'KIDS') return 'Gentle, kid-friendly haircut with quick styling and fun care.';
+      return 'Expert precision haircut with consultation and professional styling finish.';
+    }
+    if (lowerName.includes('shave') || lowerName.includes('beard') || lowerName.includes('trim')) {
+      return 'Hot towel prep, precision beard shaping, and soothing aftershave care.';
+    }
+    if (lowerName.includes('color') || lowerName.includes('highlight') || lowerName.includes('foil')) {
+      return 'Custom professional hair coloring with vibrant gloss and conditioning care.';
+    }
+    if (lowerName.includes('facial') || lowerName.includes('clean') || lowerCat.includes('skin')) {
+      return 'Deep pore cleansing, gentle exfoliation, and rejuvenating hydration facial.';
+    }
+    if (lowerName.includes('straight') || lowerName.includes('perm') || lowerName.includes('relaxer') || lowerName.includes('smoothen')) {
+      return 'Professional texturizing treatment for sleek, smooth, and long-lasting results.';
+    }
+    if (lowerName.includes('spa') || lowerName.includes('massage')) {
+      return 'Relaxing therapeutic treatment designed to rejuvenate and relieve stress.';
+    }
+    if (lowerName.includes('wax') || lowerName.includes('thread')) {
+      return 'Smooth and precise hair removal treatment with soothing skin calm lotion.';
+    }
+    if (lowerName.includes('manicure') || lowerName.includes('pedicure') || lowerName.includes('nail')) {
+      return 'Nail shaping, cuticle care, scrub, massage, and professional polish finish.';
+    }
+    return `Professional ${name || 'salon'} service customized to your preferences with salon-grade care.`;
+  }
+
+  /**
    * Renders the interactive Review & Edit modal
    */
   showReviewDialog() {
+    // Ensure every single service has a non-empty, professional description
+    this.extractedServices.forEach((s) => {
+      if (!s.description || !s.description.trim()) {
+        s.description = this.generateDefaultDescription(s.name, s.category, s.targetGender);
+      }
+    });
+
     const existing = document.getElementById('ai-scan-review-modal');
     if (existing) existing.remove();
 
@@ -596,6 +641,12 @@ export class ServicesAiScannerModal {
                   <input type="number" class="ai-input ai-input-price" data-temp-id="${item.tempId}" value="${item.price || 0}" min="0" step="10">
                 </div>
               </div>
+
+              <!-- 6. Service Description -->
+              <div class="ai-field-group field-full">
+                <label>Description (Optional)</label>
+                <textarea class="ai-input ai-input-desc" data-temp-id="${item.tempId}" rows="2" placeholder="Add service description, benefits, or details...">${this.escapeHtml(item.description || '')}</textarea>
+              </div>
             </div>
 
             <div class="ai-edit-actions-row">
@@ -607,29 +658,45 @@ export class ServicesAiScannerModal {
       `;
     }
 
-    // PIXEL-PERFECT SERVICE CARD (Matching the image)
+    // PIXEL-PERFECT SERVICE CARD (Full available width of card with expandable description)
+    const hasDesc = Boolean(item.description && item.description.trim().length > 0);
+    const isLongDesc = hasDesc && item.description.trim().length > 30;
+
     return `
       <div class="ai-service-card ${item.selected ? 'is-selected' : 'is-unselected'}" data-temp-id="${item.tempId}">
-        <div class="ai-card-col-chk">
-          <input type="checkbox" class="ai-item-chk" data-temp-id="${item.tempId}" ${item.selected ? 'checked' : ''} aria-label="Select ${this.escapeHtml(item.name)}">
-        </div>
+        <div class="ai-card-top-row">
+          <div class="ai-card-col-chk">
+            <input type="checkbox" class="ai-item-chk" data-temp-id="${item.tempId}" ${item.selected ? 'checked' : ''} aria-label="Select ${this.escapeHtml(item.name)}">
+          </div>
 
-        <div class="ai-card-main-content">
-          <div class="ai-card-service-name">${this.escapeHtml(item.name || 'Untitled Service')}</div>
-          <div class="ai-card-meta-row">
-            <span class="ai-meta-chip">
-              ${this.getGenderChipHtml(item.targetGender)}
-            </span>
-            <span class="meta-dot">·</span>
-            <span class="ai-meta-duration"><span class="clock-icon">🕒</span> ${item.durationMinutes || 30}m</span>
+          <div class="ai-card-main-content">
+            <div class="ai-card-service-name">${this.escapeHtml(item.name || 'Untitled Service')}</div>
+            <div class="ai-card-meta-row">
+              <span class="ai-meta-chip">
+                ${this.getGenderChipHtml(item.targetGender)}
+              </span>
+              <span class="meta-dot">·</span>
+              <span class="ai-meta-duration"><span class="clock-icon">🕒</span> ${item.durationMinutes || 30}m</span>
+            </div>
+          </div>
+
+          <div class="ai-card-right">
+            <span class="ai-card-price">₹${item.price || 0}</span>
+            <button type="button" class="btn-ai-service-edit" data-temp-id="${item.tempId}" title="Edit service">Edit</button>
+            <button type="button" class="btn-ai-service-delete" data-temp-id="${item.tempId}" title="Remove service">✕</button>
           </div>
         </div>
 
-        <div class="ai-card-right">
-          <span class="ai-card-price">₹${item.price || 0}</span>
-          <button type="button" class="btn-ai-service-edit" data-temp-id="${item.tempId}" title="Edit service">Edit</button>
-          <button type="button" class="btn-ai-service-delete" data-temp-id="${item.tempId}" title="Remove service">✕</button>
-        </div>
+        ${hasDesc ? `
+          <div class="ai-card-desc-wrap" data-temp-id="${item.tempId}">
+            <div class="ai-card-desc-text ${item._expandedDesc ? 'is-expanded' : 'is-clamped'}">${this.escapeHtml(item.description.trim())}</div>
+            ${isLongDesc ? `
+              <button type="button" class="btn-ai-desc-more" data-temp-id="${item.tempId}">
+                ${item._expandedDesc ? 'Show less' : 'Show more'}
+              </button>
+            ` : ''}
+          </div>
+        ` : ''}
       </div>
     `;
   }
@@ -954,8 +1021,8 @@ export class ServicesAiScannerModal {
       const editTrigger = e.target.closest('.btn-ai-service-edit, .ai-price-clickable, .ai-row-main');
       if (!editTrigger) return;
 
-      // Do not trigger edit if user clicked a checkbox, delete button, or if already editing
-      if (e.target.closest('.ai-item-chk, .btn-ai-service-delete')) return;
+      // Do not trigger edit if user clicked a checkbox, delete button, description toggle, or if already editing
+      if (e.target.closest('.ai-item-chk, .btn-ai-service-delete, .btn-ai-desc-more')) return;
       const row = editTrigger.closest('.ai-service-row, .ai-service-card');
       if (!row || row.classList.contains('is-editing')) return;
 
@@ -970,6 +1037,7 @@ export class ServicesAiScannerModal {
         targetGender: item.targetGender,
         durationMinutes: item.durationMinutes,
         price: item.price,
+        description: item.description,
       };
       item.isEditing = true;
 
@@ -993,6 +1061,7 @@ export class ServicesAiScannerModal {
         item.targetGender = item._draft.targetGender;
         item.durationMinutes = item._draft.durationMinutes;
         item.price = item._draft.price;
+        item.description = item._draft.description;
         delete item._draft;
       }
       item.isEditing = false;
@@ -1002,6 +1071,26 @@ export class ServicesAiScannerModal {
       if (card) {
         card.outerHTML = this.renderServiceCardHtml(item);
         this.updateTally();
+      }
+    });
+
+    // 7b. Description Show More / Show Less Toggle
+    modal.addEventListener('click', (e) => {
+      const descBtn = e.target.closest('.btn-ai-desc-more');
+      if (!descBtn) return;
+      e.stopPropagation();
+
+      const tempId = descBtn.getAttribute('data-temp-id');
+      const item = this.extractedServices.find((s) => s.tempId === tempId);
+      if (!item) return;
+
+      item._expandedDesc = !item._expandedDesc;
+      const wrap = descBtn.closest('.ai-card-desc-wrap');
+      const textEl = wrap?.querySelector('.ai-card-desc-text');
+      if (textEl) {
+        textEl.classList.toggle('is-expanded', item._expandedDesc);
+        textEl.classList.toggle('is-clamped', !item._expandedDesc);
+        descBtn.textContent = item._expandedDesc ? 'Show less' : 'Show more';
       }
     });
 
@@ -1023,6 +1112,7 @@ export class ServicesAiScannerModal {
       const genderInput = card.querySelector('.ai-select-gender');
       const durationInput = card.querySelector('.ai-select-duration');
       const priceInput = card.querySelector('.ai-input-price');
+      const descInput = card.querySelector('.ai-input-desc');
 
       const name = (nameInput?.value || '').trim();
       if (!name) {
@@ -1056,6 +1146,7 @@ export class ServicesAiScannerModal {
       item.targetGender = genderInput?.value || 'UNISEX';
       item.durationMinutes = parseInt(durationInput?.value, 10) || 30;
       item.price = Math.max(0, parseInt(priceInput?.value, 10) || 0);
+      item.description = (descInput?.value || '').trim();
       item.isEditing = false;
       delete item._draft;
 
@@ -1219,6 +1310,7 @@ export class ServicesAiScannerModal {
           const genderInput = card.querySelector('.ai-select-gender');
           const durationInput = card.querySelector('.ai-select-duration');
           const priceInput = card.querySelector('.ai-input-price');
+          const descInput = card.querySelector('.ai-input-desc');
 
           if (nameInput && nameInput.value.trim()) item.name = nameInput.value.trim();
           let catVal = catValInput?.value;
@@ -1229,6 +1321,7 @@ export class ServicesAiScannerModal {
           if (genderInput) item.targetGender = genderInput.value;
           if (durationInput) item.durationMinutes = parseInt(durationInput.value, 10) || 30;
           if (priceInput) item.price = Math.max(0, parseInt(priceInput.value, 10) || 0);
+          if (descInput) item.description = descInput.value.trim();
           item.isEditing = false;
         }
       });

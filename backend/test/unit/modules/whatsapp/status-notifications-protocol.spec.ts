@@ -2,11 +2,21 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { WhatsAppSenderService, WhatsAppButtonId } from '../../../../src/modules/channels/whatsapp/services/whatsapp-sender.service';
 import { WhatsAppTemplateService } from '../../../../src/modules/channels/whatsapp/services/whatsapp-template.service';
 import { AppointmentStatusService } from '../../../../src/modules/salon-admin/appointments/status/appointment-status.service';
+import { AppointmentModifierService } from '../../../../src/modules/salon-admin/appointments/modifier/appointment-modifier.service';
 import { PrismaService } from '../../../../src/database/prisma.service';
 import { WhatsAppService } from '../../../../src/modules/channels/whatsapp/whatsapp.service';
 import { AppointmentStatus } from '@prisma/client';
 
 import { ConfigService } from '@nestjs/config';
+
+/**
+ * CONTRACT: AppointmentStatusService dispatches customer notifications in the background
+ * (setImmediate) so status updates are never blocked by Meta API latency.
+ * Flush a few macrotask turns so the async callback's awaits complete before asserting.
+ */
+const flushBackground = async (turns = 5) => {
+  for (let i = 0; i < turns; i++) await new Promise((resolve) => setImmediate(resolve));
+};
 
 describe('WhatsApp Lifecycle Notifications Protocol Defense (SEATED_IN_CHAIR & COMPLETED)', () => {
   let senderService: WhatsAppSenderService;
@@ -60,6 +70,8 @@ describe('WhatsApp Lifecycle Notifications Protocol Defense (SEATED_IN_CHAIR & C
         WhatsAppSenderService,
         WhatsAppTemplateService,
         AppointmentStatusService,
+        // Sole Appointment-table writer used by AppointmentStatusService (real class; only needs Prisma).
+        AppointmentModifierService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: WhatsAppService, useValue: mockWhatsAppService },
         {
@@ -268,6 +280,7 @@ describe('WhatsApp Lifecycle Notifications Protocol Defense (SEATED_IN_CHAIR & C
         'appt-123',
         { status: AppointmentStatus.SEATED_IN_CHAIR },
       );
+      await flushBackground();
 
       expect(whatsAppService.sendMetaMessage).toHaveBeenCalledWith(
         '919876543210',
@@ -296,6 +309,7 @@ describe('WhatsApp Lifecycle Notifications Protocol Defense (SEATED_IN_CHAIR & C
         'appt-123',
         { status: AppointmentStatus.COMPLETED },
       );
+      await flushBackground();
 
       expect(whatsAppService.sendMetaMessage).toHaveBeenCalledWith(
         '919876543210',

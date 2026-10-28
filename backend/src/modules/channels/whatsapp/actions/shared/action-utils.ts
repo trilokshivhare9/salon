@@ -12,7 +12,11 @@ export class ActionUtils {
       selectedStaffId: null,
       selectedDate: null,
       selectedStartTime: null,
+      tempBookingGender: null,
+      pendingAddonServiceId: null,
       quickCodeVerifiedAt: null,
+      quickCodeAttempts: 0,
+      quickCodeLockedUntil: null,
     };
   }
 

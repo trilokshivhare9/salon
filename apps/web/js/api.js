@@ -748,18 +748,6 @@ export class ApiClient {
     return res;
   }
 
-  static async updateServiceCategory(id, payload) {
-    this.invalidateCache('/services/categories');
-    this.invalidateCache('/services');
-    const res = await this.request(ENDPOINTS.SERVICES.CATEGORY_UPDATE(id), {
-      method: 'PATCH',
-      body: JSON.stringify(payload),
-    });
-    SalonRepository.invalidate('categories');
-    SalonRepository.invalidate('services');
-    return res;
-  }
-
   static async deleteServiceCategory(id) {
     this.invalidateCache('/services/categories');
     this.invalidateCache('/services');

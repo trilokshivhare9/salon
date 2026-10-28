@@ -1,8 +1,19 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { AsyncLocalStorage } from 'async_hooks';
 import { PrismaService } from '../../../../database/prisma.service';
 import { ConversationState } from '@prisma/client';
 import { WhatsAppSenderService, WhatsAppButtonId } from './whatsapp-sender.service';
 import { WhatsAppTemplateService } from './whatsapp-template.service';
+
+/**
+ * Per-inbound-message scope. Records which conversations a handler saved during
+ * this message, so the gateway can persist the returned state for handlers that
+ * sent a reply but never saved (root cause R1). Isolated per async call chain, so
+ * concurrent customers never see each other's scope.
+ */
+export interface ConversationWriteScope {
+  writtenConversationIds: Set<string>;
+}
 
 export enum BookingLifecycleStage {
   PRE_BOOKING = 'PRE_BOOKING',
@@ -14,6 +25,12 @@ export enum BookingLifecycleStage {
 @Injectable()
 export class WhatsAppSessionService {
   private readonly logger = new Logger(WhatsAppSessionService.name);
+  private readonly writeScope = new AsyncLocalStorage<ConversationWriteScope>();
+
+  /** Runs one inbound message inside a fresh write-tracking scope. */
+  runWithWriteTracking<T>(scope: ConversationWriteScope, fn: () => Promise<T>): Promise<T> {
+    return this.writeScope.run(scope, fn);
+  }
 
   constructor(
     private prisma: PrismaService,
@@ -34,12 +51,6 @@ export class WhatsAppSessionService {
     activeAppointment: any,
     pendingAppointment?: any,
   ): BookingLifecycleStage {
-    if (pendingAppointment) {
-      return BookingLifecycleStage.PENDING_REQUEST;
-    }
-    if (activeAppointment) {
-      return BookingLifecycleStage.POST_BOOKING;
-    }
     const preBookingStates: ConversationState[] = [
       ConversationState.SELECT_CATEGORY,
       ConversationState.SELECT_SERVICE,
@@ -52,8 +63,14 @@ export class WhatsAppSessionService {
       ConversationState.QUICK_BOOK_CODE,
       ConversationState.QUICK_BOOK_CONFIRM,
     ];
-    if (preBookingStates.includes(conversation.state as ConversationState)) {
+    if (preBookingStates.includes(conversation?.state as ConversationState)) {
       return BookingLifecycleStage.PRE_BOOKING;
+    }
+    if (pendingAppointment) {
+      return BookingLifecycleStage.PENDING_REQUEST;
+    }
+    if (activeAppointment) {
+      return BookingLifecycleStage.POST_BOOKING;
     }
     return BookingLifecycleStage.IDLE;
   }
@@ -97,19 +114,58 @@ export class WhatsAppSessionService {
         case ConversationState.SELECT_CATEGORY:
           return input.startsWith('cat_') || input.startsWith('gender_select_') || input === 'btn_switch_gender';
         case ConversationState.SELECT_SERVICE:
-          return input.startsWith('svc_') || input === 'cat_back' || input.startsWith('gender_select_') || input === 'btn_switch_gender';
+          return (
+            input.startsWith('svc_') ||
+            input.startsWith('cat_') ||
+            input.startsWith('gender_select_') ||
+            input === 'btn_switch_gender' ||
+            input === 'cat_back'
+          );
         case ConversationState.SELECT_STAFF:
-          return input.startsWith('staff_');
+          return (
+            input.startsWith('staff_') ||
+            input.startsWith('svc_') ||
+            input.startsWith('cat_') ||
+            input.startsWith('gender_select_') ||
+            input === 'btn_switch_gender' ||
+            input === 'cat_back'
+          );
         case ConversationState.SELECT_DATE:
-          return input.startsWith('date_');
+          return (
+            input.startsWith('date_') ||
+            input === 'btn_change_date' ||
+            input.startsWith('staff_') ||
+            input.startsWith('svc_') ||
+            input.startsWith('cat_') ||
+            input.startsWith('gender_select_') ||
+            input === 'btn_switch_gender' ||
+            input === 'cat_back'
+          );
         case ConversationState.SELECT_TIME:
-          return input.startsWith('slot_') || input.startsWith('window_') || input === 'btn_change_time' || input === 'btn_change_date' || input === 'cat_back';
+          return (
+            input.startsWith('slot_') ||
+            input.startsWith('window_') ||
+            input === 'btn_change_time' ||
+            input === 'btn_change_date' ||
+            input.startsWith('date_') ||
+            input.startsWith('staff_') ||
+            input.startsWith('svc_') ||
+            input.startsWith('cat_') ||
+            input.startsWith('gender_select_') ||
+            input === 'btn_switch_gender' ||
+            input === 'cat_back'
+          );
         case ConversationState.SELECT_ADDON:
-          return input.startsWith('addon_');
+          return input.startsWith('addon_') || input.startsWith('svc_') || input.startsWith('cat_');
         case ConversationState.CONFIRMATION:
           return (
             ['btn_confirm_yes', 'btn_confirm_no', 'btn_confirm', 'btn_confirm_quick', 'quick_book_confirm', 'btn_change_time', 'btn_change_date'].includes(input) ||
-            input.startsWith('slot_')
+            input.startsWith('slot_') ||
+            input.startsWith('window_') ||
+            input.startsWith('date_') ||
+            input.startsWith('staff_') ||
+            input.startsWith('svc_') ||
+            input.startsWith('cat_')
           );
         case ConversationState.QUICK_BOOK_CONFIRM:
           return ['btn_confirm_quick', 'quick_book_confirm', 'confirm'].includes(input) || input === 'btn_services' || input === 'btn_start';
@@ -120,7 +176,20 @@ export class WhatsAppSessionService {
       if (['btn_add_service', 'btn_add_addon', 'btn_reschedule', 'btn_cancel_appt', 'btn_running_late', 'btn_eta_late_15', 'btn_eta_arrived', 'btn_eta_on_the_way', 'btn_eta_cancel', 'remind_confirm', 'remind_reschedule', 'remind_cancel', 'btn_book', 'btn_cancel_no', 'btn_cancel_yes', 'btn_last_booking', 'btn_resume_booking', 'btn_new_booking'].includes(input)) {
         return true;
       }
-      if (input.startsWith('svc_') || input.startsWith('remind_') || input.startsWith('appt_') || input.startsWith('propose_') || input.startsWith('late_') || input.startsWith('move_up_')) {
+      if (
+        input.startsWith('svc_') ||
+        input.startsWith('cat_') ||
+        input.startsWith('staff_') ||
+        input.startsWith('date_') ||
+        input.startsWith('slot_') ||
+        input.startsWith('window_') ||
+        input.startsWith('gender_select_') ||
+        input.startsWith('remind_') ||
+        input.startsWith('appt_') ||
+        input.startsWith('propose_') ||
+        input.startsWith('late_') ||
+        input.startsWith('move_up_')
+      ) {
         return true;
       }
 
@@ -274,6 +343,7 @@ export class WhatsAppSessionService {
     activeAppointmentId?: string | null,
     extraData?: any,
   ) {
+    this.writeScope.getStore()?.writtenConversationIds.add(conversationId);
     return this.prisma.conversation.update({
       where: { id: conversationId },
       data: {
@@ -281,6 +351,17 @@ export class WhatsAppSessionService {
         ...(activeAppointmentId !== undefined ? { activeAppointmentId } : {}),
         ...(extraData || {}),
       },
+    });
+  }
+
+  /**
+   * Links the customer's active appointment WITHOUT touching the step (state) or draft.
+   * Replaces the old background write that re-saved a stale state snapshot (root cause R5).
+   */
+  async linkActiveAppointment(conversationId: string, appointmentId: string) {
+    return this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: { activeAppointmentId: appointmentId },
     });
   }
 }
