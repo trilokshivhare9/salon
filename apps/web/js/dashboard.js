@@ -9183,7 +9183,6 @@ export class SalonDashboard {
     if (this.activeTab === 'services') {
       this.attachServicesTabListeners(tabContent);
     }
-    document.getElementById('btn-manage-categories')?.addEventListener('click', () => this.showManageCategoriesModal());
     tabContent.querySelectorAll('.btn-edit-service').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         const id = e.currentTarget.getAttribute('data-id');

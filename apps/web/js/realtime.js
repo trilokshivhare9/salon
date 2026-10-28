@@ -506,16 +506,27 @@ export class RealtimeNotifier {
 
             let msg = 'Service catalogue updated';
             let icon = '✂️';
-            if (action === 'CREATE') { msg = 'New service added to menu'; icon = '✨'; }
-            else if (action === 'DELETE') { msg = 'Service removed from menu'; icon = '🗑️'; }
-            else if (action === 'UPDATE') { msg = 'Service pricing or details updated'; icon = '✏️'; }
+            if (action === 'BULK_IMPORT') {
+              const count = payload.data?.count || 'Multiple';
+              msg = `🎉 ${count} services imported into menu`;
+              icon = '✨';
+            } else if (action === 'CREATE') {
+              msg = 'New service added to menu';
+              icon = '✨';
+            } else if (action === 'DELETE') {
+              msg = 'Service removed from menu';
+              icon = '🗑️';
+            } else if (action === 'UPDATE') {
+              msg = 'Service pricing or details updated';
+              icon = '✏️';
+            }
 
             SoundManager.playCheckinChime();
             this.dispatchNotification({
-              badgeText: 'Menu Update',
-              title: '✂️ Service Menu Synced',
+              badgeText: action === 'BULK_IMPORT' ? 'Bulk Import' : 'Menu Update',
+              title: action === 'BULK_IMPORT' ? '✨ Services Imported' : '✂️ Service Menu Synced',
               clientName: msg,
-              details: 'Real-time catalogue live',
+              details: action === 'BULK_IMPORT' ? `${payload.data?.count || ''} services catalogued` : 'Real-time catalogue live',
               icon,
               variant: 'info',
               eventKey,
