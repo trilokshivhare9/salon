@@ -1320,7 +1320,7 @@ export class ServicesAiScannerModal {
           if (catVal) item.category = catVal;
           if (genderInput) item.targetGender = genderInput.value;
           if (durationInput) item.durationMinutes = parseInt(durationInput.value, 10) || 30;
-          if (priceInput) item.price = Math.max(0, parseInt(priceInput.value, 10) || 0);
+          if (priceInput) item.price = Math.max(1, Math.min(500000, parseInt(priceInput.value, 10) || 1));
           if (descInput) item.description = descInput.value.trim();
           item.isEditing = false;
         }
@@ -1347,7 +1347,7 @@ export class ServicesAiScannerModal {
         services: selected.map((s) => ({
           name: s.name.trim(),
           category: s.category.trim() || 'General',
-          price: Math.max(0, s.price || 0),
+          price: Math.max(1, Math.min(500000, s.price || 1)),
           durationMinutes: Math.max(30, Math.round((s.durationMinutes || 30) / 15) * 15),
           targetGender: s.targetGender || 'UNISEX',
           description: s.description || undefined,

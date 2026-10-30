@@ -7,6 +7,7 @@ import {
   IsOptional,
   IsString,
   Min,
+  Max,
   ValidateNested,
 } from 'class-validator';
 import { ServiceGender } from '@prisma/client';
@@ -22,7 +23,8 @@ export class BulkImportItemDto {
   category: string;
 
   @IsNumber()
-  @Min(0)
+  @Min(1, { message: 'Service price must be at least ₹1' })
+  @Max(500000, { message: 'Service price cannot exceed ₹5,00,000' })
   price: number;
 
   @IsNumber()

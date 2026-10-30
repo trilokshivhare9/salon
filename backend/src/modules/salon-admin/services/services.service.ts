@@ -148,8 +148,11 @@ export class ServicesService {
     if (!dto.name || dto.name.trim().length === 0) {
       throw new BadRequestException('Service name cannot be empty or blank.');
     }
-    if (dto.price !== undefined && dto.price < 0) {
-      throw new BadRequestException('Service price cannot be negative.');
+    if (dto.price !== undefined && (dto.price < 1 || !Number.isFinite(dto.price))) {
+      throw new BadRequestException('Service price must be at least ₹1. Free or ₹0 services are not allowed.');
+    }
+    if (dto.price !== undefined && dto.price > 500000) {
+      throw new BadRequestException('Service price cannot exceed ₹5,00,000.');
     }
     if (dto.durationMinutes !== undefined && (dto.durationMinutes < 30 || dto.durationMinutes % 15 !== 0)) {
       throw new BadRequestException('Service duration must be at least 30 minutes and a multiple of 15.');
@@ -325,7 +328,7 @@ export class ServicesService {
         const resolvedCategory = categoryMap.get(catKey);
 
         const validDuration = Math.max(30, Math.round((item.durationMinutes || 30) / 15) * 15);
-        const validPrice = Math.max(0, item.price || 0);
+        const validPrice = Math.max(1, Math.min(500000, Number(item.price) || 1));
 
         const createdService = await tx.service.create({
           data: {
@@ -395,8 +398,11 @@ export class ServicesService {
     if (dto.category !== undefined) {
       dto.category = dto.category?.trim();
     }
-    if (dto.price !== undefined && dto.price < 0) {
-      throw new BadRequestException('Service price cannot be negative.');
+    if (dto.price !== undefined && (dto.price < 1 || !Number.isFinite(dto.price))) {
+      throw new BadRequestException('Service price must be at least ₹1. Free or ₹0 services are not allowed.');
+    }
+    if (dto.price !== undefined && dto.price > 500000) {
+      throw new BadRequestException('Service price cannot exceed ₹5,00,000.');
     }
     if (dto.durationMinutes !== undefined && (dto.durationMinutes < 30 || dto.durationMinutes % 15 !== 0)) {
       throw new BadRequestException('Service duration must be at least 30 minutes and a multiple of 15.');

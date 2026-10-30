@@ -762,6 +762,19 @@ a:hover {
   display: none;
 }
 
+@media (min-width: 901px) {
+  .settings-mobile-header.has-action {
+    display: flex !important;
+    align-items: center;
+    justify-content: flex-end;
+    margin-bottom: 8px;
+    width: 100%;
+  }
+  .settings-mobile-header.has-action .settings-mobile-back-btn {
+    display: none !important;
+  }
+}
+
 .settings-mobile-back-btn {
   display: inline-flex;
   align-items: center;
@@ -1600,11 +1613,13 @@ a:hover {
   .settings-layout.settings-drilled .settings-mobile-header {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     position: static;
     padding: 2px 0 8px 0;
     margin-bottom: 4px;
     border-bottom: none;
     background: transparent;
+    width: 100%;
   }
 
   .settings-panel-card {
@@ -1756,6 +1771,33 @@ a:hover {
   border-color: var(--border-focus);
   box-shadow: 0 0 0 3px var(--primary-subtle), inset 0 1px 2px rgba(0, 0, 0, 0.4);
   background: var(--bg-input-hover);
+}
+
+/* Currency Prefix Input Controls */
+.price-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.price-currency-symbol {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-weight: 700;
+  color: #fbbf24;
+  font-size: 0.95rem;
+  pointer-events: none;
+  user-select: none;
+  z-index: 2;
+  line-height: 1;
+}
+
+.price-input-control,
+.form-control.price-input-control {
+  padding-left: 36px !important;
 }
 
 /* -------------------------------------------------------------
@@ -5055,16 +5097,17 @@ a:hover {
   flex-wrap: nowrap;
 }
 
-/* Save Staff Services Button in Minimal Top Nav */
-.btn-save-staff-services {
+/* Save Staff Services & Schedule Buttons */
+.btn-save-staff-services,
+.btn-save-schedule {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 5px;
-  padding: 0 12px;
-  height: 30px;
-  font-size: 0.76rem;
-  font-weight: 600;
+  padding: 0 14px;
+  height: 32px;
+  font-size: 0.78rem;
+  font-weight: 700;
   letter-spacing: 0.01em;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.04);
@@ -5078,30 +5121,46 @@ a:hover {
   box-sizing: border-box;
 }
 
-.btn-save-staff-services svg {
+.btn-save-staff-services svg,
+.btn-save-schedule svg,
+.btn-save-staff-services span,
+.btn-save-schedule span {
   flex-shrink: 0;
+  pointer-events: none;
   transition: transform 0.18s ease;
+}
+
+#settings-header-action-container {
+  display: flex;
+  align-items: center;
+  position: relative;
+  z-index: 10;
 }
 
 /* Active / Dirty state: clean, high-end emerald CTA without radioactive neon haze */
 .btn-save-staff-services.is-active,
-.btn-save-staff-services:not(:disabled) {
+.btn-save-staff-services:not(:disabled),
+.btn-save-schedule.is-active,
+.btn-save-schedule:not(:disabled) {
   opacity: 1;
-  cursor: pointer;
+  cursor: pointer !important;
+  pointer-events: auto !important;
   background: #10b981;
   color: #ffffff;
   border: 1px solid #059669;
   box-shadow: 0 2px 8px rgba(16, 185, 129, 0.28);
 }
 
-.btn-save-staff-services:not(:disabled):hover {
+.btn-save-staff-services:not(:disabled):hover,
+.btn-save-schedule:not(:disabled):hover {
   background: #059669;
   border-color: #047857;
   box-shadow: 0 4px 12px rgba(16, 185, 129, 0.36);
   transform: translateY(-1px);
 }
 
-.btn-save-staff-services:not(:disabled):active {
+.btn-save-staff-services:not(:disabled):active,
+.btn-save-schedule:not(:disabled):active {
   transform: translateY(0);
   box-shadow: 0 1px 4px rgba(16, 185, 129, 0.2);
 }
@@ -6458,6 +6517,8 @@ a:hover {
 .bulk-time-inp-wrap {
   display: flex;
   flex-direction: column;
+  cursor: pointer !important;
+  user-select: none;
 }
 
 /* Universal Dark Mode Time Input Styling (Guarantees No White Box Across Mobile/Desktop) */
@@ -6480,6 +6541,7 @@ input[type="time"].form-control {
   box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5) !important;
   -webkit-appearance: none !important;
   appearance: none !important;
+  cursor: pointer !important;
 }
 
 input[type="time"]:focus,
@@ -6499,11 +6561,12 @@ input[type="time"]::-webkit-datetime-edit-ampm-field {
   color: #ffffff !important;
   -webkit-text-fill-color: #ffffff !important;
   background: transparent !important;
+  cursor: pointer !important;
 }
 
 input[type="time"]::-webkit-calendar-picker-indicator {
   filter: invert(0.8) sepia(1) hue-rotate(220deg) brightness(1.2);
-  cursor: pointer;
+  cursor: pointer !important;
   opacity: 0.9;
   padding: 2px;
 }
@@ -6514,6 +6577,8 @@ input[type="time"]::-webkit-calendar-picker-indicator {
   font-weight: 600;
   text-align: center;
   margin-top: 2px;
+  cursor: pointer !important;
+  user-select: none;
 }
 
 .bulk-time-sep {
@@ -6672,6 +6737,28 @@ input[type="time"]::-webkit-calendar-picker-indicator {
 
 .btn-banner-reset-sync:active {
   transform: translateY(0);
+}
+
+.btn-banner-reset-sync:disabled,
+.btn-banner-reset-sync[disabled] {
+  opacity: 0.42;
+  cursor: not-allowed !important;
+  pointer-events: none !important;
+  background: rgba(255, 255, 255, 0.04) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  color: #64748b !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.roster-sync-banner.is-synced {
+  cursor: default;
+  opacity: 0.8;
+}
+
+.roster-sync-banner.is-synced:hover {
+  background: rgba(139, 92, 246, 0.04);
+  border-color: rgba(139, 92, 246, 0.15);
 }
 
 .stylist-roster-row {
@@ -7972,6 +8059,37 @@ input[type="time"]::-webkit-calendar-picker-indicator {
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.85), inset 0 1px 0 rgba(255, 255, 255, 0.14);
   position: relative;
   animation: modalPop 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Dedicated Universal Confirmation Modal */
+.calendar-confirm-backdrop {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  z-index: 999999 !important;
+  padding: 20px !important;
+  box-sizing: border-box !important;
+  background: rgba(0, 0, 0, 0.78) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+  margin: 0 !important;
+}
+
+.calendar-confirm-card {
+  max-width: 420px !important;
+  width: 100% !important;
+  margin: auto !important;
+  padding: 24px !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: 18px !important;
+  background: #0f172a !important;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.9) !important;
+  box-sizing: border-box !important;
+  animation: modalPop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @keyframes modalPop {
@@ -10623,6 +10741,10 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     padding: 6px 10px !important;
     font-size: 0.82rem !important;
     border-radius: 7px !important;
+  }
+
+  .form-control.price-input-control {
+    padding-left: 36px !important;
   }
 
   .settings-info-card {
@@ -15470,6 +15592,50 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   animation: fadeIn 0.2s ease;
 }
 
+/* Quick Create Category - Icon Picker Popover */
+.cat-icon-picker-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  background: #19142b;
+  border: 1px solid rgba(139, 92, 246, 0.45);
+  border-radius: 12px;
+  padding: 10px;
+  z-index: 1100;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  width: 236px;
+  backdrop-filter: blur(16px);
+  animation: fadeIn 0.15s ease-out;
+}
+
+.cat-icon-opt-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.15rem;
+  cursor: pointer;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  padding: 0;
+}
+
+.cat-icon-opt-btn:hover {
+  background: rgba(139, 92, 246, 0.25) !important;
+  border-color: rgba(139, 92, 246, 0.6) !important;
+  transform: scale(1.12);
+}
+
+.cat-icon-opt-btn.selected {
+  background: rgba(139, 92, 246, 0.35) !important;
+  border-color: #a855f7 !important;
+  box-shadow: 0 0 8px rgba(168, 85, 247, 0.4);
+}
+
+
 /* Clean Service Modal Form Styling */
 .service-modal-form .form-group {
   margin-bottom: 0;
@@ -18804,4 +18970,216 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     opacity: 1;
     transform: scale(1);
   }
+}
+
+/* ==========================================================================
+   Modern Staff Deletion & Action Alert Modals
+   ========================================================================== */
+.staff-modal-card {
+  max-width: 420px !important;
+  width: 100% !important;
+  background: linear-gradient(168deg, #171d30 0%, #0d111d 100%) !important;
+  border-radius: 20px !important;
+  padding: 26px 24px 22px !important;
+  position: relative !important;
+  animation: modalFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  box-sizing: border-box !important;
+  text-align: center !important;
+}
+
+.staff-modal-card.blocked {
+  border: 1px solid rgba(245, 158, 11, 0.35) !important;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.85), 0 0 35px rgba(245, 158, 11, 0.12), 0 0 0 1px rgba(245, 158, 11, 0.2) !important;
+}
+
+.staff-modal-card.confirm {
+  border: 1px solid rgba(239, 68, 68, 0.35) !important;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.85), 0 0 35px rgba(239, 68, 68, 0.12), 0 0 0 1px rgba(239, 68, 68, 0.2) !important;
+}
+
+.staff-modal-close-btn {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.15rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  line-height: 1;
+}
+
+.staff-modal-close-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  transform: scale(1.08);
+}
+
+.staff-modal-icon-badge {
+  width: 58px;
+  height: 58px;
+  border-radius: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 14px;
+}
+
+.staff-modal-icon-badge.warning {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.22) 0%, rgba(217, 119, 6, 0.08) 100%);
+  border: 1px solid rgba(245, 158, 11, 0.42);
+  color: #fbbf24;
+  box-shadow: 0 0 24px rgba(245, 158, 11, 0.22);
+}
+
+.staff-modal-icon-badge.danger {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.22) 0%, rgba(185, 28, 28, 0.08) 100%);
+  border: 1px solid rgba(239, 68, 68, 0.42);
+  color: #ef4444;
+  box-shadow: 0 0 24px rgba(239, 68, 68, 0.22);
+}
+
+.staff-modal-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.staff-modal-status-pill.warning {
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #fbbf24;
+}
+
+.staff-modal-status-pill.danger {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #f87171;
+}
+
+.staff-modal-pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 6px currentColor;
+  animation: pulseDot 2s infinite ease-in-out;
+}
+
+@keyframes pulseDot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.75); }
+}
+
+.staff-modal-title {
+  font-size: 1.22rem;
+  font-weight: 800;
+  color: #ffffff;
+  margin: 0 0 6px;
+  letter-spacing: -0.015em;
+  text-align: center;
+}
+
+.staff-modal-info-card {
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 16px 0 12px;
+  text-align: left;
+}
+
+.staff-modal-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 0.86rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+  flex-shrink: 0;
+}
+
+.staff-modal-tag {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.staff-modal-tag.amber {
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.32);
+  color: #fbbf24;
+}
+
+.staff-modal-tag.purple {
+  background: rgba(168, 85, 247, 0.15);
+  border: 1px solid rgba(168, 85, 247, 0.3);
+  color: #d8b4fe;
+}
+
+.staff-modal-instruction-box {
+  background: rgba(245, 158, 11, 0.07);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: 12px;
+  padding: 9px 12px;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  font-size: 0.78rem;
+  color: #cbd5e1;
+  line-height: 1.45;
+}
+
+.staff-modal-btn-action {
+  width: 100%;
+  height: 42px;
+  border-radius: 11px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.06) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+}
+
+.staff-modal-btn-action:hover {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.18) 0%, rgba(255, 255, 255, 0.1) 100%);
+  border-color: rgba(255, 255, 255, 0.32);
+  color: #ffffff;
+  transform: translateY(-1px);
 }
