@@ -71,8 +71,8 @@ Return ONLY a valid JSON array of objects adhering to this schema:
 ]
 `;
 
-    // 3. Candidate models (primary: gemini-1.5-flash, fallback: gemini-2.0-flash, gemini-1.5-pro)
-    const models = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro'];
+    // 3. Candidate models (primary: gemini-flash-latest, fallback: gemini-3.8-flash, gemini-flash-lite-latest)
+    const models = ['gemini-flash-latest', 'gemini-3.8-flash', 'gemini-flash-lite-latest'];
     let lastError: any = null;
 
     for (const model of models) {
