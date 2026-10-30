@@ -23,20 +23,11 @@ jobs:
           script: |
             echo "🚀 [1/5] Pulling latest production code..."
             cd /var/www/styleslot
-            git fetch origin production
-            git checkout -B production origin/production
-            git reset --hard origin/production
+            git reset --hard
+            git clean -fd
+            git pull origin production
 
-            # Ensure 2GB swap space exists to prevent out-of-memory build kills on VPS
-            if [ $(swapon --show | wc -l) -le 1 ]; then
-              if [ ! -f /swapfile ]; then
-                fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048 2>/dev/null || true
-                chmod 600 /swapfile 2>/dev/null || true
-                mkswap /swapfile 2>/dev/null || true
-              fi
-              swapon /swapfile 2>/dev/null || true
-            fi
-            export NODE_OPTIONS="--max-old-space-size=768"
+            export NODE_OPTIONS="--max-old-space-size=512"
 
             echo "🔑 [2/5] Updating Production Environment Variables (WhatsApp, SMTP Email, Gemini AI)..."
             cat << 'ENVEOF' > /var/www/styleslot/backend/.env
