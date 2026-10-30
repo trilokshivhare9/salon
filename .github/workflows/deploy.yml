@@ -23,8 +23,20 @@ jobs:
           script: |
             echo "🚀 [1/5] Pulling latest production code..."
             cd /var/www/styleslot
-            git reset --hard
-            git pull origin production
+            git fetch origin production
+            git checkout -B production origin/production
+            git reset --hard origin/production
+
+            # Ensure 2GB swap space exists to prevent out-of-memory build kills on VPS
+            if [ $(swapon --show | wc -l) -le 1 ]; then
+              if [ ! -f /swapfile ]; then
+                fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048 2>/dev/null || true
+                chmod 600 /swapfile 2>/dev/null || true
+                mkswap /swapfile 2>/dev/null || true
+              fi
+              swapon /swapfile 2>/dev/null || true
+            fi
+            export NODE_OPTIONS="--max-old-space-size=768"
 
             echo "🔑 [2/5] Updating Production Environment Variables (WhatsApp, SMTP Email, Gemini AI)..."
             cat << 'ENVEOF' > /var/www/styleslot/backend/.env
@@ -52,14 +64,14 @@ jobs:
 
             echo "📦 [3/5] Building NestJS Backend & Syncing Database..."
             cd /var/www/styleslot/backend
-            npm install --production=false
+            npm install --prefer-offline --no-audit --no-fund
             npx prisma db push --accept-data-loss
             npm run build
-            pm2 restart styleslot-api || pm2 start dist/main.js --name "styleslot-api"
+            pm2 reload styleslot-api || pm2 restart styleslot-api || pm2 start dist/main.js --name "styleslot-api"
 
             echo "🌐 [4/5] Building Vite Frontend Bundle..."
             cd /var/www/styleslot/apps/web
-            npm install
+            npm install --prefer-offline --no-audit --no-fund
             npm run build
 
             echo "🔒 [5/5] Configuring Nginx Reverse Proxy (HTTP & HTTPS)..."
