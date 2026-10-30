@@ -38,7 +38,12 @@ jobs:
             npm install
             npm run build
 
-            echo "🔄 [4/4] Reloading Nginx Web Server..."
+            echo "🔒 [4/5] Setting up Free HTTPS / SSL (Required by Meta WhatsApp Webhooks)..."
+            which certbot || (apt update && apt install -y certbot python3-certbot-nginx)
+            grep -q "129.121.133.105.sslip.io" /etc/nginx/sites-available/default || sed -i 's/server_name _;/server_name _ 129.121.133.105.sslip.io;/g' /etc/nginx/sites-available/default
+            certbot --nginx -d 129.121.133.105.sslip.io --non-interactive --agree-tos -m trilokshivhare9@gmail.com --redirect || true
+
+            echo "🔄 [5/5] Reloading Nginx Web Server..."
             systemctl reload nginx
 
             echo "=================================================="
