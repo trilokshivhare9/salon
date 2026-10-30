@@ -669,8 +669,32 @@ export class StaffService {
   async deleteStaff(salonId: string, staffId: string) {
     await this.getStaffById(salonId, staffId);
 
+    // Guard: Prevent deletion if there are ACTIVE / UPCOMING / IN-PROGRESS appointments
+    const activeAppointmentsCount = await this.prisma.appointment.count({
+      where: {
+        salonId,
+        stylistId: staffId,
+        status: {
+          in: [
+            AppointmentStatus.BOOKED,
+            AppointmentStatus.CONFIRMED,
+            AppointmentStatus.ON_THE_WAY,
+            AppointmentStatus.CHECKED_IN,
+            AppointmentStatus.SEATED_IN_CHAIR,
+            AppointmentStatus.PENDING_RESCHEDULE,
+          ],
+        },
+      },
+    });
+
+    if (activeAppointmentsCount > 0) {
+      throw new BadRequestException(
+        `Cannot delete stylist: There are ${activeAppointmentsCount} active booking(s) assigned to this specialist. Please reschedule or cancel these active bookings first before deleting the stylist.`,
+      );
+    }
+
     const result = await this.prisma.$transaction(async (tx) => {
-      // 1. Remove appointments tied to this stylist so ON DELETE RESTRICT does not block deletion
+      // 1. Remove past/completed/cancelled appointments tied to this stylist so ON DELETE RESTRICT does not block deletion
       await tx.appointment.deleteMany({
         where: { salonId, stylistId: staffId },
       });

@@ -116,13 +116,8 @@ class CalendarStateEngine {
       const modalId = `calendar-confirm-modal-${Date.now()}`;
       const backdrop = document.createElement('div');
       backdrop.id = modalId;
-      backdrop.className = 'modal-backdrop show';
-      backdrop.style.zIndex = '999999';
-      backdrop.style.display = 'flex';
-      backdrop.style.alignItems = 'center';
-      backdrop.style.justifyContent = 'center';
-      backdrop.style.background = 'rgba(0, 0, 0, 0.75)';
-      backdrop.style.backdropFilter = 'blur(6px)';
+      backdrop.className = 'calendar-confirm-backdrop';
+      backdrop.style.cssText = 'position: fixed !important; inset: 0 !important; width: 100vw !important; height: 100vh !important; background: rgba(0, 0, 0, 0.78) !important; backdrop-filter: blur(8px) !important; -webkit-backdrop-filter: blur(8px) !important; display: flex !important; align-items: center !important; justify-content: center !important; z-index: 999999 !important; padding: 20px !important; box-sizing: border-box !important; margin: 0 !important;';
 
       const confirmBtnBg = type === 'danger'
         ? 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)'
@@ -132,21 +127,21 @@ class CalendarStateEngine {
         : '0 4px 14px rgba(139, 92, 246, 0.4)';
 
       backdrop.innerHTML = `
-        <div class="modal-content" style="max-width: 420px; width: 92%; margin: auto; padding: 24px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 18px; background: #0f172a; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.85); animation: modalFadeIn 0.2s ease-out;">
-          <div style="display: flex; align-items: flex-start; gap: 14px; margin-bottom: 16px;">
-            <div style="width: 44px; height: 44px; border-radius: 12px; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); display: flex; align-items: center; justify-content: center; font-size: 1.3rem; flex-shrink: 0;">
+        <div class="calendar-confirm-card" style="max-width: 420px; width: 100%; margin: auto !important; padding: 24px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 18px; background: #0f172a; box-shadow: 0 25px 60px rgba(0, 0, 0, 0.9); animation: modalFadeIn 0.2s ease-out; box-sizing: border-box;">
+          <div style="display: flex; align-items: flex-start; gap: 14px; margin-bottom: 20px;">
+            <div style="width: 46px; height: 46px; border-radius: 14px; background: ${type === 'danger' ? 'rgba(239, 68, 68, 0.14)' : 'rgba(139, 92, 246, 0.14)'}; border: 1px solid ${type === 'danger' ? 'rgba(239, 68, 68, 0.28)' : 'rgba(139, 92, 246, 0.28)'}; display: flex; align-items: center; justify-content: center; font-size: 1.4rem; flex-shrink: 0;">
               ${icon}
             </div>
-            <div>
-              <h4 style="margin: 0; font-size: 1.05rem; font-weight: 800; color: #fff;">${title}</h4>
-              <p style="margin: 6px 0 0 0; font-size: 0.82rem; color: #94a3b8; line-height: 1.45;">${message}</p>
+            <div style="flex: 1; min-width: 0;">
+              <h4 style="margin: 0; font-size: 1.05rem; font-weight: 800; color: #fff; line-height: 1.3;">${title}</h4>
+              <p style="margin: 6px 0 0 0; font-size: 0.82rem; color: #94a3b8; line-height: 1.5;">${message}</p>
             </div>
           </div>
-          <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
-            <button type="button" id="${modalId}-cancel" style="padding: 8px 16px; border-radius: 9px; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.12); color: #cbd5e1; font-size: 0.82rem; font-weight: 600; cursor: pointer; transition: all 0.15s ease;">
+          <div style="display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-top: 22px;">
+            <button type="button" id="${modalId}-cancel" style="padding: 9px 18px; border-radius: 10px; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.14); color: #cbd5e1; font-size: 0.82rem; font-weight: 600; cursor: pointer; transition: all 0.15s ease;">
               ${cancelText}
             </button>
-            <button type="button" id="${modalId}-confirm" style="padding: 8px 18px; border-radius: 9px; background: ${confirmBtnBg}; border: none; color: #fff; font-size: 0.82rem; font-weight: 700; cursor: pointer; box-shadow: ${confirmBtnShadow}; transition: all 0.15s ease;">
+            <button type="button" id="${modalId}-confirm" style="padding: 9px 20px; border-radius: 10px; background: ${confirmBtnBg}; border: none; color: #fff; font-size: 0.82rem; font-weight: 700; cursor: pointer; box-shadow: ${confirmBtnShadow}; transition: all 0.15s ease;">
               ${confirmText}
             </button>
           </div>

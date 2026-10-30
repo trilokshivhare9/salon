@@ -400,7 +400,7 @@ export class LocationPicker {
             <span style="font-size: 0.68rem; color: var(--text-muted);">Scoped search</span>
           </div>
           <div style="position: relative;">
-            <input type="text" class="form-control" id="loc-search-input" value="${(this.state.searchQuery || '').replace(/"/g, '&quot;')}" placeholder="${activeCity ? `Search landmark, market, or mall in ${activeCity}...` : 'Type area, landmark, or market...'}" style="font-size: 0.82rem; padding-left: 32px; height: 38px;" autocomplete="off" />
+            <input type="text" class="form-control" id="loc-search-input" value="${(this.state.searchQuery || '').replace(/"/g, '&quot;')}" placeholder="${activeCity ? `Search landmark, market, or mall in ${activeCity}...` : 'Type area, landmark, or market...'}" style="font-size: 0.82rem; padding-left: 32px !important; height: 38px;" autocomplete="off" />
             <span style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); font-size: 0.85rem; color: var(--text-muted); pointer-events: none;">🔍</span>
           </div>
           <div id="loc-search-dropdown" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: #182234; border: 1px solid rgba(139, 61, 255,0.4); border-radius: 8px; z-index: 999; margin-top: 4px; box-shadow: 0 10px 25px rgba(0,0,0,0.7); max-height: 240px; overflow-y: auto;"></div>

@@ -120,6 +120,30 @@ if (typeof document !== 'undefined' && !window._serviceDescListenerRegistered) {
   }, true);
 }
 
+if (typeof document !== 'undefined' && !window._scheduleSaveBtnListenerRegistered) {
+  window._scheduleSaveBtnListenerRegistered = true;
+  document.addEventListener('click', (e) => {
+    const salonBtn = e.target.closest('#btn-save-salon-hours');
+    if (salonBtn && !salonBtn.disabled) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (window.salonDashboard?.saveSalonSchedule) {
+        window.salonDashboard.saveSalonSchedule();
+      }
+      return;
+    }
+    const staffBtn = e.target.closest('#btn-save-staff-schedule');
+    if (staffBtn && !staffBtn.disabled) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (window.salonDashboard?.saveStaffSchedule) {
+        window.salonDashboard.saveStaffSchedule();
+      }
+      return;
+    }
+  }, true);
+}
+
 export function getApptServices(appt) {
   if (!appt) return [];
 
@@ -219,6 +243,109 @@ export function getFestivalIcon(name = '', religion = '') {
   if (religion === 'National') return '🇮🇳';
   if (religion === 'Hindu') return '🪔';
   return '🎉';
+}
+
+const SALON_CATEGORY_ICONS = [
+  '✂️', '💈', '💇', '💆', '💅', '🧖', '🧔', '💄',
+  '🧴', '🧼', '✨', '🌿', '🎨', '👁️', '🪒', '🌸',
+  '🎀', '👑', '⭐', '💎', '💖', '🔥', '🏷️', '📂'
+];
+
+function setupCategoryIconPicker(btnId, previewId, hiddenInputId, pickerId) {
+  const btn = document.getElementById(btnId);
+  const preview = document.getElementById(previewId);
+  const hiddenInput = document.getElementById(hiddenInputId);
+  const picker = document.getElementById(pickerId);
+  if (!btn || !picker || !hiddenInput) return;
+
+  const renderPickerIcons = () => {
+    const currentIcon = hiddenInput.value || '✂️';
+    picker.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <span style="font-size: 0.72rem; font-weight: 700; color: #a78bfa; text-transform: uppercase; letter-spacing: 0.5px;">Choose Category Icon</span>
+        <button type="button" class="close-picker-btn" style="background: none; border: none; color: #94a3b8; font-size: 0.85rem; cursor: pointer; padding: 0 4px; line-height: 1;">✕</button>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px;">
+        ${SALON_CATEGORY_ICONS.map((icon) => `
+          <button type="button" class="cat-icon-opt-btn ${icon === currentIcon ? 'selected' : ''}" data-icon="${icon}" title="${icon}">
+            ${icon}
+          </button>
+        `).join('')}
+      </div>
+    `;
+
+    picker.querySelector('.close-picker-btn')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      picker.style.display = 'none';
+    });
+  };
+
+  const togglePicker = (show) => {
+    const isVisible = picker.style.display !== 'none';
+    const nextState = show !== undefined ? show : !isVisible;
+    if (nextState) {
+      renderPickerIcons();
+    }
+    picker.style.display = nextState ? 'block' : 'none';
+  };
+
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    togglePicker();
+  });
+
+  picker.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const optBtn = e.target.closest('.cat-icon-opt-btn');
+    if (optBtn) {
+      const selectedIcon = optBtn.getAttribute('data-icon');
+      hiddenInput.value = selectedIcon;
+      if (preview) preview.textContent = selectedIcon;
+      picker.querySelectorAll('.cat-icon-opt-btn').forEach((b) => {
+        const isMatch = b.getAttribute('data-icon') === selectedIcon;
+        b.classList.toggle('selected', isMatch);
+      });
+      togglePicker(false);
+    }
+  });
+
+  const onDocClick = (e) => {
+    if (!picker.contains(e.target) && e.target !== btn && !btn.contains(e.target)) {
+      togglePicker(false);
+    }
+  };
+  document.addEventListener('click', onDocClick);
+}
+
+function makeTimeInputClickable(inputEl, wrapEl) {
+  if (!inputEl) return;
+  const triggerPicker = () => {
+    if (typeof inputEl.showPicker === 'function') {
+      try {
+        inputEl.showPicker();
+      } catch (err) {
+        inputEl.focus();
+      }
+    } else {
+      inputEl.focus();
+    }
+  };
+
+  inputEl.style.cursor = 'pointer';
+  inputEl.addEventListener('click', () => {
+    triggerPicker();
+  });
+
+  if (wrapEl) {
+    wrapEl.style.cursor = 'pointer';
+    wrapEl.addEventListener('click', (e) => {
+      if (e.target !== inputEl) {
+        triggerPicker();
+      }
+    });
+  }
 }
 
 export class SalonDashboard {
@@ -3371,6 +3498,7 @@ export class SalonDashboard {
 
     // Ensure breaks are mapped to active working days
     this.syncRoutineBreaksToDays();
+    this.initialStaffScheduleSnapshot = this.serializeStaffSchedule();
 
     const masterStart = this.currentStaffHoursState.masterShift.startTime;
     const masterEnd = this.currentStaffHoursState.masterShift.endTime;
@@ -3394,7 +3522,7 @@ export class SalonDashboard {
         <!-- TAB 1: SHIFT HOURS VIEW -->
         <div id="tab-content-shifts" style="display: ${currentTab === 'shifts' ? 'block' : 'none'};">
           <div style="display: flex; flex-direction: column; gap: 10px;">
-            <!-- Bulk Shift Setter Card (Realtime Auto-apply, No Manual Button Needed) -->
+            <!-- Bulk Shift Setter Card -->
             <div class="stylist-bulk-setter-card" id="stylist-bulk-setter-container">
               <div class="bulk-setter-row">
                 <div class="bulk-setter-info">
@@ -3402,7 +3530,7 @@ export class SalonDashboard {
                     ${Icons.zap ? Icons.zap({ size: 13, color: '#fbbf24' }) : '⚡'}
                     <span>All-Day Default Shift</span>
                   </span>
-                  <span class="bulk-setter-sub">Changes auto-apply live · Store hours: ${formatTime12h(salonMinStart)} – ${formatTime12h(salonMaxEnd)}</span>
+                  <span class="bulk-setter-sub">Set default shift · Store hours: ${formatTime12h(salonMinStart)} – ${formatTime12h(salonMaxEnd)}</span>
                 </div>
                 <div class="bulk-time-inputs">
                   <div class="bulk-time-group">
@@ -3435,18 +3563,23 @@ export class SalonDashboard {
               </div>
 
               <!-- Dedicated Quick-Sync Banner Directly Above Monday -->
-              <div class="roster-sync-banner" id="roster-sync-banner-row" role="button" tabindex="0">
-                <div class="roster-sync-banner-left">
-                  <span class="roster-sync-banner-icon">🏬</span>
-                  <div class="roster-sync-banner-info">
-                    <span class="roster-sync-banner-title">Sync with Salon Hours</span>
-                    <span class="roster-sync-banner-sub">Store: ${formatTime12h(salonMinStart)} – ${formatTime12h(salonMaxEnd)}</span>
+              ${(() => {
+                const differs = this.doesStaffDifferFromSalon();
+                return `
+                  <div class="roster-sync-banner ${differs ? '' : 'is-synced'}" id="roster-sync-banner-row" role="button" tabindex="0">
+                    <div class="roster-sync-banner-left">
+                      <span class="roster-sync-banner-icon">🏬</span>
+                      <div class="roster-sync-banner-info">
+                        <span class="roster-sync-banner-title">Sync with Salon Hours</span>
+                        <span class="roster-sync-banner-sub">Store: ${formatTime12h(salonMinStart)} – ${formatTime12h(salonMaxEnd)}</span>
+                      </div>
+                    </div>
+                    <button type="button" class="btn-banner-reset-sync" id="btn-open-sync-all-salon-sheet" ${differs ? '' : 'disabled'} title="${differs ? 'Reset all days to match salon hours' : 'Already synchronized with salon hours'}">
+                      <span>Reset ↺</span>
+                    </button>
                   </div>
-                </div>
-                <button type="button" class="btn-banner-reset-sync" id="btn-open-sync-all-salon-sheet" title="Reset all days to match salon hours">
-                  <span>Reset ↺</span>
-                </button>
-              </div>
+                `;
+              })()}
 
               <div id="stylist-roster-rows-container">
                 ${this.renderStaffRosterRowsHtml()}
@@ -3479,6 +3612,203 @@ export class SalonDashboard {
         </div>
       </div>
     `;
+  }
+
+  serializeStaffSchedule() {
+    if (!this.currentStaffHoursState) return '';
+    const daysArr = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+    const snapshot = {
+      staffId: this.currentStaffHoursState.staffId,
+      masterShift: {
+        startTime: this.currentStaffHoursState.masterShift?.startTime || '',
+        endTime: this.currentStaffHoursState.masterShift?.endTime || '',
+      },
+      days: daysArr.map((d) => {
+        const dayData = this.currentStaffHoursState.days?.[d];
+        return {
+          day: d,
+          isWorking: Boolean(dayData?.isWorking),
+          isCustomized: Boolean(dayData?.isCustomized),
+          startTime: dayData?.startTime || '',
+          endTime: dayData?.endTime || '',
+          breaks: (dayData?.breaks || []).map((b) => ({
+            title: (b.title || '').trim(),
+            startTime: b.startTime,
+            endTime: b.endTime,
+          })),
+        };
+      }),
+    };
+    return JSON.stringify(snapshot);
+  }
+
+  isStaffScheduleDirty() {
+    if (!this.initialStaffScheduleSnapshot || !this.currentStaffHoursState) return false;
+    return this.serializeStaffSchedule() !== this.initialStaffScheduleSnapshot;
+  }
+
+  updateStaffSaveBtnState() {
+    const saveBtn = document.getElementById('btn-save-staff-schedule');
+    if (!saveBtn) return;
+    const dirty = this.isStaffScheduleDirty();
+    saveBtn.disabled = !dirty;
+    saveBtn.classList.toggle('is-active', dirty);
+    saveBtn.innerHTML = `
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+        <polyline points="17 21 17 13 7 13 7 21"></polyline>
+        <polyline points="7 3 7 8 15 8"></polyline>
+      </svg>
+      <span>Save</span>
+    `;
+    saveBtn.onclick = (e) => {
+      e.preventDefault();
+      this.saveStaffSchedule();
+    };
+    this.updateStaffSyncBannerState();
+  }
+
+  doesStaffDifferFromSalon() {
+    if (!this.currentStaffHoursState?.days) return false;
+    const daysArr = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+    return daysArr.some((dKey) => {
+      const dayData = this.currentStaffHoursState.days[dKey];
+      if (!dayData) return false;
+      const salonDay = (this.salonWorkingHours || []).find((h) => h.dayOfWeek === dKey);
+      const isSalonClosed = salonDay ? Boolean(salonDay.isClosed) : false;
+      const sStart = salonDay?.startTime || this.salonProfile?.defaultStartTime || '09:00';
+      const sEnd = salonDay?.endTime || this.salonProfile?.defaultEndTime || '19:00';
+
+      if (isSalonClosed) {
+        return Boolean(dayData.isWorking);
+      } else {
+        if (!dayData.isWorking) return true;
+        return dayData.startTime !== sStart || dayData.endTime !== sEnd;
+      }
+    });
+  }
+
+  updateStaffSyncBannerState() {
+    const btnSyncAll = document.getElementById('btn-open-sync-all-salon-sheet');
+    const bannerSync = document.getElementById('roster-sync-banner-row');
+    const differs = this.doesStaffDifferFromSalon();
+
+    if (btnSyncAll) {
+      btnSyncAll.disabled = !differs;
+      btnSyncAll.title = differs
+        ? 'Reset all days to match salon hours'
+        : 'Already synchronized with salon hours';
+    }
+    if (bannerSync) {
+      bannerSync.classList.toggle('is-synced', !differs);
+    }
+  }
+
+  async saveStaffSchedule(staffId) {
+    const targetId = staffId || this.currentStaffHoursState?.staffId;
+    if (!targetId || !this.currentStaffHoursState) return;
+
+    LoadingOverlay.show('Saving shift schedule...');
+    const saveBtn = document.getElementById('btn-save-staff-schedule');
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = `
+        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="width: 12px; height: 12px; border-width: 2px;"></span>
+        <span>Saving...</span>
+      `;
+    }
+
+    try {
+      this.syncRoutineBreaksToDays();
+
+      const daysArr = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+      const hoursPayload = [];
+
+      for (const day of daysArr) {
+        const d = this.currentStaffHoursState?.days ? this.currentStaffHoursState.days[day] : null;
+        const isSalonClosed = d ? Boolean(d.isSalonClosed) : false;
+        const isWorking = !isSalonClosed && (d ? Boolean(d.isWorking) : false);
+        const start = d?.startTime || d?.salonStart || this.salonProfile?.defaultStartTime;
+        const end = d?.endTime || d?.salonEnd || this.salonProfile?.defaultEndTime;
+
+        const breaks = (d?.breaks || [])
+          .map((b) => ({
+            title: (b.title || 'Break').trim(),
+            startTime: b.startTime,
+            endTime: b.endTime,
+          }))
+          .filter((b) => b.startTime && b.endTime && b.startTime < b.endTime);
+
+        let effStart = start;
+        let effEnd = end;
+        breaks.forEach((b) => {
+          if (!effStart || b.startTime < effStart) effStart = b.startTime;
+          if (!effEnd || b.endTime > effEnd) effEnd = b.endTime;
+        });
+
+        const salonStart = d?.salonStart || this.salonProfile?.defaultStartTime;
+        const salonEnd = d?.salonEnd || this.salonProfile?.defaultEndTime;
+        const isIdenticalToSalon = !isSalonClosed && isWorking && effStart === salonStart && effEnd === salonEnd;
+        const effectiveIsCustomized = !isIdenticalToSalon;
+
+        if (d) {
+          d.startTime = effStart;
+          d.endTime = effEnd;
+          d.isCustomized = effectiveIsCustomized;
+        }
+
+        hoursPayload.push({
+          dayOfWeek: day,
+          isWorking: Boolean(isWorking && effStart < effEnd),
+          isCustomized: effectiveIsCustomized,
+          startTime: effStart,
+          endTime: effEnd,
+          breaks,
+          breakStartTime: null,
+          breakEndTime: null,
+          hasBreakOverride: true,
+        });
+      }
+
+      const anyCustom = hoursPayload.some((h) => h.isCustomized);
+      const followsSalon = !anyCustom;
+
+      const updated = await ApiClient.updateStaffWorkingHours(targetId, hoursPayload, followsSalon);
+      const st = (this.staffList || []).find((s) => s.id === targetId);
+      if (st) {
+        st.workingHours = (updated && Array.isArray(updated.hours)) ? updated.hours : (Array.isArray(updated) && updated.length > 0 ? updated : hoursPayload);
+        st.followsSalonSchedule = followsSalon;
+      }
+      if (this.currentStaffHoursState && this.currentStaffHoursState.staffId === targetId) {
+        this.currentStaffHoursState.followsSalon = followsSalon;
+      }
+      if (this.calendarSchedule && Array.isArray(this.calendarSchedule.stylists)) {
+        const calSt = this.calendarSchedule.stylists.find((s) => (s.stylistId || s.id) === targetId);
+        if (calSt) {
+          calSt.weeklyHours = hoursPayload.map((h) => ({
+            dayOfWeek: h.dayOfWeek,
+            isWorking: Boolean(h.isWorking),
+            startTime: h.isWorking ? h.startTime : null,
+            endTime: h.isWorking ? h.endTime : null,
+          }));
+          calSt.followsSalonSchedule = followsSalon;
+        }
+      }
+
+      this.initialStaffScheduleSnapshot = this.serializeStaffSchedule();
+      this.updateStaffSaveBtnState();
+      this.showToast?.('Staff shift schedule saved successfully!', 'success');
+
+      if (updated?.affectedBookingsCount > 0) {
+        this.showToast?.(updated.message || `${updated.affectedBookingsCount} booking(s) automatically sent reschedule request via WhatsApp.`, 'info');
+      }
+    } catch (err) {
+      console.error('Failed to save staff working hours:', err);
+      this.showToast?.(err?.message || 'Failed to save staff schedule. Please try again.', 'error');
+      this.updateStaffSaveBtnState();
+    } finally {
+      LoadingOverlay.hide(150);
+    }
   }
 
   autoSaveStaffSchedule(staffId, immediate = false, successMsg = null) {
@@ -3601,6 +3931,9 @@ export class SalonDashboard {
         }
         this.hideScheduleSavingIndicator(true, 'Staff schedule saved');
 
+        this.initialStaffScheduleSnapshot = this.serializeStaffSchedule();
+        this.updateStaffSaveBtnState();
+
         const finishedNow = Date.now();
         this.lastLocalActionTimestamp = finishedNow;
         if (typeof window !== 'undefined') {
@@ -3627,7 +3960,7 @@ export class SalonDashboard {
               if (activeDays.length > 0) {
                 const minS = activeDays.reduce((min, h) => (h.startTime && h.startTime < min ? h.startTime : min), activeDays[0].startTime);
                 const maxE = activeDays.reduce((max, h) => (h.endTime && h.endTime > max ? h.endTime : max), activeDays[0].endTime);
-                subEl.textContent = `Changes auto-apply live · Store hours: ${formatTime12h(minS)} – ${formatTime12h(maxE)}`;
+                subEl.textContent = `Set default shift · Store hours: ${formatTime12h(minS)} – ${formatTime12h(maxE)}`;
               }
             }
           }
@@ -3904,6 +4237,7 @@ export class SalonDashboard {
     }
     this.attachStaffRosterListeners();
     this.attachRoutineBreaksListeners();
+    this.updateStaffSyncBannerState();
   }
 
   attachStaffRosterListeners() {
@@ -3962,7 +4296,7 @@ export class SalonDashboard {
 
         this.syncRoutineBreaksToDays();
         this.updateStaffHoursTableUI();
-        this.autoSaveStaffSchedule(this.currentStaffHoursState.staffId, true, `${dayData.friendlyDay || day} marked ${isWorking ? 'Working' : 'Off'} for ${this.currentStaffHoursState.staffName || 'Specialist'} (auto-saved)`);
+        this.updateStaffSaveBtnState();
       };
     });
 
@@ -4095,6 +4429,7 @@ export class SalonDashboard {
           });
           if (!ok) return;
 
+          LoadingOverlay.show('Deleting routine break...');
           try {
             await ApiClient.deleteStaffRoutineBreak(staffId, {
               title: targetBreak.title,
@@ -4106,10 +4441,15 @@ export class SalonDashboard {
             this.currentStaffHoursState.routineBreaks.splice(idx, 1);
             this.syncRoutineBreaksToDays();
             this.updateStaffHoursTableUI();
+            this.updateStaffSyncBannerState();
+            this.initialStaffScheduleSnapshot = this.serializeStaffSchedule();
+            this.updateStaffSaveBtnState();
             this.showToast(`Removed routine break "${targetBreak.title || 'Break'}".`, 'info');
           } catch (err) {
             console.error('Failed to delete staff routine break:', err);
             this.showToast(err.message || 'Failed to delete break', 'error');
+          } finally {
+            LoadingOverlay.hide(150);
           }
         }
       };
@@ -4258,6 +4598,9 @@ export class SalonDashboard {
     const endPrev = sheetContainer.querySelector('#sheet-break-end-preview');
     const titleInp = sheetContainer.querySelector('#sheet-break-title');
 
+    makeTimeInputClickable(startInp, startInp?.closest('.sheet-time-box'));
+    makeTimeInputClickable(endInp, endInp?.closest('.sheet-time-box'));
+
     startInp?.addEventListener('input', () => {
       if (startPrev) startPrev.textContent = formatTime12h(startInp.value);
     });
@@ -4362,6 +4705,7 @@ export class SalonDashboard {
 
       const staffId = this.currentStaffHoursState.staffId;
 
+      LoadingOverlay.show(isEditing ? 'Updating routine break...' : 'Adding routine break...');
       try {
         if (isEditing) {
           await ApiClient.updateStaffRoutineBreak(staffId, {
@@ -4440,6 +4784,9 @@ export class SalonDashboard {
 
         this.syncRoutineBreaksToDays();
         this.updateStaffHoursTableUI();
+        this.updateStaffSyncBannerState();
+        this.initialStaffScheduleSnapshot = this.serializeStaffSchedule();
+        this.updateStaffSaveBtnState();
         closeSheet();
         this.showToast(`Routine break "${finalTitle}" saved!`, 'success');
       } catch (err) {
@@ -4449,6 +4796,8 @@ export class SalonDashboard {
           saveBtn.disabled = false;
           saveBtn.textContent = isEditing ? '✓ Save Changes' : '+ Add Break';
         }
+      } finally {
+        LoadingOverlay.hide(150);
       }
     });
 
@@ -4457,6 +4806,17 @@ export class SalonDashboard {
       if (isEditing) {
         const deletedTitle = breakData.title || 'Break';
         const staffId = this.currentStaffHoursState.staffId;
+        const ok = await CalendarState.confirm({
+          title: 'Delete Routine Break',
+          message: `Delete routine break "${deletedTitle}" for this specialist?`,
+          confirmText: 'Delete Break',
+          cancelText: 'Cancel',
+          icon: '🗑️',
+          type: 'danger',
+        });
+        if (!ok) return;
+
+        LoadingOverlay.show('Deleting routine break...');
         try {
           await ApiClient.deleteStaffRoutineBreak(staffId, {
             title: breakData.title,
@@ -4468,11 +4828,16 @@ export class SalonDashboard {
           this.currentStaffHoursState.routineBreaks.splice(editIndex, 1);
           this.syncRoutineBreaksToDays();
           this.updateStaffHoursTableUI();
+          this.updateStaffSyncBannerState();
+          this.initialStaffScheduleSnapshot = this.serializeStaffSchedule();
+          this.updateStaffSaveBtnState();
           closeSheet();
           this.showToast(`Removed routine break "${deletedTitle}".`, 'info');
         } catch (err) {
           console.error('Failed to delete staff routine break:', err);
           this.showToast(err.message || 'Failed to delete break', 'error');
+        } finally {
+          LoadingOverlay.hide(150);
         }
       }
     });
@@ -4719,14 +5084,60 @@ export class SalonDashboard {
 
     const modalContainer = document.getElementById('modal-container') || document.body;
     const isSalonClosed = Boolean(dayData.isSalonClosed);
-    let isWorking = !isSalonClosed && (dayData.isWorking !== false);
+
+    if (isSalonClosed) {
+      modalContainer.innerHTML = `
+        <div class="modal-backdrop show" id="staff-day-roster-modal-backdrop">
+          <div class="modal-content wh-edit-modal" style="max-width: 380px; padding: 22px 20px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 18px; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7); background: #131726;">
+            <!-- Header: Title & Close 'X' -->
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="wh-modal-day-badge" style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.35); color: #f87171; font-weight: 700; padding: 3px 8px; border-radius: 6px; font-size: 0.72rem;">${dayData.dayShort}</span>
+                <h3 style="margin: 0; font-size: 0.95rem; font-weight: 700; color: #ffffff;">${dayData.friendlyDay} — Salon Closed</h3>
+              </div>
+              <button class="close-btn" id="btn-close-roster-modal" style="background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.1); width: 28px; height: 28px; border-radius: 50%; color: #94a3b8; font-size: 1.1rem; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1; transition: all 0.15s ease;">&times;</button>
+            </div>
+
+            <!-- Single Clean Informational Surface in One Place -->
+            <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 14px; padding: 20px 16px; text-align: center; margin-bottom: 18px; display: flex; flex-direction: column; align-items: center; gap: 10px;">
+              <div style="width: 48px; height: 48px; border-radius: 12px; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.25); display: flex; align-items: center; justify-content: center; font-size: 1.5rem;">
+                🏬
+              </div>
+              <div style="font-size: 0.94rem; font-weight: 700; color: #ffffff;">
+                Salon is Closed on ${dayData.friendlyDay}
+              </div>
+              <div style="font-size: 0.8rem; color: #94a3b8; line-height: 1.55; max-width: 290px;">
+                The salon is closed on this day in Salon Working Hours. To schedule stylist shifts, please enable ${dayData.friendlyDay} in Salon Working Hours first.
+              </div>
+            </div>
+
+            <!-- Full-Width Clean Close Button -->
+            <button type="button" class="btn btn-secondary" id="modal-btn-roster-close" style="width: 100%; height: 42px; font-size: 0.86rem; font-weight: 700; border-radius: 10px; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.16); color: #ffffff; cursor: pointer; transition: all 0.15s ease; display: flex; align-items: center; justify-content: center;">
+              Close
+            </button>
+          </div>
+        </div>
+      `;
+
+      const modalBackdrop = modalContainer.querySelector('#staff-day-roster-modal-backdrop');
+      const closeModal = () => (modalContainer.innerHTML = '');
+
+      modalContainer.querySelector('#btn-close-roster-modal')?.addEventListener('click', closeModal);
+      modalContainer.querySelector('#modal-btn-roster-close')?.addEventListener('click', closeModal);
+      modalBackdrop?.addEventListener('click', (e) => {
+        if (e.target === modalBackdrop) closeModal();
+      });
+      return;
+    }
+
+    let isWorking = (dayData.isWorking !== false);
 
     modalContainer.innerHTML = `
       <div class="modal-backdrop show" id="staff-day-roster-modal-backdrop">
         <div class="modal-content wh-edit-modal">
           <div class="modal-header" style="border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 12px;">
             <div style="display: flex; align-items: center; gap: 10px;">
-              <span class="wh-modal-day-badge" style="${isSalonClosed ? 'background: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.4); color: #f87171;' : ''}">${dayData.dayShort}</span>
+              <span class="wh-modal-day-badge">${dayData.dayShort}</span>
               <div>
                 <h3 style="margin: 0; font-size: 0.92rem; font-weight: 700; color: #fff;">${dayData.friendlyDay} Shift</h3>
                 <p style="margin: 2px 0 0 0; font-size: 0.68rem; color: #94a3b8;">Set working hours for ${this.currentStaffHoursState.staffName}</p>
@@ -4736,27 +5147,17 @@ export class SalonDashboard {
           </div>
 
           <div class="modal-body" style="padding: 16px 0; display: flex; flex-direction: column; gap: 14px;">
-            ${isSalonClosed ? `
-              <!-- Salon Closed Warning Banner -->
-              <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 10px; padding: 10px 14px; display: flex; align-items: flex-start; gap: 10px;">
-                <span style="font-size: 1.15rem; line-height: 1;">🏢</span>
-                <div style="font-size: 0.74rem; color: #fca5a5; line-height: 1.45;">
-                  <strong style="display: block; font-size: 0.8rem; margin-bottom: 2px; color: #f87171;">Salon Facility is Closed on ${dayData.friendlyDay}</strong>
-                  The salon is marked closed in Salon Working Hours. Stylists cannot be scheduled to work when the salon is closed. To schedule shifts on this day, please open ${dayData.friendlyDay} in <strong>Salon Working Hours</strong> first.
-                </div>
-              </div>
-            ` : ''}
 
-            <!-- Working / Weekly Off / Closed Toggle -->
-            <div style="display: flex; align-items: center; justify-content: space-between; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 10px 14px; ${isSalonClosed ? 'opacity: 0.6;' : ''}">
+            <!-- Working / Weekly Off Toggle -->
+            <div style="display: flex; align-items: center; justify-content: space-between; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 10px 14px;">
               <div>
                 <strong style="color: #fff; font-size: 0.86rem; display: block;">Working Day</strong>
-                <span style="font-size: 0.7rem; color: ${isSalonClosed ? '#f87171' : '#94a3b8'};" id="modal-roster-status-hint">
-                  ${isSalonClosed ? 'Salon is closed on this day (locked)' : (isWorking ? 'Stylist is available for appointments' : 'Marked as Weekly Off')}
+                <span style="font-size: 0.7rem; color: #94a3b8;" id="modal-roster-status-hint">
+                  ${isWorking ? 'Stylist is available for appointments' : 'Marked as Weekly Off'}
                 </span>
               </div>
-              <label class="switch-toggle" style="margin: 0; ${isSalonClosed ? 'opacity: 0.35; cursor: not-allowed; pointer-events: none;' : ''}" title="${isSalonClosed ? `Cannot enable: Salon is closed on ${dayData.friendlyDay}` : ''}">
-                <input type="checkbox" id="modal-chk-roster-working" ${isWorking ? 'checked' : ''} ${isSalonClosed ? 'disabled' : ''} />
+              <label class="switch-toggle" style="margin: 0;">
+                <input type="checkbox" id="modal-chk-roster-working" ${isWorking ? 'checked' : ''} />
                 <span class="switch-slider"></span>
               </label>
             </div>
@@ -4850,6 +5251,9 @@ export class SalonDashboard {
     const startPrev = modalContainer.querySelector('#modal-roster-start-preview');
     const endPrev = modalContainer.querySelector('#modal-roster-end-preview');
 
+    makeTimeInputClickable(startInp, startInp?.parentElement);
+    makeTimeInputClickable(endInp, endInp?.parentElement);
+
     startInp?.addEventListener('input', () => {
       if (startPrev) startPrev.textContent = formatTime12h(startInp.value);
     });
@@ -4896,7 +5300,7 @@ export class SalonDashboard {
 
       closeModal();
       this.updateStaffHoursTableUI();
-      this.autoSaveStaffSchedule(this.currentStaffHoursState?.staffId, true, `${dayData.friendlyDay} shift updated (auto-saved)`);
+      this.updateStaffSaveBtnState();
     });
 
     modalContainer.querySelector('#modal-btn-roster-reset-salon')?.addEventListener('click', (e) => {
@@ -4910,7 +5314,7 @@ export class SalonDashboard {
 
       closeModal();
       this.updateStaffHoursTableUI();
-      this.autoSaveStaffSchedule(this.currentStaffHoursState?.staffId, true, `Reset ${dayData.friendlyDay} to salon standard hours (auto-saved)`);
+      this.updateStaffSaveBtnState();
     });
   }
 
@@ -5008,7 +5412,7 @@ export class SalonDashboard {
 
       closeSheet();
       this.updateStaffHoursTableUI();
-      this.autoSaveStaffSchedule(this.currentStaffHoursState?.staffId, true, `${dayData.friendlyDay} restored to original salon hours (${formatTime12h(swhStart)} – ${formatTime12h(swhEnd)})`);
+      this.updateStaffSaveBtnState();
     });
   }
 
@@ -5164,7 +5568,7 @@ export class SalonDashboard {
 
       closeSheet();
       this.updateStaffHoursTableUI();
-      this.autoSaveStaffSchedule(staffId, true, `✨ All days for ${staffName} reset to match salon facility operating hours!`);
+      this.updateStaffSaveBtnState();
     });
   }
 
@@ -5290,6 +5694,7 @@ export class SalonDashboard {
       };
 
       this.syncSalonRoutineBreaksToDays();
+      this.initialSalonScheduleSnapshot = this.serializeSalonSchedule();
 
       const masterStart = this.currentSalonHoursState?.masterHours?.startTime || defaultSalonStart;
       const masterEnd = this.currentSalonHoursState?.masterHours?.endTime || defaultSalonEnd;
@@ -5328,7 +5733,7 @@ export class SalonDashboard {
           <!-- TAB 1: OPERATING HOURS VIEW -->
           <div id="salon-tab-content-shifts" style="display: ${currentTab === 'shifts' ? 'block' : 'none'};">
             <div style="display: flex; flex-direction: column; gap: 10px;">
-              <!-- Bulk Hours Setter Card (Realtime Auto-apply across open days) -->
+              <!-- Bulk Hours Setter Card -->
               <div class="stylist-bulk-setter-card" id="salon-bulk-setter-container">
                 <div class="bulk-setter-row">
                   <div class="bulk-setter-info">
@@ -5336,7 +5741,7 @@ export class SalonDashboard {
                       ${Icons.zap ? Icons.zap({ size: 13, color: '#fbbf24' }) : '⚡'}
                       <span>All-Day Default Hours</span>
                     </span>
-                    <span class="bulk-setter-sub">Changes auto-apply live · Stylists inherit these hours by default</span>
+                    <span class="bulk-setter-sub">Set default hours · Stylists inherit these hours by default</span>
                   </div>
                   <div class="bulk-time-inputs">
                     <div class="bulk-time-group">
@@ -5567,6 +5972,108 @@ export class SalonDashboard {
     });
   }
 
+  serializeSalonSchedule() {
+    if (!this.currentSalonHoursState) return '';
+    const daysArr = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+    const snapshot = {
+      masterHours: {
+        startTime: this.currentSalonHoursState.masterHours?.startTime || '',
+        endTime: this.currentSalonHoursState.masterHours?.endTime || '',
+      },
+      days: daysArr.map((d) => {
+        const dayData = this.currentSalonHoursState.days?.[d];
+        return {
+          day: d,
+          isOpen: Boolean(dayData?.isOpen),
+          startTime: dayData?.startTime || '',
+          endTime: dayData?.endTime || '',
+        };
+      }),
+    };
+    return JSON.stringify(snapshot);
+  }
+
+  isSalonScheduleDirty() {
+    if (!this.initialSalonScheduleSnapshot || !this.currentSalonHoursState) return false;
+    return this.serializeSalonSchedule() !== this.initialSalonScheduleSnapshot;
+  }
+
+  updateSalonSaveBtnState() {
+    const saveBtn = document.getElementById('btn-save-salon-hours');
+    if (!saveBtn) return;
+    const dirty = this.isSalonScheduleDirty();
+    saveBtn.disabled = !dirty;
+    saveBtn.classList.toggle('is-active', dirty);
+    saveBtn.innerHTML = `
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+        <polyline points="17 21 17 13 7 13 7 21"></polyline>
+        <polyline points="7 3 7 8 15 8"></polyline>
+      </svg>
+      <span>Save</span>
+    `;
+    saveBtn.onclick = (e) => {
+      e.preventDefault();
+      this.saveSalonSchedule();
+    };
+  }
+
+  async saveSalonSchedule() {
+    if (!this.currentSalonHoursState) return;
+
+    LoadingOverlay.show('Saving operating hours...');
+    const saveBtn = document.getElementById('btn-save-salon-hours');
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = `
+        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="width: 12px; height: 12px; border-width: 2px;"></span>
+        <span>Saving...</span>
+      `;
+    }
+
+    try {
+      this.syncSalonRoutineBreaksToDays();
+      const daysArr = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+      const hoursPayload = [];
+
+      for (const day of daysArr) {
+        const d = this.currentSalonHoursState?.days ? this.currentSalonHoursState.days[day] : null;
+        const isOpen = d ? Boolean(d.isOpen) : true;
+        const start = d?.startTime || '09:00';
+        const end = d?.endTime || '21:00';
+
+        hoursPayload.push({
+          dayOfWeek: day,
+          isClosed: !isOpen,
+          startTime: start,
+          endTime: end,
+        });
+      }
+
+      const updated = await ApiClient.updateSalonWorkingHours(hoursPayload);
+      const hoursList = Array.isArray(updated)
+        ? updated
+        : (Array.isArray(updated?.hours) ? updated.hours : null);
+
+      if (hoursList) {
+        this.salonWorkingHours = hoursList;
+        this.salonBreaks = hoursList.flatMap((h) =>
+          (h.breaks || []).map((b) => ({ ...b, dayOfWeek: h.dayOfWeek })),
+        );
+      }
+
+      this.initialSalonScheduleSnapshot = this.serializeSalonSchedule();
+      this.updateSalonSaveBtnState();
+      this.showToast?.('Salon operating hours saved successfully!', 'success');
+    } catch (err) {
+      console.error('Failed to save salon operating hours:', err);
+      this.showToast?.(err?.message || 'Failed to save salon operating hours. Please try again.', 'error');
+      this.updateSalonSaveBtnState();
+    } finally {
+      LoadingOverlay.hide(150);
+    }
+  }
+
   autoSaveSalonSchedule(immediate = false, deltaPayload = null, successMsg = null) {
     if (!this.currentSalonHoursState) return;
 
@@ -5630,6 +6137,9 @@ export class SalonDashboard {
           statusBadge.innerHTML = `<span class="autosave-dot"></span><span class="autosave-text">Auto-saved</span>`;
         }
         this.hideScheduleSavingIndicator(true, 'Salon schedule saved');
+
+        this.initialSalonScheduleSnapshot = this.serializeSalonSchedule();
+        this.updateSalonSaveBtnState();
 
         const finishedNow = Date.now();
         this.lastLocalActionTimestamp = finishedNow;
@@ -5702,6 +6212,9 @@ export class SalonDashboard {
     const bulkStartPrev = container.querySelector('#salon-bulk-start-preview');
     const bulkEndPrev = container.querySelector('#salon-bulk-end-preview');
 
+    makeTimeInputClickable(bulkStartInp, bulkStartInp?.closest('.bulk-time-inp-wrap'));
+    makeTimeInputClickable(bulkEndInp, bulkEndInp?.closest('.bulk-time-inp-wrap'));
+
     const handleBulkLiveChange = (immediate = false) => {
       const sVal = bulkStartInp?.value || '';
       const eVal = bulkEndInp?.value || '';
@@ -5718,17 +6231,10 @@ export class SalonDashboard {
       }
 
       const daysArr = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
-      const changedDays = [];
       daysArr.forEach((dKey) => {
         if (this.currentSalonHoursState?.days[dKey] && this.currentSalonHoursState.days[dKey].isOpen) {
           this.currentSalonHoursState.days[dKey].startTime = sVal;
           this.currentSalonHoursState.days[dKey].endTime = eVal;
-          changedDays.push({
-            dayOfWeek: dKey,
-            isClosed: false,
-            startTime: sVal,
-            endTime: eVal,
-          });
         }
       });
 
@@ -5742,10 +6248,7 @@ export class SalonDashboard {
         rowsContainer.innerHTML = this.renderSalonRosterRowsHtml();
         this.attachSalonRosterListeners();
       }
-      const bulkMsg = (immediate && changedDays.length > 0)
-        ? `Applied ${formatTime12h(sVal)} – ${formatTime12h(eVal)} across all ${changedDays.length} open days (auto-saved)`
-        : null;
-      this.autoSaveSalonSchedule(immediate, changedDays, bulkMsg);
+      this.updateSalonSaveBtnState();
     };
 
     bulkStartInp?.addEventListener('input', () => handleBulkLiveChange(false));
@@ -5754,6 +6257,15 @@ export class SalonDashboard {
     bulkEndInp?.addEventListener('input', () => handleBulkLiveChange(false));
     bulkEndInp?.addEventListener('change', () => handleBulkLiveChange(true));
     bulkEndInp?.addEventListener('blur', () => handleBulkLiveChange(true));
+
+    const saveBtn = document.getElementById('btn-save-salon-hours');
+    if (saveBtn) {
+      saveBtn.onclick = (e) => {
+        e.preventDefault();
+        this.saveSalonSchedule();
+      };
+    }
+    this.updateSalonSaveBtnState();
 
     // 3. Attach Roster Rows & Breaks Listeners
     this.attachSalonRosterListeners();
@@ -5789,13 +6301,7 @@ export class SalonDashboard {
 
         rowsContainer.innerHTML = this.renderSalonRosterRowsHtml();
         this.attachSalonRosterListeners();
-
-        const dayLabel = this.currentSalonHoursState?.days[day]?.friendlyDay || day;
-        // ⚡ Delta save: send ONLY this single day's isClosed status!
-        this.autoSaveSalonSchedule(true, [{
-          dayOfWeek: day,
-          isClosed: !isOpen,
-        }], `${dayLabel} marked ${isOpen ? 'Open' : 'Closed'} (auto-saved)`);
+        this.updateSalonSaveBtnState();
       };
     });
 
@@ -5874,6 +6380,7 @@ export class SalonDashboard {
           });
           if (!ok) return;
 
+          LoadingOverlay.show('Deleting facility break...');
           try {
             await ApiClient.deleteSalonRoutineBreak({
               title: targetBreak.title,
@@ -5909,10 +6416,14 @@ export class SalonDashboard {
             const headerChip = document.getElementById('salon-breaks-header-count');
             if (headerChip) headerChip.textContent = this.currentSalonHoursState.routineBreaks.length;
             this.attachSalonRoutineBreaksListeners();
+            this.initialSalonScheduleSnapshot = this.serializeSalonSchedule();
+            this.updateSalonSaveBtnState();
             this.showToast(`Deleted facility break "${targetBreak?.title || 'Break'}"`, 'success');
           } catch (err) {
             console.error('Failed to delete facility break:', err);
             this.showToast(err.message || 'Failed to delete facility break', 'error');
+          } finally {
+            LoadingOverlay.hide(150);
           }
         }
       };
@@ -6041,6 +6552,9 @@ export class SalonDashboard {
     const startPrev = modalContainer.querySelector('#modal-salon-start-preview');
     const endPrev = modalContainer.querySelector('#modal-salon-end-preview');
 
+    makeTimeInputClickable(startInp, startInp?.parentElement);
+    makeTimeInputClickable(endInp, endInp?.parentElement);
+
     startInp?.addEventListener('input', () => {
       if (startPrev) startPrev.textContent = formatTime12h(startInp.value);
     });
@@ -6063,18 +6577,11 @@ export class SalonDashboard {
         return;
       }
       const daysArr = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
-      const allDaysPayload = [];
       daysArr.forEach((dKey) => {
         if (this.currentSalonHoursState.days[dKey]) {
           this.currentSalonHoursState.days[dKey].isOpen = isOpen;
           this.currentSalonHoursState.days[dKey].startTime = sVal;
           this.currentSalonHoursState.days[dKey].endTime = eVal;
-          allDaysPayload.push({
-            dayOfWeek: dKey,
-            isClosed: !isOpen,
-            startTime: sVal,
-            endTime: eVal,
-          });
         }
       });
       if (isOpen) {
@@ -6086,7 +6593,7 @@ export class SalonDashboard {
         rowsContainer.innerHTML = this.renderSalonRosterRowsHtml();
         this.attachSalonRosterListeners();
       }
-      this.autoSaveSalonSchedule(true, allDaysPayload, `Applied ${dayData.friendlyDay} hours to all 7 days (auto-saved)`);
+      this.updateSalonSaveBtnState();
     });
 
     modalContainer.querySelector('#modal-btn-salon-save')?.addEventListener('click', (e) => {
@@ -6109,13 +6616,7 @@ export class SalonDashboard {
         rowsContainer.innerHTML = this.renderSalonRosterRowsHtml();
         this.attachSalonRosterListeners();
       }
-      // ⚡ Send ONLY this single day's updated values!
-      this.autoSaveSalonSchedule(true, [{
-        dayOfWeek: dayKey,
-        isClosed: !isOpen,
-        startTime: sVal,
-        endTime: eVal,
-      }], `${dayData.friendlyDay} salon hours updated (auto-saved)`);
+      this.updateSalonSaveBtnState();
     });
   }
 
@@ -6247,6 +6748,9 @@ export class SalonDashboard {
     const endPrev = sheetContainer.querySelector('#sheet-salon-break-end-preview');
     const titleInp = sheetContainer.querySelector('#sheet-salon-break-title');
 
+    makeTimeInputClickable(startInp, startInp?.closest('.sheet-time-box'));
+    makeTimeInputClickable(endInp, endInp?.closest('.sheet-time-box'));
+
     startInp?.addEventListener('input', () => {
       if (startPrev) startPrev.textContent = formatTime12h(startInp.value);
     });
@@ -6309,6 +6813,17 @@ export class SalonDashboard {
     // Delete existing facility break
     sheetContainer.querySelector('#btn-delete-this-salon-break')?.addEventListener('click', async () => {
       if (isEditing) {
+        const ok = await CalendarState.confirm({
+          title: 'Delete Facility Break',
+          message: `Delete facility break "${breakData.title}" across its active days?`,
+          confirmText: 'Delete Facility Break',
+          cancelText: 'Cancel',
+          icon: '🗑️',
+          type: 'danger',
+        });
+        if (!ok) return;
+
+        LoadingOverlay.show('Deleting facility break...');
         try {
           await ApiClient.deleteSalonRoutineBreak({
             title: breakData.title,
@@ -6344,11 +6859,15 @@ export class SalonDashboard {
           const headerChip = document.getElementById('salon-breaks-header-count');
           if (headerChip) headerChip.textContent = this.currentSalonHoursState.routineBreaks.length;
           this.attachSalonRoutineBreaksListeners();
+          this.initialSalonScheduleSnapshot = this.serializeSalonSchedule();
+          this.updateSalonSaveBtnState();
           closeSheet();
           this.showToast('Facility break deleted', 'success');
         } catch (err) {
           console.error('Failed to delete facility break:', err);
           this.showToast(err.message || 'Failed to delete facility break', 'error');
+        } finally {
+          LoadingOverlay.hide(150);
         }
       }
     });
@@ -6391,6 +6910,7 @@ export class SalonDashboard {
         saveBtn.textContent = 'Saving...';
       }
 
+      LoadingOverlay.show(isEditing ? 'Updating facility break...' : 'Adding facility break...');
       try {
         if (isEditing) {
           await ApiClient.updateSalonRoutineBreak({
@@ -6443,6 +6963,8 @@ export class SalonDashboard {
         const headerChip = document.getElementById('salon-breaks-header-count');
         if (headerChip) headerChip.textContent = this.currentSalonHoursState.routineBreaks.length;
         this.attachSalonRoutineBreaksListeners();
+        this.initialSalonScheduleSnapshot = this.serializeSalonSchedule();
+        this.updateSalonSaveBtnState();
         closeSheet();
         this.showToast(`Facility break '${title}' ${isEditing ? 'updated' : 'added'} successfully`, 'success');
       } catch (err) {
@@ -6450,8 +6972,10 @@ export class SalonDashboard {
         this.showToast(err.message || 'Failed to save facility break', 'error');
         if (saveBtn) {
           saveBtn.disabled = false;
-          saveBtn.textContent = isEditing ? 'Save Changes' : 'Add Facility Break';
+          saveBtn.textContent = isEditing ? '✓ Save Changes' : '+ Add Facility Break';
         }
+      } finally {
+        LoadingOverlay.hide(150);
       }
     });
   }
@@ -7265,12 +7789,15 @@ export class SalonDashboard {
 
           <!-- Right Content Canvas (Active Section Detail Panel) -->
           <div class="settings-main" id="settings-main-container">
-            <!-- Mobile Back Button (Visible when drilled down on small screens) -->
-            <div class="settings-mobile-header">
+            <!-- Mobile Back Button & Action Header (Back on left, Save on right) -->
+            <div class="settings-mobile-header ${(this.activeProfileSubtab === 'hours' || this.activeProfileSubtab === 'operations') ? 'has-action' : ''}" id="settings-mobile-header-row">
               <button type="button" class="settings-mobile-back-btn" id="btn-settings-mobile-back">
                 ${Icons.chevronLeft({ size: 14 })}
                 <span>Back to Settings</span>
               </button>
+              <div id="settings-header-action-container">
+                ${this.renderSettingsHeaderActionHtml()}
+              </div>
             </div>
 
             <!-- Subtab Content Render Target -->
@@ -7281,6 +7808,22 @@ export class SalonDashboard {
         </div>
       </div>
     `;
+  }
+
+  renderSettingsHeaderActionHtml() {
+    if (this.activeProfileSubtab === 'hours' || this.activeProfileSubtab === 'operations') {
+      return `
+        <button type="button" class="btn-save-schedule" id="btn-save-salon-hours" disabled onclick="window.salonDashboard?.saveSalonSchedule?.()" title="Save salon operating hours">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+            <polyline points="17 21 17 13 7 13 7 21"></polyline>
+            <polyline points="7 3 7 8 15 8"></polyline>
+          </svg>
+          <span>Save</span>
+        </button>
+      `;
+    }
+    return '';
   }
 
   renderProfileSubtabContent() {
@@ -7751,6 +8294,16 @@ export class SalonDashboard {
     document.querySelector('.settings-container')?.classList.add('settings-drilled-active');
     document.querySelector('.settings-page-header')?.classList.add('settings-page-header-drilled');
 
+    const headerRow = document.getElementById('settings-mobile-header-row');
+    const hasAction = subtab === 'hours' || subtab === 'operations';
+    if (headerRow) {
+      headerRow.classList.toggle('has-action', hasAction);
+    }
+    const actionContainer = document.getElementById('settings-header-action-container');
+    if (actionContainer) {
+      actionContainer.innerHTML = this.renderSettingsHeaderActionHtml();
+    }
+
     const container = document.getElementById('profile-subtab-container');
     if (container) {
       try {
@@ -7795,10 +8348,24 @@ export class SalonDashboard {
       };
     });
 
-    // 2. Mobile Back button
+    // 2. Mobile Back button (with unsaved changes guard for salon hours)
     const backBtn = document.getElementById('btn-settings-mobile-back');
     if (backBtn) {
-      backBtn.onclick = (e) => {
+      backBtn.onclick = async (e) => {
+        if (this.activeProfileSubtab === 'hours' && typeof this.isSalonScheduleDirty === 'function' && this.isSalonScheduleDirty()) {
+          e.preventDefault();
+          e.stopPropagation();
+          const leave = await CalendarState.confirm({
+            title: 'Unsaved Operating Hours',
+            message: 'You have unsaved changes to salon operating hours. Leave without saving?',
+            confirmText: 'Leave Without Saving',
+            cancelText: 'Stay & Save',
+            icon: '⚠️',
+            type: 'warning',
+          });
+          if (!leave) return;
+        }
+
         e.preventDefault();
         this.mobileSettingsDrilled = false;
         const layoutRoot = document.getElementById('settings-layout-root');
@@ -8051,6 +8618,9 @@ export class SalonDashboard {
       const bulkStartPrev = container.querySelector('#master-bulk-start-preview');
       const bulkEndPrev = container.querySelector('#master-bulk-end-preview');
 
+      makeTimeInputClickable(bulkStartInp, bulkStartInp?.closest('.bulk-time-inp-wrap'));
+      makeTimeInputClickable(bulkEndInp, bulkEndInp?.closest('.bulk-time-inp-wrap'));
+
       const handleBulkShiftLiveChange = (immediate = false) => {
         const sVal = bulkStartInp?.value || '';
         const eVal = bulkEndInp?.value || '';
@@ -8123,7 +8693,7 @@ export class SalonDashboard {
           let maxE = activeDays.length > 0 ? activeDays.reduce((max, h) => (h.endTime && h.endTime > max ? h.endTime : max), activeDays[0].endTime) : eVal;
           if (sVal < minS) minS = sVal;
           if (eVal > maxE) maxE = eVal;
-          subEl.textContent = `Changes auto-apply live · Store hours: ${formatTime12h(minS)} – ${formatTime12h(maxE)}`;
+          subEl.textContent = `Set default shift · Store hours: ${formatTime12h(minS)} – ${formatTime12h(maxE)}`;
         }
         this.syncRoutineBreaksToDays();
         const rowsContainer = document.getElementById('stylist-roster-rows-container');
@@ -8131,10 +8701,7 @@ export class SalonDashboard {
           rowsContainer.innerHTML = this.renderStaffRosterRowsHtml();
           this.attachStaffRosterListeners();
         }
-        const msg = immediate
-          ? `Updated shift to ${formatTime12h(effectiveStart)} – ${formatTime12h(effectiveEnd)} for ${st.name || 'Specialist'} (auto-saved)`
-          : null;
-        this.autoSaveStaffSchedule(st.id, immediate, msg);
+        this.updateStaffSaveBtnState();
       };
 
       bulkStartInp?.addEventListener('input', () => handleBulkShiftLiveChange(false));
@@ -8143,6 +8710,12 @@ export class SalonDashboard {
       bulkEndInp?.addEventListener('input', () => handleBulkShiftLiveChange(false));
       bulkEndInp?.addEventListener('change', () => handleBulkShiftLiveChange(true));
       bulkEndInp?.addEventListener('blur', () => handleBulkShiftLiveChange(true));
+
+      const saveStaffBtn = document.getElementById('btn-save-staff-schedule');
+      if (saveStaffBtn) {
+        saveStaffBtn.onclick = () => this.saveStaffSchedule(st.id);
+      }
+      this.updateStaffSaveBtnState();
 
       // 4. Add Routine Break Button (Opens bottom sheet)
       const btnAddBreak = container.querySelector('#btn-add-routine-break');
@@ -8161,10 +8734,15 @@ export class SalonDashboard {
           el.onclick = (e) => {
             e.preventDefault();
             e.stopPropagation();
+            if (!this.doesStaffDifferFromSalon()) {
+              this.showToast?.('Staff schedule already matches salon operating hours.', 'info');
+              return;
+            }
             this.openResetAllToSalonHoursBottomSheet();
           };
         }
       });
+      this.updateStaffSyncBannerState();
     }
   }
 
@@ -10714,7 +11292,13 @@ showBlockTimeModal() {
               </div>
               <div style="flex: 1;">
                 <label style="font-size: 0.8rem;">Icon/Emoji</label>
-                <input type="text" class="form-control" id="cat-icon-input" placeholder="✂️" value="✂️" />
+                <div style="position: relative;">
+                  <button type="button" id="cat-icon-btn" title="Click to choose icon" class="form-control" style="width: 100%; height: 38px; padding: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 1.2rem; cursor: pointer; background: rgba(255,255,255,0.08); border: 1px solid var(--border-subtle);" aria-label="Choose Category Icon">
+                    <span id="cat-icon-preview">✂️</span>
+                  </button>
+                  <input type="hidden" id="cat-icon-input" value="✂️" />
+                  <div id="cat-icon-picker" class="cat-icon-picker-popover" style="display: none;"></div>
+                </div>
               </div>
               <button type="submit" class="btn btn-primary btn-sm" style="height: 38px;">➕ Add</button>
             </form>
@@ -10744,6 +11328,8 @@ showBlockTimeModal() {
   document.getElementById('btn-close-modal')?.addEventListener('click', () => {
     modalContainer.innerHTML = '';
   });
+
+  setupCategoryIconPicker('cat-icon-btn', 'cat-icon-preview', 'cat-icon-input', 'cat-icon-picker');
 
   document.getElementById('add-category-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -10823,7 +11409,8 @@ showAddServiceModal() {
             <!-- 1. Service Name -->
             <div class="form-group">
               <label style="font-size: 0.85rem; font-weight: 600; color: #fff; margin-bottom: 6px; display: block;">Service Name *</label>
-              <input type="text" class="form-control" id="svc-name" placeholder="e.g. Standard Haircut, Beard Trim, Facial" style="height: 40px; font-size: 0.88rem;" required />
+              <input type="text" class="form-control" id="svc-name" placeholder="e.g. Standard Haircut, Beard Trim, Facial" minlength="2" maxlength="100" style="height: 40px; font-size: 0.88rem;" required autocomplete="off" />
+              <span class="field-hint" style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-top: 4px;">2 to 100 characters</span>
             </div>
 
             <!-- 2. Category with Custom Dropdown + Inline New Category -->
@@ -10874,16 +11461,22 @@ showAddServiceModal() {
                   <span style="font-size: 0.75rem; font-weight: 600; color: #fff;">Quick Create Category</span>
                   <button type="button" id="btn-close-inline-cat" style="background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.8rem;">✕</button>
                 </div>
-                <div style="display: flex; gap: 6px; align-items: center;">
-                  <input type="text" id="inline-cat-icon" value="✂️" style="width: 40px; text-align: center; height: 34px; font-size: 1rem;" class="form-control" />
-                  <input type="text" id="inline-cat-name" placeholder="Category name (e.g. Spa, Shave)" class="form-control" style="flex: 1; height: 34px; font-size: 0.82rem;" />
+                <div style="display: flex; gap: 6px; align-items: center; position: relative;">
+                  <div style="position: relative; flex-shrink: 0;">
+                    <button type="button" id="inline-cat-icon-btn" title="Click to choose icon" class="form-control" style="width: 40px; height: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 1.15rem; cursor: pointer; background: rgba(255,255,255,0.08); border: 1px solid var(--border-subtle); flex-shrink: 0;" aria-label="Choose Category Icon">
+                      <span id="inline-cat-icon-preview">✂️</span>
+                    </button>
+                    <input type="hidden" id="inline-cat-icon" value="✂️" />
+                    <div id="inline-cat-icon-picker" class="cat-icon-picker-popover" style="display: none;"></div>
+                  </div>
+                  <input type="text" id="inline-cat-name" placeholder="Category name (e.g. Spa, Shave)" maxlength="50" class="form-control" style="flex: 1; height: 34px; font-size: 0.82rem;" autocomplete="off" />
                   <button type="button" id="btn-save-inline-cat" class="btn btn-primary btn-sm" style="height: 34px; padding: 0 12px; font-size: 0.8rem;">Add</button>
                 </div>
               </div>
 
               <!-- Custom Category Input fallback -->
               <div id="svc-custom-cat-group" style="display: none; margin-top: 8px;">
-                <input type="text" class="form-control" id="svc-custom-cat-input" placeholder="Type custom category name..." style="height: 38px;" />
+                <input type="text" class="form-control" id="svc-custom-cat-input" placeholder="Type custom category name..." maxlength="50" style="height: 38px;" />
               </div>
             </div>
 
@@ -10903,10 +11496,11 @@ showAddServiceModal() {
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
               <div class="form-group">
                 <label style="font-size: 0.85rem; font-weight: 600; color: #fff; margin-bottom: 6px; display: block;">Price (₹) *</label>
-                <div style="position: relative;">
-                  <span style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-weight: 700; color: #fbbf24; font-size: 0.95rem;">₹</span>
-                  <input type="number" class="form-control" id="svc-price" placeholder="100" min="0" step="1" style="padding-left: 28px; height: 40px; font-size: 0.88rem;" required />
+                <div class="price-input-wrap" style="position: relative;">
+                  <span class="price-currency-symbol" style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-weight: 700; color: #fbbf24; font-size: 0.95rem; pointer-events: none; user-select: none; z-index: 2; line-height: 1;">₹</span>
+                  <input type="number" class="form-control price-input-control" id="svc-price" placeholder="e.g. 250" min="1" max="500000" step="1" style="padding-left: 36px !important; height: 40px; font-size: 0.88rem;" required autocomplete="off" />
                 </div>
+                <span class="field-hint" style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-top: 4px;">Min ₹1 · Max ₹5,00,000</span>
               </div>
 
               <div class="form-group">
@@ -11000,7 +11594,8 @@ showAddServiceModal() {
               <label style="font-size: 0.85rem; font-weight: 600; color: #fff; margin-bottom: 6px; display: block;">
                 Description <span style="font-weight: normal; color: var(--text-muted); font-size: 0.78rem;">(Optional)</span>
               </label>
-              <input type="text" class="form-control" id="svc-desc" placeholder="Brief details about what is included in this service..." style="height: 40px; font-size: 0.88rem;" />
+              <input type="text" class="form-control" id="svc-desc" maxlength="500" placeholder="Brief details about what is included in this service..." style="height: 40px; font-size: 0.88rem;" />
+              <span class="field-hint" style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-top: 4px;">Max 500 characters</span>
             </div>
 
             <button type="submit" class="btn btn-primary" id="btn-submit-svc-form" style="width: 100%; height: 42px; font-weight: 700; font-size: 0.9rem; margin-top: 4px;">
@@ -11022,6 +11617,23 @@ showAddServiceModal() {
   const descInput = document.getElementById('svc-desc');
   const genderInput = document.getElementById('svc-gender');
 
+  // Real-time price sanitization: disallow exponential 'e', negative '-', plus '+', and clamp > 500000
+  priceInput?.addEventListener('keydown', (e) => {
+    if (['e', 'E', '+', '-'].includes(e.key)) {
+      e.preventDefault();
+    }
+  });
+  priceInput?.addEventListener('input', () => {
+    let val = priceInput.value;
+    if (val.includes('-')) {
+      priceInput.value = val.replace(/-/g, '');
+    }
+    const num = parseFloat(priceInput.value);
+    if (!isNaN(num) && num > 500000) {
+      priceInput.value = '500000';
+    }
+  });
+
   // Audience toggle buttons
   document.querySelectorAll('.svc-aud-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -11033,6 +11645,7 @@ showAddServiceModal() {
 
   // Inline category toggle & creation
   const inlineBox = document.getElementById('svc-inline-cat-box');
+  setupCategoryIconPicker('inline-cat-icon-btn', 'inline-cat-icon-preview', 'inline-cat-icon', 'inline-cat-icon-picker');
   document.getElementById('btn-toggle-inline-cat')?.addEventListener('click', () => {
     inlineBox.style.display = inlineBox.style.display === 'none' ? 'block' : 'none';
     if (inlineBox.style.display === 'block') {
@@ -11083,6 +11696,10 @@ showAddServiceModal() {
 
       inlineBox.style.display = 'none';
       document.getElementById('inline-cat-name').value = '';
+      const hiddenCatIcon = document.getElementById('inline-cat-icon');
+      if (hiddenCatIcon) hiddenCatIcon.value = '✂️';
+      const previewCatIcon = document.getElementById('inline-cat-icon-preview');
+      if (previewCatIcon) previewCatIcon.textContent = '✂️';
       this.showToast(`Category "${catName}" added!`, 'success');
     } catch (err) {
       this.showToast(err.message || 'Failed to create category', 'error');
@@ -11325,11 +11942,48 @@ showAddServiceModal() {
 
   document.getElementById('add-service-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const rawCat = categorySelect.value;
-    if (rawCat === 'CUSTOM' && !customCatInput.value.trim()) {
-      this.showToast('Please enter a custom category name.', 'warning');
-      customCatInput.focus();
+
+    // 1. Service Name Validation
+    const name = nameInput.value.trim();
+    if (!name) {
+      this.showToast('Please enter a service name.', 'warning');
+      nameInput.focus();
       return;
+    }
+    if (name.length < 2) {
+      this.showToast('Service name must be at least 2 characters long.', 'warning');
+      nameInput.focus();
+      return;
+    }
+    if (name.length > 100) {
+      this.showToast('Service name cannot exceed 100 characters.', 'warning');
+      nameInput.focus();
+      return;
+    }
+
+    // 2. Category Validation
+    const rawCat = categorySelect.value;
+    if (!rawCat) {
+      this.showToast('Please select a service category.', 'warning');
+      return;
+    }
+    if (rawCat === 'CUSTOM') {
+      const customVal = customCatInput.value.trim();
+      if (!customVal) {
+        this.showToast('Please enter a custom category name.', 'warning');
+        customCatInput.focus();
+        return;
+      }
+      if (customVal.length < 2) {
+        this.showToast('Custom category name must be at least 2 characters long.', 'warning');
+        customCatInput.focus();
+        return;
+      }
+      if (customVal.length > 50) {
+        this.showToast('Custom category name cannot exceed 50 characters.', 'warning');
+        customCatInput.focus();
+        return;
+      }
     }
     const finalCategory = rawCat === 'CUSTOM' ? customCatInput.value.trim() : rawCat;
     const selectedOpt = categorySelect.options[categorySelect.selectedIndex];
@@ -11337,22 +11991,67 @@ showAddServiceModal() {
     const matchedCat = categoryId ? null : (this.categoriesList || []).find((c) => c.name === finalCategory);
     const finalCategoryId = categoryId || (matchedCat ? matchedCat.id : undefined);
 
+    // 3. Price Validation (Disallow ₹0, negative, NaN, infinite, > 5,00,000)
+    const rawPriceStr = priceInput.value.trim();
+    if (rawPriceStr === '') {
+      this.showToast('Please enter a price for this service.', 'warning');
+      priceInput.focus();
+      return;
+    }
+    const price = Number(rawPriceStr);
+    if (isNaN(price) || !Number.isFinite(price)) {
+      this.showToast('Please enter a valid numeric price.', 'warning');
+      priceInput.focus();
+      return;
+    }
+    if (price < 1) {
+      this.showToast('Service price must be at least ₹1. Free or ₹0 services are not allowed.', 'warning');
+      priceInput.focus();
+      return;
+    }
+    if (price > 500000) {
+      this.showToast('Service price cannot exceed ₹5,00,000.', 'warning');
+      priceInput.focus();
+      return;
+    }
+    if (rawPriceStr.includes('.') && rawPriceStr.split('.')[1].length > 2) {
+      this.showToast('Price can have at most 2 decimal places.', 'warning');
+      priceInput.focus();
+      return;
+    }
+
+    // 4. Duration Validation
     const dur = parseInt(durationSelect.value, 10);
-    if (isNaN(dur) || dur < 30 || dur % 15 !== 0) {
-      this.showToast('Service duration must be at least 30 minutes and a multiple of 15 (e.g. 30, 45, 60, 75, 90 mins).', 'warning');
+    if (isNaN(dur) || dur < 15 || dur > 480 || dur % 15 !== 0) {
+      this.showToast('Service duration must be at least 15 minutes and a multiple of 15 (e.g. 30, 45, 60, 75, 90 mins).', 'warning');
+      return;
+    }
+
+    // 5. Target Audience Validation
+    const targetGender = genderInput?.value || 'UNISEX';
+    if (!['UNISEX', 'MALE', 'FEMALE', 'KIDS'].includes(targetGender)) {
+      this.showToast('Please select a valid target audience.', 'warning');
+      return;
+    }
+
+    // 6. Description Validation
+    const description = descInput.value.trim();
+    if (description.length > 500) {
+      this.showToast('Service description cannot exceed 500 characters.', 'warning');
+      descInput.focus();
       return;
     }
 
     const selectedStylistIds = Array.from(document.querySelectorAll('.svc-staff-assign-chk:checked')).map((c) => c.value);
 
     const payload = {
-      name: nameInput.value.trim(),
-      price: parseFloat(priceInput.value),
+      name,
+      price: Math.round(price * 100) / 100,
       durationMinutes: dur,
       category: finalCategory,
       categoryId: finalCategoryId,
-      targetGender: genderInput?.value || 'UNISEX',
-      description: descInput.value.trim(),
+      targetGender,
+      description,
       stylistIds: selectedStylistIds,
     };
 
@@ -11449,7 +12148,8 @@ showEditServiceModal(service) {
             <!-- 1. Service Name -->
             <div class="form-group">
               <label style="font-size: 0.85rem; font-weight: 600; color: #fff; margin-bottom: 6px; display: block;">Service Name *</label>
-              <input type="text" class="form-control" id="edit-svc-name" value="${service.name}" style="height: 40px; font-size: 0.88rem;" required />
+              <input type="text" class="form-control" id="edit-svc-name" value="${service.name}" placeholder="e.g. Standard Haircut, Beard Trim, Facial" minlength="2" maxlength="100" style="height: 40px; font-size: 0.88rem;" required autocomplete="off" />
+              <span class="field-hint" style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-top: 4px;">2 to 100 characters</span>
             </div>
 
             <!-- 2. Category with Custom Dropdown + Inline New Category -->
@@ -11500,16 +12200,22 @@ showEditServiceModal(service) {
                   <span style="font-size: 0.75rem; font-weight: 600; color: #fff;">Quick Create Category</span>
                   <button type="button" id="edit-btn-close-inline-cat" style="background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.8rem;">✕</button>
                 </div>
-                <div style="display: flex; gap: 6px; align-items: center;">
-                  <input type="text" id="edit-inline-cat-icon" value="✂️" style="width: 40px; text-align: center; height: 34px; font-size: 1rem;" class="form-control" />
-                  <input type="text" id="edit-inline-cat-name" placeholder="Category name (e.g. Spa, Shave)" class="form-control" style="flex: 1; height: 34px; font-size: 0.82rem;" />
+                <div style="display: flex; gap: 6px; align-items: center; position: relative;">
+                  <div style="position: relative; flex-shrink: 0;">
+                    <button type="button" id="edit-inline-cat-icon-btn" title="Click to choose icon" class="form-control" style="width: 40px; height: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 1.15rem; cursor: pointer; background: rgba(255,255,255,0.08); border: 1px solid var(--border-subtle); flex-shrink: 0;" aria-label="Choose Category Icon">
+                      <span id="edit-inline-cat-icon-preview">✂️</span>
+                    </button>
+                    <input type="hidden" id="edit-inline-cat-icon" value="✂️" />
+                    <div id="edit-inline-cat-icon-picker" class="cat-icon-picker-popover" style="display: none;"></div>
+                  </div>
+                  <input type="text" id="edit-inline-cat-name" placeholder="Category name (e.g. Spa, Shave)" maxlength="50" class="form-control" style="flex: 1; height: 34px; font-size: 0.82rem;" autocomplete="off" />
                   <button type="button" id="edit-btn-save-inline-cat" class="btn btn-primary btn-sm" style="height: 34px; padding: 0 12px; font-size: 0.8rem;">Add</button>
                 </div>
               </div>
 
               <!-- Custom Category Input fallback -->
               <div id="edit-svc-custom-cat-group" style="${initialCatValue === 'CUSTOM' ? 'display: block;' : 'display: none;'} margin-top: 8px;">
-                <input type="text" class="form-control" id="edit-svc-custom-cat-input" value="${initialCatValue === 'CUSTOM' ? (service.category || '') : ''}" placeholder="Type custom category name..." style="height: 38px;" />
+                <input type="text" class="form-control" id="edit-svc-custom-cat-input" value="${initialCatValue === 'CUSTOM' ? (service.category || '') : ''}" placeholder="Type custom category name..." maxlength="50" style="height: 38px;" />
               </div>
             </div>
 
@@ -11529,10 +12235,11 @@ showEditServiceModal(service) {
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
               <div class="form-group">
                 <label style="font-size: 0.85rem; font-weight: 600; color: #fff; margin-bottom: 6px; display: block;">Price (₹) *</label>
-                <div style="position: relative;">
-                  <span style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-weight: 700; color: #fbbf24; font-size: 0.95rem;">₹</span>
-                  <input type="number" class="form-control" id="edit-svc-price" value="${service.price}" min="0" step="1" style="padding-left: 28px; height: 40px; font-size: 0.88rem;" required />
+                <div class="price-input-wrap" style="position: relative;">
+                  <span class="price-currency-symbol" style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-weight: 700; color: #fbbf24; font-size: 0.95rem; pointer-events: none; user-select: none; z-index: 2; line-height: 1;">₹</span>
+                  <input type="number" class="form-control price-input-control" id="edit-svc-price" value="${service.price || ''}" placeholder="e.g. 250" min="1" max="500000" step="1" style="padding-left: 36px !important; height: 40px; font-size: 0.88rem;" required autocomplete="off" />
                 </div>
+                <span class="field-hint" style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-top: 4px;">Min ₹1 · Max ₹5,00,000</span>
               </div>
 
               <div class="form-group">
@@ -11625,7 +12332,8 @@ showEditServiceModal(service) {
               <label style="font-size: 0.85rem; font-weight: 600; color: #fff; margin-bottom: 6px; display: block;">
                 Description <span style="font-weight: normal; color: var(--text-muted); font-size: 0.78rem;">(Optional)</span>
               </label>
-              <input type="text" class="form-control" id="edit-svc-desc" value="${service.description || ''}" placeholder="Brief details about what is included in this service..." style="height: 40px; font-size: 0.88rem;" />
+              <input type="text" class="form-control" id="edit-svc-desc" value="${service.description || ''}" maxlength="500" placeholder="Brief details about what is included in this service..." style="height: 40px; font-size: 0.88rem;" />
+              <span class="field-hint" style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-top: 4px;">Max 500 characters</span>
             </div>
 
             <button type="submit" class="btn btn-primary" id="btn-submit-edit-svc" style="width: 100%; height: 42px; font-weight: 700; font-size: 0.9rem; margin-top: 4px;">
@@ -11643,6 +12351,24 @@ showEditServiceModal(service) {
   const customCatInput = document.getElementById('edit-svc-custom-cat-input');
   const durationSelect = document.getElementById('edit-svc-duration');
   const genderInput = document.getElementById('edit-svc-gender');
+  const editPriceInput = document.getElementById('edit-svc-price');
+
+  // Real-time price sanitization: disallow exponential 'e', negative '-', plus '+', and clamp > 500000
+  editPriceInput?.addEventListener('keydown', (e) => {
+    if (['e', 'E', '+', '-'].includes(e.key)) {
+      e.preventDefault();
+    }
+  });
+  editPriceInput?.addEventListener('input', () => {
+    let val = editPriceInput.value;
+    if (val.includes('-')) {
+      editPriceInput.value = val.replace(/-/g, '');
+    }
+    const num = parseFloat(editPriceInput.value);
+    if (!isNaN(num) && num > 500000) {
+      editPriceInput.value = '500000';
+    }
+  });
 
   // Audience toggle buttons
   document.querySelectorAll('.edit-svc-aud-btn').forEach((btn) => {
@@ -11774,6 +12500,7 @@ showEditServiceModal(service) {
 
   // Inline category toggle & creation
   const inlineBox = document.getElementById('edit-svc-inline-cat-box');
+  setupCategoryIconPicker('edit-inline-cat-icon-btn', 'edit-inline-cat-icon-preview', 'edit-inline-cat-icon', 'edit-inline-cat-icon-picker');
   document.getElementById('edit-btn-toggle-inline-cat')?.addEventListener('click', () => {
     inlineBox.style.display = inlineBox.style.display === 'none' ? 'block' : 'none';
     if (inlineBox.style.display === 'block') {
@@ -11824,6 +12551,10 @@ showEditServiceModal(service) {
 
       inlineBox.style.display = 'none';
       document.getElementById('edit-inline-cat-name').value = '';
+      const hiddenCatIcon = document.getElementById('edit-inline-cat-icon');
+      if (hiddenCatIcon) hiddenCatIcon.value = '✂️';
+      const previewCatIcon = document.getElementById('edit-inline-cat-icon-preview');
+      if (previewCatIcon) previewCatIcon.textContent = '✂️';
       this.showToast(`Category "${catName}" added!`, 'success');
     } catch (err) {
       this.showToast(err.message || 'Failed to create category', 'error');
@@ -11949,33 +12680,122 @@ showEditServiceModal(service) {
   document.getElementById('edit-service-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const submitBtn = document.getElementById('btn-submit-edit-svc') || e.target.querySelector('button[type="submit"]');
+
+    const nameInput = document.getElementById('edit-svc-name');
+    const priceInput = document.getElementById('edit-svc-price');
+    const durInput = document.getElementById('edit-svc-duration');
+    const descInput = document.getElementById('edit-svc-desc');
+
+    // 1. Service Name Validation
+    const name = (nameInput?.value || '').trim();
+    if (!name) {
+      this.showToast('Please enter a service name.', 'warning');
+      nameInput?.focus();
+      return;
+    }
+    if (name.length < 2) {
+      this.showToast('Service name must be at least 2 characters long.', 'warning');
+      nameInput?.focus();
+      return;
+    }
+    if (name.length > 100) {
+      this.showToast('Service name cannot exceed 100 characters.', 'warning');
+      nameInput?.focus();
+      return;
+    }
+
+    // 2. Category Validation
+    const rawCat = categorySelect.value;
+    if (!rawCat) {
+      this.showToast('Please select a service category.', 'warning');
+      return;
+    }
+    if (rawCat === 'CUSTOM') {
+      const customVal = customCatInput.value.trim();
+      if (!customVal) {
+        this.showToast('Please enter a custom category name.', 'warning');
+        customCatInput.focus();
+        return;
+      }
+      if (customVal.length < 2) {
+        this.showToast('Custom category name must be at least 2 characters long.', 'warning');
+        customCatInput.focus();
+        return;
+      }
+      if (customVal.length > 50) {
+        this.showToast('Custom category name cannot exceed 50 characters.', 'warning');
+        customCatInput.focus();
+        return;
+      }
+    }
+    const finalCategory = rawCat === 'CUSTOM' ? (customCatInput.value.trim() || 'General') : rawCat;
+
+    // 3. Price Validation (Disallow ₹0, negative, NaN, infinite, > 5,00,000)
+    const rawPriceStr = (priceInput?.value || '').trim();
+    if (rawPriceStr === '') {
+      this.showToast('Please enter a price for this service.', 'warning');
+      priceInput?.focus();
+      return;
+    }
+    const price = Number(rawPriceStr);
+    if (isNaN(price) || !Number.isFinite(price)) {
+      this.showToast('Please enter a valid numeric price.', 'warning');
+      priceInput?.focus();
+      return;
+    }
+    if (price < 1) {
+      this.showToast('Service price must be at least ₹1. Free or ₹0 services are not allowed.', 'warning');
+      priceInput?.focus();
+      return;
+    }
+    if (price > 500000) {
+      this.showToast('Service price cannot exceed ₹5,00,000.', 'warning');
+      priceInput?.focus();
+      return;
+    }
+    if (rawPriceStr.includes('.') && rawPriceStr.split('.')[1].length > 2) {
+      this.showToast('Price can have at most 2 decimal places.', 'warning');
+      priceInput?.focus();
+      return;
+    }
+
+    // 4. Duration Validation
+    const dur = parseInt(durInput?.value, 10);
+    if (isNaN(dur) || dur < 15 || dur > 480 || dur % 15 !== 0) {
+      this.showToast('Service duration must be at least 15 minutes and a multiple of 15 (e.g. 30, 45, 60, 75, 90 mins).', 'warning');
+      return;
+    }
+
+    // 5. Target Audience Validation
+    const targetGender = genderInput?.value || 'UNISEX';
+    if (!['UNISEX', 'MALE', 'FEMALE', 'KIDS'].includes(targetGender)) {
+      this.showToast('Please select a valid target audience.', 'warning');
+      return;
+    }
+
+    // 6. Description Validation
+    const description = (descInput?.value || '').trim();
+    if (description.length > 500) {
+      this.showToast('Service description cannot exceed 500 characters.', 'warning');
+      descInput?.focus();
+      return;
+    }
+
     if (submitBtn) {
       if (submitBtn.disabled) return;
       submitBtn.disabled = true;
       submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving changes...';
     }
 
-    const rawCat = categorySelect.value;
-    const finalCategory = rawCat === 'CUSTOM' ? (customCatInput.value.trim() || 'General') : rawCat;
-    const dur = parseInt(document.getElementById('edit-svc-duration').value, 10);
-    if (isNaN(dur) || dur < 30 || dur % 15 !== 0) {
-      if (submitBtn) {
-        submitBtn.disabled = false;
-        submitBtn.innerHTML = 'Save Changes to Menu →';
-      }
-      this.showToast('Service duration must be at least 30 minutes and a multiple of 15 (e.g. 30, 45, 60, 75, 90 mins).', 'warning');
-      return;
-    }
-
     const selectedStylistIds = Array.from(document.querySelectorAll('.edit-svc-staff-assign-chk:checked')).map((c) => c.value);
 
     const payload = {
-      name: document.getElementById('edit-svc-name').value.trim(),
-      price: parseFloat(document.getElementById('edit-svc-price').value),
+      name,
+      price: Math.round(price * 100) / 100,
       durationMinutes: dur,
       category: finalCategory,
-      targetGender: genderInput?.value || 'UNISEX',
-      description: document.getElementById('edit-svc-desc').value.trim(),
+      targetGender,
+      description,
       stylistIds: selectedStylistIds,
     };
 
@@ -12091,107 +12911,160 @@ showEditStaffModal(staff) {
   });
 }
 
-showDeleteStaffModal(staffId, staffName) {
-  const modalContainer = document.getElementById('modal-container');
-  if (!modalContainer) return;
+  async showDeleteStaffModal(staffId, staffName) {
+    const modalContainer = document.getElementById('modal-container');
+    if (!modalContainer) return;
 
-  const targetStaff = (this.staffList || []).find((s) => String(s.id) === String(staffId)) || { name: staffName };
-  const initials = (targetStaff.name || staffName || 'ST')
-    .split(' ')
-    .map((n) => n[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2);
+    const targetStaff = (this.staffList || []).find((s) => String(s.id) === String(staffId)) || { name: staffName };
+    const initials = (targetStaff.name || staffName || 'ST')
+      .split(' ')
+      .map((n) => n[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2);
 
-  const servicesCount = (targetStaff.services || []).length;
+    const servicesCount = (targetStaff.services || []).length;
 
-  // Check if stylist has active / waiting queue appointments today
-  const queueItems = this.queueSync?.items || this.summaryData?.todayAppointments || [];
-  const activeAppts = queueItems.filter((a) => {
-    const aStaffId = a.stylistId || a.stylist?.id;
-    const status = (a.status || '').toUpperCase();
-    return String(aStaffId) === String(staffId) && !['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(status);
-  });
-  const hasActiveAppts = activeAppts.length > 0;
+    // Check if stylist has active / waiting / upcoming appointments across API & today's queue
+    LoadingOverlay.show('Checking stylist bookings...');
+    let activeAppts = [];
+    try {
+      const apptsRes = await ApiClient.getAppointments({ stylistId: staffId }).catch(() => []);
+      const apptsList = Array.isArray(apptsRes) ? apptsRes : (apptsRes?.data || []);
+      const activeStatuses = ['BOOKED', 'CONFIRMED', 'ON_THE_WAY', 'CHECKED_IN', 'SEATED_IN_CHAIR', 'PENDING_RESCHEDULE'];
+      const apiActive = apptsList.filter((a) => {
+        const st = (a.status || '').toUpperCase();
+        return activeStatuses.includes(st);
+      });
 
-  modalContainer.innerHTML = `
-      <div class="modal-backdrop show" id="delete-staff-backdrop">
-        <div class="modal-content modal-content-sheet" style="max-width: 440px; background: linear-gradient(160deg, #171b2d 0%, #0e1220 100%); border: 1px solid rgba(239, 68, 68, 0.3); box-shadow: 0 24px 60px rgba(0,0,0,0.7), 0 0 30px rgba(239,68,68,0.15); border-radius: 16px; padding: 22px 24px;">
+      const queueItems = this.queueSync?.items || this.summaryData?.todayAppointments || [];
+      const queueActive = queueItems.filter((a) => {
+        const aStaffId = a.stylistId || a.stylist?.id;
+        const st = (a.status || '').toUpperCase();
+        return String(aStaffId) === String(staffId) && activeStatuses.includes(st);
+      });
+
+      const allActiveMap = new Map();
+      [...apiActive, ...queueActive].forEach((a) => {
+        if (a && a.id) allActiveMap.set(String(a.id), a);
+      });
+      activeAppts = Array.from(allActiveMap.values());
+    } catch (_) {
+    } finally {
+      LoadingOverlay.hide(100);
+    }
+
+    const hasActiveAppts = activeAppts.length > 0;
+
+    const displayName = targetStaff.name || staffName || 'Stylist';
+    const roleText = targetStaff.role || 'Hair & Beard Specialist';
+    const bookingCountText = activeAppts.length === 1 ? '1 Active Booking' : `${activeAppts.length} Active Bookings`;
+
+    modalContainer.innerHTML = `
+      <div class="calendar-confirm-backdrop" id="delete-staff-backdrop">
+        <div class="staff-modal-card ${hasActiveAppts ? 'blocked' : 'confirm'}">
           
-          <!-- Header: Danger Icon + Title -->
-          <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
-            <div style="width: 44px; height: 44px; border-radius: 12px; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); display: flex; align-items: center; justify-content: center; color: #ef4444; flex-shrink: 0;">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <!-- Top-Right Close Button -->
+          <button type="button" class="staff-modal-close-btn" id="btn-modal-close-x" title="Close dialog">&times;</button>
+
+          <!-- Glowing Status Icon Badge -->
+          <div class="staff-modal-icon-badge ${hasActiveAppts ? 'warning' : 'danger'}">
+            ${hasActiveAppts ? `
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                <line x1="12" y1="9" x2="12" y2="13"></line>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+              </svg>
+            ` : `
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="3 6 5 6 21 6"></polyline>
                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
                 <line x1="10" y1="11" x2="10" y2="17"></line>
                 <line x1="14" y1="11" x2="14" y2="17"></line>
               </svg>
-            </div>
-            <div>
-              <h3 style="font-size: 1.12rem; font-weight: 800; color: #ffffff; margin: 0; line-height: 1.2;">Delete Stylist</h3>
-              <p style="color: #94a3b8; font-size: 0.76rem; margin: 3px 0 0 0;">This action permanently removes the stylist record</p>
-            </div>
+            `}
           </div>
 
-          <!-- Stylist Profile Snapshot Card -->
-          <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 12px 14px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between;">
-            <div style="display: flex; align-items: center; gap: 10px;">
-              <div style="width: 36px; height: 36px; border-radius: 9px; background: linear-gradient(135deg, #a855f7 0%, #6366f1 100%); color: #fff; font-weight: 700; font-size: 0.85rem; display: flex; align-items: center; justify-content: center;">
-                ${initials}
-              </div>
-              <div>
-                <div style="font-weight: 700; color: #ffffff; font-size: 0.88rem;">${targetStaff.name || staffName}</div>
-                <div style="color: #94a3b8; font-size: 0.74rem;">${targetStaff.role || 'Hair & Beard Specialist'}</div>
+          <!-- Status Pill -->
+          <div class="staff-modal-status-pill ${hasActiveAppts ? 'warning' : 'danger'}">
+            <span class="staff-modal-pulse-dot"></span>
+            <span>${hasActiveAppts ? 'Active Bookings Detected' : 'Permanent Removal'}</span>
+          </div>
+
+          <!-- Modal Title -->
+          <h3 class="staff-modal-title">
+            ${hasActiveAppts ? 'Cannot Delete Stylist' : 'Delete Stylist?'}
+          </h3>
+
+          <!-- Specialist Snapshot Bar -->
+          <div class="staff-modal-info-card">
+            <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
+              <div class="staff-modal-avatar">${initials}</div>
+              <div style="min-width: 0;">
+                <div style="font-weight: 700; color: #ffffff; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${displayName}</div>
+                <div style="color: #94a3b8; font-size: 0.74rem;">${roleText}</div>
               </div>
             </div>
-            <span style="font-size: 0.72rem; padding: 3px 8px; border-radius: 6px; background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.3); color: #d8b4fe; font-weight: 600;">
-              ${servicesCount} Services
-            </span>
+            <div class="staff-modal-tag ${hasActiveAppts ? 'amber' : 'purple'}">
+              ${hasActiveAppts ? `
+                <span style="width: 6px; height: 6px; border-radius: 50%; background: #fbbf24; box-shadow: 0 0 6px #fbbf24;"></span>
+                <span>${bookingCountText}</span>
+              ` : `
+                <span>${servicesCount} Services</span>
+              `}
+            </div>
           </div>
 
           ${hasActiveAppts ? `
-            <!-- Active Bookings Warning Alert -->
-            <div style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 10px; padding: 10px 12px; margin-bottom: 16px; display: flex; gap: 9px; align-items: flex-start;">
-              <span style="font-size: 1.1rem; line-height: 1;">⚠️</span>
-              <div style="font-size: 0.76rem; color: #fca5a5; line-height: 1.4;">
-                <strong>Active Appointments:</strong> This stylist currently has <strong>${activeAppts.length} active/pending client(s)</strong> in today's queue. Deleting will cancel or unassign these appointments.
-              </div>
+            <!-- Action Required Instruction Note -->
+            <div class="staff-modal-instruction-box">
+              <span style="font-size: 1.05rem; flex-shrink: 0;">💡</span>
+              <span>Please <strong>reschedule</strong> or <strong>cancel</strong> active bookings first before deleting this specialist.</span>
             </div>
-          ` : `
-            <p style="color: #94a3b8; font-size: 0.82rem; line-height: 1.45; margin: 0 0 18px 0;">
-              Are you sure you want to permanently delete <strong style="color: #ffffff;">${targetStaff.name || staffName}</strong>? All their routine break schedules, working hours, and service qualifications will be permanently deleted.
-            </p>
-          `}
 
-          <!-- Actions: Cancel vs Confirm Delete -->
-          <div style="display: flex; gap: 10px; align-items: center;">
-            <button type="button" class="btn btn-secondary" style="flex: 1; padding: 9px 14px; font-size: 0.84rem; font-weight: 600;" id="btn-cancel-delete-staff">
-              Cancel
+            <!-- Full-Width Action Button -->
+            <button type="button" class="staff-modal-btn-action" id="btn-cancel-delete-staff">
+              Understood, Close
             </button>
-            <button type="button" class="btn btn-primary" style="flex: 1.2; padding: 9px 14px; font-size: 0.84rem; font-weight: 700; background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); border-color: #ef4444; box-shadow: 0 4px 14px rgba(239, 68, 68, 0.35);" id="btn-confirm-delete-staff">
-              Yes, Delete Stylist
-            </button>
-          </div>
+          ` : `
+            <!-- Warning Note -->
+            <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.22); border-radius: 12px; padding: 9px 12px; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; text-align: left; font-size: 0.78rem; color: #fca5a5; line-height: 1.45;">
+              <span style="font-size: 1rem; flex-shrink: 0;">⚠️</span>
+              <span>Working hours, routine breaks, and qualified service links will be removed immediately.</span>
+            </div>
+
+            <!-- Action Buttons -->
+            <div style="display: flex; gap: 10px; align-items: center;">
+              <button type="button" class="btn btn-secondary" style="flex: 1; height: 42px; font-size: 0.86rem; font-weight: 600; border-radius: 11px;" id="btn-cancel-delete-staff">
+                Cancel
+              </button>
+              <button type="button" class="btn btn-primary" style="flex: 1.3; height: 42px; font-size: 0.86rem; font-weight: 700; border-radius: 11px; background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); border-color: #ef4444; box-shadow: 0 4px 14px rgba(239, 68, 68, 0.35);" id="btn-confirm-delete-staff">
+                Yes, Delete
+              </button>
+            </div>
+          `}
 
         </div>
       </div>
     `;
 
-  const closeModal = () => {
-    modalContainer.innerHTML = '';
-    document.removeEventListener('keydown', handleEsc);
-  };
+    const closeModal = () => {
+      modalContainer.innerHTML = '';
+      document.removeEventListener('keydown', handleEsc);
+    };
 
-  const handleEsc = (e) => {
-    if (e.key === 'Escape') closeModal();
-  };
-  document.addEventListener('keydown', handleEsc);
+    const handleEsc = (e) => {
+      if (e.key === 'Escape') closeModal();
+    };
+    document.addEventListener('keydown', handleEsc);
 
-  document.getElementById('btn-cancel-delete-staff')?.addEventListener('click', closeModal);
-  document.getElementById('delete-staff-backdrop')?.addEventListener('click', (e) => {
-    if (e.target.id === 'delete-staff-backdrop') closeModal();
-  });
+    document.getElementById('btn-modal-close-x')?.addEventListener('click', closeModal);
+    document.getElementById('btn-cancel-delete-staff')?.addEventListener('click', closeModal);
+    document.getElementById('delete-staff-backdrop')?.addEventListener('click', (e) => {
+      if (e.target.id === 'delete-staff-backdrop') closeModal();
+    });
+
+    if (hasActiveAppts) return;
 
   document.getElementById('btn-confirm-delete-staff')?.addEventListener('click', async (e) => {
     const confirmBtn = e.currentTarget;

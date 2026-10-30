@@ -304,5 +304,96 @@ describe('ServicesService - Duration & Staff Qualification Tests', () => {
       }
     });
   });
+
+  describe('createService & updateService price validation rules (min ₹1, max ₹5,00,000, finite)', () => {
+    beforeEach(() => {
+      mockPrisma.service.findFirst.mockResolvedValue({
+        id: mockServiceId,
+        salonId: mockSalonId,
+        name: 'Existing Service',
+        price: 100,
+        durationMinutes: 30,
+        status: ServiceStatus.ACTIVE,
+      });
+    });
+
+    it('should reject createService with price less than 1 (e.g. 0, -50)', async () => {
+      for (const invalidPrice of [0, -1, -100]) {
+        await expect(
+          service.createService(mockSalonId, {
+            name: 'Zero or Negative Price Service',
+            price: invalidPrice,
+            durationMinutes: 30,
+          }),
+        ).rejects.toThrow(BadRequestException);
+      }
+    });
+
+    it('should reject createService with price greater than 500,000 or infinite', async () => {
+      for (const invalidPrice of [500001, 1e7, Infinity, NaN]) {
+        await expect(
+          service.createService(mockSalonId, {
+            name: 'Overpriced Service',
+            price: invalidPrice,
+            durationMinutes: 30,
+          }),
+        ).rejects.toThrow(BadRequestException);
+      }
+    });
+
+    it('should accept createService with valid prices between 1 and 500,000', async () => {
+      for (const validPrice of [1, 250, 500000]) {
+        const mockCreated = {
+          id: `svc-${validPrice}`,
+          salonId: mockSalonId,
+          name: `Valid Service ${validPrice}`,
+          price: validPrice,
+          durationMinutes: 30,
+          status: ServiceStatus.ACTIVE,
+        };
+        mockPrisma.service.create.mockResolvedValue(mockCreated);
+        mockPrisma.service.findUnique.mockResolvedValue(mockCreated);
+
+        const res = await service.createService(mockSalonId, {
+          name: `Valid Service ${validPrice}`,
+          price: validPrice,
+          durationMinutes: 30,
+          category: 'General',
+        });
+        expect(res).toBeDefined();
+        expect(res.price).toBe(validPrice);
+      }
+    });
+
+    it('should reject updateService with price < 1, > 500,000, or non-finite', async () => {
+      for (const invalidPrice of [0, -20, 500001, Infinity, NaN]) {
+        await expect(
+          service.updateService(mockSalonId, mockServiceId, {
+            price: invalidPrice,
+          }),
+        ).rejects.toThrow(BadRequestException);
+      }
+    });
+
+    it('should accept updateService with valid price within bounds', async () => {
+      for (const validPrice of [1, 350, 500000]) {
+        const mockUpdated = {
+          id: mockServiceId,
+          salonId: mockSalonId,
+          name: 'Existing Service',
+          price: validPrice,
+          durationMinutes: 30,
+          status: ServiceStatus.ACTIVE,
+        };
+        mockPrisma.service.update.mockResolvedValue(mockUpdated);
+        mockPrisma.service.findUnique.mockResolvedValue(mockUpdated);
+
+        const updated = await service.updateService(mockSalonId, mockServiceId, {
+          price: validPrice,
+        });
+        expect(updated.price).toBe(validPrice);
+      }
+    });
+  });
 });
 
