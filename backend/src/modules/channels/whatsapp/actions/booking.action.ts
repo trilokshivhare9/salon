@@ -179,6 +179,23 @@ export class BookingAction {
   private async handleStartBooking(ctx: ActionContext): Promise<ActionResult> {
     const { cleanNumber, phoneNumberId, salonId, salon, conversation } = ctx;
 
+    const activeServices = salon?.services || [];
+    const activeStaff = salon?.staff || salon?.stylists || [];
+    if (activeServices.length === 0 || activeStaff.length === 0) {
+      const reply = `⚠️ *${salon?.name || 'Salon'} Notice*\n\nOur service catalog and specialist team are currently being updated. Automated WhatsApp booking will open shortly.\n\nPlease contact us directly at *${salon?.phone || 'our front desk'}* for assistance.`;
+      await this.sendMessage(
+        cleanNumber,
+        {
+          bodyText: reply,
+          interactiveType: 'button',
+          buttons: [{ id: WhatsAppButtonId.START, title: '🏠 Main Menu' }],
+        },
+        phoneNumberId,
+        salonId,
+      );
+      return { replyMessage: reply, state: ConversationState.START };
+    }
+
     await this.session.updateConversationState(
       conversation.id,
       ConversationState.SELECT_CATEGORY,

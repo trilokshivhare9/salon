@@ -343,19 +343,76 @@ export class PersonalProfileView {
   }
 
   /**
-   * Auto-detects GPS coordinates and reverse-geocodes locality, city & postcode.
+   * Auto-detects GPS coordinates with automatic multi-tier fallback:
+   * Tier 1: Hardware satellite GPS (navigator.geolocation)
+   * Tier 2: Network IP Geolocation (https://ipwho.is/)
    */
-  detectCurrentLocation() {
+  async detectCurrentLocation() {
     const btnText = document.getElementById('pp-gps-btn-text');
-
-    if (!navigator.geolocation) {
-      this.showAlert('Geolocation is not supported by your browser.', 'error');
-      return;
-    }
 
     this.isLocating = true;
     if (btnText) btnText.textContent = 'Locating...';
 
+    // Helper: Execute Tier 2 IP Geolocation fallback
+    const runIpFallback = async (reasonMsg = '') => {
+      try {
+        const res = await fetch('https://ipwho.is/');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success !== false && data.latitude && data.longitude) {
+            this.latitude = Number(data.latitude);
+            this.longitude = Number(data.longitude);
+            this.googleMapsUrl = `https://www.google.com/maps?q=${this.latitude},${this.longitude}`;
+            this.locationType = 'NETWORK_IP';
+
+            if (data.city) {
+              this.salonCity = data.city;
+              const cityInput = document.getElementById('pp-salon-city');
+              if (cityInput) cityInput.value = data.city;
+            }
+
+            if (data.postal && /^\d{6}$/.test(data.postal.trim())) {
+              this.salonPincode = data.postal.trim();
+              const pinInput = document.getElementById('pp-salon-pincode');
+              if (pinInput) pinInput.value = this.salonPincode;
+            }
+
+            if (data.region && !this.salonLandmark) {
+              this.salonLandmark = data.region;
+              const landmarkInput = document.getElementById('pp-salon-landmark');
+              if (landmarkInput) landmarkInput.value = data.region;
+            }
+
+            this.isLocating = false;
+            if (btnText) btnText.textContent = '✓ GPS Active';
+
+            const successNote = reasonMsg
+              ? `📍 ${data.city || 'City'}, ${data.region || ''} detected via network (${this.latitude.toFixed(4)}, ${this.longitude.toFixed(4)}).`
+              : `📍 Location detected: ${data.city || ''} (${this.latitude.toFixed(4)}, ${this.longitude.toFixed(4)})`;
+
+            this.showAlert(successNote, 'success');
+            if (this.app?.showToast) {
+              this.app.showToast('Location coordinates detected and locked!', 'success');
+            }
+            this.syncInputsToState();
+            this.render();
+            return true;
+          }
+        }
+      } catch (_) {}
+
+      this.isLocating = false;
+      if (btnText) btnText.textContent = 'Auto-detect GPS';
+      this.showAlert(reasonMsg || 'Could not determine location. Please enter your address manually.', 'error');
+      return false;
+    };
+
+    // If browser lacks geolocation API or page is in insecure non-HTTPS context
+    if (!navigator.geolocation) {
+      return runIpFallback('Geolocation API not supported.');
+    }
+
+    // Try Tier 1 Satellite / Device GPS first
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         const lat = pos.coords.latitude;
@@ -408,14 +465,11 @@ export class PersonalProfileView {
         this.syncInputsToState();
         this.render();
       },
-      (err) => {
-        this.isLocating = false;
-        if (btnText) btnText.textContent = 'Auto-detect GPS';
-        let msg = 'Could not access location.';
-        if (err.code === 1) msg = 'Location permission denied. Please allow GPS access in your browser.';
-        this.showAlert(msg, 'error');
+      async (err) => {
+        // Fall back gracefully to Tier 2 IP Geolocation
+        await runIpFallback('Browser GPS permission restricted. Location estimated via network.');
       },
-      { timeout: 12000, enableHighAccuracy: true }
+      { timeout: 8000, enableHighAccuracy: true }
     );
   }
 

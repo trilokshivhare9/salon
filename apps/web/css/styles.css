@@ -220,6 +220,11 @@ a:hover {
   box-shadow: 0 0 8px rgba(52, 211, 153, 0.9);
 }
 
+.brand-live-indicator.inactive {
+  background: #fbbf24;
+  box-shadow: 0 0 8px rgba(251, 191, 36, 0.85);
+}
+
 .brand-live-indicator.offline {
   background: #64748b;
 }

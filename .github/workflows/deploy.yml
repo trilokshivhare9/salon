@@ -26,7 +26,7 @@ jobs:
             git reset --hard
             git pull origin production
 
-            echo "🔑 [2/5] Updating Production Environment Variables with Meta WhatsApp Token..."
+            echo "🔑 [2/5] Updating Production Environment Variables (WhatsApp, SMTP Email, Gemini AI)..."
             cat << 'ENVEOF' > /var/www/styleslot/backend/.env
             PORT=3000
             NODE_ENV=production
@@ -40,6 +40,13 @@ jobs:
             WHATSAPP_PHONE_NUMBER_ID="1344691785393273"
             WHATSAPP_ACCESS_TOKEN="EAA7FciyDOmYBS0ZCe07F4daN0JXf0x1Bt1Trkc4QajShyo6A0nVklAbgeY5ZCcpgMZBSZCzc8QJYkCSKwziDDbtSS8kw0caeu915pphPOnwtZAxuyZBeFy1ZAvzwsHjLLZCZBqSbuIv6qswxUz2DoR5EXdLsB7s85MldvufAJfFns00IEne8V36NYZAtxkfFIhOAZDZD"
             WHATSAPP_VERIFY_TOKEN="salon_webhook_verify_token_prod"
+            SMTP_HOST="smtp.gmail.com"
+            SMTP_PORT=465
+            SMTP_SECURE=true
+            SMTP_USER="trilokshivhare9@gmail.com"
+            SMTP_PASS="wkvgtandbiquexet"
+            SMTP_FROM="Styleslot Security <trilokshivhare9@gmail.com>"
+            GEMINI_API_KEY="${{ secrets.GEMINI_API_KEY }}"
             ENVEOF
             sed -i 's/^[ \t]*//' /var/www/styleslot/backend/.env
 
@@ -64,30 +71,14 @@ jobs:
 
                 client_max_body_size 50M;
 
-                # Frontend SPA
+                # Allow ACME challenge for Let's Encrypt certificate renewals
+                location /.well-known/acme-challenge/ {
+                    root /var/www/html;
+                }
+
+                # Redirect all web traffic to secure HTTPS domain
                 location / {
-                    root /var/www/styleslot/apps/web/dist;
-                    index index.html;
-                    try_files $uri $uri/ /index.html;
-                }
-
-                # Backend API Reverse Proxy
-                location /api/ {
-                    proxy_pass http://127.0.0.1:3000/api/;
-                    proxy_http_version 1.1;
-                    proxy_set_header Upgrade $http_upgrade;
-                    proxy_set_header Connection 'upgrade';
-                    proxy_set_header Host $host;
-                    proxy_set_header X-Real-IP $remote_addr;
-                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-                    proxy_set_header X-Forwarded-Proto $scheme;
-                    proxy_cache_bypass $http_upgrade;
-                }
-
-                # Health Check
-                location /health {
-                    proxy_pass http://127.0.0.1:3000/health;
-                    proxy_set_header Host $host;
+                    return 301 https://129.121.133.105.sslip.io$request_uri;
                 }
             }
 
