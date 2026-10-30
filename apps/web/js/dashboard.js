@@ -1540,14 +1540,42 @@ export class SalonDashboard {
 
     // A salon is ONLY deactivated if its explicit status in DB is DEACTIVATED
     const isDeactivated = this.salonProfile?.status === 'DEACTIVATED';
+    const isInactive = this.salonProfile?.status === 'INACTIVE' || this.salonProfile?.status === 'SUSPENDED';
 
-    // A salon only requires initial setup onboarding if its status is NOT active AND it has 0 staff & 0 services
+    // A salon requires initial setup onboarding if its status is NOT active OR it has 0 staff & 0 services
     const stylistCount = (this.salonProfile?._count?.stylists !== undefined ? this.salonProfile._count.stylists : (this.staffList ? this.staffList.length : 0));
     const serviceCount = (this.salonProfile?._count?.services !== undefined ? this.salonProfile._count.services : (this.servicesList ? this.servicesList.length : 0));
-    const isSetupRequired = (this.salonProfile?.status && this.salonProfile.status !== 'ACTIVE') && (stylistCount === 0 || serviceCount === 0);
+    const isSetupRequired = isInactive || ((this.salonProfile?.status && this.salonProfile.status !== 'ACTIVE') && (stylistCount === 0 || serviceCount === 0));
 
     const todayClosure = this.getTodayClosure();
     const isClosedToday = !!todayClosure;
+
+    // Harmonized Architectural Status Badge Tokens
+    let badgeBg = 'rgba(16,185,129,0.2)';
+    let badgeBorder = 'rgba(16,185,129,0.4)';
+    let badgeColor = '#34d399';
+    let badgeText = 'LIVE';
+    let indicatorState = 'live';
+
+    if (isClosedToday) {
+      badgeBg = 'rgba(239, 68, 68, 0.2)';
+      badgeBorder = 'rgba(239, 68, 68, 0.4)';
+      badgeColor = '#f87171';
+      badgeText = todayClosure.closureType === 'HOLIDAY' ? '🌴 HOLIDAY' : '🚨 STORE CLOSED';
+      indicatorState = 'offline';
+    } else if (isDeactivated) {
+      badgeBg = 'rgba(100,116,139,0.2)';
+      badgeBorder = 'rgba(100,116,139,0.4)';
+      badgeColor = '#94a3b8';
+      badgeText = 'OFFLINE';
+      indicatorState = 'offline';
+    } else if (isSetupRequired || isInactive) {
+      badgeBg = 'rgba(245,158,11,0.2)';
+      badgeBorder = 'rgba(245,158,11,0.4)';
+      badgeColor = '#fbbf24';
+      badgeText = 'INACTIVE';
+      indicatorState = 'inactive';
+    }
 
     const pendingQuickCount = (this.summaryData?.todayAppointments || []).filter((a) => a.status === 'PENDING_ACCEPTANCE').length;
 
@@ -1558,14 +1586,14 @@ export class SalonDashboard {
           <div class="header-brand-group">
             <div class="brand-icon-box">
               ${Icons.scissors({ size: 20, color: '#c7d2fe' })}
-              <span class="brand-live-indicator ${isClosedToday ? 'offline' : isDeactivated ? 'offline' : 'live'}" title="${isClosedToday ? 'Store Closed Today' : isDeactivated ? 'Offline' : 'Real-Time Connected'}"></span>
+              <span class="brand-live-indicator ${indicatorState}" title="${indicatorState === 'live' ? 'Real-Time Connected' : indicatorState === 'inactive' ? 'Store Inactive (Setup Required)' : 'Offline'}"></span>
             </div>
             <div class="header-title-block">
               <div class="header-title-row">
                 <span class="header-salon-name">${salonName}</span>
-                <span class="q-live-pill desktop-only-badge" style="padding: 2px 8px; background: ${isClosedToday ? 'rgba(239, 68, 68, 0.2)' : isDeactivated ? 'rgba(100,116,139,0.2)' : 'rgba(16,185,129,0.2)'}; border: 1px solid ${isClosedToday ? 'rgba(239, 68, 68, 0.4)' : isDeactivated ? 'rgba(100,116,139,0.4)' : 'rgba(16,185,129,0.4)'};">
-                  <span class="q-live-dot" style="background: ${isClosedToday ? '#f87171' : isDeactivated ? '#94a3b8' : '#34d399'};"></span>
-                  <span class="q-live-label" style="font-size: 0.64rem; font-weight: 800; color: ${isClosedToday ? '#f87171' : isDeactivated ? '#94a3b8' : '#34d399'};">${isClosedToday ? (todayClosure.closureType === 'HOLIDAY' ? '🌴 HOLIDAY' : '🚨 STORE CLOSED') : isDeactivated ? 'OFFLINE' : 'LIVE'}</span>
+                <span class="q-live-pill desktop-only-badge" style="padding: 2px 8px; background: ${badgeBg}; border: 1px solid ${badgeBorder};">
+                  <span class="q-live-dot" style="background: ${badgeColor};"></span>
+                  <span class="q-live-label" style="font-size: 0.64rem; font-weight: 800; color: ${badgeColor};">${badgeText}</span>
                 </span>
               </div>
               <div class="header-meta-row">

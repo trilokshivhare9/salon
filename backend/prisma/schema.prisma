@@ -277,7 +277,7 @@ model Salon {
   locationType         String?     @default("MANUAL") @map("location_type")
   timezone             String      @default("Asia/Kolkata")
   description          String?
-  status               SalonStatus @default(ACTIVE)
+  status               SalonStatus @default(INACTIVE)
 
   // Default operating hours used for 7-day initial seeding
   defaultStartTime     String      @default("09:00") @map("default_start_time")

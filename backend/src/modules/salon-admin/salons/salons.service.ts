@@ -16,7 +16,7 @@ import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { DateTime } from 'luxon';
 import { TimeUtility } from '../../../common/utils/time.utility';
-import { AdminRole, SalonStatus, DayOfWeek, AppointmentStatus } from '@prisma/client';
+import { AdminRole, SalonStatus, StylistStatus, ServiceStatus, DayOfWeek, AppointmentStatus } from '@prisma/client';
 import { WhatsAppService } from '../../channels/whatsapp/whatsapp.service';
 import { AppointmentsService } from '../appointments/appointments.service';
 
@@ -282,7 +282,7 @@ export class SalonsService {
           googleMapsUrl: dto.googleMapsUrl?.trim() || null,
           locationType: dto.locationType || 'MANUAL',
           timezone: dto.timezone || TimeUtility.DEFAULT_TIMEZONE,
-          status: SalonStatus.ACTIVE,
+          status: SalonStatus.INACTIVE, // ARCHITECTURAL RULE: Newly registered salon starts INACTIVE until >= 1 stylist & >= 1 service are configured
           defaultStartTime: openTime,
           defaultEndTime: closeTime,
         },
@@ -582,10 +582,15 @@ Here are your salon owner login credentials:
         data: { status: SalonStatus.DEACTIVATED },
       });
     } else {
-      // Re-activating salon: transition to ACTIVE
+      // Re-activating salon: dynamically evaluate operational readiness
+      const [activeStylistCount, activeServiceCount] = await Promise.all([
+        this.prisma.stylist.count({ where: { salonId, status: StylistStatus.ACTIVE } }),
+        this.prisma.service.count({ where: { salonId, status: ServiceStatus.ACTIVE } }),
+      ]);
+      const meetsRequirements = activeStylistCount >= 1 && activeServiceCount >= 1;
       return this.prisma.salon.update({
         where: { id: salonId },
-        data: { status: SalonStatus.ACTIVE },
+        data: { status: meetsRequirements ? SalonStatus.ACTIVE : SalonStatus.INACTIVE },
       });
     }
   }

@@ -35,7 +35,7 @@ export class HomeView {
     return `
       <div class="home-cockpit-layout" style="display: flex; flex-direction: column; gap: 18px; padding-bottom: 30px;">
         
-        ${this.renderStoreAlerts(salonProfile, summaryData, todayClosure)}
+        ${this.renderStoreAlerts(salonProfile, summaryData, todayClosure, staffList, servicesList)}
         
         <!-- SECTION 1: TODAY'S REVENUE & OPERATIONAL PULSE COCKPIT -->
         ${this.renderHeroPulse(summaryData, salonProfile, labelPrefix, todayAppointments, staffList, todayClosure)}
@@ -59,7 +59,7 @@ export class HomeView {
   /**
    * Store Alerts (Store Closed or Inactive Warning)
    */
-  static renderStoreAlerts(profile = {}, summary = {}, todayClosure = null) {
+  static renderStoreAlerts(profile = {}, summary = {}, todayClosure = null, staffList = [], servicesList = []) {
     let html = '';
 
     const closure = summary?.storeAlert?.isClosedToday
@@ -80,18 +80,32 @@ export class HomeView {
       `;
     }
 
-    const isInactive = profile.status === 'INACTIVE' || summary.status === 'INACTIVE' || summary?.storeAlert?.salonStatus === 'INACTIVE';
-    if (isInactive) {
+    // ARCHITECTURAL RULE: Prevent duplicate alerts. If the salon has incomplete setup (0 staff or 0 services),
+    // the global setup-required onboarding banner at the top of the shell is the single source of truth.
+    const stylistCount = (Array.isArray(staffList) && staffList.length > 0)
+      ? staffList.length
+      : (profile?._count?.stylists ?? (summary?.pulse?.totalStylists ?? 0));
+
+    const serviceCount = (Array.isArray(servicesList) && servicesList.length > 0)
+      ? servicesList.length
+      : (profile?._count?.services ?? (summary?.serviceCount ?? 0));
+
+    const isInitialOnboarding = stylistCount === 0 || serviceCount === 0;
+
+    const isInactive = profile.status === 'INACTIVE' || profile.status === 'DEACTIVATED' || summary.status === 'INACTIVE' || summary?.storeAlert?.salonStatus === 'INACTIVE';
+
+    // Only render if operations were explicitly paused/deactivated AFTER initial setup was already completed
+    if (isInactive && !isInitialOnboarding) {
       html += `
         <div style="background: rgba(239, 68, 68, 0.12); border: 1px solid #ef4444; border-radius: 14px; padding: 14px 18px; color: #fca5a5; display: flex; align-items: center; justify-content: space-between; gap: 14px;">
           <div style="display: flex; align-items: center; gap: 12px;">
-            <span style="font-size: 1.4rem;">⚠️</span>
+            <span style="font-size: 1.4rem;">🛑</span>
             <div>
-              <div style="font-weight: 700; font-size: 0.92rem; color: #fee2e2;">Salon Account is Inactive</div>
-              <div style="font-size: 0.80rem; color: #fca5a5; line-height: 1.4;">Automated WhatsApp booking is paused. Add 1 stylist and 1 service to activate.</div>
+              <div style="font-weight: 700; font-size: 0.92rem; color: #fee2e2;">Salon Storefront Paused</div>
+              <div style="font-size: 0.80rem; color: #fca5a5; line-height: 1.4;">Automated WhatsApp booking is currently paused for your store.</div>
             </div>
           </div>
-          <button type="button" class="btn btn-primary btn-sm" id="btn-goto-services-banner" style="font-size: 0.78rem; padding: 6px 14px;">Set Up →</button>
+          <button type="button" class="btn btn-secondary btn-sm" id="btn-goto-services-banner" style="font-size: 0.78rem; padding: 6px 14px;">Settings →</button>
         </div>
       `;
     }

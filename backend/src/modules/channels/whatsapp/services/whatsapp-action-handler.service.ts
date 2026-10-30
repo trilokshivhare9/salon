@@ -115,13 +115,18 @@ export class WhatsAppActionHandlerService {
     // 1. Fetch Salon Details & Active Services/Staff from Catalog Cache
     const salon: any = await this.catalogCache.getCachedSalon(salonId);
 
-    if (!salon || salon.status !== 'ACTIVE') {
-      const reply = 'Sorry, this salon booking service is currently inactive.';
+    if (salon && !salon.staff) salon.staff = salon.stylists;
+    const activeServicesCount = Array.isArray(salon?.services) ? salon.services.length : 0;
+    const activeStaffCount = Array.isArray(salon?.staff) ? salon.staff.length : 0;
+    const isOperationallyReady = salon?.status === 'ACTIVE' && activeServicesCount >= 1 && activeStaffCount >= 1;
+
+    if (!isOperationallyReady) {
+      const salonName = salon?.name || 'Our salon';
+      const reply = `⚠️ *${salonName} Notice*\n\nThank you for reaching out! Our salon is currently completing initial setup and is temporarily unavailable for automated WhatsApp bookings.\n\nPlease contact us directly at ${salon?.phone || 'our front desk'} for assistance.`;
       await this.sendMessage(cleanNumber, { textBody: reply }, phoneNumberId, salonId);
       return { replyMessage: reply, state: ConversationState.START };
     }
 
-    if (salon && !salon.staff) salon.staff = salon.stylists;
     const tz = salon.timezone || 'Asia/Kolkata';
 
     // 2. Resolve Customer User & Session State

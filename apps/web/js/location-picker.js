@@ -183,7 +183,33 @@ export class LocationPicker {
         this.notifyChange();
         this.render();
       },
-      (err) => {
+      async (err) => {
+        // Tier 2 Fallback: Network IP Geolocation
+        try {
+          const res = await fetch('https://ipwho.is/');
+          if (res.ok) {
+            const data = await res.json();
+            if (data.success !== false && data.latitude && data.longitude) {
+              const lat = Number(Number(data.latitude).toFixed(6));
+              const lng = Number(Number(data.longitude).toFixed(6));
+              this.state.latitude = lat;
+              this.state.longitude = lng;
+              this.state.locationType = 'GPS';
+              if (data.city) this.state.city = data.city;
+              if (data.region) this.state.state = data.region;
+              if (data.postal && !this.state.address) this.state.address = `${data.city || ''}, ${data.postal}`;
+              this.state.isDetectingGps = false;
+              this.state.gpsStatus = {
+                type: 'success',
+                message: `✅ Location Locked via Network: ${data.city || 'City'} (${lat}, ${lng}).`,
+              };
+              this.notifyChange();
+              this.render();
+              return;
+            }
+          }
+        } catch (_) {}
+
         this.state.isDetectingGps = false;
         let errMsg = 'Could not access location.';
         if (err.code === 1) errMsg = 'Permission denied. Please allow location access or use Search/Manual mode.';
@@ -192,7 +218,7 @@ export class LocationPicker {
         this.state.gpsStatus = { type: 'error', message: errMsg };
         this.render();
       },
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
     );
   }
 

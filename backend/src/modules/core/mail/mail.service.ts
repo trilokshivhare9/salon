@@ -122,7 +122,7 @@ Expires In: 10 minutes
     if (!this.isConfigured || !this.transporter) {
       if (isProduction) {
         throw new ServiceUnavailableException(
-          'Email delivery service is not configured on the production server. Please configure SMTP credentials (SMTP_USER and SMTP_PASS) in Render Environment.',
+          'Email delivery service is not configured on the production server. Please configure SMTP credentials (SMTP_USER and SMTP_PASS) in production server environment (.env).',
         );
       }
       // In local dev fallback mode, return true after logging
@@ -143,7 +143,7 @@ Expires In: 10 minutes
       this.logger.error(`[MailService] Failed to send email to ${toEmail}: ${err.message}`);
       if (isProduction) {
         throw new ServiceUnavailableException(
-          `Failed to dispatch verification email: ${err.message}. Please check your SMTP settings on Render.`,
+          `Failed to dispatch verification email: ${err.message}. Please check your SMTP settings on the production server (.env).`,
         );
       }
       // In local dev fallback, don't crash the request
