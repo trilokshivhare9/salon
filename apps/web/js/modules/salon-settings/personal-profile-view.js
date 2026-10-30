@@ -1,4 +1,5 @@
 import { ApiClient, SalonAuth } from '../../api.js';
+import { UniversalLoader } from '../shared/universal-loader.js';
 
 /**
  * PersonalProfileView
@@ -119,11 +120,12 @@ export class PersonalProfileView {
   renderLoading() {
     if (!this.container) return;
     this.container.innerHTML = `
-      <div class="stylist-routine-card" style="min-height: 240px; display: flex; align-items: center; justify-content: center; margin-bottom: 120px;">
-        <div style="display: flex; flex-direction: column; align-items: center; gap: 10px;">
-          <div class="spinner-border" style="width: 28px; height: 28px; border: 2.5px solid rgba(168, 85, 247, 0.2); border-top-color: #a855f7; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
-          <span style="font-size: 0.82rem; color: #94a3b8; font-weight: 500;">Loading profile details...</span>
-        </div>
+      <div class="stylist-routine-card" style="min-height: 260px; margin-bottom: 120px;">
+        ${UniversalLoader.render({
+          title: 'Loading profile details...',
+          subtitle: 'Fetching salon settings & account credentials...',
+          minHeight: '220px',
+        })}
       </div>
     `;
   }

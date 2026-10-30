@@ -1,5 +1,6 @@
 import { ApiClient } from '../../../api.js';
 import { ScheduleDayOffDialog } from '../../salon-settings/schedule-day-off-dialog.js';
+import { CalendarState } from '../calendar-state.js';
 
 /**
  * ClosureDialog
@@ -331,22 +332,29 @@ export class ClosureDialog {
     modalContainer.querySelectorAll('.btn-delete-closure-from-inspector').forEach((btn) => {
       btn.addEventListener('click', async (e) => {
         const id = e.currentTarget.getAttribute('data-id');
-        if (confirm('Are you sure you want to cancel this closure and reopen the booking calendar for these dates?')) {
+        const confirmed = await CalendarState.confirm({
+          title: 'Reopen Salon Calendar?',
+          message: 'Are you sure you want to cancel this closure and reopen the booking calendar for these dates?',
+          confirmText: 'Reopen Salon',
+          cancelText: 'Keep Closed',
+          type: 'danger',
+          icon: '🌴',
+        });
+        if (confirmed) {
+          CalendarState.showLoading('Reopening salon calendar...');
           try {
             await ApiClient.deleteSalonClosure(id);
-            if (app?.showToast || window.salonDashboard?.showToast || window.dashboardApp?.showToast) {
-              (app?.showToast || window.salonDashboard?.showToast || window.dashboardApp?.showToast)('Closure cancelled and calendar reopened.', 'success');
-            } else {
-              alert('Closure cancelled and calendar reopened.');
-            }
             closeModal();
-            await onRefresh();
-          } catch (err) {
-            if (app?.showToast || window.salonDashboard?.showToast || window.dashboardApp?.showToast) {
-              (app?.showToast || window.salonDashboard?.showToast || window.dashboardApp?.showToast)(err.message || 'Failed to cancel closure.', 'error');
-            } else {
-              alert(err.message || 'Failed to cancel closure.');
+            CalendarState.hideLoading(0);
+            CalendarState.optimisticRemoveClosure(id);
+            CalendarState.notify('Closure cancelled and calendar reopened.', 'success');
+            await CalendarState.refreshAll();
+            if (typeof onRefresh === 'function') {
+              try { onRefresh(); } catch (e) { console.warn(e); }
             }
+          } catch (err) {
+            CalendarState.hideLoading(0);
+            CalendarState.notify(err.message || 'Failed to cancel closure.', 'error');
           }
         }
       });
@@ -555,13 +563,29 @@ export class ClosureDialog {
     });
 
     detailContainer.querySelector('#btn-detail-reopen')?.addEventListener('click', async () => {
-      if (confirm('Are you sure you want to cancel this closure and reopen the booking calendar for these dates?')) {
+      const confirmed = await CalendarState.confirm({
+        title: 'Reopen Salon Calendar?',
+        message: 'Are you sure you want to cancel this closure and reopen the booking calendar for these dates?',
+        confirmText: 'Reopen Salon',
+        cancelText: 'Keep Closed',
+        type: 'danger',
+        icon: '🌴',
+      });
+      if (confirmed) {
+        CalendarState.showLoading('Reopening salon calendar...');
         try {
           await ApiClient.deleteSalonClosure(closure.id);
           closeDetail();
-          await onReopen();
+          CalendarState.hideLoading(0);
+          CalendarState.optimisticRemoveClosure(closure.id);
+          CalendarState.notify('Closure cancelled and calendar reopened.', 'success');
+          await CalendarState.refreshAll();
+          if (typeof onReopen === 'function') {
+            try { onReopen(); } catch (e) { console.warn(e); }
+          }
         } catch (err) {
-          alert(err.message || 'Failed to reopen salon calendar.');
+          CalendarState.hideLoading(0);
+          CalendarState.notify(err.message || 'Failed to reopen salon calendar.', 'error');
         }
       }
     });

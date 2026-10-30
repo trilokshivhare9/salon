@@ -1,5 +1,6 @@
 import { ApiClient } from '../../api.js';
 import { StaffApplyLeaveDialog } from '../staff/staff-apply-leave-dialog.js';
+import { CalendarState } from '../calendar/calendar-state.js';
 
 /**
  * ScheduleDayOffDialog
@@ -794,17 +795,17 @@ export class ScheduleDayOffDialog {
       const isPartialDay = Boolean(togglePartial?.checked && startDate === endDate);
 
       if (!reason || !startDate || !endDate) {
-        alert('Please provide a reason and valid date range.');
+        CalendarState.notify('Please provide a reason and valid date range.', 'warning');
         return;
       }
 
       if (startDate < todayStr) {
-        alert('Cannot schedule closures or holidays for dates that have already passed.');
+        CalendarState.notify('Cannot schedule closures or holidays for dates that have already passed.', 'warning');
         return;
       }
 
       if (endDate < startDate) {
-        alert('End date cannot be earlier than start date.');
+        CalendarState.notify('End date cannot be earlier than start date.', 'warning');
         return;
       }
 
@@ -815,7 +816,7 @@ export class ScheduleDayOffDialog {
         return (startDate <= ce && endDate >= cs);
       });
       if (overlapping) {
-        alert(`A salon closure already exists overlapping these dates: "${overlapping.reason || 'Store Closure'}".`);
+        CalendarState.notify(`A salon closure already exists overlapping these dates: "${overlapping.reason || 'Store Closure'}".`, 'warning');
         return;
       }
 
@@ -846,47 +847,31 @@ export class ScheduleDayOffDialog {
         submitBtn.disabled = true;
         submitBtn.innerHTML = `<span>⏳ Processing Closure & Rescheduling...</span>`;
       }
+      CalendarState.showLoading('Scheduling salon closure & rescheduling...');
 
       try {
         const res = await ApiClient.createSalonClosure(payload);
         const msg = res?.data?.message || res?.message || 'Salon closure scheduled successfully!';
-        if (window.salonDashboard?.showToast || window.dashboardApp?.showToast) {
-          (window.salonDashboard?.showToast || window.dashboardApp?.showToast)(msg, 'success');
-        } else {
-          alert(msg);
-        }
         closeModal();
+        CalendarState.hideLoading(0);
+        CalendarState.notify(msg, 'success');
         if (typeof onSuccess === 'function') {
-          await onSuccess();
+          try { onSuccess(); } catch (e) { console.warn(e); }
         }
-        if (window.salonDashboard?.currentCalendarView?.refresh) {
-          await window.salonDashboard.currentCalendarView.refresh();
-        } else if (window.dashboardApp?.currentCalendarView?.refresh) {
-          await window.dashboardApp.currentCalendarView.refresh();
-        }
+        await CalendarState.refreshAll();
       } catch (err) {
+        CalendarState.hideLoading(0);
         const isOverlapOrExists = err.message && (
           err.message.toLowerCase().includes('already exists') ||
           err.message.toLowerCase().includes('overlapping')
         );
 
         if (isOverlapOrExists) {
-          if (window.salonDashboard?.showToast || window.dashboardApp?.showToast) {
-            (window.salonDashboard?.showToast || window.dashboardApp?.showToast)(err.message, 'warning');
-          } else {
-            alert(err.message);
-          }
+          CalendarState.notify(err.message, 'warning');
           closeModal();
-          if (typeof onSuccess === 'function') {
-            await onSuccess();
-          }
-          if (window.salonDashboard?.currentCalendarView?.refresh) {
-            await window.salonDashboard.currentCalendarView.refresh();
-          } else if (window.dashboardApp?.currentCalendarView?.refresh) {
-            await window.dashboardApp.currentCalendarView.refresh();
-          }
+          await CalendarState.refreshAll();
         } else {
-          alert(err.message || 'Failed to schedule salon closure.');
+          CalendarState.notify(err.message || 'Failed to schedule salon closure.', 'error');
           if (submitBtn) {
             submitBtn.disabled = false;
             submitBtn.innerHTML = `<span>🌴 Mark Salon Closed</span>`;

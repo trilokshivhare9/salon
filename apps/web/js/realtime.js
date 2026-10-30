@@ -1,6 +1,7 @@
 // Realtime Event Stream, Audio Chimes & Professional PWA Notification Dispatcher
-import { API_BASE, formatTime12h } from './api.js';
+import { API_BASE, formatTime12h, getClientId } from './api.js';
 import { SoundManager } from './sound.js';
+import { AppSnackbar } from './modules/shared/app-snackbar.js';
 
 export class RealtimeNotifier {
   static activeInstance = null;
@@ -95,6 +96,16 @@ export class RealtimeNotifier {
     return false;
   }
 
+  /**
+   * Architectural Originator Check
+   * Returns true if the event was originated by the current client session.
+   */
+  isSelfOrigin(payload) {
+    if (!payload) return false;
+    const currentClientId = typeof getClientId === 'function' ? getClientId() : '';
+    return Boolean(currentClientId && payload.originatorClientId && payload.originatorClientId === currentClientId);
+  }
+
   // Smart Dispatcher: Only shows OS native notification when app is in BACKGROUND.
   // When in FOREGROUND, shows only the sleek in-app luxury banner.
   dispatchNotification({ title, body, badgeText, clientName, details, specialist, icon = '⚡', variant = 'success', eventKey, actionCallback, showActionBtn = false }) {
@@ -162,137 +173,32 @@ export class RealtimeNotifier {
     }
   }
 
-  // Luxury Glassmorphic In-App Banner with Mobile-First Capsule & Stack Limiter
-  static showLuxuryBanner({ badgeText, title, clientName, details, specialist, icon = '⚡', variant = 'success', actionCallback, showActionBtn = false }) {
-    // Clear any existing app top notification toasts to avoid double snackbars
-    const existingToasts = document.querySelectorAll('.app-top-notification-toast');
-    existingToasts.forEach((el) => {
-      el.style.opacity = '0';
-      el.style.transform = 'translate(-50%, -24px)';
-      setTimeout(() => el.remove(), 180);
-    });
-
-    let container = document.getElementById('live-banner-container');
-    if (!container) {
-      container = document.createElement('div');
-      container.id = 'live-banner-container';
-      document.body.appendChild(container);
+  /**
+   * Unified In-App Live Notification
+   * Delegates directly to AppSnackbar for consistent luxury UI across all states.
+   */
+  static showLuxuryBanner({ badgeText, title, clientName, details, specialist, icon = '⚡', variant = 'info', actionCallback, showActionBtn = false }) {
+    const cardTitle = badgeText || title || 'Live Update';
+    let messageText = clientName || title || '';
+    if (details) {
+      messageText = messageText ? `${messageText} — ${details}` : details;
+    }
+    if (specialist) {
+      messageText = `${messageText} (Specialist: ${specialist})`;
     }
 
-    // Stack Limiter: Max 1 on mobile, Max 2 on desktop (prevents multiple banners cascading down)
-    const isMobile = window.innerWidth <= 640;
-    const maxAllowed = isMobile ? 1 : 2;
-    const existingBanners = Array.from(container.querySelectorAll('.live-luxury-banner'));
-    if (existingBanners.length >= maxAllowed) {
-      for (let i = 0; i <= existingBanners.length - maxAllowed; i++) {
-        const oldBanner = existingBanners[i];
-        oldBanner.classList.remove('banner-visible');
-        setTimeout(() => oldBanner.remove(), 250);
-      }
-    }
+    const normalizedVariant = (variant === 'danger' || variant === 'error')
+      ? 'error'
+      : (variant === 'warning' ? 'warning' : (variant === 'success' ? 'success' : 'info'));
 
-    // Color tokens based on variant
-    let accentColor = '#10b981'; // Emerald
-    let glowColor = 'rgba(16, 185, 129, 0.25)';
-    let badgeBg = 'rgba(16, 185, 129, 0.15)';
+    const effectiveCallback = actionCallback || (showActionBtn ? () => { window.location.hash = '#admin'; } : null);
 
-    if (variant === 'danger' || variant === 'error') {
-      accentColor = '#f43f5e'; // Rose
-      glowColor = 'rgba(244, 63, 94, 0.25)';
-      badgeBg = 'rgba(244, 63, 94, 0.15)';
-    } else if (variant === 'warning') {
-      accentColor = '#f59e0b'; // Amber
-      glowColor = 'rgba(245, 158, 11, 0.25)';
-      badgeBg = 'rgba(245, 158, 11, 0.15)';
-    } else if (variant === 'info') {
-      accentColor = '#8B3DFF'; // Indigo
-      glowColor = 'rgba(139, 61, 255, 0.25)';
-      badgeBg = 'rgba(139, 61, 255, 0.15)';
-    }
-
-    const banner = document.createElement('div');
-    banner.className = 'live-luxury-banner';
-    banner.style.setProperty('--banner-accent', accentColor);
-    banner.style.setProperty('--banner-glow', glowColor);
-    banner.style.setProperty('--banner-bg', badgeBg);
-
-    banner.innerHTML = `
-      <!-- Top Tag Strip (Desktop) -->
-      <div class="banner-top-strip">
-        <div class="banner-tag-wrap">
-          <span class="banner-status-dot"></span>
-          <span class="banner-tag-badge">
-            ${badgeText || title}
-          </span>
-        </div>
-        <button type="button" class="banner-close-btn" aria-label="Dismiss">&times;</button>
-      </div>
-
-      <!-- Main Body -->
-      <div class="banner-body-row">
-        <div class="banner-icon-box">
-          ${icon}
-        </div>
-        <div class="banner-text-wrap">
-          <div class="banner-title">
-            ${clientName || title}
-          </div>
-          ${details ? `<div class="banner-details">${details}</div>` : ''}
-          ${specialist ? `<div class="banner-details">Specialist: <strong>${specialist}</strong></div>` : ''}
-        </div>
-        <button type="button" class="banner-close-btn mobile-close" aria-label="Dismiss">&times;</button>
-      </div>
-
-      <!-- Bottom Interactive Bar (Only when actionCallback or showActionBtn is enabled) -->
-      ${showActionBtn || actionCallback ? `
-      <div class="banner-footer-row">
-        <span class="banner-footer-text">Just now • Tap to view queue</span>
-        <button type="button" class="banner-action-btn">
-          <span>View Queue</span>
-          <span>→</span>
-        </button>
-      </div>
-      ` : ''}
-
-      <!-- Auto-dismiss Progress Bar -->
-      <div class="banner-progress"></div>
-    `;
-
-    container.appendChild(banner);
-
-    // Trigger Entrance Animation
-    requestAnimationFrame(() => {
-      banner.classList.add('banner-visible');
+    return AppSnackbar.show(messageText, normalizedVariant, {
+      title: cardTitle,
+      icon,
+      actionText: effectiveCallback ? 'View Queue' : null,
+      actionCallback: effectiveCallback,
     });
-
-    let dismissTimer = null;
-    const dismissBanner = () => {
-      if (dismissTimer) clearTimeout(dismissTimer);
-      banner.classList.remove('banner-visible');
-      setTimeout(() => banner.remove(), 250);
-    };
-
-    // Close button dismisses
-    banner.querySelectorAll('.banner-close-btn').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        dismissBanner();
-      });
-    });
-
-    // Click on banner invokes action
-    banner.addEventListener('click', (e) => {
-      if (e.target.closest('.banner-close-btn')) return;
-      dismissBanner();
-      if (actionCallback) {
-        actionCallback();
-      } else if (showActionBtn) {
-        window.location.hash = '#admin';
-      }
-    });
-
-    // Auto-dismiss after 4.5 seconds
-    dismissTimer = setTimeout(dismissBanner, 4500);
   }
 
   showLuxuryBanner(options) {
@@ -302,7 +208,8 @@ export class RealtimeNotifier {
   connect() {
     if (!this.salonId) return;
 
-    const streamUrl = `${API_BASE}/appointments/stream/${this.salonId}`;
+    const clientId = typeof getClientId === 'function' ? getClientId() : '';
+    const streamUrl = `${API_BASE}/appointments/stream/${this.salonId}${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ''}`;
     console.log('[Realtime] ⚡ Connecting to Live Event Stream:', streamUrl);
 
     if (this.eventSource) {
@@ -322,6 +229,16 @@ export class RealtimeNotifier {
         }
 
         console.log('[Realtime] 📡 Received live event:', payload);
+
+        // Architectural Self-Action Suppression:
+        // If the event was originated by this client session, silently sync state and drop redundant banners/chimes
+        if (this.isSelfOrigin(payload)) {
+          console.log(`[Realtime] 🛡️ Suppressing UI banner for self-originated event (${payload.type})`);
+          if (this.onEventCallback) {
+            this.onEventCallback(payload);
+          }
+          return;
+        }
 
         if (payload.type === 'NEW_BOOKING') {
           const appt = payload.data;
@@ -475,82 +392,11 @@ export class RealtimeNotifier {
               eventKey,
             });
           }
-        } else if (payload.type === 'STAFF_UPDATED') {
-          // Check for self-action suppression:
-          // If the user recently triggered an admin action on staff (within last 7 seconds),
-          // suppress the incoming toast to prevent self-echo notification storms.
-          const lastStaffAction = window.lastDashboardActionTimestamp ||
-            window.salonDashboard?.lastLocalActionTimestamp ||
-            window.dashboardApp?.lastLocalActionTimestamp;
-          const isLocalStaffAction = lastStaffAction &&
-            (Date.now() - lastStaffAction < 7000);
-
-          if (!isLocalStaffAction) {
-            const action = payload.data?.action || 'UPDATED';
-            const staffId = payload.data?.staffId || payload.data?.id || 'all';
-            const eventKey = `staff:${staffId}:${action}`;
-
-            let msg = 'Stylist schedule or profile updated';
-            let icon = '👥';
-            if (action === 'CREATE') { msg = 'New stylist added to team'; icon = '✨'; }
-            else if (action === 'DELETE') { msg = 'Stylist removed from team'; icon = '🗑️'; }
-            else if (action === 'ASSIGN_SERVICES') { msg = 'Stylist service qualifications updated'; icon = '✂️'; }
-            else if (action === 'UPDATE_HOURS') { msg = 'Stylist shift hours updated'; icon = '⏰'; }
-
-            SoundManager.playCheckinChime();
-            this.dispatchNotification({
-              badgeText: 'Team Update',
-              title: '👥 Stylists Updated',
-              clientName: msg,
-              details: 'Live salon roster synced',
-              icon,
-              variant: 'info',
-              eventKey,
-              showActionBtn: false,
-            });
-          }
-        } else if (payload.type === 'SERVICE_UPDATED') {
-          // Check for self-action suppression:
-          const lastSvcAction = window.lastDashboardActionTimestamp ||
-            window.salonDashboard?.lastLocalActionTimestamp ||
-            window.dashboardApp?.lastLocalActionTimestamp;
-          const isLocalServiceAction = lastSvcAction &&
-            (Date.now() - lastSvcAction < 7000);
-
-          if (!isLocalServiceAction) {
-            const action = payload.data?.action || 'UPDATED';
-            const serviceId = payload.data?.serviceId || payload.data?.id || 'all';
-            const eventKey = `service:${serviceId}:${action}`;
-
-            let msg = 'Service catalogue updated';
-            let icon = '✂️';
-            if (action === 'BULK_IMPORT') {
-              const count = payload.data?.count || 'Multiple';
-              msg = `🎉 ${count} services imported into menu`;
-              icon = '✨';
-            } else if (action === 'CREATE') {
-              msg = 'New service added to menu';
-              icon = '✨';
-            } else if (action === 'DELETE') {
-              msg = 'Service removed from menu';
-              icon = '🗑️';
-            } else if (action === 'UPDATE') {
-              msg = 'Service pricing or details updated';
-              icon = '✏️';
-            }
-
-            SoundManager.playCheckinChime();
-            this.dispatchNotification({
-              badgeText: action === 'BULK_IMPORT' ? 'Bulk Import' : 'Menu Update',
-              title: action === 'BULK_IMPORT' ? '✨ Services Imported' : '✂️ Service Menu Synced',
-              clientName: msg,
-              details: action === 'BULK_IMPORT' ? `${payload.data?.count || ''} services catalogued` : 'Real-time catalogue live',
-              icon,
-              variant: 'info',
-              eventKey,
-              showActionBtn: false,
-            });
-          }
+        } else if (payload.type === 'STAFF_UPDATED' || payload.type === 'SERVICE_UPDATED') {
+          // Architectural Separation of Concerns: Staff roster and service catalogue changes are strictly
+          // background data synchronization / cache invalidation events. They refresh views silently without
+          // interrupting the user with disruptive banners or chime sounds.
+          console.log(`[Realtime] 🔄 Data sync event received (${payload.type}): local state syncing silently`);
         } else if (payload.type === 'APPOINTMENT_UPDATED') {
           // ETA updates, auto-completion, reschedule confirmations — silent dashboard refresh
           // (Handled by the generic onEventCallback below)

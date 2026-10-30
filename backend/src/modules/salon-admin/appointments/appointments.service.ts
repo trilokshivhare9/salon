@@ -356,14 +356,23 @@ export class AppointmentsService {
   // REAL-TIME EVENT STREAM
   // ---------------------------------------------------------------------------
 
-  getSalonEvents(salonId: string, lastEventId?: string | number): Observable<SalonRealtimeEvent> {
+  getSalonEvents(
+    salonId: string,
+    lastEventId?: string | number,
+    clientId?: string,
+  ): Observable<SalonRealtimeEvent> {
     this.ensureInitializedServices();
-    return this.eventsService!.getSalonEvents(salonId, lastEventId);
+    return this.eventsService!.getSalonEvents(salonId, lastEventId, clientId);
   }
 
-  emitSalonEvent(salonId: string, type: SalonRealtimeEvent['type'], data: any) {
+  emitSalonEvent(
+    salonId: string,
+    type: SalonRealtimeEvent['type'],
+    data: any,
+    explicitClientId?: string,
+  ) {
     this.ensureInitializedServices();
-    this.eventsService!.emitSalonEvent(salonId, type, data);
+    this.eventsService!.emitSalonEvent(salonId, type, data, explicitClientId);
   }
 
   async resolveScheduleConflicts(query: ScheduleConflictQuery): Promise<ConflictResolutionResult> {

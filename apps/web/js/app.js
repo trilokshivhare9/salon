@@ -219,31 +219,35 @@ class App {
           </div>
 
           <form id="fp-form-2">
-            <div style="margin-bottom:14px;">
-              <label style="display:block; font-size:0.75rem; color:#94a3b8; margin-bottom:6px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em;">6-Digit OTP Code</label>
-              <input type="text" id="fp-otp" placeholder="••••••" maxlength="6" inputmode="numeric" required style="width:100%; padding:12px 14px; background:#1f2937; border:1px solid #9D5CFF; border-radius:10px; color:#fff; font-size:1.4rem; letter-spacing:0.35em; text-align:center; font-family:monospace; font-weight:800; box-sizing:border-box; outline:none;" />
-            </div>
-
-            <div style="margin-bottom:14px;">
-              <label style="display:block; font-size:0.75rem; color:#94a3b8; margin-bottom:6px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em;">New Password (Min 8 Chars)</label>
-              <input type="password" id="fp-new-password" placeholder="Enter new secure password" required minlength="8" style="width:100%; padding:12px 14px; background:#1f2937; border:1px solid #374151; border-radius:10px; color:#fff; font-size:0.95rem; box-sizing:border-box; outline:none;" />
-            </div>
-
             <div style="margin-bottom:16px;">
-              <label style="display:block; font-size:0.75rem; color:#94a3b8; margin-bottom:6px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em;">Confirm New Password</label>
-              <input type="password" id="fp-confirm-password" placeholder="Confirm new password" required minlength="8" style="width:100%; padding:12px 14px; background:#1f2937; border:1px solid #374151; border-radius:10px; color:#fff; font-size:0.95rem; box-sizing:border-box; outline:none;" />
+              <label style="display:block; font-size:0.75rem; color:#94a3b8; margin-bottom:6px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em;">6-Digit OTP Code</label>
+              <input type="text" id="fp-otp" placeholder="••••••" maxlength="6" inputmode="numeric" required style="width:100%; padding:12px 14px; background:#1f2937; border:1px solid #9D5CFF; border-radius:10px; color:#fff; font-size:1.4rem; letter-spacing:0.35em; text-align:center; font-family:monospace; font-weight:800; box-sizing:border-box; outline:none; transition: all 0.2s ease;" />
+              <div id="fp-otp-status" style="margin-top:8px; font-size:0.82rem; min-height:18px; display:none;"></div>
             </div>
 
-            <div id="fp-error-2" style="color:#f87171; background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.25); border-radius:8px; padding:10px 12px; font-size:0.8rem; margin-bottom:14px; display:none;"></div>
+            <!-- Lock password fields until OTP is auto-verified -->
+            <div id="fp-password-section" style="opacity:0.35; pointer-events:none; filter:grayscale(0.4); transition:all 0.3s ease;">
+              <div style="margin-bottom:14px;">
+                <label style="display:block; font-size:0.75rem; color:#94a3b8; margin-bottom:6px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em;">New Password (Min 8 Chars)</label>
+                <input type="password" id="fp-new-password" placeholder="Enter new secure password" required minlength="8" disabled style="width:100%; padding:12px 14px; background:#1f2937; border:1px solid #374151; border-radius:10px; color:#fff; font-size:0.95rem; box-sizing:border-box; outline:none;" />
+              </div>
 
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; font-size:0.8rem;">
+              <div style="margin-bottom:16px;">
+                <label style="display:block; font-size:0.75rem; color:#94a3b8; margin-bottom:6px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em;">Confirm New Password</label>
+                <input type="password" id="fp-confirm-password" placeholder="Confirm new password" required minlength="8" disabled style="width:100%; padding:12px 14px; background:#1f2937; border:1px solid #374151; border-radius:10px; color:#fff; font-size:0.95rem; box-sizing:border-box; outline:none;" />
+              </div>
+
+              <div id="fp-error-2" style="color:#f87171; background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.25); border-radius:8px; padding:10px 12px; font-size:0.8rem; margin-bottom:14px; display:none;"></div>
+
+              <button type="submit" id="btn-fp-submit-reset" disabled style="width:100%; padding:13px; background:linear-gradient(135deg, #9D5CFF 0%, #8B3DFF 100%); border:none; border-radius:10px; color:#fff; font-weight:700; font-size:0.95rem; cursor:not-allowed; opacity:0.6; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow:0 4px 14px rgba(79,70,229,0.35); transition:all 0.2s ease;">
+                <span>Enter 6-Digit OTP to Unlock</span>
+              </button>
+            </div>
+
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:16px; margin-bottom:4px; font-size:0.8rem;">
               <span id="fp-timer-label" style="color:#94a3b8;">Resend code in <strong id="fp-timer-count" style="color:#e2e8f0;">60s</strong></span>
               <a href="#" id="fp-resend-link" style="color:#A855F7; text-decoration:none; font-weight:600; display:none;">Resend Code</a>
             </div>
-
-            <button type="submit" id="btn-fp-submit-reset" style="width:100%; padding:13px; background:linear-gradient(135deg, #9D5CFF 0%, #8B3DFF 100%); border:none; border-radius:10px; color:#fff; font-weight:700; font-size:0.95rem; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow:0 4px 14px rgba(79,70,229,0.35);">
-              <span>Reset Password & Log In</span>
-            </button>
 
             <button type="button" id="btn-fp-back-step1" style="width:100%; margin-top:10px; padding:10px; background:transparent; border:none; color:#94a3b8; font-size:0.82rem; cursor:pointer;">
               &larr; Use a different mobile number
@@ -354,6 +358,106 @@ class App {
       await performLookup(mobileVal);
     });
 
+    // Helper functions to manage progressive password section unlocking
+    const lockPasswordSection = () => {
+      const pwSection = document.getElementById('fp-password-section');
+      const newPw = document.getElementById('fp-new-password');
+      const confirmPw = document.getElementById('fp-confirm-password');
+      const submitBtn = document.getElementById('btn-fp-submit-reset');
+      if (pwSection) {
+        pwSection.style.opacity = '0.35';
+        pwSection.style.pointerEvents = 'none';
+        pwSection.style.filter = 'grayscale(0.4)';
+      }
+      if (newPw) newPw.disabled = true;
+      if (confirmPw) confirmPw.disabled = true;
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.style.cursor = 'not-allowed';
+        submitBtn.style.opacity = '0.6';
+        submitBtn.innerHTML = '<span>Enter 6-Digit OTP to Unlock</span>';
+      }
+    };
+
+    const unlockPasswordSection = () => {
+      const pwSection = document.getElementById('fp-password-section');
+      const newPw = document.getElementById('fp-new-password');
+      const confirmPw = document.getElementById('fp-confirm-password');
+      const submitBtn = document.getElementById('btn-fp-submit-reset');
+      if (pwSection) {
+        pwSection.style.opacity = '1';
+        pwSection.style.pointerEvents = 'auto';
+        pwSection.style.filter = 'none';
+      }
+      if (newPw) newPw.disabled = false;
+      if (confirmPw) confirmPw.disabled = false;
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.style.cursor = 'pointer';
+        submitBtn.style.opacity = '1';
+        submitBtn.innerHTML = '<span>Reset Password & Log In</span>';
+      }
+    };
+
+    let isOtpVerified = false;
+    let isVerifyingOtp = false;
+
+    // Auto-verify OTP when exactly 6 digits are typed
+    const otpInput = document.getElementById('fp-otp');
+    const otpStatus = document.getElementById('fp-otp-status');
+
+    otpInput?.addEventListener('input', async (e) => {
+      const cleanVal = e.target.value.replace(/\D/g, '').slice(0, 6);
+      e.target.value = cleanVal;
+
+      if (cleanVal.length < 6) {
+        isOtpVerified = false;
+        lockPasswordSection();
+        otpInput.style.border = '1px solid #9D5CFF';
+        otpInput.style.background = '#1f2937';
+        if (otpStatus) {
+          otpStatus.style.display = 'none';
+          otpStatus.innerHTML = '';
+        }
+        return;
+      }
+
+      // Exactly 6 digits entered: Trigger Instant Auto-Verification
+      if (cleanVal.length === 6 && !isVerifyingOtp && !isOtpVerified) {
+        isVerifyingOtp = true;
+        if (otpStatus) {
+          otpStatus.style.display = 'block';
+          otpStatus.innerHTML = '<span style="color:#c084fc; font-weight:600; display:inline-flex; align-items:center; gap:6px;"><span>⏳</span> Verifying 6-digit code...</span>';
+        }
+        otpInput.style.border = '1px solid #c084fc';
+
+        try {
+          await SalonAuth.verifyResetOtp(activeMobile, cleanVal);
+          isOtpVerified = true;
+          if (otpStatus) {
+            otpStatus.style.display = 'block';
+            otpStatus.innerHTML = '<span style="color:#34d399; font-weight:700; display:inline-flex; align-items:center; gap:6px;"><span>✓</span> Code verified! Enter your new password below.</span>';
+          }
+          otpInput.style.border = '2px solid #10b981';
+          otpInput.style.background = 'rgba(16,185,129,0.08)';
+          unlockPasswordSection();
+          setTimeout(() => document.getElementById('fp-new-password')?.focus(), 150);
+        } catch (err) {
+          isOtpVerified = false;
+          lockPasswordSection();
+          if (otpStatus) {
+            otpStatus.style.display = 'block';
+            otpStatus.innerHTML = `<span style="color:#f87171; font-weight:600; display:inline-flex; align-items:center; gap:6px;"><span>✕</span> ${err.message || 'Invalid or expired OTP code.'}</span>`;
+          }
+          otpInput.style.border = '1px solid #ef4444';
+          otpInput.style.background = 'rgba(239,68,68,0.08)';
+          otpInput.focus();
+        } finally {
+          isVerifyingOtp = false;
+        }
+      }
+    });
+
     // Step 1 Trigger Send OTP to Saved Email
     document.getElementById('btn-fp-send-otp')?.addEventListener('click', async () => {
       const errEl = document.getElementById('fp-error-1');
@@ -372,11 +476,24 @@ class App {
         document.getElementById('fp-step-2').style.display = 'block';
         const maskedEl = document.getElementById('fp-masked-email');
         if (maskedEl) maskedEl.textContent = res.maskedEmail || currentSavedEmail || 'your saved email';
-        startCountdown(5);
+        
+        // Reset and lock password section initially
+        isOtpVerified = false;
+        if (otpInput) {
+          otpInput.value = '';
+          otpInput.style.border = '1px solid #9D5CFF';
+          otpInput.style.background = '#1f2937';
+        }
+        if (otpStatus) {
+          otpStatus.style.display = 'none';
+          otpStatus.innerHTML = '';
+        }
+        lockPasswordSection();
+        startCountdown(60);
         setTimeout(() => document.getElementById('fp-otp')?.focus(), 100);
       } catch (err) {
         if (errEl) {
-          errEl.textContent = err.message || 'Could not send OTP to saved email. Please try again.';
+          errEl.textContent = err.message || 'Could not send verification email. Please check server SMTP configuration.';
           errEl.style.display = 'block';
         }
         if (sendBtn) {
@@ -390,13 +507,27 @@ class App {
     document.getElementById('fp-resend-link')?.addEventListener('click', async (e) => {
       e.preventDefault();
       const errEl = document.getElementById('fp-error-2');
-      errEl.style.display = 'none';
+      if (errEl) errEl.style.display = 'none';
       try {
         await SalonAuth.forgotPassword(activeMobile);
-        startCountdown(5);
+        startCountdown(60);
+        isOtpVerified = false;
+        if (otpInput) {
+          otpInput.value = '';
+          otpInput.style.border = '1px solid #9D5CFF';
+          otpInput.style.background = '#1f2937';
+          otpInput.focus();
+        }
+        if (otpStatus) {
+          otpStatus.style.display = 'block';
+          otpStatus.innerHTML = '<span style="color:#34d399; font-weight:600;">✓ A new 6-digit code has been dispatched to your email.</span>';
+        }
+        lockPasswordSection();
       } catch (err) {
-        errEl.textContent = err.message || 'Could not resend code. Please wait.';
-        errEl.style.display = 'block';
+        if (errEl) {
+          errEl.textContent = err.message || 'Could not resend code. Please wait.';
+          errEl.style.display = 'block';
+        }
       }
     });
 
@@ -421,6 +552,12 @@ class App {
       const submitBtn = document.getElementById('btn-fp-submit-reset');
 
       errEl.style.display = 'none';
+
+      if (!isOtpVerified || otp.length !== 6) {
+        errEl.textContent = 'Please enter a valid 6-digit verification code first.';
+        errEl.style.display = 'block';
+        return;
+      }
 
       if (newPassword !== confirmPassword) {
         errEl.textContent = 'New passwords do not match. Please verify.';

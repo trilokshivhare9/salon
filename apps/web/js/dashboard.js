@@ -16,6 +16,7 @@ import {
   StaffLeaveDialog,
   FestivalDialog,
   DateEventsDialog,
+  CalendarState,
 } from './modules/calendar/index.js';
 import { ScheduleDayOffDialog, SalonClosuresModal } from './modules/salon-settings/schedule-day-off-dialog.js';
 import { StaffApplyLeaveDialog } from './modules/staff/index.js';
@@ -29,41 +30,36 @@ import {
   renderServiceDurationOptions,
 } from './constants.js';
 import { AppointmentStatus, StatusPredicates } from './constants/appointment-status.js';
-import { LoadingOverlay } from './modules/shared/loading-overlay.js';
+import {
+  AppLoaders,
+  AppBootLoader,
+  PageDataLoader,
+  ActionOverlayLoader,
+  LoadingOverlay,
+  UniversalLoader,
+} from './modules/shared/app-loaders.js';
+import { AppSnackbar } from './modules/shared/app-snackbar.js';
 
 export {
   SERVICE_DURATION_OPTIONS,
   renderServiceDurationOptions,
+  AppLoaders,
+  AppBootLoader,
+  PageDataLoader,
+  ActionOverlayLoader,
   LoadingOverlay,
+  UniversalLoader,
+  AppSnackbar,
 };
 
-function showNotification(msg, type = 'info') {
-  let cleanMsg = typeof msg === 'object' ? (msg.message || JSON.stringify(msg)) : String(msg || '');
-  if (cleanMsg.length > 200) {
-    cleanMsg = cleanMsg.slice(0, 200) + '...';
-  }
-
-  const isError = type === 'error' || type === 'danger';
-  const isWarning = type === 'warning';
-  const isSuccess = type === 'success';
-
-  const variant = isError ? 'danger' : (isWarning ? 'warning' : (isSuccess ? 'success' : 'info'));
-  const icon = isError ? '✕' : (isWarning ? '⚠️' : (isSuccess ? '✓' : '⚡'));
-  const badgeText = isError ? 'Error' : (isWarning ? 'Notice' : (isSuccess ? 'Success' : 'Salon Update'));
-
-  RealtimeNotifier.showLuxuryBanner({
-    badgeText,
-    title: cleanMsg,
-    clientName: cleanMsg,
-    icon,
-    variant,
-  });
+function showNotification(msg, type = 'info', options = {}) {
+  return AppSnackbar.show(msg, type, options);
 }
 
 // Global Service Description Expansion Handler (Module Top-Level, Available Immediately)
 window._expandedServiceDescIds = window._expandedServiceDescIds || new Set();
 
-window.toggleServiceDesc = function(targetId, btnEl, event) {
+window.toggleServiceDesc = function (targetId, btnEl, event) {
   if (event && event._descHandled) return;
   if (event) {
     event._descHandled = true;
@@ -71,7 +67,7 @@ window.toggleServiceDesc = function(targetId, btnEl, event) {
       if (typeof event.preventDefault === 'function') event.preventDefault();
       if (typeof event.stopPropagation === 'function') event.stopPropagation();
       if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
-    } catch (_) {}
+    } catch (_) { }
   }
 
   const btn = (btnEl instanceof HTMLElement)
@@ -304,7 +300,7 @@ export class SalonDashboard {
         if (typeof showNotification === 'function') {
           showNotification('📋 Booking link copied to clipboard!', 'success');
         } else {
-          alert(`Booking link copied:\n${url}`);
+          showNotification(`Booking link copied: ${url}`, 'success');
         }
       },
       onFilterQueue: (filter) => {
@@ -384,8 +380,15 @@ export class SalonDashboard {
   }
 
   showToast(msg, type = 'info') {
-    this.lastLocalActionTimestamp = Date.now();
-    window.lastDashboardActionTimestamp = Date.now();
+    const now = Date.now();
+    if (this && typeof this === 'object') {
+      this.lastLocalActionTimestamp = now;
+    }
+    if (typeof window !== 'undefined') {
+      window.lastDashboardActionTimestamp = now;
+      if (window.salonDashboard) window.salonDashboard.lastLocalActionTimestamp = now;
+      if (window.dashboardApp) window.dashboardApp.lastLocalActionTimestamp = now;
+    }
     showNotification(msg, type);
   }
 
@@ -438,52 +441,52 @@ export class SalonDashboard {
     `;
 
     const renderReqCard = (req) => {
-        const clientName = req.customer?.name || req.customerPhone || 'In-Salon Client';
-        const clientPhone = req.customer?.phone || req.customerPhone || '';
-        const reqServices = getApptServices(req);
-        const serviceName = reqServices.length > 0
-          ? reqServices.map((s) => `${s.name}${s.isAddon ? ' (Add-on)' : ''}`).join(' + ')
-          : (req.serviceNameSnapshot || req.service?.name || 'Quick Service');
-        const rawTime = req.startTime || req.startAt;
-        const timeStr = rawTime
-          ? (typeof formatTime12h === 'function' ? formatTime12h(rawTime) : new Date(rawTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }))
-          : 'Today';
-        const specialist = req.staff?.name || req.stylist?.name || 'Any Specialist';
-        const finalPrice = req.totalPrice !== undefined ? req.totalPrice : req.price;
-        const price = finalPrice ? `₹${Number(finalPrice).toLocaleString('en-IN')}` : '';
+      const clientName = req.customer?.name || req.customerPhone || 'In-Salon Client';
+      const clientPhone = req.customer?.phone || req.customerPhone || '';
+      const reqServices = getApptServices(req);
+      const serviceName = reqServices.length > 0
+        ? reqServices.map((s) => `${s.name}${s.isAddon ? ' (Add-on)' : ''}`).join(' + ')
+        : (req.serviceNameSnapshot || req.service?.name || 'Quick Service');
+      const rawTime = req.startTime || req.startAt;
+      const timeStr = rawTime
+        ? (typeof formatTime12h === 'function' ? formatTime12h(rawTime) : new Date(rawTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }))
+        : 'Today';
+      const specialist = req.staff?.name || req.stylist?.name || 'Any Specialist';
+      const finalPrice = req.totalPrice !== undefined ? req.totalPrice : req.price;
+      const price = finalPrice ? `₹${Number(finalPrice).toLocaleString('en-IN')}` : '';
 
-        // Clean customer initials
-        const nameParts = clientName.trim().split(/\s+/);
-        const initials = nameParts.length >= 2
-          ? (nameParts[0][0] + nameParts[nameParts.length - 1][0]).toUpperCase()
-          : (clientName.substring(0, 2) || 'CL').toUpperCase();
+      // Clean customer initials
+      const nameParts = clientName.trim().split(/\s+/);
+      const initials = nameParts.length >= 2
+        ? (nameParts[0][0] + nameParts[nameParts.length - 1][0]).toUpperCase()
+        : (clientName.substring(0, 2) || 'CL').toUpperCase();
 
-        // High quality channel badge (compact)
-        let channelBadge = '';
-        if (req.source === 'WHATSAPP') {
-          channelBadge = `
+      // High quality channel badge (compact)
+      let channelBadge = '';
+      if (req.source === 'WHATSAPP') {
+        channelBadge = `
             <span style="display: inline-flex; align-items: center; gap: 3px; background: rgba(34, 197, 94, 0.15); border: 1px solid rgba(34, 197, 94, 0.35); color: #4ade80; font-size: 0.66rem; font-weight: 700; padding: 1px 7px; border-radius: 9999px;">
               ${Icons.messageCircle ? Icons.messageCircle({ size: 11, color: '#4ade80' }) : '💬'}
               <span>WhatsApp</span>
             </span>
           `;
-        } else if (req.source === 'QUICK_BOOK') {
-          channelBadge = `
+      } else if (req.source === 'QUICK_BOOK') {
+        channelBadge = `
             <span style="display: inline-flex; align-items: center; gap: 3px; background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.35); color: #fbbf24; font-size: 0.66rem; font-weight: 700; padding: 1px 7px; border-radius: 9999px;">
               ${Icons.qrCode ? Icons.qrCode({ size: 11, color: '#fbbf24' }) : '📱'}
               <span>Store QR</span>
             </span>
           `;
-        } else {
-          channelBadge = `
+      } else {
+        channelBadge = `
             <span style="display: inline-flex; align-items: center; gap: 3px; background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.35); color: #38bdf8; font-size: 0.66rem; font-weight: 700; padding: 1px 7px; border-radius: 9999px;">
               ${Icons.user ? Icons.user({ size: 11, color: '#38bdf8' }) : '📲'}
               <span>App</span>
             </span>
           `;
-        }
+      }
 
-        return `
+      return `
           <div class="quick-req-card" style="background: #1e172e; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 11px; padding: 10px 12px; margin-bottom: 8px; box-sizing: border-box; width: 100%; display: block; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);">
             
             <!-- Row 1: Header (Avatar, Name, Badge & Price/Time) -->
@@ -574,12 +577,12 @@ export class SalonDashboard {
         </div>
       `
       : stylistGroups.map((group) => {
-          const sName = group.stylist?.name || 'Any Specialist';
-          const sColor = group.stylist?.colorCode || '#8b5cf6';
-          const sInitial = (sName.charAt(0) || 'S').toUpperCase();
-          const reqCount = group.requests.length;
+        const sName = group.stylist?.name || 'Any Specialist';
+        const sColor = group.stylist?.colorCode || '#8b5cf6';
+        const sInitial = (sName.charAt(0) || 'S').toUpperCase();
+        const reqCount = group.requests.length;
 
-          return `
+        return `
             <div class="stylist-request-group" style="margin-bottom: 14px;">
               <!-- Stylist Group Header Banner -->
               <div style="display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; margin-bottom: 8px; border-radius: 9px; background: rgba(255, 255, 255, 0.04); border-left: 3px solid ${sColor};">
@@ -604,7 +607,7 @@ export class SalonDashboard {
               </div>
             </div>
           `;
-        }).join('');
+      }).join('');
 
     modal.innerHTML = `
       <style>
@@ -880,7 +883,7 @@ export class SalonDashboard {
                   this.summaryData = fresh;
                   this.refreshActiveTab();
                 }
-              }).catch(() => {});
+              }).catch(() => { });
             }
             return;
           }
@@ -1028,7 +1031,7 @@ export class SalonDashboard {
         try {
           const newHash = this.activeTab === 'dashboard' ? '#admin' : `#admin/${this.activeTab}`;
           window.history.replaceState(null, '', newHash);
-        } catch (_) {}
+        } catch (_) { }
       }
     } else {
       // Fallback to full re-render if tab-content not found
@@ -1064,7 +1067,7 @@ export class SalonDashboard {
       try {
         const newHash = targetTab === 'dashboard' ? '#admin' : `#admin/${targetTab}`;
         window.history.replaceState(null, '', newHash);
-      } catch (_) {}
+      } catch (_) { }
     }
 
     // Update active state on desktop tab buttons
@@ -1089,7 +1092,7 @@ export class SalonDashboard {
             if (Array.isArray(fresh)) {
               this.servicesList = fresh;
             }
-          }).catch(() => {});
+          }).catch(() => { });
         }
       } catch (err) {
         console.error('[Dashboard] Error rendering tab:', targetTab, err);
@@ -1104,10 +1107,10 @@ export class SalonDashboard {
     try {
       if (tab === 'queue' || tab === 'dashboard') {
         await Promise.all([
-          this.queueSync.fetchQueue(force).catch(() => {}),
+          this.queueSync.fetchQueue(force).catch(() => { }),
           ApiClient.getDashboardSummary(this.selectedDate, force).then((s) => {
             if (s) this.summaryData = s;
-          }).catch(() => {}),
+          }).catch(() => { }),
         ]);
         if (Array.isArray(this.queueSync.items)) {
           this.summaryData.todayAppointments = this.queueSync.items;
@@ -1311,7 +1314,7 @@ export class SalonDashboard {
   renderServerUnreachable(errorDetails = null) {
     const isDeviceOffline = (typeof navigator !== 'undefined' && !navigator.onLine) || NetworkHealth.getState() === ConnectionState.OFFLINE;
     const title = isDeviceOffline ? 'No Internet Connection' : 'Unable to Connect';
-    const desc = isDeviceOffline 
+    const desc = isDeviceOffline
       ? 'Your device is currently offline. Please check your Wi-Fi or mobile data connection.'
       : "We're having trouble reaching the salon service. Please check your connection and try again.";
     const btnLabel = isDeviceOffline ? 'Check Connection' : 'Try Again';
@@ -1373,18 +1376,10 @@ export class SalonDashboard {
       return;
     }
 
-    this.container.innerHTML = `
-      <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #0c0f17; color: #fff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; gap: 16px;">
-        <div style="width: 46px; height: 46px; border: 3px solid rgba(168, 85, 247, 0.2); border-top-color: #a855f7; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
-        <div style="font-size: 0.95rem; font-weight: 700; color: #e2e8f0; letter-spacing: -0.01em;">StyleSlot Operations</div>
-        <div style="font-size: 0.78rem; color: #94a3b8;" id="loading-status-text">Connecting to salon workspace...</div>
-      </div>
-      <style>@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }</style>
-    `;
+    this.container.innerHTML = AppBootLoader.render('Connecting to salon workspace...');
 
     setTimeout(() => {
-      const el = document.getElementById('loading-status-text');
-      if (el) el.textContent = 'Verifying server connection...';
+      AppBootLoader.updateStatus('Verifying server connection...');
     }, 1800);
   }
 
@@ -1588,7 +1583,7 @@ export class SalonDashboard {
       try {
         const newHash = this.activeTab === 'dashboard' ? '#admin' : `#admin/${this.activeTab}`;
         window.history.replaceState(null, '', newHash);
-      } catch (_) {}
+      } catch (_) { }
     }
   }
 
@@ -1743,14 +1738,14 @@ export class SalonDashboard {
               <span>All Specialists</span>
             </div>
             ${this.staffList.map((st) => {
-              const initials = (st.name || 'S').trim().split(/\s+/).map((n) => n[0]).slice(0, 2).join('').toUpperCase();
-              return `
+      const initials = (st.name || 'S').trim().split(/\s+/).map((n) => n[0]).slice(0, 2).join('').toUpperCase();
+      return `
                 <div class="qd-chip ${filters.stylistId === st.id ? 'active' : ''}" data-val="${st.id}">
                   <span class="qd-chip-avatar">${initials}</span>
                   <span>${st.name}</span>
                 </div>
               `;
-            }).join('')}
+    }).join('')}
           </div>
         </div>
 
@@ -2542,13 +2537,13 @@ export class SalonDashboard {
             </div>
             <div class="qc__pipeline-track" title="Step ${currentIdx + 1} of 6: ${stageLabel}">
               ${steps.map((st, i) => {
-                const isDone = i < currentIdx;
-                const isCurrent = i === currentIdx;
-                const cls = isDone ? 'is-done' : (isCurrent ? 'is-current' : 'is-upcoming');
-                const bg = isDone ? '#10b981' : (isCurrent ? activeColor : 'rgba(255, 255, 255, 0.08)');
-                const shadow = isCurrent ? `box-shadow: 0 0 6px ${activeColor};` : '';
-                return `<div class="qc__pipeline-seg ${cls}" style="background: ${bg}; ${shadow}" title="${st.num}. ${st.label} ${isCurrent ? '(Current)' : (isDone ? '(Done)' : '')}"></div>`;
-              }).join('')}
+          const isDone = i < currentIdx;
+          const isCurrent = i === currentIdx;
+          const cls = isDone ? 'is-done' : (isCurrent ? 'is-current' : 'is-upcoming');
+          const bg = isDone ? '#10b981' : (isCurrent ? activeColor : 'rgba(255, 255, 255, 0.08)');
+          const shadow = isCurrent ? `box-shadow: 0 0 6px ${activeColor};` : '';
+          return `<div class="qc__pipeline-seg ${cls}" style="background: ${bg}; ${shadow}" title="${st.num}. ${st.label} ${isCurrent ? '(Current)' : (isDone ? '(Done)' : '')}"></div>`;
+        }).join('')}
             </div>
           </div>
         `;
@@ -2706,8 +2701,8 @@ export class SalonDashboard {
                 </div>
                 <div class="qc__services-items">
                   ${(() => {
-                    if (apptSvcs.length === 0) {
-                      return `
+            if (apptSvcs.length === 0) {
+              return `
                         <div class="qc__svc-row">
                           <span class="qc__svc-bullet">✂</span>
                           <span class="qc__svc-name">${serviceName}</span>
@@ -2717,8 +2712,8 @@ export class SalonDashboard {
                           </div>
                         </div>
                       `;
-                    }
-                    return apptSvcs.map((s) => `
+            }
+            return apptSvcs.map((s) => `
                       <div class="qc__svc-row ${s.isAddon ? 'qc__svc-row--addon' : ''}">
                         <span class="qc__svc-bullet ${s.isAddon ? 'qc__svc-bullet--plus' : ''}">${s.isAddon ? '+' : '✂'}</span>
                         <span class="qc__svc-name">${s.name}</span>
@@ -2728,23 +2723,23 @@ export class SalonDashboard {
                         </div>
                       </div>
                     `).join('');
-                  })()}
+          })()}
                 </div>
               </div>
 
               <!-- Row 3.5: Contextual Note (Overdue / Late) -->
               ${(() => {
-                if (isOverdue && !isDone && !isCancelled) {
-                  return `<div class="qc__note qc__note--warn">⚠️ Slot Passed · Client not checked in</div>`;
-                }
-                if (appt.clientEtaStatus === 'ON_THE_WAY' && appt.status !== 'ON_THE_WAY') {
-                  return `<div class="qc__note qc__note--green">🚗 Client On The Way</div>`;
-                }
-                if (appt.clientEtaStatus === 'RUNNING_LATE_10M' || appt.clientEtaStatus === 'RUNNING_LATE_20M') {
-                  return `<div class="qc__note qc__note--warn">⏰ Client Running Late (${appt.clientEtaStatus === 'RUNNING_LATE_20M' ? '20m' : '10m'})</div>`;
-                }
-                return '';
-              })()}
+            if (isOverdue && !isDone && !isCancelled) {
+              return `<div class="qc__note qc__note--warn">⚠️ Slot Passed · Client not checked in</div>`;
+            }
+            if (appt.clientEtaStatus === 'ON_THE_WAY' && appt.status !== 'ON_THE_WAY') {
+              return `<div class="qc__note qc__note--green">🚗 Client On The Way</div>`;
+            }
+            if (appt.clientEtaStatus === 'RUNNING_LATE_10M' || appt.clientEtaStatus === 'RUNNING_LATE_20M') {
+              return `<div class="qc__note qc__note--warn">⏰ Client Running Late (${appt.clientEtaStatus === 'RUNNING_LATE_20M' ? '20m' : '10m'})</div>`;
+            }
+            return '';
+          })()}
 
               <!-- Row 4: Lifecycle Progress Bar (Requested by user) -->
               ${renderBookingLifecycle(appt)}
@@ -3147,7 +3142,7 @@ export class SalonDashboard {
         });
       }
     }, 0);
-    return `<div id="staff-leaves-calendar-root" style="display:flex;align-items:center;justify-content:center;min-height:360px;color:#a5b4fc;"><div style="font-size:0.88rem;font-weight:600;">Loading specialist leaves...</div></div>`;
+    return `<div id="staff-leaves-calendar-root">${UniversalLoader.render({ title: `Loading specialist leaves for ${st.name}...`, minHeight: '360px' })}</div>`;
   }
 
   renderStaffHoursSubtab(st) {
@@ -3486,8 +3481,16 @@ export class SalonDashboard {
     `;
   }
 
-  autoSaveStaffSchedule(staffId, immediate = false) {
+  autoSaveStaffSchedule(staffId, immediate = false, successMsg = null) {
     if (!this.currentStaffHoursState || this.currentStaffHoursState.staffId !== staffId) return;
+
+    const now = Date.now();
+    this.lastLocalActionTimestamp = now;
+    if (typeof window !== 'undefined') {
+      window.lastDashboardActionTimestamp = now;
+      if (window.salonDashboard) window.salonDashboard.lastLocalActionTimestamp = now;
+      if (window.dashboardApp) window.dashboardApp.lastLocalActionTimestamp = now;
+    }
 
     this.showScheduleSavingIndicator('Saving...');
 
@@ -3598,6 +3601,20 @@ export class SalonDashboard {
         }
         this.hideScheduleSavingIndicator(true, 'Staff schedule saved');
 
+        const finishedNow = Date.now();
+        this.lastLocalActionTimestamp = finishedNow;
+        if (typeof window !== 'undefined') {
+          window.lastDashboardActionTimestamp = finishedNow;
+          if (window.salonDashboard) window.salonDashboard.lastLocalActionTimestamp = finishedNow;
+          if (window.dashboardApp) window.dashboardApp.lastLocalActionTimestamp = finishedNow;
+        }
+
+        if (successMsg) {
+          setTimeout(() => {
+            this.showToast?.(successMsg, 'success');
+          }, 160);
+        }
+
         if (updated?.affectedBookingsCount > 0) {
           this.showToast?.(updated.message || `${updated.affectedBookingsCount} booking(s) automatically sent reschedule request via WhatsApp.`, 'info');
         }
@@ -3624,7 +3641,9 @@ export class SalonDashboard {
           statusBadge.innerHTML = `<span class="autosave-dot error"></span><span class="autosave-text" title="${err.message || 'Error'}">⚠️ Save error</span>`;
         }
         this.hideScheduleSavingIndicator(false, err.message || 'Save error');
-        this.showToast?.(`Schedule save warning: ${err.message || 'Validation error'}`, 'warning');
+        setTimeout(() => {
+          this.showToast?.(err.message || 'Failed to auto-save specialist schedule. Please check break windows and operating hours.', 'error');
+        }, 160);
       }
     };
 
@@ -3943,7 +3962,7 @@ export class SalonDashboard {
 
         this.syncRoutineBreaksToDays();
         this.updateStaffHoursTableUI();
-        this.autoSaveStaffSchedule(this.currentStaffHoursState.staffId, true);
+        this.autoSaveStaffSchedule(this.currentStaffHoursState.staffId, true, `${dayData.friendlyDay || day} marked ${isWorking ? 'Working' : 'Off'} for ${this.currentStaffHoursState.staffName || 'Specialist'} (auto-saved)`);
       };
     });
 
@@ -4066,7 +4085,15 @@ export class SalonDashboard {
         if (this.currentStaffHoursState?.routineBreaks && this.currentStaffHoursState.routineBreaks[idx]) {
           const targetBreak = this.currentStaffHoursState.routineBreaks[idx];
           const staffId = this.currentStaffHoursState.staffId;
-          if (!confirm(`Delete routine break "${targetBreak.title}" for this stylist?`)) return;
+          const ok = await CalendarState.confirm({
+            title: 'Delete Routine Break',
+            message: `Delete routine break "${targetBreak.title}" for this specialist?`,
+            confirmText: 'Delete Break',
+            cancelText: 'Cancel',
+            icon: '🗑️',
+            type: 'danger',
+          });
+          if (!ok) return;
 
           try {
             await ApiClient.deleteStaffRoutineBreak(staffId, {
@@ -4302,11 +4329,11 @@ export class SalonDashboard {
       const eVal = endInp ? endInp.value : '14:00';
 
       if (!sVal || !eVal || sVal >= eVal) {
-        alert('Break start time must be earlier than break end time.');
+        this.showToast('Break start time must be earlier than break end time.', 'warning');
         return;
       }
       if (selectedDays.length === 0) {
-        alert('Please select at least one day for this routine break.');
+        this.showToast('Please select at least one day for this routine break.', 'warning');
         return;
       }
 
@@ -4323,7 +4350,7 @@ export class SalonDashboard {
       });
 
       if (hasConflict) {
-        alert('This break time overlaps with an existing routine break on one of the selected days. Please adjust your break window.');
+        this.showToast('This break time overlaps with an existing routine break on one of the selected days. Please adjust your break window.', 'warning');
         return;
       }
 
@@ -4417,7 +4444,7 @@ export class SalonDashboard {
         this.showToast(`Routine break "${finalTitle}" saved!`, 'success');
       } catch (err) {
         console.error('Failed to save staff routine break:', err);
-        alert(err.message || 'Failed to save break');
+        this.showToast(err.message || 'Failed to save break', 'error');
         if (saveBtn) {
           saveBtn.disabled = false;
           saveBtn.textContent = isEditing ? '✓ Save Changes' : '+ Add Break';
@@ -4445,7 +4472,7 @@ export class SalonDashboard {
           this.showToast(`Removed routine break "${deletedTitle}".`, 'info');
         } catch (err) {
           console.error('Failed to delete staff routine break:', err);
-          alert(err.message || 'Failed to delete break');
+          this.showToast(err.message || 'Failed to delete break', 'error');
         }
       }
     });
@@ -4636,7 +4663,14 @@ export class SalonDashboard {
 
         const hasConflict = btn.getAttribute('data-has-conflict') === 'true';
         if (hasConflict) {
-          const ok = confirm(`Timing Conflict Detected!\n\n${targetBreak.conflictReason}\n\nDo you want to replace this specialist's custom break with "${targetBreak.title}" (${targetBreak.startTime}–${targetBreak.endTime}) from the salon standard timing?`);
+          const ok = await CalendarState.confirm({
+            title: 'Timing Conflict Detected',
+            message: `${targetBreak.conflictReason}. Do you want to replace this specialist's custom break with "${targetBreak.title}" (${formatTime12h(targetBreak.startTime)}–${formatTime12h(targetBreak.endTime)}) from the salon standard timing?`,
+            confirmText: 'Replace with Salon Timing',
+            cancelText: 'Keep Custom Break',
+            icon: '⚠️',
+            type: 'warning',
+          });
           if (!ok) return;
         }
 
@@ -4839,13 +4873,13 @@ export class SalonDashboard {
       }
       if (isWorking) {
         if (!sVal || !eVal || sVal >= eVal) {
-          alert(`Shift start (${formatTime12h(sVal)}) must be earlier than shift end (${formatTime12h(eVal)}).`);
+          this.showToast(`Shift start (${formatTime12h(sVal)}) must be earlier than shift end (${formatTime12h(eVal)}).`, 'warning');
           return;
         }
         const swhStart = dayData.salonStart || this.salonProfile?.defaultStartTime || '09:00';
         const swhEnd = dayData.salonEnd || this.salonProfile?.defaultEndTime || '19:00';
         if (sVal < swhStart || eVal > swhEnd) {
-          alert(`Facility Boundary Error: Shift (${formatTime12h(sVal)} – ${formatTime12h(eVal)}) cannot extend outside salon facility operating hours (${formatTime12h(swhStart)} – ${formatTime12h(swhEnd)}). Stylists must work under salon hours.`);
+          this.showToast(`Facility Boundary Error: Shift (${formatTime12h(sVal)} – ${formatTime12h(eVal)}) cannot extend outside salon facility operating hours (${formatTime12h(swhStart)} – ${formatTime12h(swhEnd)}). Stylists must work under salon hours.`, 'warning');
           return;
         }
       }
@@ -4862,8 +4896,7 @@ export class SalonDashboard {
 
       closeModal();
       this.updateStaffHoursTableUI();
-      this.autoSaveStaffSchedule(this.currentStaffHoursState?.staffId, true);
-      this.showToast(`${dayData.friendlyDay} shift updated (auto-saved)`, 'success');
+      this.autoSaveStaffSchedule(this.currentStaffHoursState?.staffId, true, `${dayData.friendlyDay} shift updated (auto-saved)`);
     });
 
     modalContainer.querySelector('#modal-btn-roster-reset-salon')?.addEventListener('click', (e) => {
@@ -4877,8 +4910,7 @@ export class SalonDashboard {
 
       closeModal();
       this.updateStaffHoursTableUI();
-      this.autoSaveStaffSchedule(this.currentStaffHoursState?.staffId, true);
-      this.showToast(`Reset ${dayData.friendlyDay} to salon standard hours (auto-saved)`, 'success');
+      this.autoSaveStaffSchedule(this.currentStaffHoursState?.staffId, true, `Reset ${dayData.friendlyDay} to salon standard hours (auto-saved)`);
     });
   }
 
@@ -4976,8 +5008,7 @@ export class SalonDashboard {
 
       closeSheet();
       this.updateStaffHoursTableUI();
-      this.autoSaveStaffSchedule(this.currentStaffHoursState?.staffId, true);
-      this.showToast(`${dayData.friendlyDay} restored to original salon hours (${formatTime12h(swhStart)} – ${formatTime12h(swhEnd)})`, 'success');
+      this.autoSaveStaffSchedule(this.currentStaffHoursState?.staffId, true, `${dayData.friendlyDay} restored to original salon hours (${formatTime12h(swhStart)} – ${formatTime12h(swhEnd)})`);
     });
   }
 
@@ -5133,8 +5164,7 @@ export class SalonDashboard {
 
       closeSheet();
       this.updateStaffHoursTableUI();
-      this.autoSaveStaffSchedule(staffId, true);
-      this.showToast(`✨ All days for ${staffName} reset to match salon facility operating hours!`, 'success');
+      this.autoSaveStaffSchedule(staffId, true, `✨ All days for ${staffName} reset to match salon facility operating hours!`);
     });
   }
 
@@ -5537,8 +5567,16 @@ export class SalonDashboard {
     });
   }
 
-  autoSaveSalonSchedule(immediate = false, deltaPayload = null) {
+  autoSaveSalonSchedule(immediate = false, deltaPayload = null, successMsg = null) {
     if (!this.currentSalonHoursState) return;
+
+    const now = Date.now();
+    this.lastLocalActionTimestamp = now;
+    if (typeof window !== 'undefined') {
+      window.lastDashboardActionTimestamp = now;
+      if (window.salonDashboard) window.salonDashboard.lastLocalActionTimestamp = now;
+      if (window.dashboardApp) window.dashboardApp.lastLocalActionTimestamp = now;
+    }
 
     this.showScheduleSavingIndicator('Saving...');
 
@@ -5593,6 +5631,20 @@ export class SalonDashboard {
         }
         this.hideScheduleSavingIndicator(true, 'Salon schedule saved');
 
+        const finishedNow = Date.now();
+        this.lastLocalActionTimestamp = finishedNow;
+        if (typeof window !== 'undefined') {
+          window.lastDashboardActionTimestamp = finishedNow;
+          if (window.salonDashboard) window.salonDashboard.lastLocalActionTimestamp = finishedNow;
+          if (window.dashboardApp) window.dashboardApp.lastLocalActionTimestamp = finishedNow;
+        }
+
+        if (successMsg) {
+          setTimeout(() => {
+            this.showToast?.(successMsg, 'success');
+          }, 160);
+        }
+
         if (updated?.affectedBookingsCount > 0) {
           this.showToast?.(updated.message || `${updated.affectedBookingsCount} booking(s) automatically sent reschedule request via WhatsApp.`, 'info');
         }
@@ -5602,7 +5654,9 @@ export class SalonDashboard {
           statusBadge.innerHTML = `<span class="autosave-dot error"></span><span class="autosave-text" title="${err.message || 'Error'}">⚠️ Save error</span>`;
         }
         this.hideScheduleSavingIndicator(false, err.message || 'Save error');
-        this.showToast?.(`Salon schedule save error: ${err.message || 'Validation error'}`, 'warning');
+        setTimeout(() => {
+          this.showToast?.(err.message || 'Failed to auto-save salon operating schedule. Please check operating windows.', 'error');
+        }, 160);
       }
     };
 
@@ -5688,7 +5742,10 @@ export class SalonDashboard {
         rowsContainer.innerHTML = this.renderSalonRosterRowsHtml();
         this.attachSalonRosterListeners();
       }
-      this.autoSaveSalonSchedule(immediate, changedDays);
+      const bulkMsg = (immediate && changedDays.length > 0)
+        ? `Applied ${formatTime12h(sVal)} – ${formatTime12h(eVal)} across all ${changedDays.length} open days (auto-saved)`
+        : null;
+      this.autoSaveSalonSchedule(immediate, changedDays, bulkMsg);
     };
 
     bulkStartInp?.addEventListener('input', () => handleBulkLiveChange(false));
@@ -5733,11 +5790,12 @@ export class SalonDashboard {
         rowsContainer.innerHTML = this.renderSalonRosterRowsHtml();
         this.attachSalonRosterListeners();
 
+        const dayLabel = this.currentSalonHoursState?.days[day]?.friendlyDay || day;
         // ⚡ Delta save: send ONLY this single day's isClosed status!
         this.autoSaveSalonSchedule(true, [{
           dayOfWeek: day,
           isClosed: !isOpen,
-        }]);
+        }], `${dayLabel} marked ${isOpen ? 'Open' : 'Closed'} (auto-saved)`);
       };
     });
 
@@ -5806,7 +5864,15 @@ export class SalonDashboard {
         const idx = parseInt(btn.getAttribute('data-index') || btn.closest('.routine-break-row-card')?.getAttribute('data-idx'), 10);
         if (this.currentSalonHoursState?.routineBreaks && this.currentSalonHoursState.routineBreaks[idx]) {
           const targetBreak = this.currentSalonHoursState.routineBreaks[idx];
-          if (!confirm(`Delete facility break "${targetBreak.title}" across its active days?`)) return;
+          const ok = await CalendarState.confirm({
+            title: 'Delete Facility Break',
+            message: `Delete facility break "${targetBreak.title}" across its active days?`,
+            confirmText: 'Delete Facility Break',
+            cancelText: 'Cancel',
+            icon: '🗑️',
+            type: 'danger',
+          });
+          if (!ok) return;
 
           try {
             await ApiClient.deleteSalonRoutineBreak({
@@ -5993,7 +6059,7 @@ export class SalonDashboard {
       const sVal = startInp?.value || dayData.startTime || '';
       const eVal = endInp?.value || dayData.endTime || '';
       if (isOpen && (!sVal || !eVal || sVal >= eVal)) {
-        alert(`Opening time (${formatTime12h(sVal)}) must be earlier than closing time (${formatTime12h(eVal)}).`);
+        this.showToast(`Opening time (${formatTime12h(sVal)}) must be earlier than closing time (${formatTime12h(eVal)}).`, 'warning');
         return;
       }
       const daysArr = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
@@ -6020,8 +6086,7 @@ export class SalonDashboard {
         rowsContainer.innerHTML = this.renderSalonRosterRowsHtml();
         this.attachSalonRosterListeners();
       }
-      this.autoSaveSalonSchedule(true, allDaysPayload);
-      this.showToast(`Applied ${dayData.friendlyDay} hours to all 7 days (auto-saved)`, 'success');
+      this.autoSaveSalonSchedule(true, allDaysPayload, `Applied ${dayData.friendlyDay} hours to all 7 days (auto-saved)`);
     });
 
     modalContainer.querySelector('#modal-btn-salon-save')?.addEventListener('click', (e) => {
@@ -6030,7 +6095,7 @@ export class SalonDashboard {
       const eVal = endInp?.value || dayData.endTime || '';
       if (isOpen) {
         if (!sVal || !eVal || sVal >= eVal) {
-          alert(`Opening time (${formatTime12h(sVal)}) must be earlier than closing time (${formatTime12h(eVal)}).`);
+          this.showToast(`Opening time (${formatTime12h(sVal)}) must be earlier than closing time (${formatTime12h(eVal)}).`, 'warning');
           return;
         }
       }
@@ -6050,8 +6115,7 @@ export class SalonDashboard {
         isClosed: !isOpen,
         startTime: sVal,
         endTime: eVal,
-      }]);
-      this.showToast(`${dayData.friendlyDay} salon hours updated (auto-saved)`, 'success');
+      }], `${dayData.friendlyDay} salon hours updated (auto-saved)`);
     });
   }
 
@@ -6284,7 +6348,7 @@ export class SalonDashboard {
           this.showToast('Facility break deleted', 'success');
         } catch (err) {
           console.error('Failed to delete facility break:', err);
-          alert(err.message || 'Failed to delete facility break');
+          this.showToast(err.message || 'Failed to delete facility break', 'error');
         }
       }
     });
@@ -6296,15 +6360,15 @@ export class SalonDashboard {
       const eVal = endInp?.value || '';
 
       if (!sVal || !eVal) {
-        alert('Please specify both break start and end times.');
+        this.showToast('Please specify both break start and end times.', 'warning');
         return;
       }
       if (sVal >= eVal) {
-        alert(`Break start time (${formatTime12h(sVal)}) must be earlier than end time (${formatTime12h(eVal)}).`);
+        this.showToast(`Break start time (${formatTime12h(sVal)}) must be earlier than end time (${formatTime12h(eVal)}).`, 'warning');
         return;
       }
       if (selectedDays.length === 0) {
-        alert('Please select at least one day for this facility break.');
+        this.showToast('Please select at least one day for this facility break.', 'warning');
         return;
       }
 
@@ -6317,7 +6381,7 @@ export class SalonDashboard {
       });
 
       if (hasConflict) {
-        alert('This break time overlaps with an existing facility break on one of the selected days. Please adjust your break window.');
+        this.showToast('This break time overlaps with an existing facility break on one of the selected days. Please adjust your break window.', 'warning');
         return;
       }
 
@@ -6383,7 +6447,7 @@ export class SalonDashboard {
         this.showToast(`Facility break '${title}' ${isEditing ? 'updated' : 'added'} successfully`, 'success');
       } catch (err) {
         console.error('Failed to save facility break:', err);
-        alert(err.message || 'Failed to save facility break');
+        this.showToast(err.message || 'Failed to save facility break', 'error');
         if (saveBtn) {
           saveBtn.disabled = false;
           saveBtn.textContent = isEditing ? 'Save Changes' : 'Add Facility Break';
@@ -6461,16 +6525,16 @@ export class SalonDashboard {
                     All (${services.length})
                   </button>
                   ${categories.filter((c) => c !== 'ALL').map((c) => {
-                    const count = services.filter((s) => (s.category || '').toUpperCase() === (c || '').toUpperCase()).length;
-                    const isAct = (activeFilters.category || '').toUpperCase() === c.toUpperCase();
-                    return `
+        const count = services.filter((s) => (s.category || '').toUpperCase() === (c || '').toUpperCase()).length;
+        const isAct = (activeFilters.category || '').toUpperCase() === c.toUpperCase();
+        return `
                       <button type="button" class="filter-chip-btn ${isAct ? 'is-active' : ''}" data-filter-type="category" data-value="${c}">
                         <span>${getCatIcon(c, '')}</span>
                         <span>${c}</span>
                         <span class="filter-chip-count">(${count})</span>
                       </button>
                     `;
-                  }).join('')}
+      }).join('')}
                 </div>
               </div>
 
@@ -6620,19 +6684,19 @@ export class SalonDashboard {
             <!-- 3. Dedicated Frameless Service List Container (Separated from Operations) -->
             <div class="service-list-container" id="svc-list-container">
               ${services.map((s) => {
-                const count = (s.stylists && s.stylists.length) || s._count?.stylists || 0;
-                const g = (s.targetGender || 'UNISEX').toUpperCase();
-                const labelMap = { MALE: 'Men', FEMALE: 'Women', UNISEX: 'Unisex', KIDS: 'Kids' };
-                const genderIcons = { MALE: '👤', FEMALE: '👩', UNISEX: '👥', KIDS: '👶' };
-                const genderLabel = labelMap[g] || 'Unisex';
-                const gIcon = genderIcons[g] || '👥';
-                const catName = s.category || 'General';
-                const catIcon = getCatIcon(catName, s.name);
-                const descText = (s.description || '').trim();
-                const isLongDesc = descText.length > 42;
-                const isExpanded = Boolean(window._expandedServiceDescIds && window._expandedServiceDescIds.has(s.id));
+        const count = (s.stylists && s.stylists.length) || s._count?.stylists || 0;
+        const g = (s.targetGender || 'UNISEX').toUpperCase();
+        const labelMap = { MALE: 'Men', FEMALE: 'Women', UNISEX: 'Unisex', KIDS: 'Kids' };
+        const genderIcons = { MALE: '👤', FEMALE: '👩', UNISEX: '👥', KIDS: '👶' };
+        const genderLabel = labelMap[g] || 'Unisex';
+        const gIcon = genderIcons[g] || '👥';
+        const catName = s.category || 'General';
+        const catIcon = getCatIcon(catName, s.name);
+        const descText = (s.description || '').trim();
+        const isLongDesc = descText.length > 42;
+        const isExpanded = Boolean(window._expandedServiceDescIds && window._expandedServiceDescIds.has(s.id));
 
-                return `
+        return `
                   <div class="service-card-item" data-category="${catName.toUpperCase()}" data-name="${(s.name || '').toLowerCase()}" data-gender="${g}" data-staff-count="${count}">
                     <!-- Top: Icon + Headings & Tags (Left) | Action Buttons (Right) -->
                     <div class="service-card-header">
@@ -6709,7 +6773,7 @@ export class SalonDashboard {
                     </div>
                   </div>
                 `;
-              }).join('')}
+      }).join('')}
             </div>
 
             <!-- Empty Search / Filter State -->
@@ -6776,7 +6840,7 @@ export class SalonDashboard {
         </div>
 
         <div id="customers-table-container">
-          <div style="text-align: center; padding: 30px; color: var(--text-muted);">Loading customer records...</div>
+          ${PageDataLoader.render({ title: 'Loading customer records...', subtitle: 'Fetching client CRM directory...', minHeight: '160px', variant: 'compact' })}
         </div>
       </div>
     `;
@@ -7012,14 +7076,21 @@ export class SalonDashboard {
     container.querySelectorAll('.btn-block-customer').forEach((btn) => {
       btn.addEventListener('click', async (e) => {
         const id = e.currentTarget.getAttribute('data-id');
-        const name = e.currentTarget.getAttribute('data-name');
-        if (confirm(`Are you sure you want to block ${name} from booking new appointment slots?`)) {
+        const ok = await CalendarState.confirm({
+          title: 'Block Customer',
+          message: `Are you sure you want to block ${name} from booking new appointment slots?`,
+          confirmText: 'Block Customer',
+          cancelText: 'Cancel',
+          icon: '🔒',
+          type: 'danger',
+        });
+        if (ok) {
           try {
             await ApiClient.updateCustomerStrikes(id, 3, true);
-            alert(`🔒 ${name} has been blocked from booking.`);
+            this.showToast(`🔒 ${name} has been blocked from booking.`, 'warning');
             this.loadCustomersTable(this.searchQuery);
           } catch (err) {
-            alert(`Error blocking customer: ${err.message}`);
+            this.showToast(`Error blocking customer: ${err.message}`, 'error');
           }
         }
       });
@@ -7260,7 +7331,7 @@ export class SalonDashboard {
           SalonDayOffView.mount(container, this);
         }
       }, 0);
-      return `<div id="profile-subtab-container-loading" style="display:flex;align-items:center;justify-content:center;min-height:360px;color:#a5b4fc;"><div style="font-size:0.88rem;font-weight:600;">Loading live salon calendar...</div></div>`;
+      return `<div id="profile-subtab-container-loading">${UniversalLoader.render({ title: 'Loading live salon calendar...', minHeight: '380px' })}</div>`;
     }
 
     // SECTION 5: STORE USERS & CUSTOMER CRM
@@ -7305,7 +7376,7 @@ export class SalonDashboard {
             </div>
 
             <div id="customers-table-container">
-              <div style="text-align: center; padding: 20px; color: var(--text-muted);">Loading customer records...</div>
+              ${PageDataLoader.render({ title: 'Loading customer records...', subtitle: 'Fetching client CRM directory...', minHeight: '160px', variant: 'compact' })}
             </div>
           </div>
         </div>
@@ -7420,13 +7491,13 @@ export class SalonDashboard {
         SalonDayOffView.mount(container, this);
       }
     }, 0);
-    return `<div id="profile-subtab-container" style="display:flex;align-items:center;justify-content:center;min-height:360px;color:#a5b4fc;"><div style="font-size:0.88rem;font-weight:600;">Loading live salon calendar...</div></div>`;
+    return `<div id="profile-subtab-container">${UniversalLoader.render({ title: 'Loading live salon calendar...', minHeight: '380px' })}</div>`;
   }
 
   async toggleStaffWeeklyOffDay(staffId, dayOfWeek) {
     const staff = (this.staffList || []).find((s) => s.id === staffId);
     if (!staff) {
-      alert('Specialist not found. Please refresh and try again.');
+      this.showToast('Specialist not found. Please refresh and try again.', 'warning');
       return;
     }
 
@@ -7483,13 +7554,13 @@ export class SalonDashboard {
       this.render();
 
     } catch (err) {
-      alert(err.message || 'Failed to update specialist routine.');
+      this.showToast(err.message || 'Failed to update specialist routine.', 'error');
     }
   }
 
   async toggleWeeklyOffDay(dayOfWeek) {
     if (!this.salonWorkingHours || !Array.isArray(this.salonWorkingHours)) {
-      alert('Operating schedule not loaded. Please try again.');
+      this.showToast('Operating schedule not loaded. Please try again.', 'warning');
       return;
     }
 
@@ -7541,15 +7612,21 @@ export class SalonDashboard {
         SalonDayOffView.mount(container, this);
       }
     } catch (err) {
-      alert(err.message || 'Failed to update weekly routine.');
+      this.showToast(err.message || 'Failed to update weekly routine.', 'error');
     }
   }
 
   async cancelSpecialistLeave(staffId, absenceId, staffName) {
     const displayName = staffName || 'this specialist';
-    if (!confirm(`Cancel scheduled leave for ${displayName}?\n\nThey will be marked active and available for customer bookings immediately.`)) {
-      return;
-    }
+    const ok = await CalendarState.confirm({
+      title: 'Cancel Specialist Leave',
+      message: `Cancel scheduled leave for ${displayName}? They will be marked active and available for customer bookings immediately.`,
+      confirmText: 'Cancel Leave',
+      cancelText: 'Keep Leave',
+      icon: '🌴',
+      type: 'warning',
+    });
+    if (!ok) return;
 
     try {
       this.showToast(`Cancelling leave for ${displayName}...`, 'info');
@@ -7559,7 +7636,7 @@ export class SalonDashboard {
       this.render();
 
     } catch (err) {
-      alert(err.message || 'Failed to cancel specialist leave.');
+      this.showToast(err.message || 'Failed to cancel specialist leave.', 'error');
     }
   }
 
@@ -7604,9 +7681,10 @@ export class SalonDashboard {
       staffName,
       scheduleData: this.calendarSchedule,
       getFestivalForDate: (dt) => cal.getFestivalForDate(dt),
-      onRefresh: async () => {
-        await this.loadData(true);
-        this.render();
+      onRefresh: () => {
+        this.loadData(true).then(() => {
+          if (typeof this.render === 'function') this.render();
+        }).catch(() => { });
       },
     });
   }
@@ -7629,7 +7707,7 @@ export class SalonDashboard {
             await this.loadData(true);
             this.render();
           } catch (e) {
-            alert(e.message || 'Failed to remove closure.');
+            this.showToast(e.message || 'Failed to remove closure.', 'error');
           }
         },
       });
@@ -8053,7 +8131,10 @@ export class SalonDashboard {
           rowsContainer.innerHTML = this.renderStaffRosterRowsHtml();
           this.attachStaffRosterListeners();
         }
-        this.autoSaveStaffSchedule(st.id, immediate);
+        const msg = immediate
+          ? `Updated shift to ${formatTime12h(effectiveStart)} – ${formatTime12h(effectiveEnd)} for ${st.name || 'Specialist'} (auto-saved)`
+          : null;
+        this.autoSaveStaffSchedule(st.id, immediate, msg);
       };
 
       bulkStartInp?.addEventListener('input', () => handleBulkShiftLiveChange(false));
@@ -8601,7 +8682,7 @@ export class SalonDashboard {
       const slug = this.salonProfile?.slug || 'glamour-studio';
       const url = `${window.location.origin}/#book/${slug}`;
       navigator.clipboard.writeText(url);
-      alert(`Booking link copied to clipboard:\n${url}`);
+      this.showToast('Booking link copied to clipboard!', 'success');
     });
     document.getElementById('btn-goto-staff')?.addEventListener('click', () => {
       this.switchTab('staff');
@@ -8764,7 +8845,7 @@ export class SalonDashboard {
       const slug = this.salonProfile?.slug || 'glamour-studio';
       const url = `${window.location.origin}/#book/${slug}`;
       navigator.clipboard.writeText(url);
-      alert(`Booking link copied to clipboard:\n${url}`);
+      this.showToast('Booking link copied to clipboard!', 'success');
     });
 
     // Open QR & WhatsApp Modal
@@ -8811,7 +8892,7 @@ export class SalonDashboard {
             targetItem.status = prevStatus;
             this.render();
           }
-          alert(`Could not update status: ${err.message}`);
+          this.showToast(`Could not update status: ${err.message}`, 'error');
         }
       });
     });
@@ -8887,511 +8968,518 @@ export class SalonDashboard {
         this.showToast('No active absence record found for this specialist on this date', 'error');
         return;
       }
-      if (confirm(`Are you sure you want to cancel the absence for ${name}? The specialist will be marked available again.`)) {
-        try {
-          await Api.cancelStaffAbsence(id, absenceId);
-          this.showToast(`Absence cancelled for ${name}. Specialist is available again.`, 'success');
-          await this.loadStaff();
-          this.render();
-        } catch (err) {
-          this.showToast(err.message || 'Failed to cancel absence', 'error');
-        }
+      const ok = await CalendarState.confirm({
+        title: 'Cancel Specialist Absence',
+        message: `Are you sure you want to cancel the absence for ${name}? The specialist will be marked available again.`,
+        confirmText: 'Cancel Absence',
+        cancelText: 'Keep Absence',
+        icon: '🌴',
+        type: 'warning',
+      });
+      if (!ok) return;
+      try {
+        await Api.cancelStaffAbsence(id, absenceId);
+        this.showToast(`Absence cancelled for ${name}. Specialist is available again.`, 'success');
+        await this.loadStaff();
+        this.render();
+      } catch (err) {
+        this.showToast(err.message || 'Failed to cancel absence', 'error');
       }
     };
 
     this.container.querySelectorAll('.btn-cancel-absent').forEach((btn) => {
-      btn.addEventListener('click', handleCancelAbsent);
+    btn.addEventListener('click', handleCancelAbsent);
+  });
+this.attachStaffScheduleListeners(this.container);
+
+// Edit Service Modal
+this.container.querySelectorAll('.btn-edit-service').forEach((btn) => {
+  btn.addEventListener('click', (e) => {
+    const id = e.currentTarget.getAttribute('data-id');
+    const service = (this.servicesList || []).find((s) => String(s.id) === String(id)) || {
+      id,
+      name: e.currentTarget.getAttribute('data-name'),
+      price: e.currentTarget.getAttribute('data-price'),
+      durationMinutes: e.currentTarget.getAttribute('data-duration'),
+      category: e.currentTarget.getAttribute('data-category'),
+      description: e.currentTarget.getAttribute('data-desc'),
+    };
+    this.showEditServiceModal(service);
+  });
+});
+
+// Delete Service Modal
+this.container.querySelectorAll('.btn-delete-service').forEach((btn) => {
+  btn.addEventListener('click', (e) => {
+    const id = e.currentTarget.getAttribute('data-id');
+    const name = e.currentTarget.getAttribute('data-name');
+    this.showDeleteServiceModal(id, name);
+  });
+});
+
+// CRM Search Debounce
+const searchInput = document.getElementById('customer-search-input');
+let debounceTimer;
+searchInput?.addEventListener('input', (e) => {
+  this.searchQuery = e.target.value;
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(() => {
+    this.loadCustomersTable(this.searchQuery, this.activeCustomerFilter || 'ALL');
+  }, 300);
+});
+
+// Customer Strike Filter Chips
+this.container.querySelectorAll('.cust-filter-btn').forEach((btn) => {
+  btn.addEventListener('click', (e) => {
+    this.container.querySelectorAll('.cust-filter-btn').forEach((b) => {
+      b.style.background = 'rgba(255,255,255,0.05)';
     });
-    this.attachStaffScheduleListeners(this.container);
+    e.currentTarget.style.background = 'rgba(139, 61, 255,0.3)';
+    const filter = e.currentTarget.getAttribute('data-filter');
+    this.activeCustomerFilter = filter;
+    this.loadCustomersTable(this.searchQuery, filter);
+  });
+});
 
-    // Edit Service Modal
-    this.container.querySelectorAll('.btn-edit-service').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        const id = e.currentTarget.getAttribute('data-id');
-        const service = (this.servicesList || []).find((s) => String(s.id) === String(id)) || {
-          id,
-          name: e.currentTarget.getAttribute('data-name'),
-          price: e.currentTarget.getAttribute('data-price'),
-          durationMinutes: e.currentTarget.getAttribute('data-duration'),
-          category: e.currentTarget.getAttribute('data-category'),
-          description: e.currentTarget.getAttribute('data-desc'),
-        };
-        this.showEditServiceModal(service);
-      });
-    });
+// View Customer History
+this.container.querySelectorAll('.btn-view-customer-history').forEach((btn) => {
+  btn.addEventListener('click', async (e) => {
+    const id = e.currentTarget.getAttribute('data-id');
+    const name = e.currentTarget.getAttribute('data-name');
+    this.showCustomerHistoryModal(id, name);
+  });
+});
 
-    // Delete Service Modal
-    this.container.querySelectorAll('.btn-delete-service').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        const id = e.currentTarget.getAttribute('data-id');
-        const name = e.currentTarget.getAttribute('data-name');
-        this.showDeleteServiceModal(id, name);
-      });
-    });
+// WhatsApp Log Filter
+document.getElementById('btn-fetch-wa-logs')?.addEventListener('click', () => {
+  const phone = document.getElementById('whatsapp-log-phone-filter')?.value || '';
+  this.loadWhatsAppLogs(phone);
+});
 
-    // CRM Search Debounce
-    const searchInput = document.getElementById('customer-search-input');
-    let debounceTimer;
-    searchInput?.addEventListener('input', (e) => {
-      this.searchQuery = e.target.value;
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        this.loadCustomersTable(this.searchQuery, this.activeCustomerFilter || 'ALL');
-      }, 300);
-    });
+// Load table on initial tab switch
+if (this.activeTab === 'customers') this.loadCustomersTable();
+if (this.activeTab === 'whatsapp-logs') this.loadWhatsAppLogs();
 
-    // Customer Strike Filter Chips
-    this.container.querySelectorAll('.cust-filter-btn').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        this.container.querySelectorAll('.cust-filter-btn').forEach((b) => {
-          b.style.background = 'rgba(255,255,255,0.05)';
-        });
-        e.currentTarget.style.background = 'rgba(139, 61, 255,0.3)';
-        const filter = e.currentTarget.getAttribute('data-filter');
-        this.activeCustomerFilter = filter;
-        this.loadCustomersTable(this.searchQuery, filter);
-      });
-    });
+// Profile Tab: Initialize settings subtab listeners
+if (this.activeTab === 'profile') {
+  this.attachProfileSubtabListeners();
+}
 
-    // View Customer History
-    this.container.querySelectorAll('.btn-view-customer-history').forEach((btn) => {
-      btn.addEventListener('click', async (e) => {
-        const id = e.currentTarget.getAttribute('data-id');
-        const name = e.currentTarget.getAttribute('data-name');
-        this.showCustomerHistoryModal(id, name);
-      });
-    });
+// Delegated click listener on root container for settings navigation subtabs (guarantees click always works)
+if (!this._settingsNavDelegated && this.container) {
+  this._settingsNavDelegated = true;
+  this.container.addEventListener('click', (e) => {
+    const navBtn = e.target.closest('.settings-nav-row[data-subtab]');
+    if (navBtn) {
+      e.preventDefault();
+      const sub = navBtn.getAttribute('data-subtab');
+      if (sub) this.switchProfileSubtab(sub);
+    }
+  });
+}
 
-    // WhatsApp Log Filter
-    document.getElementById('btn-fetch-wa-logs')?.addEventListener('click', () => {
-      const phone = document.getElementById('whatsapp-log-phone-filter')?.value || '';
-      this.loadWhatsAppLogs(phone);
-    });
+// Call tab event listeners for active tab content
+this.attachTabEventListeners();
 
-    // Load table on initial tab switch
-    if (this.activeTab === 'customers') this.loadCustomersTable();
-    if (this.activeTab === 'whatsapp-logs') this.loadWhatsAppLogs();
+// Global Delegated Filter Drawer Controller (guarantees filter trigger button always works)
+if (!this._servicesFilterGlobalDelegated) {
+  this._servicesFilterGlobalDelegated = true;
 
-    // Profile Tab: Initialize settings subtab listeners
-    if (this.activeTab === 'profile') {
-      this.attachProfileSubtabListeners();
+  document.addEventListener('click', (e) => {
+    const openTrigger = e.target.closest('#btn-open-filter-drawer');
+    if (openTrigger) {
+      e.preventDefault();
+      e.stopPropagation();
+      this.openServicesFilterDrawer();
+      return;
     }
 
-    // Delegated click listener on root container for settings navigation subtabs (guarantees click always works)
-    if (!this._settingsNavDelegated && this.container) {
-      this._settingsNavDelegated = true;
-      this.container.addEventListener('click', (e) => {
-        const navBtn = e.target.closest('.settings-nav-row[data-subtab]');
-        if (navBtn) {
-          e.preventDefault();
-          const sub = navBtn.getAttribute('data-subtab');
-          if (sub) this.switchProfileSubtab(sub);
-        }
-      });
+    const catTrigger = e.target.closest('#btn-manage-categories, #btn-drawer-manage-cat-link');
+    if (catTrigger) {
+      e.preventDefault();
+      e.stopPropagation();
+      this.closeServicesFilterDrawer();
+      this.showManageCategoriesModal();
+      return;
     }
 
-    // Call tab event listeners for active tab content
-    this.attachTabEventListeners();
+    const closeTrigger = e.target.closest('#btn-close-filter-drawer, .drawer-close-btn, #btn-drawer-apply-filters');
+    if (closeTrigger) {
+      e.preventDefault();
+      this.closeServicesFilterDrawer();
+      return;
+    }
 
-    // Global Delegated Filter Drawer Controller (guarantees filter trigger button always works)
-    if (!this._servicesFilterGlobalDelegated) {
-      this._servicesFilterGlobalDelegated = true;
+    const backdropTrigger = e.target.closest('#svc-filter-drawer-backdrop');
+    if (backdropTrigger) {
+      e.preventDefault();
+      this.closeServicesFilterDrawer();
+      return;
+    }
 
-      document.addEventListener('click', (e) => {
-        const openTrigger = e.target.closest('#btn-open-filter-drawer');
-        if (openTrigger) {
-          e.preventDefault();
-          e.stopPropagation();
-          this.openServicesFilterDrawer();
-          return;
-        }
-
-        const catTrigger = e.target.closest('#btn-manage-categories, #btn-drawer-manage-cat-link');
-        if (catTrigger) {
-          e.preventDefault();
-          e.stopPropagation();
-          this.closeServicesFilterDrawer();
-          this.showManageCategoriesModal();
-          return;
-        }
-
-        const closeTrigger = e.target.closest('#btn-close-filter-drawer, .drawer-close-btn, #btn-drawer-apply-filters');
-        if (closeTrigger) {
-          e.preventDefault();
-          this.closeServicesFilterDrawer();
-          return;
-        }
-
-        const backdropTrigger = e.target.closest('#svc-filter-drawer-backdrop');
-        if (backdropTrigger) {
-          e.preventDefault();
-          this.closeServicesFilterDrawer();
-          return;
-        }
-
-        // Delegated Filter Chip Selection (Reliable even when drawer is relocated to document.body)
-        const chipTrigger = e.target.closest('.filter-chip-btn');
-        if (chipTrigger) {
-          e.preventDefault();
-          const type = chipTrigger.getAttribute('data-filter-type');
-          const val = chipTrigger.getAttribute('data-value');
-          if (type && val) {
-            if (!this.serviceFilters) {
-              this.serviceFilters = { category: 'ALL', gender: 'ALL', staff: 'ALL' };
-            }
-            this.serviceFilters[type] = val;
-            this.syncServicesFilterPills();
-            this.triggerServicesFilter();
-          }
-          return;
-        }
-
-        // Delegated Reset All Filters
-        const resetTrigger = e.target.closest('#btn-drawer-reset-filters, #btn-clear-all-filters, #btn-reset-empty-search');
-        if (resetTrigger) {
-          e.preventDefault();
+    // Delegated Filter Chip Selection (Reliable even when drawer is relocated to document.body)
+    const chipTrigger = e.target.closest('.filter-chip-btn');
+    if (chipTrigger) {
+      e.preventDefault();
+      const type = chipTrigger.getAttribute('data-filter-type');
+      const val = chipTrigger.getAttribute('data-value');
+      if (type && val) {
+        if (!this.serviceFilters) {
           this.serviceFilters = { category: 'ALL', gender: 'ALL', staff: 'ALL' };
-          const searchInput = document.getElementById('svc-search-input');
-          if (searchInput) searchInput.value = '';
-          this.syncServicesFilterPills();
-          this.triggerServicesFilter();
-          return;
         }
-
-        // Delegated Remove Filter Pill
-        const removePillTrigger = e.target.closest('.btn-remove-filter');
-        if (removePillTrigger) {
-          e.preventDefault();
-          const type = removePillTrigger.getAttribute('data-filter-type');
-          if (type) {
-            if (!this.serviceFilters) {
-              this.serviceFilters = { category: 'ALL', gender: 'ALL', staff: 'ALL' };
-            }
-            this.serviceFilters[type] = 'ALL';
-            this.syncServicesFilterPills();
-            this.triggerServicesFilter();
-          }
-          return;
-        }
-      });
-
-      document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-          const drawer = document.getElementById('svc-filter-drawer');
-          if (drawer && drawer.classList.contains('is-open')) {
-            this.closeServicesFilterDrawer();
-          }
-        }
-      });
+        this.serviceFilters[type] = val;
+        this.syncServicesFilterPills();
+        this.triggerServicesFilter();
+      }
+      return;
     }
+
+    // Delegated Reset All Filters
+    const resetTrigger = e.target.closest('#btn-drawer-reset-filters, #btn-clear-all-filters, #btn-reset-empty-search');
+    if (resetTrigger) {
+      e.preventDefault();
+      this.serviceFilters = { category: 'ALL', gender: 'ALL', staff: 'ALL' };
+      const searchInput = document.getElementById('svc-search-input');
+      if (searchInput) searchInput.value = '';
+      this.syncServicesFilterPills();
+      this.triggerServicesFilter();
+      return;
+    }
+
+    // Delegated Remove Filter Pill
+    const removePillTrigger = e.target.closest('.btn-remove-filter');
+    if (removePillTrigger) {
+      e.preventDefault();
+      const type = removePillTrigger.getAttribute('data-filter-type');
+      if (type) {
+        if (!this.serviceFilters) {
+          this.serviceFilters = { category: 'ALL', gender: 'ALL', staff: 'ALL' };
+        }
+        this.serviceFilters[type] = 'ALL';
+        this.syncServicesFilterPills();
+        this.triggerServicesFilter();
+      }
+      return;
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      const drawer = document.getElementById('svc-filter-drawer');
+      if (drawer && drawer.classList.contains('is-open')) {
+        this.closeServicesFilterDrawer();
+      }
+    }
+  });
+}
   }
 
-  setupQueueTabListeners(tabContent) {
-    if (!tabContent) return;
+setupQueueTabListeners(tabContent) {
+  if (!tabContent) return;
 
-    // Queue Filter Pills (All, Waiting, In Chair, Done, Cancelled)
-    tabContent.querySelectorAll('.q-chip').forEach((pill) => {
-      pill.addEventListener('click', (e) => {
-        const filter = e.currentTarget.getAttribute('data-filter');
-        if (filter) {
-          this.queueFilter = filter;
-          this.render();
-        }
-      });
+  // Queue Filter Pills (All, Waiting, In Chair, Done, Cancelled)
+  tabContent.querySelectorAll('.q-chip').forEach((pill) => {
+    pill.addEventListener('click', (e) => {
+      const filter = e.currentTarget.getAttribute('data-filter');
+      if (filter) {
+        this.queueFilter = filter;
+        this.render();
+      }
     });
+  });
 
-    // Date Navigation Controls (Prev, Next, Today)
-    const prevBtn = tabContent.querySelector('#btn-date-prev');
-    if (prevBtn) {
-      prevBtn.onclick = (e) => {
-        e.preventDefault();
-        this.handleQueueDateChange(this.addDaysToDateString(this.selectedDate, -1));
-      };
-    }
-
-    const nextBtn = tabContent.querySelector('#btn-date-next');
-    if (nextBtn) {
-      nextBtn.onclick = (e) => {
-        e.preventDefault();
-        this.handleQueueDateChange(this.addDaysToDateString(this.selectedDate, 1));
-      };
-    }
-
-    const todayBtn = tabContent.querySelector('#btn-date-today');
-    if (todayBtn) {
-      todayBtn.onclick = (e) => {
-        e.preventDefault();
-        this.handleQueueDateChange(this.getLocalDateString());
-      };
-    }
-
-    // Interactive Calendar Popover Trigger - Single Canonical Controller
-    const calPopover = tabContent.querySelector('#q-calendar-popover') || document.getElementById('q-calendar-popover');
-    const calToggleBtn = tabContent.querySelector('#btn-toggle-cal-popover') || document.getElementById('btn-toggle-cal-popover');
-
-    if (calToggleBtn) {
-      calToggleBtn.onclick = (e) => this.toggleCalendarPopover(e);
-    }
-
-    if (calPopover) {
-      this.wireCalendarPopoverEvents(calPopover, (d) => this.handleQueueDateChange(d));
-    }
-
-    // Ensure clean state for outside-click listener on tab re-render
-    if (this._handlePopoverDocClick) {
-      document.removeEventListener('click', this._handlePopoverDocClick);
-      this._handlePopoverDocClick = null;
-    }
-
-    // Right-Side Filter Drawer Controls
-    const filterDrawer = tabContent.querySelector('#queue-drawer') || document.getElementById('queue-drawer');
-    const drawerBackdrop = tabContent.querySelector('#queue-drawer-backdrop') || document.getElementById('queue-drawer-backdrop');
-
-    const openQueueDrawer = () => {
-      filterDrawer?.classList.add('is-open');
-      drawerBackdrop?.classList.add('is-open');
-      document.body.style.overflow = 'hidden';
+  // Date Navigation Controls (Prev, Next, Today)
+  const prevBtn = tabContent.querySelector('#btn-date-prev');
+  if (prevBtn) {
+    prevBtn.onclick = (e) => {
+      e.preventDefault();
+      this.handleQueueDateChange(this.addDaysToDateString(this.selectedDate, -1));
     };
-
-    const closeQueueDrawer = () => {
-      filterDrawer?.classList.remove('is-open');
-      drawerBackdrop?.classList.remove('is-open');
-      document.body.style.overflow = '';
-    };
-
-    tabContent.querySelector('#btn-open-queue-drawer')?.addEventListener('click', openQueueDrawer);
-    document.getElementById('btn-open-queue-drawer')?.addEventListener('click', openQueueDrawer);
-    filterDrawer?.querySelector('#btn-close-queue-drawer')?.addEventListener('click', closeQueueDrawer);
-    drawerBackdrop?.addEventListener('click', closeQueueDrawer);
-
-    // Drawer Chips Selection
-    filterDrawer?.querySelectorAll('.qd-chips').forEach((groupEl) => {
-      groupEl.querySelectorAll('.qd-chip').forEach((chip) => {
-        chip.addEventListener('click', () => {
-          groupEl.querySelectorAll('.qd-chip').forEach((c) => c.classList.remove('active'));
-          chip.classList.add('active');
-        });
-      });
-    });
-
-    // Apply Drawer Filters
-    filterDrawer?.querySelector('#btn-apply-queue-filters')?.addEventListener('click', () => {
-      const newFilters = { stylistId: '', bookingType: '', status: '', categoryId: '' };
-      filterDrawer.querySelectorAll('.qd-chips').forEach((groupEl) => {
-        const groupKey = groupEl.getAttribute('data-filter-group');
-        const activeChip = groupEl.querySelector('.qd-chip.active');
-        if (activeChip && groupKey) {
-          newFilters[groupKey] = activeChip.getAttribute('data-val') || '';
-        }
-      });
-      this.queueDrawerFilters = newFilters;
-      closeQueueDrawer();
-      this.render();
-    });
-
-    // Reset Drawer Filters
-    filterDrawer?.querySelector('#btn-reset-queue-filters')?.addEventListener('click', () => {
-      this.queueDrawerFilters = { stylistId: '', bookingType: '', status: '', categoryId: '' };
-      closeQueueDrawer();
-      this.render();
-    });
   }
 
-  /**
-   * PERFORMANCE: Re-attach only event listeners inside #tab-content.
-   * Called during targeted SSE re-renders to avoid re-binding global header/nav listeners.
-   */
-  attachTabEventListeners() {
-    const tabContent = document.getElementById('tab-content');
-    if (!tabContent) return;
+  const nextBtn = tabContent.querySelector('#btn-date-next');
+  if (nextBtn) {
+    nextBtn.onclick = (e) => {
+      e.preventDefault();
+      this.handleQueueDateChange(this.addDaysToDateString(this.selectedDate, 1));
+    };
+  }
 
-    // Home Dashboard Event Delegation
-    if (this.activeTab === 'dashboard') {
-      this.homeManager.attachEventListeners(tabContent);
-    }
+  const todayBtn = tabContent.querySelector('#btn-date-today');
+  if (todayBtn) {
+    todayBtn.onclick = (e) => {
+      e.preventDefault();
+      this.handleQueueDateChange(this.getLocalDateString());
+    };
+  }
 
-    // Queue Screen Interactive Listeners (Date Popover, Filter Drawer, Chips)
-    this.setupQueueTabListeners(tabContent);
+  // Interactive Calendar Popover Trigger - Single Canonical Controller
+  const calPopover = tabContent.querySelector('#q-calendar-popover') || document.getElementById('q-calendar-popover');
+  const calToggleBtn = tabContent.querySelector('#btn-toggle-cal-popover') || document.getElementById('btn-toggle-cal-popover');
 
-    // Status Updates
-    tabContent.querySelectorAll('.btn-status').forEach((btn) => {
-      btn.addEventListener('click', async (e) => {
-        const targetBtn = e.currentTarget;
-        if (targetBtn.disabled) return;
-        targetBtn.disabled = true;
-        const id = targetBtn.getAttribute('data-id');
-        const status = targetBtn.getAttribute('data-status');
+  if (calToggleBtn) {
+    calToggleBtn.onclick = (e) => this.toggleCalendarPopover(e);
+  }
 
-        // Optimistic in-memory update (0ms Frame 1)
-        const targetItem = (this.queueSync?.items || []).find((item) => item.id === id);
-        const prevStatus = targetItem ? targetItem.status : null;
-        if (targetItem) {
-          targetItem.status = status;
-          this.render();
-        }
+  if (calPopover) {
+    this.wireCalendarPopoverEvents(calPopover, (d) => this.handleQueueDateChange(d));
+  }
 
-        try {
-          if (prevStatus === 'PENDING_ACCEPTANCE') {
-            if (status === 'CHECKED_IN' || status === 'CONFIRMED') {
-              await ApiClient.acceptQuickBooking(id);
-            } else if (status === 'REJECTED' || status === 'CANCELLED') {
-              await ApiClient.declineQuickBooking(id);
-            } else {
-              await ApiClient.updateAppointmentStatus(id, status);
-            }
+  // Ensure clean state for outside-click listener on tab re-render
+  if (this._handlePopoverDocClick) {
+    document.removeEventListener('click', this._handlePopoverDocClick);
+    this._handlePopoverDocClick = null;
+  }
+
+  // Right-Side Filter Drawer Controls
+  const filterDrawer = tabContent.querySelector('#queue-drawer') || document.getElementById('queue-drawer');
+  const drawerBackdrop = tabContent.querySelector('#queue-drawer-backdrop') || document.getElementById('queue-drawer-backdrop');
+
+  const openQueueDrawer = () => {
+    filterDrawer?.classList.add('is-open');
+    drawerBackdrop?.classList.add('is-open');
+    document.body.style.overflow = 'hidden';
+  };
+
+  const closeQueueDrawer = () => {
+    filterDrawer?.classList.remove('is-open');
+    drawerBackdrop?.classList.remove('is-open');
+    document.body.style.overflow = '';
+  };
+
+  tabContent.querySelector('#btn-open-queue-drawer')?.addEventListener('click', openQueueDrawer);
+  document.getElementById('btn-open-queue-drawer')?.addEventListener('click', openQueueDrawer);
+  filterDrawer?.querySelector('#btn-close-queue-drawer')?.addEventListener('click', closeQueueDrawer);
+  drawerBackdrop?.addEventListener('click', closeQueueDrawer);
+
+  // Drawer Chips Selection
+  filterDrawer?.querySelectorAll('.qd-chips').forEach((groupEl) => {
+    groupEl.querySelectorAll('.qd-chip').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        groupEl.querySelectorAll('.qd-chip').forEach((c) => c.classList.remove('active'));
+        chip.classList.add('active');
+      });
+    });
+  });
+
+  // Apply Drawer Filters
+  filterDrawer?.querySelector('#btn-apply-queue-filters')?.addEventListener('click', () => {
+    const newFilters = { stylistId: '', bookingType: '', status: '', categoryId: '' };
+    filterDrawer.querySelectorAll('.qd-chips').forEach((groupEl) => {
+      const groupKey = groupEl.getAttribute('data-filter-group');
+      const activeChip = groupEl.querySelector('.qd-chip.active');
+      if (activeChip && groupKey) {
+        newFilters[groupKey] = activeChip.getAttribute('data-val') || '';
+      }
+    });
+    this.queueDrawerFilters = newFilters;
+    closeQueueDrawer();
+    this.render();
+  });
+
+  // Reset Drawer Filters
+  filterDrawer?.querySelector('#btn-reset-queue-filters')?.addEventListener('click', () => {
+    this.queueDrawerFilters = { stylistId: '', bookingType: '', status: '', categoryId: '' };
+    closeQueueDrawer();
+    this.render();
+  });
+}
+
+/**
+ * PERFORMANCE: Re-attach only event listeners inside #tab-content.
+ * Called during targeted SSE re-renders to avoid re-binding global header/nav listeners.
+ */
+attachTabEventListeners() {
+  const tabContent = document.getElementById('tab-content');
+  if (!tabContent) return;
+
+  // Home Dashboard Event Delegation
+  if (this.activeTab === 'dashboard') {
+    this.homeManager.attachEventListeners(tabContent);
+  }
+
+  // Queue Screen Interactive Listeners (Date Popover, Filter Drawer, Chips)
+  this.setupQueueTabListeners(tabContent);
+
+  // Status Updates
+  tabContent.querySelectorAll('.btn-status').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      const targetBtn = e.currentTarget;
+      if (targetBtn.disabled) return;
+      targetBtn.disabled = true;
+      const id = targetBtn.getAttribute('data-id');
+      const status = targetBtn.getAttribute('data-status');
+
+      // Optimistic in-memory update (0ms Frame 1)
+      const targetItem = (this.queueSync?.items || []).find((item) => item.id === id);
+      const prevStatus = targetItem ? targetItem.status : null;
+      if (targetItem) {
+        targetItem.status = status;
+        this.render();
+      }
+
+      try {
+        if (prevStatus === 'PENDING_ACCEPTANCE') {
+          if (status === 'CHECKED_IN' || status === 'CONFIRMED') {
+            await ApiClient.acceptQuickBooking(id);
+          } else if (status === 'REJECTED' || status === 'CANCELLED') {
+            await ApiClient.declineQuickBooking(id);
           } else {
             await ApiClient.updateAppointmentStatus(id, status);
           }
-        } catch (err) {
-          if (targetItem && prevStatus) {
-            targetItem.status = prevStatus;
-            this.render();
-          }
-          alert(`Could not update status: ${err.message}`);
+        } else {
+          await ApiClient.updateAppointmentStatus(id, status);
         }
-      });
+      } catch (err) {
+        if (targetItem && prevStatus) {
+          targetItem.status = prevStatus;
+          this.render();
+        }
+        this.showToast(`Could not update status: ${err.message}`, 'error');
+      }
     });
+  });
 
-    // Reschedule Button
-    tabContent.querySelectorAll('.btn-open-reschedule').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        const id = e.currentTarget.getAttribute('data-id');
-        const serviceId = e.currentTarget.getAttribute('data-service');
-        const staffId = e.currentTarget.getAttribute('data-staff');
-        const clientName = e.currentTarget.getAttribute('data-name');
-        this.showRescheduleModal(id, serviceId, staffId, clientName);
-      });
+  // Reschedule Button
+  tabContent.querySelectorAll('.btn-open-reschedule').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      const id = e.currentTarget.getAttribute('data-id');
+      const serviceId = e.currentTarget.getAttribute('data-service');
+      const staffId = e.currentTarget.getAttribute('data-staff');
+      const clientName = e.currentTarget.getAttribute('data-name');
+      this.showRescheduleModal(id, serviceId, staffId, clientName);
     });
+  });
 
-    // Add Service / Add-on Button
-    tabContent.querySelectorAll('.btn-open-add-addon').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        const id = e.currentTarget.getAttribute('data-id');
-        const clientName = e.currentTarget.getAttribute('data-name');
-        this.showAddAddonModal(id, clientName);
-      });
+  // Add Service / Add-on Button
+  tabContent.querySelectorAll('.btn-open-add-addon').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      const id = e.currentTarget.getAttribute('data-id');
+      const clientName = e.currentTarget.getAttribute('data-name');
+      this.showAddAddonModal(id, clientName);
     });
+  });
 
-    // Start Live 10-Minute Timer Ticks
-    this.startLiveTimerTicks();
+  // Start Live 10-Minute Timer Ticks
+  this.startLiveTimerTicks();
 
-    // Cancel Button
-    tabContent.querySelectorAll('.btn-open-cancel').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        const id = e.currentTarget.getAttribute('data-id');
-        const clientName = e.currentTarget.getAttribute('data-name');
-        this.showCancelModal(id, clientName);
-      });
+  // Cancel Button
+  tabContent.querySelectorAll('.btn-open-cancel').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      const id = e.currentTarget.getAttribute('data-id');
+      const clientName = e.currentTarget.getAttribute('data-name');
+      this.showCancelModal(id, clientName);
     });
+  });
 
 
-    // Quick Onboarding Action Buttons
-    document.getElementById('btn-quick-add-staff')?.addEventListener('click', () => this.showAddStaffModal());
-    document.getElementById('btn-empty-add-staff')?.addEventListener('click', () => this.showAddStaffModal());
+  // Quick Onboarding Action Buttons
+  document.getElementById('btn-quick-add-staff')?.addEventListener('click', () => this.showAddStaffModal());
+  document.getElementById('btn-empty-add-staff')?.addEventListener('click', () => this.showAddStaffModal());
 
-    // Staff Tab Master-Detail Workspace Listeners
-    if (this.activeTab === 'staff') {
-      this.attachStaffTabListeners(tabContent);
-    }
-
-    // Services Tab Buttons
-    if (this.activeTab === 'services') {
-      this.attachServicesTabListeners(tabContent);
-    }
-    tabContent.querySelectorAll('.btn-edit-service').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        const id = e.currentTarget.getAttribute('data-id');
-        const service = (this.servicesList || []).find((s) => String(s.id) === String(id)) || {
-          id,
-          name: e.currentTarget.getAttribute('data-name'),
-          price: e.currentTarget.getAttribute('data-price'),
-          durationMinutes: e.currentTarget.getAttribute('data-duration'),
-          category: e.currentTarget.getAttribute('data-category'),
-          description: e.currentTarget.getAttribute('data-desc'),
-        };
-        this.showEditServiceModal(service);
-      });
-    });
-    tabContent.querySelectorAll('.btn-delete-service').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        this.showDeleteServiceModal(e.currentTarget.getAttribute('data-id'), e.currentTarget.getAttribute('data-name'));
-      });
-    });
-
-    // Profile Tab
-    if (this.activeTab === 'profile') {
-      this.attachProfileSubtabListeners();
-    }
-    document.getElementById('btn-copy-invite')?.addEventListener('click', () => {
-      const slug = this.salonProfile?.slug || 'the-grand-royal-barber-1';
-      const url = `${window.location.origin}/#book/${slug}`;
-      navigator.clipboard.writeText(url);
-      this.showToast('Booking link copied to clipboard!', 'success');
-    });
-    tabContent.querySelectorAll('.btn-open-closures-modal').forEach((b) => {
-      b.onclick = () => {
-        this.switchTab('profile');
-        this.switchProfileSubtab('closures');
-      };
-    });
-    document.getElementById('btn-open-qr')?.addEventListener('click', () => this.showQRCodeModal());
-    document.getElementById('btn-block-time')?.addEventListener('click', () => this.showBlockTimeModal());
-
-
-    // Back button listener for Customer Management Tab (Navigates to previously active tab)
-    document.getElementById('btn-cust-back')?.addEventListener('click', () => {
-      const target = this.previousTab || 'queue';
-      this.switchTab(target);
-    });
-
-    // CRM Search & Customer Filter Chips
-    const searchInput = document.getElementById('customer-search-input');
-    let debounceTimer;
-    searchInput?.addEventListener('input', (e) => {
-      this.searchQuery = e.target.value;
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => this.loadCustomersTable(this.searchQuery, this.activeCustomerFilter || 'ALL'), 300);
-    });
-
-    const custFilterBtns = tabContent.querySelectorAll('.cust-filter-btn');
-    custFilterBtns.forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        const filter = e.currentTarget.getAttribute('data-filter');
-        this.activeCustomerFilter = filter;
-        custFilterBtns.forEach((b) => {
-          b.classList.toggle('active', b.getAttribute('data-filter') === filter);
-        });
-        this.loadCustomersTable(this.searchQuery || '', filter);
-      });
-    });
-
-    tabContent.querySelectorAll('.btn-view-customer-history').forEach((btn) => {
-      btn.addEventListener('click', async (e) => {
-        this.showCustomerHistoryModal(e.currentTarget.getAttribute('data-id'), e.currentTarget.getAttribute('data-name'));
-      });
-    });
-
-    // WhatsApp Log Filter
-    document.getElementById('btn-fetch-wa-logs')?.addEventListener('click', () => {
-      const phone = document.getElementById('whatsapp-log-phone-filter')?.value || '';
-      this.loadWhatsAppLogs(phone);
-    });
-
-    // Load table on tab switch
-    if (this.activeTab === 'customers') this.loadCustomersTable(this.searchQuery || '', this.activeCustomerFilter || 'ALL');
-    if (this.activeTab === 'whatsapp-logs') this.loadWhatsAppLogs();
+  // Staff Tab Master-Detail Workspace Listeners
+  if (this.activeTab === 'staff') {
+    this.attachStaffTabListeners(tabContent);
   }
 
-  // =========================================================================
-  // MODALS
-  // =========================================================================
-  showWalkInModal() {
-    const modalContainer = document.getElementById('modal-container');
-    const todayIso = this.getLocalDateString();
-    const maxDays = this.salonProfile?.maxAdvanceDays || 3;
-    const maxDateIso = this.addDaysToDateString(todayIso, maxDays);
+  // Services Tab Buttons
+  if (this.activeTab === 'services') {
+    this.attachServicesTabListeners(tabContent);
+  }
+  tabContent.querySelectorAll('.btn-edit-service').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      const id = e.currentTarget.getAttribute('data-id');
+      const service = (this.servicesList || []).find((s) => String(s.id) === String(id)) || {
+        id,
+        name: e.currentTarget.getAttribute('data-name'),
+        price: e.currentTarget.getAttribute('data-price'),
+        durationMinutes: e.currentTarget.getAttribute('data-duration'),
+        category: e.currentTarget.getAttribute('data-category'),
+        description: e.currentTarget.getAttribute('data-desc'),
+      };
+      this.showEditServiceModal(service);
+    });
+  });
+  tabContent.querySelectorAll('.btn-delete-service').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      this.showDeleteServiceModal(e.currentTarget.getAttribute('data-id'), e.currentTarget.getAttribute('data-name'));
+    });
+  });
 
-    modalContainer.innerHTML = `
+  // Profile Tab
+  if (this.activeTab === 'profile') {
+    this.attachProfileSubtabListeners();
+  }
+  document.getElementById('btn-copy-invite')?.addEventListener('click', () => {
+    const slug = this.salonProfile?.slug || 'the-grand-royal-barber-1';
+    const url = `${window.location.origin}/#book/${slug}`;
+    navigator.clipboard.writeText(url);
+    this.showToast('Booking link copied to clipboard!', 'success');
+  });
+  tabContent.querySelectorAll('.btn-open-closures-modal').forEach((b) => {
+    b.onclick = () => {
+      this.switchTab('profile');
+      this.switchProfileSubtab('closures');
+    };
+  });
+  document.getElementById('btn-open-qr')?.addEventListener('click', () => this.showQRCodeModal());
+  document.getElementById('btn-block-time')?.addEventListener('click', () => this.showBlockTimeModal());
+
+
+  // Back button listener for Customer Management Tab (Navigates to previously active tab)
+  document.getElementById('btn-cust-back')?.addEventListener('click', () => {
+    const target = this.previousTab || 'queue';
+    this.switchTab(target);
+  });
+
+  // CRM Search & Customer Filter Chips
+  const searchInput = document.getElementById('customer-search-input');
+  let debounceTimer;
+  searchInput?.addEventListener('input', (e) => {
+    this.searchQuery = e.target.value;
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => this.loadCustomersTable(this.searchQuery, this.activeCustomerFilter || 'ALL'), 300);
+  });
+
+  const custFilterBtns = tabContent.querySelectorAll('.cust-filter-btn');
+  custFilterBtns.forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      const filter = e.currentTarget.getAttribute('data-filter');
+      this.activeCustomerFilter = filter;
+      custFilterBtns.forEach((b) => {
+        b.classList.toggle('active', b.getAttribute('data-filter') === filter);
+      });
+      this.loadCustomersTable(this.searchQuery || '', filter);
+    });
+  });
+
+  tabContent.querySelectorAll('.btn-view-customer-history').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      this.showCustomerHistoryModal(e.currentTarget.getAttribute('data-id'), e.currentTarget.getAttribute('data-name'));
+    });
+  });
+
+  // WhatsApp Log Filter
+  document.getElementById('btn-fetch-wa-logs')?.addEventListener('click', () => {
+    const phone = document.getElementById('whatsapp-log-phone-filter')?.value || '';
+    this.loadWhatsAppLogs(phone);
+  });
+
+  // Load table on tab switch
+  if (this.activeTab === 'customers') this.loadCustomersTable(this.searchQuery || '', this.activeCustomerFilter || 'ALL');
+  if (this.activeTab === 'whatsapp-logs') this.loadWhatsAppLogs();
+}
+
+// =========================================================================
+// MODALS
+// =========================================================================
+showWalkInModal() {
+  const modalContainer = document.getElementById('modal-container');
+  const todayIso = this.getLocalDateString();
+  const maxDays = this.salonProfile?.maxAdvanceDays || 3;
+  const maxDateIso = this.addDaysToDateString(todayIso, maxDays);
+
+  modalContainer.innerHTML = `
       <div class="modal-backdrop show">
         <div class="modal-content modal-content-lg">
           <div class="modal-header">
@@ -9450,47 +9538,47 @@ export class SalonDashboard {
       </div>
     `;
 
-    document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+  document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
 
-    document.getElementById('fast-booking-form')?.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const errorDiv = document.getElementById('walkin-error');
-      const submitBtn = document.getElementById('btn-submit-walkin');
-      submitBtn.textContent = 'Verifying Slot & Booking...';
-      submitBtn.setAttribute('disabled', 'true');
-      errorDiv.style.display = 'none';
+  document.getElementById('fast-booking-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errorDiv = document.getElementById('walkin-error');
+    const submitBtn = document.getElementById('btn-submit-walkin');
+    submitBtn.textContent = 'Verifying Slot & Booking...';
+    submitBtn.setAttribute('disabled', 'true');
+    errorDiv.style.display = 'none';
 
-      try {
-        const payload = {
-          serviceId: document.getElementById('walkin-service').value,
-          staffId: document.getElementById('walkin-staff').value || undefined,
-          date: document.getElementById('walkin-date').value,
-          startTime: document.getElementById('walkin-time').value,
-          customerName: document.getElementById('walkin-name').value,
-          customerPhone: document.getElementById('walkin-phone').value,
-          source: 'WALK_IN',
-        };
+    try {
+      const payload = {
+        serviceId: document.getElementById('walkin-service').value,
+        staffId: document.getElementById('walkin-staff').value || undefined,
+        date: document.getElementById('walkin-date').value,
+        startTime: document.getElementById('walkin-time').value,
+        customerName: document.getElementById('walkin-name').value,
+        customerPhone: document.getElementById('walkin-phone').value,
+        source: 'WALK_IN',
+      };
 
-        await ApiClient.createAppointment(payload);
-        modalContainer.innerHTML = '';
-        await this.loadData();
-        this.render();
-      } catch (err) {
-        errorDiv.textContent = err.message || 'Could not create appointment.';
-        errorDiv.style.display = 'block';
-        submitBtn.textContent = 'Confirm & Book Appointment →';
-        submitBtn.removeAttribute('disabled');
-      }
-    });
-  }
+      await ApiClient.createAppointment(payload);
+      modalContainer.innerHTML = '';
+      await this.loadData();
+      this.render();
+    } catch (err) {
+      errorDiv.textContent = err.message || 'Could not create appointment.';
+      errorDiv.style.display = 'block';
+      submitBtn.textContent = 'Confirm & Book Appointment →';
+      submitBtn.removeAttribute('disabled');
+    }
+  });
+}
 
-  showRescheduleModal(appointmentId, serviceId, staffId, clientName) {
-    const modalContainer = document.getElementById('modal-container');
-    const todayIso = this.getLocalDateString();
-    const maxDays = this.salonProfile?.maxAdvanceDays || 3;
-    const maxDateIso = this.addDaysToDateString(todayIso, maxDays);
+showRescheduleModal(appointmentId, serviceId, staffId, clientName) {
+  const modalContainer = document.getElementById('modal-container');
+  const todayIso = this.getLocalDateString();
+  const maxDays = this.salonProfile?.maxAdvanceDays || 3;
+  const maxDateIso = this.addDaysToDateString(todayIso, maxDays);
 
-    modalContainer.innerHTML = `
+  modalContainer.innerHTML = `
       <div class="modal-backdrop show">
         <div class="modal-content">
           <div class="modal-header">
@@ -9538,71 +9626,71 @@ export class SalonDashboard {
       </div>
     `;
 
-    document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+  document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
 
-    document.getElementById('reschedule-form')?.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const errorDiv = document.getElementById('reschedule-error');
-      const submitBtn = document.getElementById('btn-submit-reschedule');
-      submitBtn.textContent = 'Rescheduling...';
-      submitBtn.setAttribute('disabled', 'true');
+  document.getElementById('reschedule-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errorDiv = document.getElementById('reschedule-error');
+    const submitBtn = document.getElementById('btn-submit-reschedule');
+    submitBtn.textContent = 'Rescheduling...';
+    submitBtn.setAttribute('disabled', 'true');
 
-      try {
-        await ApiClient.rescheduleAppointment(appointmentId, {
-          newDate: document.getElementById('reschedule-date').value,
-          newStartTime: document.getElementById('reschedule-time').value,
-          newStaffId: document.getElementById('reschedule-staff').value || undefined,
-          reason: document.getElementById('reschedule-reason').value,
-        });
+    try {
+      await ApiClient.rescheduleAppointment(appointmentId, {
+        newDate: document.getElementById('reschedule-date').value,
+        newStartTime: document.getElementById('reschedule-time').value,
+        newStaffId: document.getElementById('reschedule-staff').value || undefined,
+        reason: document.getElementById('reschedule-reason').value,
+      });
 
-        modalContainer.innerHTML = '';
-        await this.loadData();
-        this.render();
-      } catch (err) {
-        errorDiv.textContent = err.message || 'Rescheduling failed.';
-        errorDiv.style.display = 'block';
-        submitBtn.textContent = '⚡ Update Schedule Immediately';
-        submitBtn.removeAttribute('disabled');
-      }
-    });
+      modalContainer.innerHTML = '';
+      await this.loadData();
+      this.render();
+    } catch (err) {
+      errorDiv.textContent = err.message || 'Rescheduling failed.';
+      errorDiv.style.display = 'block';
+      submitBtn.textContent = '⚡ Update Schedule Immediately';
+      submitBtn.removeAttribute('disabled');
+    }
+  });
 
-    document.getElementById('btn-propose-reschedule')?.addEventListener('click', async () => {
-      const errorDiv = document.getElementById('reschedule-error');
-      const proposeBtn = document.getElementById('btn-propose-reschedule');
-      proposeBtn.textContent = 'Sending WhatsApp Proposal...';
-      proposeBtn.setAttribute('disabled', 'true');
+  document.getElementById('btn-propose-reschedule')?.addEventListener('click', async () => {
+    const errorDiv = document.getElementById('reschedule-error');
+    const proposeBtn = document.getElementById('btn-propose-reschedule');
+    proposeBtn.textContent = 'Sending WhatsApp Proposal...';
+    proposeBtn.setAttribute('disabled', 'true');
 
-      try {
-        const dateVal = document.getElementById('reschedule-date').value;
-        const timeVal = document.getElementById('reschedule-time').value;
-        const [y, m, d] = dateVal.split('-').map(Number);
-        const [hh, mm] = timeVal.split(':').map(Number);
-        const proposedStartAt = new Date(y, m - 1, d, hh, mm, 0);
-        const proposedEndAt = new Date(proposedStartAt.getTime() + 30 * 60000);
+    try {
+      const dateVal = document.getElementById('reschedule-date').value;
+      const timeVal = document.getElementById('reschedule-time').value;
+      const [y, m, d] = dateVal.split('-').map(Number);
+      const [hh, mm] = timeVal.split(':').map(Number);
+      const proposedStartAt = new Date(y, m - 1, d, hh, mm, 0);
+      const proposedEndAt = new Date(proposedStartAt.getTime() + 30 * 60000);
 
-        await ApiClient.proposeAdminReschedule(appointmentId, {
-          newStartAt: proposedStartAt.toISOString(),
-          newEndAt: proposedEndAt.toISOString(),
-        });
+      await ApiClient.proposeAdminReschedule(appointmentId, {
+        newStartAt: proposedStartAt.toISOString(),
+        newEndAt: proposedEndAt.toISOString(),
+      });
 
-        modalContainer.innerHTML = '';
-        await this.loadData();
-        this.render();
-      } catch (err) {
-        errorDiv.textContent = err.message || 'Failed to propose reschedule.';
-        errorDiv.style.display = 'block';
-        proposeBtn.textContent = '📩 Propose to Client via WhatsApp';
-        proposeBtn.removeAttribute('disabled');
-      }
-    });
-  }
+      modalContainer.innerHTML = '';
+      await this.loadData();
+      this.render();
+    } catch (err) {
+      errorDiv.textContent = err.message || 'Failed to propose reschedule.';
+      errorDiv.style.display = 'block';
+      proposeBtn.textContent = '📩 Propose to Client via WhatsApp';
+      proposeBtn.removeAttribute('disabled');
+    }
+  });
+}
 
-  showAddAddonModal(appointmentId, clientName) {
-    const modalContainer = document.getElementById('modal-container');
-    if (!modalContainer) return;
-    const services = Array.isArray(this.servicesList) ? this.servicesList.filter((s) => s.status !== 'INACTIVE') : [];
+showAddAddonModal(appointmentId, clientName) {
+  const modalContainer = document.getElementById('modal-container');
+  if (!modalContainer) return;
+  const services = Array.isArray(this.servicesList) ? this.servicesList.filter((s) => s.status !== 'INACTIVE') : [];
 
-    modalContainer.innerHTML = `
+  modalContainer.innerHTML = `
       <div class="modal-backdrop show">
         <div class="modal-content" style="max-width: 480px; width: 100%; border: 1px solid rgba(245, 158, 11, 0.35); box-shadow: 0 20px 40px rgba(0,0,0,0.6);">
           <div class="modal-header" style="border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
@@ -9647,120 +9735,120 @@ export class SalonDashboard {
       </div>
     `;
 
-    const close = () => { modalContainer.innerHTML = ''; };
-    document.getElementById('btn-close-modal')?.addEventListener('click', close);
-    document.getElementById('btn-cancel-addon')?.addEventListener('click', close);
+  const close = () => { modalContainer.innerHTML = ''; };
+  document.getElementById('btn-close-modal')?.addEventListener('click', close);
+  document.getElementById('btn-cancel-addon')?.addEventListener('click', close);
 
-    const searchInp = document.getElementById('addon-search-inp');
-    searchInp?.addEventListener('input', (e) => {
-      const q = (e.target.value || '').toLowerCase().trim();
-      modalContainer.querySelectorAll('.addon-item').forEach((el) => {
-        const name = el.getAttribute('data-name') || '';
-        el.style.display = name.includes(q) ? 'flex' : 'none';
-      });
+  const searchInp = document.getElementById('addon-search-inp');
+  searchInp?.addEventListener('input', (e) => {
+    const q = (e.target.value || '').toLowerCase().trim();
+    modalContainer.querySelectorAll('.addon-item').forEach((el) => {
+      const name = el.getAttribute('data-name') || '';
+      el.style.display = name.includes(q) ? 'flex' : 'none';
     });
+  });
 
-    modalContainer.querySelectorAll('.btn-select-addon').forEach((btn) => {
-      btn.addEventListener('click', async (e) => {
-        const apptId = e.currentTarget.getAttribute('data-appt-id');
-        const svcId = e.currentTarget.getAttribute('data-service-id');
-        const svcName = e.currentTarget.getAttribute('data-service-name');
-        const errDiv = document.getElementById('addon-error');
-        if (errDiv) errDiv.style.display = 'none';
+  modalContainer.querySelectorAll('.btn-select-addon').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      const apptId = e.currentTarget.getAttribute('data-appt-id');
+      const svcId = e.currentTarget.getAttribute('data-service-id');
+      const svcName = e.currentTarget.getAttribute('data-service-name');
+      const errDiv = document.getElementById('addon-error');
+      if (errDiv) errDiv.style.display = 'none';
 
-        e.currentTarget.textContent = 'Adding...';
-        e.currentTarget.disabled = true;
+      e.currentTarget.textContent = 'Adding...';
+      e.currentTarget.disabled = true;
 
-        try {
-          const res = await ApiClient.addAddonService(apptId, svcId);
-          if (res?.conflict) {
-            if (errDiv) {
-              errDiv.textContent = `Cannot add ${svcName}: Time slot conflicts with ${res.conflictBooking?.name || 'another booking or salon operating hours'}.`;
-              errDiv.style.display = 'block';
-            }
-            e.currentTarget.textContent = '+ Add';
-            e.currentTarget.disabled = false;
-            return;
-          }
-
-          close();
-          await this.loadData();
-          this.render();
-        } catch (err) {
+      try {
+        const res = await ApiClient.addAddonService(apptId, svcId);
+        if (res?.conflict) {
           if (errDiv) {
-            errDiv.textContent = err?.message || 'Could not add service.';
+            errDiv.textContent = `Cannot add ${svcName}: Time slot conflicts with ${res.conflictBooking?.name || 'another booking or salon operating hours'}.`;
             errDiv.style.display = 'block';
           }
           e.currentTarget.textContent = '+ Add';
           e.currentTarget.disabled = false;
+          return;
         }
-      });
+
+        close();
+        await this.loadData();
+        this.render();
+      } catch (err) {
+        if (errDiv) {
+          errDiv.textContent = err?.message || 'Could not add service.';
+          errDiv.style.display = 'block';
+        }
+        e.currentTarget.textContent = '+ Add';
+        e.currentTarget.disabled = false;
+      }
     });
-  }
+  });
+}
 
-  startLiveTimerTicks() {
-    if (this.timerInterval) clearInterval(this.timerInterval);
-    this.timerInterval = setInterval(() => {
-      // 1) Existing Reminder Badges
-      const badges = document.querySelectorAll('.qc__timer-badge[data-reminder-sent]');
-      badges.forEach((badge) => {
-        const sentAt = badge.getAttribute('data-reminder-sent');
-        if (!sentAt) return;
-        const elapsedMs = Date.now() - new Date(sentAt).getTime();
-        const remainingMs = (10 * 60 * 1000) - elapsedMs;
-        const countdownEl = badge.querySelector('.qc__timer-countdown');
-        const graceEl = badge.querySelector('.qc__grace-countdown');
+startLiveTimerTicks() {
+  if (this.timerInterval) clearInterval(this.timerInterval);
+  this.timerInterval = setInterval(() => {
+    // 1) Existing Reminder Badges
+    const badges = document.querySelectorAll('.qc__timer-badge[data-reminder-sent]');
+    badges.forEach((badge) => {
+      const sentAt = badge.getAttribute('data-reminder-sent');
+      if (!sentAt) return;
+      const elapsedMs = Date.now() - new Date(sentAt).getTime();
+      const remainingMs = (10 * 60 * 1000) - elapsedMs;
+      const countdownEl = badge.querySelector('.qc__timer-countdown');
+      const graceEl = badge.querySelector('.qc__grace-countdown');
 
-        if (remainingMs > 0) {
-          const mins = Math.floor(remainingMs / 60000);
-          const secs = Math.floor((remainingMs % 60000) / 1000);
-          if (countdownEl) {
-            countdownEl.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
-          }
-        } else {
-          const graceMins = Math.floor(Math.abs(remainingMs) / 60000);
-          if (graceEl) {
-            graceEl.textContent = `${graceMins}m`;
-          }
+      if (remainingMs > 0) {
+        const mins = Math.floor(remainingMs / 60000);
+        const secs = Math.floor((remainingMs % 60000) / 1000);
+        if (countdownEl) {
+          countdownEl.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
         }
-      });
-
-      // 2) Live Reverse Countdown Clocks on Cards (Normal time styling, decreasing order)
-      const clockTimers = document.querySelectorAll('.qc__clock-timer[data-countdown-target]');
-      clockTimers.forEach((timerEl) => {
-        const targetMs = Number(timerEl.getAttribute('data-countdown-target'));
-        if (!targetMs || isNaN(targetMs)) return;
-        const now = Date.now();
-        const diffMs = targetMs - now;
-
-        if (diffMs > 0) {
-          const totalSecs = Math.floor(diffMs / 1000);
-          const hours = Math.floor(totalSecs / 3600);
-          const mins = Math.floor((totalSecs % 3600) / 60);
-          const secs = totalSecs % 60;
-
-          if (hours > 0) {
-            timerEl.textContent = `⏳ ${hours} hr ${mins} min ${secs} sec`;
-          } else if (mins > 0) {
-            timerEl.textContent = `⏳ ${mins} min ${secs} sec`;
-          } else {
-            timerEl.textContent = `⏳ ${secs} sec`;
-          }
-        } else {
-          const timeStr = timerEl.getAttribute('data-time-str') || '';
-          timerEl.textContent = timeStr ? `⏰ ${timeStr}` : '';
+      } else {
+        const graceMins = Math.floor(Math.abs(remainingMs) / 60000);
+        if (graceEl) {
+          graceEl.textContent = `${graceMins}m`;
         }
-      });
-    }, 1000);
-  }
+      }
+    });
+
+    // 2) Live Reverse Countdown Clocks on Cards (Normal time styling, decreasing order)
+    const clockTimers = document.querySelectorAll('.qc__clock-timer[data-countdown-target]');
+    clockTimers.forEach((timerEl) => {
+      const targetMs = Number(timerEl.getAttribute('data-countdown-target'));
+      if (!targetMs || isNaN(targetMs)) return;
+      const now = Date.now();
+      const diffMs = targetMs - now;
+
+      if (diffMs > 0) {
+        const totalSecs = Math.floor(diffMs / 1000);
+        const hours = Math.floor(totalSecs / 3600);
+        const mins = Math.floor((totalSecs % 3600) / 60);
+        const secs = totalSecs % 60;
+
+        if (hours > 0) {
+          timerEl.textContent = `⏳ ${hours} hr ${mins} min ${secs} sec`;
+        } else if (mins > 0) {
+          timerEl.textContent = `⏳ ${mins} min ${secs} sec`;
+        } else {
+          timerEl.textContent = `⏳ ${secs} sec`;
+        }
+      } else {
+        const timeStr = timerEl.getAttribute('data-time-str') || '';
+        timerEl.textContent = timeStr ? `⏰ ${timeStr}` : '';
+      }
+    });
+  }, 1000);
+}
 
 
 
 
-  showCancelModal(appointmentId, clientName) {
-    const modalContainer = document.getElementById('modal-container');
+showCancelModal(appointmentId, clientName) {
+  const modalContainer = document.getElementById('modal-container');
 
-    modalContainer.innerHTML = `
+  modalContainer.innerHTML = `
       <div class="modal-backdrop show">
         <div class="modal-content">
           <div class="modal-header">
@@ -9802,169 +9890,169 @@ export class SalonDashboard {
       </div>
     `;
 
-    document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+  document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
 
-    document.getElementById('cancel-form')?.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const submitBtn = document.getElementById('btn-submit-cancel');
-      submitBtn.textContent = 'Processing Cancellation...';
-      submitBtn.setAttribute('disabled', 'true');
+  document.getElementById('cancel-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const submitBtn = document.getElementById('btn-submit-cancel');
+    submitBtn.textContent = 'Processing Cancellation...';
+    submitBtn.setAttribute('disabled', 'true');
 
-      const penaltyMode = document.getElementById('cancel-penalty-select').value;
-      const reasonCategory = document.getElementById('cancel-category-select').value;
-      const reasonNote = document.getElementById('cancel-reason-note').value || '';
-      const applyPenalty = penaltyMode === 'APPLY_PENALTY';
-      const noPenalty = penaltyMode === 'NO_PENALTY';
+    const penaltyMode = document.getElementById('cancel-penalty-select').value;
+    const reasonCategory = document.getElementById('cancel-category-select').value;
+    const reasonNote = document.getElementById('cancel-reason-note').value || '';
+    const applyPenalty = penaltyMode === 'APPLY_PENALTY';
+    const noPenalty = penaltyMode === 'NO_PENALTY';
 
-      try {
-        await ApiClient.cancelBooking(appointmentId, {
-          source: 'ADMIN_DASHBOARD',
-          fault: applyPenalty ? 'CLIENT' : 'SALON',
-          applyPenalty,
-          noPenalty,
-          reason: reasonNote || reasonCategory,
-        });
-        modalContainer.innerHTML = '';
-        await this.loadData();
-        this.render();
-      } catch (err) {
-        alert(`Failed to cancel: ${err.message}`);
-        submitBtn.textContent = 'Confirm Cancellation';
-        submitBtn.removeAttribute('disabled');
-      }
-    });
-  }
-
-  attachStaffScheduleListeners(root) {
-    if (!root) return;
-
-    // Toggle Single Staff Schedule (On-Demand)
-    root.querySelectorAll('.btn-toggle-staff-schedule').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        const id = e.currentTarget.getAttribute('data-id');
-        if (!id) return;
-        this.openStaffScheduleIds = this.openStaffScheduleIds || new Set();
-        if (this.openStaffScheduleIds.has(id)) {
-          this.openStaffScheduleIds.delete(id);
-        } else {
-          this.openStaffScheduleIds.add(id);
-        }
-        this.refreshActiveTab();
+    try {
+      await ApiClient.cancelBooking(appointmentId, {
+        source: 'ADMIN_DASHBOARD',
+        fault: applyPenalty ? 'CLIENT' : 'SALON',
+        applyPenalty,
+        noPenalty,
+        reason: reasonNote || reasonCategory,
       });
-    });
+      modalContainer.innerHTML = '';
+      await this.loadData();
+      this.render();
+    } catch (err) {
+      this.showToast(`Failed to cancel: ${err.message}`, 'error');
+      submitBtn.textContent = 'Confirm Cancellation';
+      submitBtn.removeAttribute('disabled');
+    }
+  });
+}
 
-    // Toggle All Staff Schedules (Master Toolbar Action)
-    root.querySelector('#btn-toggle-all-schedules')?.addEventListener('click', () => {
+attachStaffScheduleListeners(root) {
+  if (!root) return;
+
+  // Toggle Single Staff Schedule (On-Demand)
+  root.querySelectorAll('.btn-toggle-staff-schedule').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      const id = e.currentTarget.getAttribute('data-id');
+      if (!id) return;
       this.openStaffScheduleIds = this.openStaffScheduleIds || new Set();
-      const allIds = (this.staffList || []).map((s) => s.id);
-      const allOpen = allIds.length > 0 && allIds.every((id) => this.openStaffScheduleIds.has(id));
-      if (allOpen) {
-        this.openStaffScheduleIds.clear();
+      if (this.openStaffScheduleIds.has(id)) {
+        this.openStaffScheduleIds.delete(id);
       } else {
-        allIds.forEach((id) => this.openStaffScheduleIds.add(id));
+        this.openStaffScheduleIds.add(id);
       }
       this.refreshActiveTab();
     });
+  });
 
-    // Switch View Mode (Timeline vs Agenda)
-    root.querySelectorAll('.btn-switch-sched-view').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        const id = e.currentTarget.getAttribute('data-id');
-        const mode = e.currentTarget.getAttribute('data-mode');
-        if (!id || !mode) return;
-        this.staffScheduleViewMode = this.staffScheduleViewMode || {};
-        this.staffScheduleViewMode[id] = mode;
-        this.refreshActiveTab();
-      });
+  // Toggle All Staff Schedules (Master Toolbar Action)
+  root.querySelector('#btn-toggle-all-schedules')?.addEventListener('click', () => {
+    this.openStaffScheduleIds = this.openStaffScheduleIds || new Set();
+    const allIds = (this.staffList || []).map((s) => s.id);
+    const allOpen = allIds.length > 0 && allIds.every((id) => this.openStaffScheduleIds.has(id));
+    if (allOpen) {
+      this.openStaffScheduleIds.clear();
+    } else {
+      allIds.forEach((id) => this.openStaffScheduleIds.add(id));
+    }
+    this.refreshActiveTab();
+  });
+
+  // Switch View Mode (Timeline vs Agenda)
+  root.querySelectorAll('.btn-switch-sched-view').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      const id = e.currentTarget.getAttribute('data-id');
+      const mode = e.currentTarget.getAttribute('data-mode');
+      if (!id || !mode) return;
+      this.staffScheduleViewMode = this.staffScheduleViewMode || {};
+      this.staffScheduleViewMode[id] = mode;
+      this.refreshActiveTab();
     });
+  });
 
-    // Horizontal Scroll: Jump to NOW
-    root.querySelectorAll('.btn-jump-now').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        const id = e.currentTarget.getAttribute('data-id');
-        const track = root.querySelector(`#timeline-track-${id}`) || document.getElementById(`timeline-track-${id}`);
-        const nowLeft = Number(e.currentTarget.getAttribute('data-now-left')) || 0;
-        if (track) {
-          track.scrollTo({ left: Math.max(0, nowLeft - 160), behavior: 'smooth' });
-        }
-      });
-    });
-
-    // Horizontal Scroll: Scroll Earlier
-    root.querySelectorAll('.btn-scroll-earlier').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        const id = e.currentTarget.getAttribute('data-id');
-        const track = root.querySelector(`#timeline-track-${id}`) || document.getElementById(`timeline-track-${id}`);
-        if (track) {
-          track.scrollBy({ left: -220, behavior: 'smooth' });
-        }
-      });
-    });
-
-    // Horizontal Scroll: Scroll Later
-    root.querySelectorAll('.btn-scroll-later').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        const id = e.currentTarget.getAttribute('data-id');
-        const track = root.querySelector(`#timeline-track-${id}`) || document.getElementById(`timeline-track-${id}`);
-        if (track) {
-          track.scrollBy({ left: 220, behavior: 'smooth' });
-        }
-      });
-    });
-
-    // Center live track initial scroll
-    root.querySelectorAll('.staff-timeline-scroll-track').forEach((track) => {
-      const initialScroll = Number(track.getAttribute('data-initial-scroll')) || 0;
-      if (initialScroll > 0) {
-        setTimeout(() => {
-          track.scrollLeft = initialScroll;
-        }, 50);
+  // Horizontal Scroll: Jump to NOW
+  root.querySelectorAll('.btn-jump-now').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      const id = e.currentTarget.getAttribute('data-id');
+      const track = root.querySelector(`#timeline-track-${id}`) || document.getElementById(`timeline-track-${id}`);
+      const nowLeft = Number(e.currentTarget.getAttribute('data-now-left')) || 0;
+      if (track) {
+        track.scrollTo({ left: Math.max(0, nowLeft - 160), behavior: 'smooth' });
       }
     });
-  }
+  });
+
+  // Horizontal Scroll: Scroll Earlier
+  root.querySelectorAll('.btn-scroll-earlier').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      const id = e.currentTarget.getAttribute('data-id');
+      const track = root.querySelector(`#timeline-track-${id}`) || document.getElementById(`timeline-track-${id}`);
+      if (track) {
+        track.scrollBy({ left: -220, behavior: 'smooth' });
+      }
+    });
+  });
+
+  // Horizontal Scroll: Scroll Later
+  root.querySelectorAll('.btn-scroll-later').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      const id = e.currentTarget.getAttribute('data-id');
+      const track = root.querySelector(`#timeline-track-${id}`) || document.getElementById(`timeline-track-${id}`);
+      if (track) {
+        track.scrollBy({ left: 220, behavior: 'smooth' });
+      }
+    });
+  });
+
+  // Center live track initial scroll
+  root.querySelectorAll('.staff-timeline-scroll-track').forEach((track) => {
+    const initialScroll = Number(track.getAttribute('data-initial-scroll')) || 0;
+    if (initialScroll > 0) {
+      setTimeout(() => {
+        track.scrollLeft = initialScroll;
+      }, 50);
+    }
+  });
+}
 
   async handleToggleStaff(id) {
-    if (!id || this._isTogglingStaff) return;
-    this._isTogglingStaff = true;
-    this.lastLocalActionTimestamp = Date.now();
+  if (!id || this._isTogglingStaff) return;
+  this._isTogglingStaff = true;
+  this.lastLocalActionTimestamp = Date.now();
 
-    const idx = this.staffList.findIndex((s) => String(s.id) === String(id));
-    const previousStatus = idx !== -1 ? this.staffList[idx].status : null;
+  const idx = this.staffList.findIndex((s) => String(s.id) === String(id));
+  const previousStatus = idx !== -1 ? this.staffList[idx].status : null;
 
-    try {
-      if (idx !== -1) {
-        this.staffList[idx] = {
-          ...this.staffList[idx],
-          status: previousStatus === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE',
-        };
-        this.render();
-      }
-      await ApiClient.toggleStaffStatus(id);
-      SalonRepository.invalidate('staff');
-      this.showToast(`Stylist is now ${this.staffList[idx]?.status === 'ACTIVE' ? 'Active' : 'Inactive'}`, 'success');
-    } catch (err) {
-      if (idx !== -1 && previousStatus) {
-        this.staffList[idx] = {
-          ...this.staffList[idx],
-          status: previousStatus,
-        };
-        this.render();
-      }
-      alert(`${err.message}`);
-    } finally {
-      setTimeout(() => {
-        this._isTogglingStaff = false;
-      }, 400);
+  try {
+    if (idx !== -1) {
+      this.staffList[idx] = {
+        ...this.staffList[idx],
+        status: previousStatus === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE',
+      };
+      this.render();
     }
+    await ApiClient.toggleStaffStatus(id);
+    SalonRepository.invalidate('staff');
+    this.showToast(`Stylist is now ${this.staffList[idx]?.status === 'ACTIVE' ? 'Active' : 'Inactive'}`, 'success');
+  } catch (err) {
+    if (idx !== -1 && previousStatus) {
+      this.staffList[idx] = {
+        ...this.staffList[idx],
+        status: previousStatus,
+      };
+      this.render();
+    }
+    this.showToast(err.message, 'error');
+  } finally {
+    setTimeout(() => {
+      this._isTogglingStaff = false;
+    }, 400);
   }
+}
 
-  showAddStaffModal() {
-    const modalContainer = document.getElementById('modal-container');
-    const defaultPhone = this.salonProfile?.phone || this.currentUser?.salon?.phone || this.currentUser?.phone || '';
-    const defaultEmail = this.salonProfile?.email || this.currentUser?.salon?.email || this.currentUser?.email || '';
-    const hasServices = Array.isArray(this.servicesList) && this.servicesList.length > 0;
+showAddStaffModal() {
+  const modalContainer = document.getElementById('modal-container');
+  const defaultPhone = this.salonProfile?.phone || this.currentUser?.salon?.phone || this.currentUser?.phone || '';
+  const defaultEmail = this.salonProfile?.email || this.currentUser?.salon?.email || this.currentUser?.email || '';
+  const hasServices = Array.isArray(this.servicesList) && this.servicesList.length > 0;
 
-    modalContainer.innerHTML = `
+  modalContainer.innerHTML = `
       <div class="modal-backdrop show">
         <div class="modal-content">
           <div class="modal-header">
@@ -10033,72 +10121,72 @@ export class SalonDashboard {
       </div>
     `;
 
-    document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+  document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
 
-    document.getElementById('btn-quick-goto-services')?.addEventListener('click', () => {
-      modalContainer.innerHTML = '';
-      this.switchTab('services');
-      setTimeout(() => this.showAddServiceModal(), 120);
-    });
+  document.getElementById('btn-quick-goto-services')?.addEventListener('click', () => {
+    modalContainer.innerHTML = '';
+    this.switchTab('services');
+    setTimeout(() => this.showAddServiceModal(), 120);
+  });
 
-    document.getElementById('add-staff-form')?.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const name = document.getElementById('new-staff-name').value.trim();
-      const phone = document.getElementById('new-staff-phone').value.trim();
-      const email = document.getElementById('new-staff-email')?.value?.trim() || undefined;
-      const selectedServices = Array.from(document.querySelectorAll('.staff-service-chk:checked')).map((c) => c.value);
+  document.getElementById('add-staff-form')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const name = document.getElementById('new-staff-name').value.trim();
+    const phone = document.getElementById('new-staff-phone').value.trim();
+    const email = document.getElementById('new-staff-email')?.value?.trim() || undefined;
+    const selectedServices = Array.from(document.querySelectorAll('.staff-service-chk:checked')).map((c) => c.value);
 
-      // Instant UI response (0ms)
-      const tempId = `temp-staff-${Date.now()}`;
-      const optimisticStaff = {
-        id: tempId,
-        name,
-        phone,
-        email,
-        status: 'ACTIVE',
-        statusLabel: 'Available',
-        statusDotClass: 'status-available',
-        statusBadgeClass: 'badge-available',
-        services: selectedServices.map((id) => ({ serviceId: id })),
-        workingHours: [],
-        breaks: [],
-        _isOptimistic: true,
-      };
+    // Instant UI response (0ms)
+    const tempId = `temp-staff-${Date.now()}`;
+    const optimisticStaff = {
+      id: tempId,
+      name,
+      phone,
+      email,
+      status: 'ACTIVE',
+      statusLabel: 'Available',
+      statusDotClass: 'status-available',
+      statusBadgeClass: 'badge-available',
+      services: selectedServices.map((id) => ({ serviceId: id })),
+      workingHours: [],
+      breaks: [],
+      _isOptimistic: true,
+    };
 
-      this.lastLocalActionTimestamp = Date.now();
-      window.lastDashboardActionTimestamp = Date.now();
-      this.staffList = [optimisticStaff, ...this.staffList];
-      modalContainer.innerHTML = '';
-      this.showToast(`Stylist "${name}" added!`, 'success');
-      this.render();
+    this.lastLocalActionTimestamp = Date.now();
+    window.lastDashboardActionTimestamp = Date.now();
+    this.staffList = [optimisticStaff, ...this.staffList];
+    modalContainer.innerHTML = '';
+    this.showToast(`Stylist "${name}" added!`, 'success');
+    this.render();
 
-      // Background network sync
-      ApiClient.createStaff({
-        name,
-        phone,
-        email,
-        serviceIds: selectedServices,
-      }).then((created) => {
-        if (created && created.id) {
-          this.staffList = this.staffList.map((s) => (s.id === tempId ? created : s));
-          this.render();
-          SalonRepository.invalidate('staff');
-        }
-      }).catch((err) => {
-        this.staffList = this.staffList.filter((s) => s.id !== tempId);
+    // Background network sync
+    ApiClient.createStaff({
+      name,
+      phone,
+      email,
+      serviceIds: selectedServices,
+    }).then((created) => {
+      if (created && created.id) {
+        this.staffList = this.staffList.map((s) => (s.id === tempId ? created : s));
         this.render();
-        alert(`Failed to add stylist: ${err.message}`);
-      });
+        SalonRepository.invalidate('staff');
+      }
+    }).catch((err) => {
+      this.staffList = this.staffList.filter((s) => s.id !== tempId);
+      this.render();
+      this.showToast(`Failed to add stylist: ${err.message}`, 'error');
     });
-  }
+  });
+}
 
-  showAssignServicesModal(staffId, staffName) {
-    const modalContainer = document.getElementById('modal-container');
-    const staff = this.staffList.find((s) => s.id === staffId);
-    const assignedIds = (staff?.services || []).map((s) => s.serviceId || s.service?.id);
-    const hasServices = Array.isArray(this.servicesList) && this.servicesList.length > 0;
+showAssignServicesModal(staffId, staffName) {
+  const modalContainer = document.getElementById('modal-container');
+  const staff = this.staffList.find((s) => s.id === staffId);
+  const assignedIds = (staff?.services || []).map((s) => s.serviceId || s.service?.id);
+  const hasServices = Array.isArray(this.servicesList) && this.servicesList.length > 0;
 
-    modalContainer.innerHTML = `
+  modalContainer.innerHTML = `
       <div class="modal-backdrop show">
         <div class="modal-content">
           <div class="modal-header">
@@ -10136,48 +10224,48 @@ export class SalonDashboard {
       </div>
     `;
 
-    document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+  document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
 
-    document.getElementById('btn-assign-goto-services')?.addEventListener('click', () => {
-      modalContainer.innerHTML = '';
-      this.switchTab('services');
-      setTimeout(() => this.showAddServiceModal(), 120);
-    });
+  document.getElementById('btn-assign-goto-services')?.addEventListener('click', () => {
+    modalContainer.innerHTML = '';
+    this.switchTab('services');
+    setTimeout(() => this.showAddServiceModal(), 120);
+  });
 
-    document.getElementById('assign-services-form')?.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const selected = Array.from(document.querySelectorAll('.chk-assign-svc:checked')).map((c) => c.value);
-      try {
-        const updated = await ApiClient.assignStaffServices(staffId, selected);
-        const idx = this.staffList.findIndex((s) => String(s.id) === String(staffId));
-        if (idx !== -1 && updated) {
-          this.staffList[idx] = { ...this.staffList[idx], ...updated };
-        }
-        modalContainer.innerHTML = '';
-        this.render();
-
-        this.loadData(true).then(() => {
-          this.refreshActiveTab();
-        }).catch(() => { });
-      } catch (err) {
-        alert(err.message);
+  document.getElementById('assign-services-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const selected = Array.from(document.querySelectorAll('.chk-assign-svc:checked')).map((c) => c.value);
+    try {
+      const updated = await ApiClient.assignStaffServices(staffId, selected);
+      const idx = this.staffList.findIndex((s) => String(s.id) === String(staffId));
+      if (idx !== -1 && updated) {
+        this.staffList[idx] = { ...this.staffList[idx], ...updated };
       }
-    });
-  }
+      modalContainer.innerHTML = '';
+      this.render();
+
+      this.loadData(true).then(() => {
+        this.refreshActiveTab();
+      }).catch(() => { });
+    } catch (err) {
+      this.showToast(err.message, 'error');
+    }
+  });
+}
 
   async showAddBreakModal(staffId, staffName) {
-    const modalContainer = document.getElementById('modal-container');
+  const modalContainer = document.getElementById('modal-container');
 
-    const formatTime12h = (t) => {
-      if (!t) return '';
-      const [hStr, mStr] = t.split(':');
-      let h = parseInt(hStr, 10);
-      const ampm = h >= 12 ? 'PM' : 'AM';
-      h = h % 12 || 12;
-      return `${h.toString().padStart(2, '0')}:${mStr || '00'} ${ampm}`;
-    };
+  const formatTime12h = (t) => {
+    if (!t) return '';
+    const [hStr, mStr] = t.split(':');
+    let h = parseInt(hStr, 10);
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12 || 12;
+    return `${h.toString().padStart(2, '0')}:${mStr || '00'} ${ampm}`;
+  };
 
-    modalContainer.innerHTML = `
+  modalContainer.innerHTML = `
       <div class="modal-backdrop show">
         <div class="modal-content modal-content-sheet" style="max-width: 520px; max-height: 90vh; overflow-y: auto;">
           <div class="sheet-grab-handle"></div>
@@ -10192,8 +10280,8 @@ export class SalonDashboard {
             <button class="close-btn" id="btn-close-modal">&times;</button>
           </div>
 
-          <div style="text-align: center; padding: 30px;" id="break-modal-loading">
-            <span style="font-size: 0.85rem; color: #94a3b8;">Loading breaks schedule for ${staffName}...</span>
+          <div id="break-modal-loading">
+            ${PageDataLoader.render({ title: `Loading breaks schedule for ${staffName}...`, minHeight: '130px', variant: 'compact' })}
           </div>
 
           <div id="break-modal-body" style="display: none;">
@@ -10258,96 +10346,96 @@ export class SalonDashboard {
       </div>
     `;
 
-    document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
-    document.getElementById('btn-cancel-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+  document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+  document.getElementById('btn-cancel-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
 
-    let staffBreaks = [];
-    try {
-      staffBreaks = await ApiClient.getStaffBreaks(staffId, true);
-    } catch (err) {
-      console.warn('[StaffBreaks] Failed to fetch breaks:', err);
-      staffBreaks = [];
-    }
+  let staffBreaks = [];
+  try {
+    staffBreaks = await ApiClient.getStaffBreaks(staffId, true);
+  } catch (err) {
+    console.warn('[StaffBreaks] Failed to fetch breaks:', err);
+    staffBreaks = [];
+  }
 
-    const loadingDiv = document.getElementById('break-modal-loading');
-    const bodyDiv = document.getElementById('break-modal-body');
-    if (loadingDiv) loadingDiv.style.display = 'none';
-    if (bodyDiv) bodyDiv.style.display = 'block';
+  const loadingDiv = document.getElementById('break-modal-loading');
+  const bodyDiv = document.getElementById('break-modal-body');
+  if (loadingDiv) loadingDiv.style.display = 'none';
+  if (bodyDiv) bodyDiv.style.display = 'block';
 
-    const daySelect = document.getElementById('break-day');
-    const dayLabel = document.getElementById('label-selected-day');
-    const breaksContainer = document.getElementById('active-day-breaks-container');
-    const countBadge = document.getElementById('day-break-count-badge');
-    const bStart = document.getElementById('break-start');
-    const bEnd = document.getElementById('break-end');
-    const preview = document.getElementById('break-duration-preview');
-    const formError = document.getElementById('break-form-error');
+  const daySelect = document.getElementById('break-day');
+  const dayLabel = document.getElementById('label-selected-day');
+  const breaksContainer = document.getElementById('active-day-breaks-container');
+  const countBadge = document.getElementById('day-break-count-badge');
+  const bStart = document.getElementById('break-start');
+  const bEnd = document.getElementById('break-end');
+  const preview = document.getElementById('break-duration-preview');
+  const formError = document.getElementById('break-form-error');
 
-    const updateDurationPreview = () => {
-      if (!bStart || !bEnd || !preview) return;
-      if (bStart.value && bEnd.value) {
-        const [sh, sm] = bStart.value.split(':').map(Number);
-        const [eh, em] = bEnd.value.split(':').map(Number);
-        const diff = (eh * 60 + em) - (sh * 60 + sm);
-        if (diff > 0) {
-          const selectedDay = daySelect.value;
-          const currentSalonBreaks = staffBreaks.filter(b => b.dayOfWeek === selectedDay && b.origin === 'SALON');
-          const overlappingSalonBreak = currentSalonBreaks.find(sb => {
-            const [sbSh, sbSm] = sb.startTime.split(':').map(Number);
-            const [sbEh, sbEm] = sb.endTime.split(':').map(Number);
-            const sbStartM = sbSh * 60 + sbSm;
-            const sbEndM = sbEh * 60 + sbEm;
-            const curStartM = sh * 60 + sm;
-            const curEndM = eh * 60 + em;
-            return curStartM < sbEndM && curEndM > sbStartM;
-          });
+  const updateDurationPreview = () => {
+    if (!bStart || !bEnd || !preview) return;
+    if (bStart.value && bEnd.value) {
+      const [sh, sm] = bStart.value.split(':').map(Number);
+      const [eh, em] = bEnd.value.split(':').map(Number);
+      const diff = (eh * 60 + em) - (sh * 60 + sm);
+      if (diff > 0) {
+        const selectedDay = daySelect.value;
+        const currentSalonBreaks = staffBreaks.filter(b => b.dayOfWeek === selectedDay && b.origin === 'SALON');
+        const overlappingSalonBreak = currentSalonBreaks.find(sb => {
+          const [sbSh, sbSm] = sb.startTime.split(':').map(Number);
+          const [sbEh, sbEm] = sb.endTime.split(':').map(Number);
+          const sbStartM = sbSh * 60 + sbSm;
+          const sbEndM = sbEh * 60 + sbEm;
+          const curStartM = sh * 60 + sm;
+          const curEndM = eh * 60 + em;
+          return curStartM < sbEndM && curEndM > sbStartM;
+        });
 
-          preview.style.display = 'block';
-          if (overlappingSalonBreak) {
-            preview.style.background = 'rgba(245, 158, 11, 0.12)';
-            preview.style.border = '1px solid rgba(245, 158, 11, 0.3)';
-            preview.style.color = '#fbbf24';
-            preview.textContent = `⏱️ ${diff} mins • ℹ️ Overlaps with Salon Break (${formatTime12h(overlappingSalonBreak.startTime)} - ${formatTime12h(overlappingSalonBreak.endTime)}). Facility downtime already protects this slot.`;
-          } else {
-            preview.style.background = 'rgba(16, 185, 129, 0.12)';
-            preview.style.border = '1px solid rgba(16, 185, 129, 0.3)';
-            preview.style.color = '#34d399';
-            preview.textContent = `⏱️ Break Duration: ${diff} minutes`;
-          }
+        preview.style.display = 'block';
+        if (overlappingSalonBreak) {
+          preview.style.background = 'rgba(245, 158, 11, 0.12)';
+          preview.style.border = '1px solid rgba(245, 158, 11, 0.3)';
+          preview.style.color = '#fbbf24';
+          preview.textContent = `⏱️ ${diff} mins • ℹ️ Overlaps with Salon Break (${formatTime12h(overlappingSalonBreak.startTime)} - ${formatTime12h(overlappingSalonBreak.endTime)}). Facility downtime already protects this slot.`;
         } else {
-          preview.style.display = 'block';
-          preview.style.background = 'rgba(239, 68, 68, 0.12)';
-          preview.style.border = '1px solid rgba(239, 68, 68, 0.3)';
-          preview.style.color = '#f87171';
-          preview.textContent = `⚠️ End time must be later than start time.`;
+          preview.style.background = 'rgba(16, 185, 129, 0.12)';
+          preview.style.border = '1px solid rgba(16, 185, 129, 0.3)';
+          preview.style.color = '#34d399';
+          preview.textContent = `⏱️ Break Duration: ${diff} minutes`;
         }
       } else {
-        preview.style.display = 'none';
+        preview.style.display = 'block';
+        preview.style.background = 'rgba(239, 68, 68, 0.12)';
+        preview.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+        preview.style.color = '#f87171';
+        preview.textContent = `⚠️ End time must be later than start time.`;
       }
-    };
+    } else {
+      preview.style.display = 'none';
+    }
+  };
 
-    bStart?.addEventListener('change', updateDurationPreview);
-    bEnd?.addEventListener('change', updateDurationPreview);
+  bStart?.addEventListener('change', updateDurationPreview);
+  bEnd?.addEventListener('change', updateDurationPreview);
 
-    const renderDayBreaks = (selectedDay) => {
-      const dayBreaks = staffBreaks.filter((b) => b.dayOfWeek === selectedDay);
-      const salonBreaks = dayBreaks.filter((b) => b.origin === 'SALON');
-      const stylistBreaks = dayBreaks.filter((b) => b.origin === 'STYLIST');
+  const renderDayBreaks = (selectedDay) => {
+    const dayBreaks = staffBreaks.filter((b) => b.dayOfWeek === selectedDay);
+    const salonBreaks = dayBreaks.filter((b) => b.origin === 'SALON');
+    const stylistBreaks = dayBreaks.filter((b) => b.origin === 'STYLIST');
 
-      if (dayLabel) {
-        dayLabel.textContent = selectedDay.charAt(0) + selectedDay.slice(1).toLowerCase();
-      }
+    if (dayLabel) {
+      dayLabel.textContent = selectedDay.charAt(0) + selectedDay.slice(1).toLowerCase();
+    }
 
-      if (countBadge) {
-        const total = salonBreaks.length + stylistBreaks.length;
-        countBadge.textContent = total > 0 ? `${total} Active Break${total === 1 ? '' : 's'}` : '0 Breaks';
-      }
+    if (countBadge) {
+      const total = salonBreaks.length + stylistBreaks.length;
+      countBadge.textContent = total > 0 ? `${total} Active Break${total === 1 ? '' : 's'}` : '0 Breaks';
+    }
 
-      let html = '';
+    let html = '';
 
-      // 1. Salon Facility Breaks Banner
-      if (salonBreaks.length > 0) {
-        html += `
+    // 1. Salon Facility Breaks Banner
+    if (salonBreaks.length > 0) {
+      html += `
           <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 10px;">
             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
               <span style="font-size: 0.78rem; font-weight: 700; color: #34d399; display: flex; align-items: center; gap: 6px;">
@@ -10373,11 +10461,11 @@ export class SalonDashboard {
             </div>
           </div>
         `;
-      }
+    }
 
-      // 2. Stylist Personal Shift Breaks
-      if (stylistBreaks.length > 0) {
-        html += `
+    // 2. Stylist Personal Shift Breaks
+    if (stylistBreaks.length > 0) {
+      html += `
           <div style="background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.3); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 10px;">
             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
               <span style="font-size: 0.78rem; font-weight: 700; color: #c4b5fd; display: flex; align-items: center; gap: 6px;">
@@ -10403,121 +10491,129 @@ export class SalonDashboard {
             </div>
           </div>
         `;
-      }
+    }
 
-      if (salonBreaks.length === 0 && stylistBreaks.length === 0) {
-        html += `
+    if (salonBreaks.length === 0 && stylistBreaks.length === 0) {
+      html += `
           <div style="background: rgba(255, 255, 255, 0.03); border: 1px dashed rgba(255, 255, 255, 0.1); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 10px; text-align: center;">
             <span style="color: var(--text-muted); font-size: 0.78rem;">No breaks scheduled for ${selectedDay.charAt(0) + selectedDay.slice(1).toLowerCase()}. Stylist is available throughout the operating shift.</span>
           </div>
         `;
-      }
+    }
 
-      breaksContainer.innerHTML = html;
+    breaksContainer.innerHTML = html;
 
-      // Wire delete buttons for personal breaks
-      breaksContainer.querySelectorAll('.btn-delete-staff-break').forEach((btn) => {
-        btn.addEventListener('click', async (e) => {
-          const breakId = e.currentTarget.getAttribute('data-break-id');
-          if (!confirm('Are you sure you want to remove this personal break?')) return;
-          try {
-            await ApiClient.deleteStaffBreak(staffId, breakId);
-            staffBreaks = await ApiClient.getStaffBreaks(staffId, true);
-            renderDayBreaks(daySelect.value);
-            this.loadData(true).then(() => {
-              this.refreshActiveTab();
-            }).catch(() => { });
-          } catch (err) {
-            alert(err.message || 'Failed to delete break');
-          }
+    // Wire delete buttons for personal breaks
+    breaksContainer.querySelectorAll('.btn-delete-staff-break').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        const breakId = e.currentTarget.getAttribute('data-break-id');
+        const ok = await CalendarState.confirm({
+          title: 'Remove Personal Break',
+          message: 'Are you sure you want to remove this personal break from the specialist schedule?',
+          confirmText: 'Remove Break',
+          cancelText: 'Cancel',
+          icon: '🗑️',
+          type: 'danger',
         });
+        if (!ok) return;
+        try {
+          await ApiClient.deleteStaffBreak(staffId, breakId);
+          staffBreaks = await ApiClient.getStaffBreaks(staffId, true);
+          renderDayBreaks(daySelect.value);
+          this.loadData(true).then(() => {
+            this.refreshActiveTab();
+          }).catch(() => { });
+        } catch (err) {
+          this.showToast(err.message || 'Failed to delete break', 'error');
+        }
+      });
+    });
+
+    updateDurationPreview();
+  };
+
+  daySelect?.addEventListener('change', (e) => {
+    renderDayBreaks(e.target.value);
+  });
+
+  // Default to MONDAY or current day
+  renderDayBreaks(daySelect.value || 'MONDAY');
+
+  document.getElementById('add-break-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const submitBtn = document.getElementById('btn-submit-break');
+    if (formError) formError.style.display = 'none';
+    if (submitBtn) {
+      submitBtn.textContent = 'Saving Shift Break...';
+      submitBtn.setAttribute('disabled', 'true');
+    }
+
+    try {
+      await ApiClient.createStaffBreak(staffId, {
+        dayOfWeek: daySelect.value,
+        startTime: document.getElementById('break-start').value,
+        endTime: document.getElementById('break-end').value,
+        title: document.getElementById('break-title').value || 'Personal Break',
       });
 
-      updateDurationPreview();
-    };
+      // Refetch breaks and update view
+      staffBreaks = await ApiClient.getStaffBreaks(staffId, true);
+      renderDayBreaks(daySelect.value);
 
-    daySelect?.addEventListener('change', (e) => {
-      renderDayBreaks(e.target.value);
-    });
+      // Reset form inputs
+      document.getElementById('break-start').value = '';
+      document.getElementById('break-end').value = '';
+      document.getElementById('break-title').value = '';
+      if (preview) preview.style.display = 'none';
 
-    // Default to MONDAY or current day
-    renderDayBreaks(daySelect.value || 'MONDAY');
-
-    document.getElementById('add-break-form')?.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const submitBtn = document.getElementById('btn-submit-break');
-      if (formError) formError.style.display = 'none';
       if (submitBtn) {
-        submitBtn.textContent = 'Saving Shift Break...';
-        submitBtn.setAttribute('disabled', 'true');
+        submitBtn.textContent = 'Save Personal Break →';
+        submitBtn.removeAttribute('disabled');
       }
 
-      try {
-        await ApiClient.createStaffBreak(staffId, {
-          dayOfWeek: daySelect.value,
-          startTime: document.getElementById('break-start').value,
-          endTime: document.getElementById('break-end').value,
-          title: document.getElementById('break-title').value || 'Personal Break',
-        });
-
-        // Refetch breaks and update view
-        staffBreaks = await ApiClient.getStaffBreaks(staffId, true);
-        renderDayBreaks(daySelect.value);
-
-        // Reset form inputs
-        document.getElementById('break-start').value = '';
-        document.getElementById('break-end').value = '';
-        document.getElementById('break-title').value = '';
-        if (preview) preview.style.display = 'none';
-
-        if (submitBtn) {
-          submitBtn.textContent = 'Save Personal Break →';
-          submitBtn.removeAttribute('disabled');
-        }
-
-        this.loadData(true).then(() => {
-          this.refreshActiveTab();
-        }).catch(() => { });
-      } catch (err) {
-        if (formError) {
-          formError.textContent = err.message || 'Failed to save shift break';
-          formError.style.display = 'block';
-        } else {
-          alert(err.message);
-        }
-        if (submitBtn) {
-          submitBtn.textContent = 'Save Personal Break →';
-          submitBtn.removeAttribute('disabled');
-        }
+      this.loadData(true).then(() => {
+        this.refreshActiveTab();
+      }).catch(() => { });
+    } catch (err) {
+      if (formError) {
+        formError.textContent = err.message || 'Failed to save shift break';
+        formError.style.display = 'block';
+      } else {
+        this.showToast(err.message, 'error');
       }
-    });
-  }
+      if (submitBtn) {
+        submitBtn.textContent = 'Save Personal Break →';
+        submitBtn.removeAttribute('disabled');
+      }
+    }
+  });
+}
 
-  showMarkAbsentModal(staffId, staffName) {
-    StaffApplyLeaveDialog.open({
-      staffId: staffId || null,
-      staffName: staffName || null,
-      showModeSwitch: !staffId,
-      salonWorkingHours: this.salonWorkingHours || [],
-      staffList: this.staffList || [],
-      onSuccess: async () => {
-        await this.loadData(true);
-      },
-    });
-  }
+showMarkAbsentModal(staffId, staffName) {
+  StaffApplyLeaveDialog.open({
+    staffId: staffId || null,
+    staffName: staffName || null,
+    showModeSwitch: !staffId,
+    salonWorkingHours: this.salonWorkingHours || [],
+    staffList: this.staffList || [],
+    onSuccess: async () => {
+      await this.loadData(true);
+    },
+  });
+}
 
-  showLeaveHistoryModal(staffId, staffName) {
-    this.leaveUI.showLeaveHistoryModal(staffId, staffName);
-  }
+showLeaveHistoryModal(staffId, staffName) {
+  this.leaveUI.showLeaveHistoryModal(staffId, staffName);
+}
 
-  showAbsenceResultModal(staffName, result) {
-    this.leaveUI.showLeaveResultModal(staffName, result);
-  }
+showAbsenceResultModal(staffName, result) {
+  this.leaveUI.showLeaveResultModal(staffName, result);
+}
 
-  showBlockTimeModal() {
-    const modalContainer = document.getElementById('modal-container');
+showBlockTimeModal() {
+  const modalContainer = document.getElementById('modal-container');
 
-    modalContainer.innerHTML = `
+  modalContainer.innerHTML = `
       <div class="modal-backdrop show">
         <div class="modal-content">
           <div class="modal-header">
@@ -10562,43 +10658,43 @@ export class SalonDashboard {
       </div>
     `;
 
-    document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+  document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
 
-    document.getElementById('block-time-form')?.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const staffId = document.getElementById('block-target').value || undefined;
-      const date = document.getElementById('block-date').value;
-      const startTime = document.getElementById('block-start-time').value;
-      const endTime = document.getElementById('block-end-time').value;
-      const reason = document.getElementById('block-reason').value;
+  document.getElementById('block-time-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const staffId = document.getElementById('block-target').value || undefined;
+    const date = document.getElementById('block-date').value;
+    const startTime = document.getElementById('block-start-time').value;
+    const endTime = document.getElementById('block-end-time').value;
+    const reason = document.getElementById('block-reason').value;
 
-      try {
-        await ApiClient.addBlockedTime({
-          staffId,
-          startTime: `${date}T${startTime}:00.000Z`,
-          endTime: `${date}T${endTime}:00.000Z`,
-          reason,
-        });
+    try {
+      await ApiClient.addBlockedTime({
+        staffId,
+        startTime: `${date}T${startTime}:00.000Z`,
+        endTime: `${date}T${endTime}:00.000Z`,
+        reason,
+      });
 
-        modalContainer.innerHTML = '';
-        await this.loadData();
-        this.render();
-      } catch (err) {
-        alert(err.message);
-      }
-    });
-  }
+      modalContainer.innerHTML = '';
+      await this.loadData();
+      this.render();
+    } catch (err) {
+      this.showToast(err.message, 'error');
+    }
+  });
+}
 
   async showManageCategoriesModal() {
-    const modalContainer = document.getElementById('modal-container');
-    try {
-      this.categoriesList = await ApiClient.getServiceCategories(true).catch(() => []);
-    } catch (e) {
-      console.warn('Failed to load categories', e);
-    }
-    const categories = Array.isArray(this.categoriesList) ? this.categoriesList : [];
+  const modalContainer = document.getElementById('modal-container');
+  try {
+    this.categoriesList = await ApiClient.getServiceCategories(true).catch(() => []);
+  } catch (e) {
+    console.warn('Failed to load categories', e);
+  }
+  const categories = Array.isArray(this.categoriesList) ? this.categoriesList : [];
 
-    modalContainer.innerHTML = `
+  modalContainer.innerHTML = `
       <div class="modal-backdrop show">
         <div class="modal-content modal-content-md" style="max-height: 90vh; overflow-y: auto;">
           <div class="modal-header">
@@ -10645,66 +10741,73 @@ export class SalonDashboard {
       </div>
     `;
 
-    document.getElementById('btn-close-modal')?.addEventListener('click', () => {
-      modalContainer.innerHTML = '';
-    });
+  document.getElementById('btn-close-modal')?.addEventListener('click', () => {
+    modalContainer.innerHTML = '';
+  });
 
-    document.getElementById('add-category-form')?.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const name = document.getElementById('cat-name-input').value.trim();
-      const icon = document.getElementById('cat-icon-input').value.trim() || '✂️';
-      if (!name) return;
-      try {
-        await ApiClient.createServiceCategory({ name, icon });
-        showNotification(`Category "${name}" created!`, 'success');
-        this.categoriesList = await ApiClient.getServiceCategories(true);
-        await this.showManageCategoriesModal();
-        await this.loadData(true);
-      } catch (err) {
-        showNotification(err.message || 'Failed to create category', 'error');
-      }
-    });
+  document.getElementById('add-category-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = document.getElementById('cat-name-input').value.trim();
+    const icon = document.getElementById('cat-icon-input').value.trim() || '✂️';
+    if (!name) return;
+    try {
+      await ApiClient.createServiceCategory({ name, icon });
+      showNotification(`Category "${name}" created!`, 'success');
+      this.categoriesList = await ApiClient.getServiceCategories(true);
+      await this.showManageCategoriesModal();
+      await this.loadData(true);
+    } catch (err) {
+      showNotification(err.message || 'Failed to create category', 'error');
+    }
+  });
 
-    document.querySelectorAll('.btn-delete-cat').forEach((btn) => {
-      btn.addEventListener('click', async (e) => {
-        const id = btn.getAttribute('data-id');
-        const name = btn.getAttribute('data-name');
-        if (confirm(`Delete category "${name}"? Services in this category will become general uncategorized services.`)) {
-          try {
-            await ApiClient.deleteServiceCategory(id);
-            showNotification(`Category "${name}" deleted`, 'success');
-            this.categoriesList = await ApiClient.getServiceCategories(true);
-            await this.showManageCategoriesModal();
-            await this.loadData(true);
-          } catch (err) {
-            showNotification(err.message || 'Failed to delete category', 'error');
-          }
-        }
+  document.querySelectorAll('.btn-delete-cat').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      const id = btn.getAttribute('data-id');
+      const ok = await CalendarState.confirm({
+        title: 'Delete Service Category',
+        message: `Are you sure you want to delete category "${name}"? Services in this category will become general uncategorized services.`,
+        confirmText: 'Delete Category',
+        cancelText: 'Cancel',
+        icon: '🗑️',
+        type: 'danger',
       });
-    });
-  }
-
-  showAddServiceModal() {
-    if (document.getElementById('add-service-form')) return;
-    const modalContainer = this.getModalContainer();
-    const activeStaff = (this.staffList || []).filter((st) => st.status === 'ACTIVE' || !st.status);
-
-    const renderCatOptions = (selected = '') => {
-      if (!this.categoriesList || this.categoriesList.length === 0) {
-        return '<option value="General" selected>✂️ General Services</option><option value="CUSTOM">➕ Other / Custom Category...</option>';
+      if (ok) {
+        try {
+          await ApiClient.deleteServiceCategory(id);
+          showNotification(`Category "${name}" deleted`, 'success');
+          this.categoriesList = await ApiClient.getServiceCategories(true);
+          await this.showManageCategoriesModal();
+          await this.loadData(true);
+        } catch (err) {
+          showNotification(err.message || 'Failed to delete category', 'error');
+        }
       }
-      return this.categoriesList.map((c) => `<option value="${c.name}" data-id="${c.id}" ${c.name === selected ? 'selected' : ''}>${c.icon || '✂️'} ${c.name}</option>`).join('') + '<option value="CUSTOM">➕ Other / Custom Category...</option>';
-    };
+    });
+  });
+}
 
-    const catList = (this.categoriesList && this.categoriesList.length > 0)
-      ? this.categoriesList
-      : [{ id: 'cat-general', name: 'General', icon: '✂️' }];
+showAddServiceModal() {
+  if (document.getElementById('add-service-form')) return;
+  const modalContainer = this.getModalContainer();
+  const activeStaff = (this.staffList || []).filter((st) => st.status === 'ACTIVE' || !st.status);
 
-    const firstCat = catList[0];
-    const initialCatName = firstCat.name;
-    const initialCatIcon = firstCat.icon || '✂️';
+  const renderCatOptions = (selected = '') => {
+    if (!this.categoriesList || this.categoriesList.length === 0) {
+      return '<option value="General" selected>✂️ General Services</option><option value="CUSTOM">➕ Other / Custom Category...</option>';
+    }
+    return this.categoriesList.map((c) => `<option value="${c.name}" data-id="${c.id}" ${c.name === selected ? 'selected' : ''}>${c.icon || '✂️'} ${c.name}</option>`).join('') + '<option value="CUSTOM">➕ Other / Custom Category...</option>';
+  };
 
-    modalContainer.innerHTML = `
+  const catList = (this.categoriesList && this.categoriesList.length > 0)
+    ? this.categoriesList
+    : [{ id: 'cat-general', name: 'General', icon: '✂️' }];
+
+  const firstCat = catList[0];
+  const initialCatName = firstCat.name;
+  const initialCatIcon = firstCat.icon || '✂️';
+
+  modalContainer.innerHTML = `
       <div class="modal-backdrop show">
         <div class="modal-content modal-content-md service-modal-form" style="max-height: 90vh; overflow-y: auto; padding: 24px; max-width: 520px; width: 100%;">
           <!-- Header (Compact, no subtitle) -->
@@ -10872,8 +10975,8 @@ export class SalonDashboard {
                     ${activeStaff.length === 0 ? `
                       <div style="font-size: 0.8rem; color: var(--text-muted); padding: 12px; text-align: center;">No active stylists yet. Can be assigned later.</div>
                     ` : activeStaff.map((st) => {
-                      const initials = st.name.split(' ').map((n) => n[0]).join('').substring(0, 2).toUpperCase();
-                      return `
+    const initials = st.name.split(' ').map((n) => n[0]).join('').substring(0, 2).toUpperCase();
+    return `
                         <div class="svc-staff-dd-item selected" data-id="${st.id}" data-name="${st.name.toLowerCase()}">
                           <input type="checkbox" class="svc-staff-assign-chk" value="${st.id}" checked style="display: none;" />
                           <div class="svc-staff-dd-checkbox">✓</div>
@@ -10881,7 +10984,7 @@ export class SalonDashboard {
                           <span class="svc-staff-name" title="${st.name}">${st.name}</span>
                         </div>
                       `;
-                    }).join('')}
+  }).join('')}
                   </div>
 
                   <div class="svc-staff-dd-footer">
@@ -10908,57 +11011,57 @@ export class SalonDashboard {
       </div>
     `;
 
-    document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+  document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
 
-    const categorySelect = document.getElementById('svc-category-select');
-    const customCatGroup = document.getElementById('svc-custom-cat-group');
-    const customCatInput = document.getElementById('svc-custom-cat-input');
-    const nameInput = document.getElementById('svc-name');
-    const priceInput = document.getElementById('svc-price');
-    const durationSelect = document.getElementById('svc-duration');
-    const descInput = document.getElementById('svc-desc');
-    const genderInput = document.getElementById('svc-gender');
+  const categorySelect = document.getElementById('svc-category-select');
+  const customCatGroup = document.getElementById('svc-custom-cat-group');
+  const customCatInput = document.getElementById('svc-custom-cat-input');
+  const nameInput = document.getElementById('svc-name');
+  const priceInput = document.getElementById('svc-price');
+  const durationSelect = document.getElementById('svc-duration');
+  const descInput = document.getElementById('svc-desc');
+  const genderInput = document.getElementById('svc-gender');
 
-    // Audience toggle buttons
-    document.querySelectorAll('.svc-aud-btn').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.svc-aud-btn').forEach((b) => b.classList.remove('selected'));
-        btn.classList.add('selected');
-        if (genderInput) genderInput.value = btn.getAttribute('data-val');
-      });
+  // Audience toggle buttons
+  document.querySelectorAll('.svc-aud-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.svc-aud-btn').forEach((b) => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      if (genderInput) genderInput.value = btn.getAttribute('data-val');
     });
+  });
 
-    // Inline category toggle & creation
-    const inlineBox = document.getElementById('svc-inline-cat-box');
-    document.getElementById('btn-toggle-inline-cat')?.addEventListener('click', () => {
-      inlineBox.style.display = inlineBox.style.display === 'none' ? 'block' : 'none';
-      if (inlineBox.style.display === 'block') {
-        document.getElementById('inline-cat-name')?.focus();
-      }
-    });
+  // Inline category toggle & creation
+  const inlineBox = document.getElementById('svc-inline-cat-box');
+  document.getElementById('btn-toggle-inline-cat')?.addEventListener('click', () => {
+    inlineBox.style.display = inlineBox.style.display === 'none' ? 'block' : 'none';
+    if (inlineBox.style.display === 'block') {
+      document.getElementById('inline-cat-name')?.focus();
+    }
+  });
 
-    document.getElementById('btn-close-inline-cat')?.addEventListener('click', () => {
-      inlineBox.style.display = 'none';
-    });
+  document.getElementById('btn-close-inline-cat')?.addEventListener('click', () => {
+    inlineBox.style.display = 'none';
+  });
 
-    document.getElementById('btn-save-inline-cat')?.addEventListener('click', async () => {
-      const catName = document.getElementById('inline-cat-name')?.value.trim();
-      const catIcon = document.getElementById('inline-cat-icon')?.value.trim() || '✂️';
-      if (!catName) return;
+  document.getElementById('btn-save-inline-cat')?.addEventListener('click', async () => {
+    const catName = document.getElementById('inline-cat-name')?.value.trim();
+    const catIcon = document.getElementById('inline-cat-icon')?.value.trim() || '✂️';
+    if (!catName) return;
 
-      try {
-        const newCat = await ApiClient.createServiceCategory({ name: catName, icon: catIcon });
-        this.categoriesList = await ApiClient.getServiceCategories(true).catch(() => [
-          ...(this.categoriesList || []),
-          newCat || { id: `cat-${Date.now()}`, name: catName, icon: catIcon },
-        ]);
-        categorySelect.innerHTML = renderCatOptions(catName);
-        categorySelect.value = catName;
-        if (catSelectedIcon) catSelectedIcon.textContent = catIcon;
-        if (catSelectedName) catSelectedName.textContent = catName;
+    try {
+      const newCat = await ApiClient.createServiceCategory({ name: catName, icon: catIcon });
+      this.categoriesList = await ApiClient.getServiceCategories(true).catch(() => [
+        ...(this.categoriesList || []),
+        newCat || { id: `cat-${Date.now()}`, name: catName, icon: catIcon },
+      ]);
+      categorySelect.innerHTML = renderCatOptions(catName);
+      categorySelect.value = catName;
+      if (catSelectedIcon) catSelectedIcon.textContent = catIcon;
+      if (catSelectedName) catSelectedName.textContent = catName;
 
-        if (catMenu) {
-          catMenu.innerHTML = `
+      if (catMenu) {
+        catMenu.innerHTML = `
             ${this.categoriesList.map((c) => `
               <div class="custom-select-option ${c.name === catName ? 'selected' : ''}" data-value="${c.name}" data-icon="${c.icon || '✂️'}" data-id="${c.id || ''}">
                 <div style="display: flex; align-items: center; gap: 8px;">
@@ -10975,105 +11078,57 @@ export class SalonDashboard {
               </div>
             </div>
           `;
-          bindCatOptions();
-        }
-
-        inlineBox.style.display = 'none';
-        document.getElementById('inline-cat-name').value = '';
-        this.showToast(`Category "${catName}" added!`, 'success');
-      } catch (err) {
-        this.showToast(err.message || 'Failed to create category', 'error');
+        bindCatOptions();
       }
-    });
 
-    // Custom Category Dropdown Interactions
-    const catContainer = document.getElementById('svc-cat-custom-container');
-    const catTrigger = document.getElementById('svc-cat-custom-trigger');
-    const catMenu = document.getElementById('svc-cat-custom-menu');
-    const catChevron = document.getElementById('svc-cat-custom-chevron');
-    const catSelectedIcon = document.getElementById('svc-cat-selected-icon');
-    const catSelectedName = document.getElementById('svc-cat-selected-name');
+      inlineBox.style.display = 'none';
+      document.getElementById('inline-cat-name').value = '';
+      this.showToast(`Category "${catName}" added!`, 'success');
+    } catch (err) {
+      this.showToast(err.message || 'Failed to create category', 'error');
+    }
+  });
 
-    const toggleCatMenu = (forceOpen) => {
-      if (!catMenu) return;
-      const isOpen = forceOpen !== undefined ? forceOpen : !catMenu.classList.contains('open');
-      catMenu.classList.toggle('open', isOpen);
-      catTrigger?.classList.toggle('active', isOpen);
-      catChevron?.classList.toggle('open', isOpen);
-    };
+  // Custom Category Dropdown Interactions
+  const catContainer = document.getElementById('svc-cat-custom-container');
+  const catTrigger = document.getElementById('svc-cat-custom-trigger');
+  const catMenu = document.getElementById('svc-cat-custom-menu');
+  const catChevron = document.getElementById('svc-cat-custom-chevron');
+  const catSelectedIcon = document.getElementById('svc-cat-selected-icon');
+  const catSelectedName = document.getElementById('svc-cat-selected-name');
 
-    catTrigger?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggleDdMenu?.(false);
-      toggleDurMenu?.(false);
-      toggleCatMenu();
-    });
+  const toggleCatMenu = (forceOpen) => {
+    if (!catMenu) return;
+    const isOpen = forceOpen !== undefined ? forceOpen : !catMenu.classList.contains('open');
+    catMenu.classList.toggle('open', isOpen);
+    catTrigger?.classList.toggle('active', isOpen);
+    catChevron?.classList.toggle('open', isOpen);
+  };
 
-    const bindCatOptions = () => {
-      catMenu?.querySelectorAll('.custom-select-option').forEach((opt) => {
-        opt.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const val = opt.getAttribute('data-value');
-          const icon = opt.getAttribute('data-icon') || '✂️';
-          const name = opt.querySelector('span:nth-child(2)')?.textContent || val;
+  catTrigger?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleDdMenu?.(false);
+    toggleDurMenu?.(false);
+    toggleCatMenu();
+  });
 
-          if (categorySelect) {
-            categorySelect.value = val;
-            categorySelect.dispatchEvent(new Event('change'));
-          }
-
-          if (catSelectedIcon) catSelectedIcon.textContent = icon;
-          if (catSelectedName) catSelectedName.textContent = val === 'CUSTOM' ? 'Custom Category' : name;
-
-          catMenu.querySelectorAll('.custom-select-option').forEach((o) => {
-            o.classList.toggle('selected', o === opt);
-            const check = o.querySelector('.custom-select-opt-check');
-            if (check) check.remove();
-            if (o === opt) {
-              const checkSpan = document.createElement('span');
-              checkSpan.className = 'custom-select-opt-check';
-              checkSpan.textContent = '✓';
-              o.appendChild(checkSpan);
-            }
-          });
-
-          toggleCatMenu(false);
-        });
-      });
-    };
-    bindCatOptions();
-
-    // Custom Duration Dropdown Interactions
-    const durContainer = document.getElementById('svc-dur-custom-container');
-    const durTrigger = document.getElementById('svc-dur-custom-trigger');
-    const durMenu = document.getElementById('svc-dur-custom-menu');
-    const durChevron = document.getElementById('svc-dur-custom-chevron');
-    const durLabel = document.getElementById('svc-dur-selected-label');
-
-    const toggleDurMenu = (forceOpen) => {
-      if (!durMenu) return;
-      const isOpen = forceOpen !== undefined ? forceOpen : !durMenu.classList.contains('open');
-      durMenu.classList.toggle('open', isOpen);
-      durTrigger?.classList.toggle('active', isOpen);
-      durChevron?.classList.toggle('open', isOpen);
-    };
-
-    durTrigger?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggleDdMenu?.(false);
-      toggleCatMenu?.(false);
-      toggleDurMenu();
-    });
-
-    durMenu?.querySelectorAll('.custom-select-option').forEach((opt) => {
+  const bindCatOptions = () => {
+    catMenu?.querySelectorAll('.custom-select-option').forEach((opt) => {
       opt.addEventListener('click', (e) => {
         e.stopPropagation();
         const val = opt.getAttribute('data-value');
-        const text = opt.querySelector('span')?.textContent || `${val} mins`;
-        if (durationSelect) durationSelect.value = val;
-        if (durLabel) durLabel.textContent = text;
+        const icon = opt.getAttribute('data-icon') || '✂️';
+        const name = opt.querySelector('span:nth-child(2)')?.textContent || val;
 
-        durMenu.querySelectorAll('.custom-select-option').forEach((o) => {
+        if (categorySelect) {
+          categorySelect.value = val;
+          categorySelect.dispatchEvent(new Event('change'));
+        }
+
+        if (catSelectedIcon) catSelectedIcon.textContent = icon;
+        if (catSelectedName) catSelectedName.textContent = val === 'CUSTOM' ? 'Custom Category' : name;
+
+        catMenu.querySelectorAll('.custom-select-option').forEach((o) => {
           o.classList.toggle('selected', o === opt);
           const check = o.querySelector('.custom-select-opt-check');
           if (check) check.remove();
@@ -11084,253 +11139,301 @@ export class SalonDashboard {
             o.appendChild(checkSpan);
           }
         });
-        toggleDurMenu(false);
+
+        toggleCatMenu(false);
       });
     });
+  };
+  bindCatOptions();
 
-    document.addEventListener('click', (e) => {
-      if (catContainer && !catContainer.contains(e.target)) toggleCatMenu(false);
-      if (durContainer && !durContainer.contains(e.target)) toggleDurMenu(false);
-    });
+  // Custom Duration Dropdown Interactions
+  const durContainer = document.getElementById('svc-dur-custom-container');
+  const durTrigger = document.getElementById('svc-dur-custom-trigger');
+  const durMenu = document.getElementById('svc-dur-custom-menu');
+  const durChevron = document.getElementById('svc-dur-custom-chevron');
+  const durLabel = document.getElementById('svc-dur-selected-label');
 
-    // Multi-Select Stylist Dropdown Interactions
-    const ddWrapper = document.getElementById('svc-staff-dd-wrapper');
-    const ddTrigger = document.getElementById('svc-staff-dd-trigger');
-    const ddMenu = document.getElementById('svc-staff-dd-menu');
-    const ddChevron = document.getElementById('svc-staff-dd-chevron');
-    const ddSearch = document.getElementById('svc-staff-search');
-    const ddLabelText = document.getElementById('svc-staff-dd-label-text');
-    const ddBadge = document.getElementById('svc-staff-dd-badge');
-    const ddHint = document.getElementById('svc-staff-hint');
-    const ddFooterCount = document.getElementById('svc-staff-dd-footer-count');
-    const ddDoneBtn = document.getElementById('svc-staff-dd-done-btn');
-    const ddSelectAll = document.getElementById('svc-staff-select-all');
-    const ddClearAll = document.getElementById('svc-staff-clear-all');
+  const toggleDurMenu = (forceOpen) => {
+    if (!durMenu) return;
+    const isOpen = forceOpen !== undefined ? forceOpen : !durMenu.classList.contains('open');
+    durMenu.classList.toggle('open', isOpen);
+    durTrigger?.classList.toggle('active', isOpen);
+    durChevron?.classList.toggle('open', isOpen);
+  };
 
-    const updateStaffDropdownState = () => {
-      const items = Array.from(document.querySelectorAll('#svc-staff-dd-list .svc-staff-dd-item'));
-      const total = items.length;
-      if (total === 0) return;
-      const checkedItems = items.filter((it) => {
-        const chk = it.querySelector('.svc-staff-assign-chk');
-        return chk && chk.checked;
-      });
-      const checkedCount = checkedItems.length;
+  durTrigger?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleDdMenu?.(false);
+    toggleCatMenu?.(false);
+    toggleDurMenu();
+  });
 
-      if (ddBadge) ddBadge.textContent = `${checkedCount}/${total}`;
-      const countText = document.getElementById('svc-staff-dd-count-text');
-      if (countText) countText.textContent = `${checkedCount} of ${total} selected`;
-
-      if (checkedCount === total) {
-        if (ddLabelText) ddLabelText.textContent = `All Stylists Assigned (${total})`;
-        if (ddHint) ddHint.textContent = `All ${total} Stylists Selected`;
-      } else if (checkedCount === 0) {
-        if (ddLabelText) ddLabelText.textContent = `No Stylists Selected`;
-        if (ddHint) ddHint.textContent = `0 Selected`;
-      } else if (checkedCount === 1) {
-        const name = checkedItems[0].querySelector('.svc-staff-name')?.textContent || '1 Stylist';
-        if (ddLabelText) ddLabelText.textContent = name;
-        if (ddHint) ddHint.textContent = `1 of ${total} Selected`;
-      } else if (checkedCount === 2) {
-        const names = checkedItems.map((it) => it.querySelector('.svc-staff-name')?.textContent || '').filter(Boolean).join(', ');
-        if (ddLabelText) ddLabelText.textContent = names;
-        if (ddHint) ddHint.textContent = `2 of ${total} Selected`;
-      } else {
-        if (ddLabelText) ddLabelText.textContent = `${checkedCount} Stylists Selected`;
-        if (ddHint) ddHint.textContent = `${checkedCount} of ${total} Selected`;
-      }
-    };
-
-    const toggleDdMenu = (forceOpen) => {
-      if (!ddMenu) return;
-      const isOpen = forceOpen !== undefined ? forceOpen : !ddMenu.classList.contains('open');
-      ddMenu.classList.toggle('open', isOpen);
-      ddTrigger?.classList.toggle('active', isOpen);
-      ddChevron?.classList.toggle('open', isOpen);
-      if (isOpen && ddSearch) {
-        ddSearch.value = '';
-        ddSearch.focus({ preventScroll: true });
-        document.querySelectorAll('#svc-staff-dd-list .svc-staff-dd-item').forEach((it) => (it.style.display = 'flex'));
-      }
-    };
-
-    ddTrigger?.addEventListener('click', (e) => {
+  durMenu?.querySelectorAll('.custom-select-option').forEach((opt) => {
+    opt.addEventListener('click', (e) => {
       e.stopPropagation();
-      toggleDdMenu();
-    });
+      const val = opt.getAttribute('data-value');
+      const text = opt.querySelector('span')?.textContent || `${val} mins`;
+      if (durationSelect) durationSelect.value = val;
+      if (durLabel) durLabel.textContent = text;
 
-    ddDoneBtn?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggleDdMenu(false);
-    });
-
-    ddSearch?.addEventListener('input', (e) => {
-      const q = (e.target.value || '').toLowerCase().trim();
-      document.querySelectorAll('#svc-staff-dd-list .svc-staff-dd-item').forEach((it) => {
-        const name = (it.getAttribute('data-name') || '').toLowerCase();
-        it.style.display = name.includes(q) ? 'flex' : 'none';
-      });
-    });
-
-    ddSearch?.addEventListener('click', (e) => e.stopPropagation());
-
-    document.querySelectorAll('#svc-staff-dd-list .svc-staff-dd-item').forEach((item) => {
-      item.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const chk = item.querySelector('.svc-staff-assign-chk');
-        if (!chk) return;
-        chk.checked = !chk.checked;
-        item.classList.toggle('selected', chk.checked);
-        updateStaffDropdownState();
-      });
-    });
-
-    ddSelectAll?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      document.querySelectorAll('#svc-staff-dd-list .svc-staff-dd-item').forEach((it) => {
-        const chk = it.querySelector('.svc-staff-assign-chk');
-        if (chk) chk.checked = true;
-        it.classList.add('selected');
-      });
-      updateStaffDropdownState();
-    });
-
-    ddClearAll?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      document.querySelectorAll('#svc-staff-dd-list .svc-staff-dd-item').forEach((it) => {
-        const chk = it.querySelector('.svc-staff-assign-chk');
-        if (chk) chk.checked = false;
-        it.classList.remove('selected');
-      });
-      updateStaffDropdownState();
-    });
-
-    const onAddModalClickOutside = (e) => {
-      if (ddWrapper && !ddWrapper.contains(e.target)) {
-        toggleDdMenu(false);
-      }
-    };
-    document.addEventListener('click', onAddModalClickOutside);
-
-    categorySelect?.addEventListener('change', (e) => {
-      if (e.target.value === 'CUSTOM') {
-        customCatGroup.style.display = 'block';
-      } else {
-        customCatGroup.style.display = 'none';
-      }
-    });
-
-    document.getElementById('add-service-form')?.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const rawCat = categorySelect.value;
-      if (rawCat === 'CUSTOM' && !customCatInput.value.trim()) {
-        alert('Please enter a custom category name.');
-        customCatInput.focus();
-        return;
-      }
-      const finalCategory = rawCat === 'CUSTOM' ? customCatInput.value.trim() : rawCat;
-      const selectedOpt = categorySelect.options[categorySelect.selectedIndex];
-      const categoryId = selectedOpt ? selectedOpt.getAttribute('data-id') : null;
-      const matchedCat = categoryId ? null : (this.categoriesList || []).find((c) => c.name === finalCategory);
-      const finalCategoryId = categoryId || (matchedCat ? matchedCat.id : undefined);
-
-      const dur = parseInt(durationSelect.value, 10);
-      if (isNaN(dur) || dur < 30 || dur % 15 !== 0) {
-        alert('Service duration must be at least 30 minutes and a multiple of 15 (e.g. 30, 45, 60, 75, 90 mins).');
-        return;
-      }
-
-      const selectedStylistIds = Array.from(document.querySelectorAll('.svc-staff-assign-chk:checked')).map((c) => c.value);
-
-      const payload = {
-        name: nameInput.value.trim(),
-        price: parseFloat(priceInput.value),
-        durationMinutes: dur,
-        category: finalCategory,
-        categoryId: finalCategoryId,
-        targetGender: genderInput?.value || 'UNISEX',
-        description: descInput.value.trim(),
-        stylistIds: selectedStylistIds,
-      };
-
-      // Instant UI response (0ms)
-      const tempId = `temp-svc-${Date.now()}`;
-      const optimisticService = {
-        id: tempId,
-        ...payload,
-        status: 'ACTIVE',
-        stylists: selectedStylistIds.map((id) => ({ stylistId: id })),
-        _isOptimistic: true,
-      };
-
-      this.servicesList = [optimisticService, ...this.servicesList];
-      modalContainer.innerHTML = '';
-      this.showToast(`Service "${payload.name}" created!`, 'success');
-      this.render();
-
-      // Background network sync
-      ApiClient.createService(payload).then((created) => {
-        if (created && created.id) {
-          this.servicesList = this.servicesList.map((s) => (s.id === tempId ? created : s));
-          this.render();
-          SalonRepository.invalidate('services');
+      durMenu.querySelectorAll('.custom-select-option').forEach((o) => {
+        o.classList.toggle('selected', o === opt);
+        const check = o.querySelector('.custom-select-opt-check');
+        if (check) check.remove();
+        if (o === opt) {
+          const checkSpan = document.createElement('span');
+          checkSpan.className = 'custom-select-opt-check';
+          checkSpan.textContent = '✓';
+          o.appendChild(checkSpan);
         }
-      }).catch((err) => {
-        this.servicesList = this.servicesList.filter((s) => s.id !== tempId);
-        this.render();
-        alert(`Failed to create service: ${err.message}`);
       });
+      toggleDurMenu(false);
     });
-  }
+  });
 
-  showEditServiceModal(service) {
-    if (service?.id && String(service.id).startsWith('temp-')) {
-      this.showToast('Please wait a moment while this service finishes saving to the cloud...', 'info');
+  document.addEventListener('click', (e) => {
+    if (catContainer && !catContainer.contains(e.target)) toggleCatMenu(false);
+    if (durContainer && !durContainer.contains(e.target)) toggleDurMenu(false);
+  });
+
+  // Multi-Select Stylist Dropdown Interactions
+  const ddWrapper = document.getElementById('svc-staff-dd-wrapper');
+  const ddTrigger = document.getElementById('svc-staff-dd-trigger');
+  const ddMenu = document.getElementById('svc-staff-dd-menu');
+  const ddChevron = document.getElementById('svc-staff-dd-chevron');
+  const ddSearch = document.getElementById('svc-staff-search');
+  const ddLabelText = document.getElementById('svc-staff-dd-label-text');
+  const ddBadge = document.getElementById('svc-staff-dd-badge');
+  const ddHint = document.getElementById('svc-staff-hint');
+  const ddFooterCount = document.getElementById('svc-staff-dd-footer-count');
+  const ddDoneBtn = document.getElementById('svc-staff-dd-done-btn');
+  const ddSelectAll = document.getElementById('svc-staff-select-all');
+  const ddClearAll = document.getElementById('svc-staff-clear-all');
+
+  const updateStaffDropdownState = () => {
+    const items = Array.from(document.querySelectorAll('#svc-staff-dd-list .svc-staff-dd-item'));
+    const total = items.length;
+    if (total === 0) return;
+    const checkedItems = items.filter((it) => {
+      const chk = it.querySelector('.svc-staff-assign-chk');
+      return chk && chk.checked;
+    });
+    const checkedCount = checkedItems.length;
+
+    if (ddBadge) ddBadge.textContent = `${checkedCount}/${total}`;
+    const countText = document.getElementById('svc-staff-dd-count-text');
+    if (countText) countText.textContent = `${checkedCount} of ${total} selected`;
+
+    if (checkedCount === total) {
+      if (ddLabelText) ddLabelText.textContent = `All Stylists Assigned (${total})`;
+      if (ddHint) ddHint.textContent = `All ${total} Stylists Selected`;
+    } else if (checkedCount === 0) {
+      if (ddLabelText) ddLabelText.textContent = `No Stylists Selected`;
+      if (ddHint) ddHint.textContent = `0 Selected`;
+    } else if (checkedCount === 1) {
+      const name = checkedItems[0].querySelector('.svc-staff-name')?.textContent || '1 Stylist';
+      if (ddLabelText) ddLabelText.textContent = name;
+      if (ddHint) ddHint.textContent = `1 of ${total} Selected`;
+    } else if (checkedCount === 2) {
+      const names = checkedItems.map((it) => it.querySelector('.svc-staff-name')?.textContent || '').filter(Boolean).join(', ');
+      if (ddLabelText) ddLabelText.textContent = names;
+      if (ddHint) ddHint.textContent = `2 of ${total} Selected`;
+    } else {
+      if (ddLabelText) ddLabelText.textContent = `${checkedCount} Stylists Selected`;
+      if (ddHint) ddHint.textContent = `${checkedCount} of ${total} Selected`;
+    }
+  };
+
+  const toggleDdMenu = (forceOpen) => {
+    if (!ddMenu) return;
+    const isOpen = forceOpen !== undefined ? forceOpen : !ddMenu.classList.contains('open');
+    ddMenu.classList.toggle('open', isOpen);
+    ddTrigger?.classList.toggle('active', isOpen);
+    ddChevron?.classList.toggle('open', isOpen);
+    if (isOpen && ddSearch) {
+      ddSearch.value = '';
+      ddSearch.focus({ preventScroll: true });
+      document.querySelectorAll('#svc-staff-dd-list .svc-staff-dd-item').forEach((it) => (it.style.display = 'flex'));
+    }
+  };
+
+  ddTrigger?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleDdMenu();
+  });
+
+  ddDoneBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleDdMenu(false);
+  });
+
+  ddSearch?.addEventListener('input', (e) => {
+    const q = (e.target.value || '').toLowerCase().trim();
+    document.querySelectorAll('#svc-staff-dd-list .svc-staff-dd-item').forEach((it) => {
+      const name = (it.getAttribute('data-name') || '').toLowerCase();
+      it.style.display = name.includes(q) ? 'flex' : 'none';
+    });
+  });
+
+  ddSearch?.addEventListener('click', (e) => e.stopPropagation());
+
+  document.querySelectorAll('#svc-staff-dd-list .svc-staff-dd-item').forEach((item) => {
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const chk = item.querySelector('.svc-staff-assign-chk');
+      if (!chk) return;
+      chk.checked = !chk.checked;
+      item.classList.toggle('selected', chk.checked);
+      updateStaffDropdownState();
+    });
+  });
+
+  ddSelectAll?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.querySelectorAll('#svc-staff-dd-list .svc-staff-dd-item').forEach((it) => {
+      const chk = it.querySelector('.svc-staff-assign-chk');
+      if (chk) chk.checked = true;
+      it.classList.add('selected');
+    });
+    updateStaffDropdownState();
+  });
+
+  ddClearAll?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.querySelectorAll('#svc-staff-dd-list .svc-staff-dd-item').forEach((it) => {
+      const chk = it.querySelector('.svc-staff-assign-chk');
+      if (chk) chk.checked = false;
+      it.classList.remove('selected');
+    });
+    updateStaffDropdownState();
+  });
+
+  const onAddModalClickOutside = (e) => {
+    if (ddWrapper && !ddWrapper.contains(e.target)) {
+      toggleDdMenu(false);
+    }
+  };
+  document.addEventListener('click', onAddModalClickOutside);
+
+  categorySelect?.addEventListener('change', (e) => {
+    if (e.target.value === 'CUSTOM') {
+      customCatGroup.style.display = 'block';
+    } else {
+      customCatGroup.style.display = 'none';
+    }
+  });
+
+  document.getElementById('add-service-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const rawCat = categorySelect.value;
+    if (rawCat === 'CUSTOM' && !customCatInput.value.trim()) {
+      this.showToast('Please enter a custom category name.', 'warning');
+      customCatInput.focus();
       return;
     }
-    const modalContainer = this.getModalContainer();
-    const matchedCat = (this.categoriesList || []).find((c) => c.name === service.category);
-    const initialCatValue = matchedCat ? service.category : 'CUSTOM';
-    const activeStaff = (this.staffList || []).filter((st) => st.status === 'ACTIVE' || !st.status);
-    const currentAudience = (service.targetGender || 'UNISEX').toUpperCase();
-    const currentDuration = service.durationMinutes || 30;
+    const finalCategory = rawCat === 'CUSTOM' ? customCatInput.value.trim() : rawCat;
+    const selectedOpt = categorySelect.options[categorySelect.selectedIndex];
+    const categoryId = selectedOpt ? selectedOpt.getAttribute('data-id') : null;
+    const matchedCat = categoryId ? null : (this.categoriesList || []).find((c) => c.name === finalCategory);
+    const finalCategoryId = categoryId || (matchedCat ? matchedCat.id : undefined);
 
-    const renderCatOptions = (selected = '') => {
-      if (!this.categoriesList || this.categoriesList.length === 0) {
-        return '<option value="General" selected>✂️ General Services</option><option value="CUSTOM">➕ Other / Custom Category...</option>';
-      }
-      return this.categoriesList.map((c) => `<option value="${c.name}" data-id="${c.id}" ${c.name === selected ? 'selected' : ''}>${c.icon || '✂️'} ${c.name}</option>`).join('') + '<option value="CUSTOM">➕ Other / Custom Category...</option>';
+    const dur = parseInt(durationSelect.value, 10);
+    if (isNaN(dur) || dur < 30 || dur % 15 !== 0) {
+      this.showToast('Service duration must be at least 30 minutes and a multiple of 15 (e.g. 30, 45, 60, 75, 90 mins).', 'warning');
+      return;
+    }
+
+    const selectedStylistIds = Array.from(document.querySelectorAll('.svc-staff-assign-chk:checked')).map((c) => c.value);
+
+    const payload = {
+      name: nameInput.value.trim(),
+      price: parseFloat(priceInput.value),
+      durationMinutes: dur,
+      category: finalCategory,
+      categoryId: finalCategoryId,
+      targetGender: genderInput?.value || 'UNISEX',
+      description: descInput.value.trim(),
+      stylistIds: selectedStylistIds,
     };
 
-    const initialAssignedCount = activeStaff.filter((st) =>
-      (service.stylists || []).some((s) => String(s.stylistId || s.stylist?.id || s.id) === String(st.id))
-    ).length;
+    // Instant UI response (0ms)
+    const tempId = `temp-svc-${Date.now()}`;
+    const optimisticService = {
+      id: tempId,
+      ...payload,
+      status: 'ACTIVE',
+      stylists: selectedStylistIds.map((id) => ({ stylistId: id })),
+      _isOptimistic: true,
+    };
 
-    let initialStaffLabel = 'No Stylists Assigned';
-    if (initialAssignedCount === activeStaff.length && activeStaff.length > 0) {
-      initialStaffLabel = `All Stylists Assigned (${activeStaff.length})`;
-    } else if (initialAssignedCount === 1) {
-      const oneSt = activeStaff.find((st) => (service.stylists || []).some((s) => String(s.stylistId || s.stylist?.id || s.id) === String(st.id)));
-      initialStaffLabel = oneSt ? oneSt.name : '1 Stylist Assigned';
-    } else if (initialAssignedCount > 0) {
-      initialStaffLabel = `${initialAssignedCount} Stylists Assigned`;
+    this.servicesList = [optimisticService, ...this.servicesList];
+    modalContainer.innerHTML = '';
+    this.showToast(`Service "${payload.name}" created!`, 'success');
+    this.render();
+
+    // Background network sync
+    ApiClient.createService(payload).then((created) => {
+      if (created && created.id) {
+        this.servicesList = this.servicesList.map((s) => (s.id === tempId ? created : s));
+        this.render();
+        SalonRepository.invalidate('services');
+      }
+    }).catch((err) => {
+      this.servicesList = this.servicesList.filter((s) => s.id !== tempId);
+      this.render();
+      this.showToast(`Failed to create service: ${err.message}`, 'error');
+    });
+  });
+}
+
+showEditServiceModal(service) {
+  if (service?.id && String(service.id).startsWith('temp-')) {
+    this.showToast('Please wait a moment while this service finishes saving to the cloud...', 'info');
+    return;
+  }
+  const modalContainer = this.getModalContainer();
+  const matchedCat = (this.categoriesList || []).find((c) => c.name === service.category);
+  const initialCatValue = matchedCat ? service.category : 'CUSTOM';
+  const activeStaff = (this.staffList || []).filter((st) => st.status === 'ACTIVE' || !st.status);
+  const currentAudience = (service.targetGender || 'UNISEX').toUpperCase();
+  const currentDuration = service.durationMinutes || 30;
+
+  const renderCatOptions = (selected = '') => {
+    if (!this.categoriesList || this.categoriesList.length === 0) {
+      return '<option value="General" selected>✂️ General Services</option><option value="CUSTOM">➕ Other / Custom Category...</option>';
     }
+    return this.categoriesList.map((c) => `<option value="${c.name}" data-id="${c.id}" ${c.name === selected ? 'selected' : ''}>${c.icon || '✂️'} ${c.name}</option>`).join('') + '<option value="CUSTOM">➕ Other / Custom Category...</option>';
+  };
 
-    const catList = (this.categoriesList && this.categoriesList.length > 0)
-      ? this.categoriesList
-      : [{ id: 'cat-general', name: 'General', icon: '✂️' }];
+  const initialAssignedCount = activeStaff.filter((st) =>
+    (service.stylists || []).some((s) => String(s.stylistId || s.stylist?.id || s.id) === String(st.id))
+  ).length;
 
-    let editSelectedCatName = matchedCat ? service.category : (service.category || 'General');
-    let editSelectedCatIcon = matchedCat?.icon || '✂️';
-    if (!matchedCat && service.category) {
-      editSelectedCatName = 'CUSTOM';
-      editSelectedCatIcon = '➕';
-    }
+  let initialStaffLabel = 'No Stylists Assigned';
+  if (initialAssignedCount === activeStaff.length && activeStaff.length > 0) {
+    initialStaffLabel = `All Stylists Assigned (${activeStaff.length})`;
+  } else if (initialAssignedCount === 1) {
+    const oneSt = activeStaff.find((st) => (service.stylists || []).some((s) => String(s.stylistId || s.stylist?.id || s.id) === String(st.id)));
+    initialStaffLabel = oneSt ? oneSt.name : '1 Stylist Assigned';
+  } else if (initialAssignedCount > 0) {
+    initialStaffLabel = `${initialAssignedCount} Stylists Assigned`;
+  }
 
-    const matchedDur = SERVICE_DURATION_OPTIONS.find((opt) => opt.value === currentDuration);
-    const initialDurLabel = matchedDur ? matchedDur.label : `${currentDuration} mins`;
+  const catList = (this.categoriesList && this.categoriesList.length > 0)
+    ? this.categoriesList
+    : [{ id: 'cat-general', name: 'General', icon: '✂️' }];
 
-    modalContainer.innerHTML = `
+  let editSelectedCatName = matchedCat ? service.category : (service.category || 'General');
+  let editSelectedCatIcon = matchedCat?.icon || '✂️';
+  if (!matchedCat && service.category) {
+    editSelectedCatName = 'CUSTOM';
+    editSelectedCatIcon = '➕';
+  }
+
+  const matchedDur = SERVICE_DURATION_OPTIONS.find((opt) => opt.value === currentDuration);
+  const initialDurLabel = matchedDur ? matchedDur.label : `${currentDuration} mins`;
+
+  modalContainer.innerHTML = `
       <div class="modal-backdrop show">
         <div class="modal-content modal-content-md service-modal-form" style="max-height: 90vh; overflow-y: auto; padding: 24px; max-width: 520px; width: 100%;">
           <!-- Header (Compact, no subtitle) -->
@@ -11496,9 +11599,9 @@ export class SalonDashboard {
                     ${activeStaff.length === 0 ? `
                       <div style="font-size: 0.8rem; color: var(--text-muted); padding: 12px; text-align: center;">No active stylists in salon yet.</div>
                     ` : activeStaff.map((st) => {
-                      const isAssigned = (service.stylists || []).some((s) => String(s.stylistId || s.stylist?.id || s.id) === String(st.id));
-                      const initials = st.name.split(' ').map((n) => n[0]).join('').substring(0, 2).toUpperCase();
-                      return `
+    const isAssigned = (service.stylists || []).some((s) => String(s.stylistId || s.stylist?.id || s.id) === String(st.id));
+    const initials = st.name.split(' ').map((n) => n[0]).join('').substring(0, 2).toUpperCase();
+    return `
                         <div class="svc-staff-dd-item ${isAssigned ? 'selected' : ''}" data-id="${st.id}" data-name="${st.name.toLowerCase()}">
                           <input type="checkbox" class="edit-svc-staff-assign-chk" value="${st.id}" ${isAssigned ? 'checked' : ''} style="display: none;" />
                           <div class="svc-staff-dd-checkbox">✓</div>
@@ -11506,7 +11609,7 @@ export class SalonDashboard {
                           <span class="svc-staff-name" title="${st.name}">${st.name}</span>
                         </div>
                       `;
-                    }).join('')}
+  }).join('')}
                   </div>
 
                   <div class="svc-staff-dd-footer">
@@ -11533,173 +11636,173 @@ export class SalonDashboard {
       </div>
     `;
 
-    document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+  document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
 
-    const categorySelect = document.getElementById('edit-svc-category-select');
-    const customCatGroup = document.getElementById('edit-svc-custom-cat-group');
-    const customCatInput = document.getElementById('edit-svc-custom-cat-input');
-    const durationSelect = document.getElementById('edit-svc-duration');
-    const genderInput = document.getElementById('edit-svc-gender');
+  const categorySelect = document.getElementById('edit-svc-category-select');
+  const customCatGroup = document.getElementById('edit-svc-custom-cat-group');
+  const customCatInput = document.getElementById('edit-svc-custom-cat-input');
+  const durationSelect = document.getElementById('edit-svc-duration');
+  const genderInput = document.getElementById('edit-svc-gender');
 
-    // Audience toggle buttons
-    document.querySelectorAll('.edit-svc-aud-btn').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.edit-svc-aud-btn').forEach((b) => b.classList.remove('selected'));
-        btn.classList.add('selected');
-        if (genderInput) genderInput.value = btn.getAttribute('data-val');
-      });
+  // Audience toggle buttons
+  document.querySelectorAll('.edit-svc-aud-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.edit-svc-aud-btn').forEach((b) => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      if (genderInput) genderInput.value = btn.getAttribute('data-val');
     });
+  });
 
-    // Multi-Select Stylist Dropdown Interactions (Edit Modal)
-    const editDdWrapper = document.getElementById('edit-svc-staff-dd-wrapper');
-    const editDdTrigger = document.getElementById('edit-svc-staff-dd-trigger');
-    const editDdMenu = document.getElementById('edit-svc-staff-dd-menu');
-    const editDdChevron = document.getElementById('edit-svc-staff-dd-chevron');
-    const editDdSearch = document.getElementById('edit-svc-staff-search');
-    const editDdLabelText = document.getElementById('edit-svc-staff-dd-label-text');
-    const editDdBadge = document.getElementById('edit-svc-staff-dd-badge');
-    const editDdHint = document.getElementById('edit-svc-staff-hint');
-    const editDdFooterCount = document.getElementById('edit-svc-staff-dd-footer-count');
-    const editDdDoneBtn = document.getElementById('edit-svc-staff-dd-done-btn');
-    const editDdSelectAll = document.getElementById('edit-svc-staff-select-all');
-    const editDdClearAll = document.getElementById('edit-svc-staff-clear-all');
+  // Multi-Select Stylist Dropdown Interactions (Edit Modal)
+  const editDdWrapper = document.getElementById('edit-svc-staff-dd-wrapper');
+  const editDdTrigger = document.getElementById('edit-svc-staff-dd-trigger');
+  const editDdMenu = document.getElementById('edit-svc-staff-dd-menu');
+  const editDdChevron = document.getElementById('edit-svc-staff-dd-chevron');
+  const editDdSearch = document.getElementById('edit-svc-staff-search');
+  const editDdLabelText = document.getElementById('edit-svc-staff-dd-label-text');
+  const editDdBadge = document.getElementById('edit-svc-staff-dd-badge');
+  const editDdHint = document.getElementById('edit-svc-staff-hint');
+  const editDdFooterCount = document.getElementById('edit-svc-staff-dd-footer-count');
+  const editDdDoneBtn = document.getElementById('edit-svc-staff-dd-done-btn');
+  const editDdSelectAll = document.getElementById('edit-svc-staff-select-all');
+  const editDdClearAll = document.getElementById('edit-svc-staff-clear-all');
 
-    const updateEditStaffDropdownState = () => {
-      const items = Array.from(document.querySelectorAll('#edit-svc-staff-dd-list .svc-staff-dd-item'));
-      const total = items.length;
-      if (total === 0) return;
-      const checkedItems = items.filter((it) => {
-        const chk = it.querySelector('.edit-svc-staff-assign-chk');
-        return chk && chk.checked;
-      });
-      const checkedCount = checkedItems.length;
-
-      if (editDdBadge) editDdBadge.textContent = `${checkedCount}/${total}`;
-      const editCountText = document.getElementById('edit-svc-staff-dd-count-text');
-      if (editCountText) editCountText.textContent = `${checkedCount} of ${total} selected`;
-
-      if (checkedCount === total) {
-        if (editDdLabelText) editDdLabelText.textContent = `All Stylists Assigned (${total})`;
-        if (editDdHint) editDdHint.textContent = `All ${total} Stylists Assigned`;
-      } else if (checkedCount === 0) {
-        if (editDdLabelText) editDdLabelText.textContent = `No Stylists Assigned`;
-        if (editDdHint) editDdHint.textContent = `0 Selected`;
-      } else if (checkedCount === 1) {
-        const name = checkedItems[0].querySelector('.svc-staff-name')?.textContent || '1 Stylist';
-        if (editDdLabelText) editDdLabelText.textContent = name;
-        if (editDdHint) editDdHint.textContent = `1 of ${total} Selected`;
-      } else if (checkedCount === 2) {
-        const names = checkedItems.map((it) => it.querySelector('.svc-staff-name')?.textContent || '').filter(Boolean).join(', ');
-        if (editDdLabelText) editDdLabelText.textContent = names;
-        if (editDdHint) editDdHint.textContent = `2 of ${total} Selected`;
-      } else {
-        if (editDdLabelText) editDdLabelText.textContent = `${checkedCount} Stylists Assigned`;
-        if (editDdHint) editDdHint.textContent = `${checkedCount} of ${total} Selected`;
-      }
-    };
-
-    const toggleEditDdMenu = (forceOpen) => {
-      if (!editDdMenu) return;
-      const isOpen = forceOpen !== undefined ? forceOpen : !editDdMenu.classList.contains('open');
-      editDdMenu.classList.toggle('open', isOpen);
-      editDdTrigger?.classList.toggle('active', isOpen);
-      editDdChevron?.classList.toggle('open', isOpen);
-      if (isOpen && editDdSearch) {
-        editDdSearch.value = '';
-        editDdSearch.focus({ preventScroll: true });
-        document.querySelectorAll('#edit-svc-staff-dd-list .svc-staff-dd-item').forEach((it) => (it.style.display = 'flex'));
-      }
-    };
-
-    editDdTrigger?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggleEditDdMenu();
+  const updateEditStaffDropdownState = () => {
+    const items = Array.from(document.querySelectorAll('#edit-svc-staff-dd-list .svc-staff-dd-item'));
+    const total = items.length;
+    if (total === 0) return;
+    const checkedItems = items.filter((it) => {
+      const chk = it.querySelector('.edit-svc-staff-assign-chk');
+      return chk && chk.checked;
     });
+    const checkedCount = checkedItems.length;
 
-    editDdDoneBtn?.addEventListener('click', (e) => {
+    if (editDdBadge) editDdBadge.textContent = `${checkedCount}/${total}`;
+    const editCountText = document.getElementById('edit-svc-staff-dd-count-text');
+    if (editCountText) editCountText.textContent = `${checkedCount} of ${total} selected`;
+
+    if (checkedCount === total) {
+      if (editDdLabelText) editDdLabelText.textContent = `All Stylists Assigned (${total})`;
+      if (editDdHint) editDdHint.textContent = `All ${total} Stylists Assigned`;
+    } else if (checkedCount === 0) {
+      if (editDdLabelText) editDdLabelText.textContent = `No Stylists Assigned`;
+      if (editDdHint) editDdHint.textContent = `0 Selected`;
+    } else if (checkedCount === 1) {
+      const name = checkedItems[0].querySelector('.svc-staff-name')?.textContent || '1 Stylist';
+      if (editDdLabelText) editDdLabelText.textContent = name;
+      if (editDdHint) editDdHint.textContent = `1 of ${total} Selected`;
+    } else if (checkedCount === 2) {
+      const names = checkedItems.map((it) => it.querySelector('.svc-staff-name')?.textContent || '').filter(Boolean).join(', ');
+      if (editDdLabelText) editDdLabelText.textContent = names;
+      if (editDdHint) editDdHint.textContent = `2 of ${total} Selected`;
+    } else {
+      if (editDdLabelText) editDdLabelText.textContent = `${checkedCount} Stylists Assigned`;
+      if (editDdHint) editDdHint.textContent = `${checkedCount} of ${total} Selected`;
+    }
+  };
+
+  const toggleEditDdMenu = (forceOpen) => {
+    if (!editDdMenu) return;
+    const isOpen = forceOpen !== undefined ? forceOpen : !editDdMenu.classList.contains('open');
+    editDdMenu.classList.toggle('open', isOpen);
+    editDdTrigger?.classList.toggle('active', isOpen);
+    editDdChevron?.classList.toggle('open', isOpen);
+    if (isOpen && editDdSearch) {
+      editDdSearch.value = '';
+      editDdSearch.focus({ preventScroll: true });
+      document.querySelectorAll('#edit-svc-staff-dd-list .svc-staff-dd-item').forEach((it) => (it.style.display = 'flex'));
+    }
+  };
+
+  editDdTrigger?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleEditDdMenu();
+  });
+
+  editDdDoneBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleEditDdMenu(false);
+  });
+
+  editDdSearch?.addEventListener('input', (e) => {
+    const q = (e.target.value || '').toLowerCase().trim();
+    document.querySelectorAll('#edit-svc-staff-dd-list .svc-staff-dd-item').forEach((it) => {
+      const name = (it.getAttribute('data-name') || '').toLowerCase();
+      it.style.display = name.includes(q) ? 'flex' : 'none';
+    });
+  });
+
+  editDdSearch?.addEventListener('click', (e) => e.stopPropagation());
+
+  document.querySelectorAll('#edit-svc-staff-dd-list .svc-staff-dd-item').forEach((item) => {
+    item.addEventListener('click', (e) => {
       e.stopPropagation();
+      const chk = item.querySelector('.edit-svc-staff-assign-chk');
+      if (!chk) return;
+      chk.checked = !chk.checked;
+      item.classList.toggle('selected', chk.checked);
+      updateEditStaffDropdownState();
+    });
+  });
+
+  editDdSelectAll?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.querySelectorAll('#edit-svc-staff-dd-list .svc-staff-dd-item').forEach((it) => {
+      const chk = it.querySelector('.edit-svc-staff-assign-chk');
+      if (chk) chk.checked = true;
+      it.classList.add('selected');
+    });
+    updateEditStaffDropdownState();
+  });
+
+  editDdClearAll?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.querySelectorAll('#edit-svc-staff-dd-list .svc-staff-dd-item').forEach((it) => {
+      const chk = it.querySelector('.edit-svc-staff-assign-chk');
+      if (chk) chk.checked = false;
+      it.classList.remove('selected');
+    });
+    updateEditStaffDropdownState();
+  });
+
+  const onEditModalClickOutside = (e) => {
+    if (editDdWrapper && !editDdWrapper.contains(e.target)) {
       toggleEditDdMenu(false);
-    });
+    }
+  };
+  document.addEventListener('click', onEditModalClickOutside);
 
-    editDdSearch?.addEventListener('input', (e) => {
-      const q = (e.target.value || '').toLowerCase().trim();
-      document.querySelectorAll('#edit-svc-staff-dd-list .svc-staff-dd-item').forEach((it) => {
-        const name = (it.getAttribute('data-name') || '').toLowerCase();
-        it.style.display = name.includes(q) ? 'flex' : 'none';
-      });
-    });
+  // Inline category toggle & creation
+  const inlineBox = document.getElementById('edit-svc-inline-cat-box');
+  document.getElementById('edit-btn-toggle-inline-cat')?.addEventListener('click', () => {
+    inlineBox.style.display = inlineBox.style.display === 'none' ? 'block' : 'none';
+    if (inlineBox.style.display === 'block') {
+      document.getElementById('edit-inline-cat-name')?.focus();
+    }
+  });
 
-    editDdSearch?.addEventListener('click', (e) => e.stopPropagation());
+  document.getElementById('edit-btn-close-inline-cat')?.addEventListener('click', () => {
+    inlineBox.style.display = 'none';
+  });
 
-    document.querySelectorAll('#edit-svc-staff-dd-list .svc-staff-dd-item').forEach((item) => {
-      item.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const chk = item.querySelector('.edit-svc-staff-assign-chk');
-        if (!chk) return;
-        chk.checked = !chk.checked;
-        item.classList.toggle('selected', chk.checked);
-        updateEditStaffDropdownState();
-      });
-    });
+  document.getElementById('edit-btn-save-inline-cat')?.addEventListener('click', async () => {
+    const catName = document.getElementById('edit-inline-cat-name')?.value.trim();
+    const catIcon = document.getElementById('edit-inline-cat-icon')?.value.trim() || '✂️';
+    if (!catName) return;
 
-    editDdSelectAll?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      document.querySelectorAll('#edit-svc-staff-dd-list .svc-staff-dd-item').forEach((it) => {
-        const chk = it.querySelector('.edit-svc-staff-assign-chk');
-        if (chk) chk.checked = true;
-        it.classList.add('selected');
-      });
-      updateEditStaffDropdownState();
-    });
+    try {
+      const newCat = await ApiClient.createServiceCategory({ name: catName, icon: catIcon });
+      this.categoriesList = await ApiClient.getServiceCategories(true).catch(() => [
+        ...(this.categoriesList || []),
+        newCat || { id: `cat-${Date.now()}`, name: catName, icon: catIcon },
+      ]);
+      categorySelect.innerHTML = renderCatOptions(catName);
+      categorySelect.value = catName;
+      if (editCatSelectedIcon) editCatSelectedIcon.textContent = catIcon;
+      if (editCatSelectedName) editCatSelectedName.textContent = catName;
 
-    editDdClearAll?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      document.querySelectorAll('#edit-svc-staff-dd-list .svc-staff-dd-item').forEach((it) => {
-        const chk = it.querySelector('.edit-svc-staff-assign-chk');
-        if (chk) chk.checked = false;
-        it.classList.remove('selected');
-      });
-      updateEditStaffDropdownState();
-    });
-
-    const onEditModalClickOutside = (e) => {
-      if (editDdWrapper && !editDdWrapper.contains(e.target)) {
-        toggleEditDdMenu(false);
-      }
-    };
-    document.addEventListener('click', onEditModalClickOutside);
-
-    // Inline category toggle & creation
-    const inlineBox = document.getElementById('edit-svc-inline-cat-box');
-    document.getElementById('edit-btn-toggle-inline-cat')?.addEventListener('click', () => {
-      inlineBox.style.display = inlineBox.style.display === 'none' ? 'block' : 'none';
-      if (inlineBox.style.display === 'block') {
-        document.getElementById('edit-inline-cat-name')?.focus();
-      }
-    });
-
-    document.getElementById('edit-btn-close-inline-cat')?.addEventListener('click', () => {
-      inlineBox.style.display = 'none';
-    });
-
-    document.getElementById('edit-btn-save-inline-cat')?.addEventListener('click', async () => {
-      const catName = document.getElementById('edit-inline-cat-name')?.value.trim();
-      const catIcon = document.getElementById('edit-inline-cat-icon')?.value.trim() || '✂️';
-      if (!catName) return;
-
-      try {
-        const newCat = await ApiClient.createServiceCategory({ name: catName, icon: catIcon });
-        this.categoriesList = await ApiClient.getServiceCategories(true).catch(() => [
-          ...(this.categoriesList || []),
-          newCat || { id: `cat-${Date.now()}`, name: catName, icon: catIcon },
-        ]);
-        categorySelect.innerHTML = renderCatOptions(catName);
-        categorySelect.value = catName;
-        if (editCatSelectedIcon) editCatSelectedIcon.textContent = catIcon;
-        if (editCatSelectedName) editCatSelectedName.textContent = catName;
-
-        if (editCatMenu) {
-          editCatMenu.innerHTML = `
+      if (editCatMenu) {
+        editCatMenu.innerHTML = `
             ${this.categoriesList.map((c) => `
               <div class="custom-select-option ${c.name === catName ? 'selected' : ''}" data-value="${c.name}" data-icon="${c.icon || '✂️'}" data-id="${c.id || ''}">
                 <div style="display: flex; align-items: center; gap: 8px;">
@@ -11716,106 +11819,57 @@ export class SalonDashboard {
               </div>
             </div>
           `;
-          bindEditCatOptions();
-        }
-
-        inlineBox.style.display = 'none';
-        document.getElementById('edit-inline-cat-name').value = '';
-        this.showToast(`Category "${catName}" added!`, 'success');
-      } catch (err) {
-        this.showToast(err.message || 'Failed to create category', 'error');
+        bindEditCatOptions();
       }
-    });
 
-    // Custom Category Dropdown Interactions (Edit Modal)
-    const editCatContainer = document.getElementById('edit-svc-cat-custom-container');
-    const editCatTrigger = document.getElementById('edit-svc-cat-custom-trigger');
-    const editCatMenu = document.getElementById('edit-svc-cat-custom-menu');
-    const editCatChevron = document.getElementById('edit-svc-cat-custom-chevron');
-    const editCatSelectedIcon = document.getElementById('edit-svc-cat-selected-icon');
-    const editCatSelectedName = document.getElementById('edit-svc-cat-selected-name');
+      inlineBox.style.display = 'none';
+      document.getElementById('edit-inline-cat-name').value = '';
+      this.showToast(`Category "${catName}" added!`, 'success');
+    } catch (err) {
+      this.showToast(err.message || 'Failed to create category', 'error');
+    }
+  });
 
-    const toggleEditCatMenu = (forceOpen) => {
-      if (!editCatMenu) return;
-      const isOpen = forceOpen !== undefined ? forceOpen : !editCatMenu.classList.contains('open');
-      editCatMenu.classList.toggle('open', isOpen);
-      editCatTrigger?.classList.toggle('active', isOpen);
-      editCatChevron?.classList.toggle('open', isOpen);
-    };
+  // Custom Category Dropdown Interactions (Edit Modal)
+  const editCatContainer = document.getElementById('edit-svc-cat-custom-container');
+  const editCatTrigger = document.getElementById('edit-svc-cat-custom-trigger');
+  const editCatMenu = document.getElementById('edit-svc-cat-custom-menu');
+  const editCatChevron = document.getElementById('edit-svc-cat-custom-chevron');
+  const editCatSelectedIcon = document.getElementById('edit-svc-cat-selected-icon');
+  const editCatSelectedName = document.getElementById('edit-svc-cat-selected-name');
 
-    editCatTrigger?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggleEditDdMenu?.(false);
-      toggleEditDurMenu?.(false);
-      toggleEditCatMenu();
-    });
+  const toggleEditCatMenu = (forceOpen) => {
+    if (!editCatMenu) return;
+    const isOpen = forceOpen !== undefined ? forceOpen : !editCatMenu.classList.contains('open');
+    editCatMenu.classList.toggle('open', isOpen);
+    editCatTrigger?.classList.toggle('active', isOpen);
+    editCatChevron?.classList.toggle('open', isOpen);
+  };
 
-    const bindEditCatOptions = () => {
-      editCatMenu?.querySelectorAll('.custom-select-option').forEach((opt) => {
-        opt.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const val = opt.getAttribute('data-value');
-          const icon = opt.getAttribute('data-icon') || '✂️';
-          const name = opt.querySelector('span:nth-child(2)')?.textContent || val;
+  editCatTrigger?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleEditDdMenu?.(false);
+    toggleEditDurMenu?.(false);
+    toggleEditCatMenu();
+  });
 
-          if (categorySelect) {
-            categorySelect.value = val;
-            categorySelect.dispatchEvent(new Event('change'));
-          }
-
-          if (editCatSelectedIcon) editCatSelectedIcon.textContent = icon;
-          if (editCatSelectedName) editCatSelectedName.textContent = val === 'CUSTOM' ? 'Custom Category' : name;
-
-          editCatMenu.querySelectorAll('.custom-select-option').forEach((o) => {
-            o.classList.toggle('selected', o === opt);
-            const check = o.querySelector('.custom-select-opt-check');
-            if (check) check.remove();
-            if (o === opt) {
-              const checkSpan = document.createElement('span');
-              checkSpan.className = 'custom-select-opt-check';
-              checkSpan.textContent = '✓';
-              o.appendChild(checkSpan);
-            }
-          });
-
-          toggleEditCatMenu(false);
-        });
-      });
-    };
-    bindEditCatOptions();
-
-    // Custom Duration Dropdown Interactions (Edit Modal)
-    const editDurContainer = document.getElementById('edit-svc-dur-custom-container');
-    const editDurTrigger = document.getElementById('edit-svc-dur-custom-trigger');
-    const editDurMenu = document.getElementById('edit-svc-dur-custom-menu');
-    const editDurChevron = document.getElementById('edit-svc-dur-custom-chevron');
-    const editDurLabel = document.getElementById('edit-svc-dur-selected-label');
-    const editDurSelect = document.getElementById('edit-svc-duration');
-
-    const toggleEditDurMenu = (forceOpen) => {
-      if (!editDurMenu) return;
-      const isOpen = forceOpen !== undefined ? forceOpen : !editDurMenu.classList.contains('open');
-      editDurMenu.classList.toggle('open', isOpen);
-      editDurTrigger?.classList.toggle('active', isOpen);
-      editDurChevron?.classList.toggle('open', isOpen);
-    };
-
-    editDurTrigger?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggleEditDdMenu?.(false);
-      toggleEditCatMenu?.(false);
-      toggleEditDurMenu();
-    });
-
-    editDurMenu?.querySelectorAll('.custom-select-option').forEach((opt) => {
+  const bindEditCatOptions = () => {
+    editCatMenu?.querySelectorAll('.custom-select-option').forEach((opt) => {
       opt.addEventListener('click', (e) => {
         e.stopPropagation();
         const val = opt.getAttribute('data-value');
-        const text = opt.querySelector('span')?.textContent || `${val} mins`;
-        if (editDurSelect) editDurSelect.value = val;
-        if (editDurLabel) editDurLabel.textContent = text;
+        const icon = opt.getAttribute('data-icon') || '✂️';
+        const name = opt.querySelector('span:nth-child(2)')?.textContent || val;
 
-        editDurMenu.querySelectorAll('.custom-select-option').forEach((o) => {
+        if (categorySelect) {
+          categorySelect.value = val;
+          categorySelect.dispatchEvent(new Event('change'));
+        }
+
+        if (editCatSelectedIcon) editCatSelectedIcon.textContent = icon;
+        if (editCatSelectedName) editCatSelectedName.textContent = val === 'CUSTOM' ? 'Custom Category' : name;
+
+        editCatMenu.querySelectorAll('.custom-select-option').forEach((o) => {
           o.classList.toggle('selected', o === opt);
           const check = o.querySelector('.custom-select-opt-check');
           if (check) check.remove();
@@ -11826,88 +11880,137 @@ export class SalonDashboard {
             o.appendChild(checkSpan);
           }
         });
-        toggleEditDurMenu(false);
+
+        toggleEditCatMenu(false);
       });
     });
+  };
+  bindEditCatOptions();
 
-    document.addEventListener('click', (e) => {
-      if (editCatContainer && !editCatContainer.contains(e.target)) toggleEditCatMenu(false);
-      if (editDurContainer && !editDurContainer.contains(e.target)) toggleEditDurMenu(false);
+  // Custom Duration Dropdown Interactions (Edit Modal)
+  const editDurContainer = document.getElementById('edit-svc-dur-custom-container');
+  const editDurTrigger = document.getElementById('edit-svc-dur-custom-trigger');
+  const editDurMenu = document.getElementById('edit-svc-dur-custom-menu');
+  const editDurChevron = document.getElementById('edit-svc-dur-custom-chevron');
+  const editDurLabel = document.getElementById('edit-svc-dur-selected-label');
+  const editDurSelect = document.getElementById('edit-svc-duration');
+
+  const toggleEditDurMenu = (forceOpen) => {
+    if (!editDurMenu) return;
+    const isOpen = forceOpen !== undefined ? forceOpen : !editDurMenu.classList.contains('open');
+    editDurMenu.classList.toggle('open', isOpen);
+    editDurTrigger?.classList.toggle('active', isOpen);
+    editDurChevron?.classList.toggle('open', isOpen);
+  };
+
+  editDurTrigger?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleEditDdMenu?.(false);
+    toggleEditCatMenu?.(false);
+    toggleEditDurMenu();
+  });
+
+  editDurMenu?.querySelectorAll('.custom-select-option').forEach((opt) => {
+    opt.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const val = opt.getAttribute('data-value');
+      const text = opt.querySelector('span')?.textContent || `${val} mins`;
+      if (editDurSelect) editDurSelect.value = val;
+      if (editDurLabel) editDurLabel.textContent = text;
+
+      editDurMenu.querySelectorAll('.custom-select-option').forEach((o) => {
+        o.classList.toggle('selected', o === opt);
+        const check = o.querySelector('.custom-select-opt-check');
+        if (check) check.remove();
+        if (o === opt) {
+          const checkSpan = document.createElement('span');
+          checkSpan.className = 'custom-select-opt-check';
+          checkSpan.textContent = '✓';
+          o.appendChild(checkSpan);
+        }
+      });
+      toggleEditDurMenu(false);
     });
+  });
 
-    categorySelect?.addEventListener('change', (e) => {
-      if (e.target.value === 'CUSTOM') {
-        customCatGroup.style.display = 'block';
-      } else {
-        customCatGroup.style.display = 'none';
-      }
-    });
+  document.addEventListener('click', (e) => {
+    if (editCatContainer && !editCatContainer.contains(e.target)) toggleEditCatMenu(false);
+    if (editDurContainer && !editDurContainer.contains(e.target)) toggleEditDurMenu(false);
+  });
 
-    document.getElementById('edit-service-form')?.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const submitBtn = document.getElementById('btn-submit-edit-svc') || e.target.querySelector('button[type="submit"]');
+  categorySelect?.addEventListener('change', (e) => {
+    if (e.target.value === 'CUSTOM') {
+      customCatGroup.style.display = 'block';
+    } else {
+      customCatGroup.style.display = 'none';
+    }
+  });
+
+  document.getElementById('edit-service-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const submitBtn = document.getElementById('btn-submit-edit-svc') || e.target.querySelector('button[type="submit"]');
+    if (submitBtn) {
+      if (submitBtn.disabled) return;
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving changes...';
+    }
+
+    const rawCat = categorySelect.value;
+    const finalCategory = rawCat === 'CUSTOM' ? (customCatInput.value.trim() || 'General') : rawCat;
+    const dur = parseInt(document.getElementById('edit-svc-duration').value, 10);
+    if (isNaN(dur) || dur < 30 || dur % 15 !== 0) {
       if (submitBtn) {
-        if (submitBtn.disabled) return;
-        submitBtn.disabled = true;
-        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving changes...';
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = 'Save Changes to Menu →';
+      }
+      this.showToast('Service duration must be at least 30 minutes and a multiple of 15 (e.g. 30, 45, 60, 75, 90 mins).', 'warning');
+      return;
+    }
+
+    const selectedStylistIds = Array.from(document.querySelectorAll('.edit-svc-staff-assign-chk:checked')).map((c) => c.value);
+
+    const payload = {
+      name: document.getElementById('edit-svc-name').value.trim(),
+      price: parseFloat(document.getElementById('edit-svc-price').value),
+      durationMinutes: dur,
+      category: finalCategory,
+      targetGender: genderInput?.value || 'UNISEX',
+      description: document.getElementById('edit-svc-desc').value.trim(),
+      stylistIds: selectedStylistIds,
+    };
+
+    try {
+      this.lastLocalActionTimestamp = Date.now();
+      const updated = await ApiClient.updateService(service.id, payload);
+
+      // Immediate in-memory state update for 0ms reactivity
+      const idx = this.servicesList.findIndex((s) => String(s.id) === String(service.id));
+      if (idx !== -1) {
+        this.servicesList[idx] = {
+          ...this.servicesList[idx],
+          ...payload,
+          ...(updated && typeof updated === 'object' ? updated : {}),
+        };
       }
 
-      const rawCat = categorySelect.value;
-      const finalCategory = rawCat === 'CUSTOM' ? (customCatInput.value.trim() || 'General') : rawCat;
-      const dur = parseInt(document.getElementById('edit-svc-duration').value, 10);
-      if (isNaN(dur) || dur < 30 || dur % 15 !== 0) {
-        if (submitBtn) {
-          submitBtn.disabled = false;
-          submitBtn.innerHTML = 'Save Changes to Menu →';
-        }
-        alert('Service duration must be at least 30 minutes and a multiple of 15 (e.g. 30, 45, 60, 75, 90 mins).');
-        return;
+      modalContainer.innerHTML = '';
+      this.showToast(`Service "${payload.name}" updated!`, 'success');
+      this.render();
+      SalonRepository.invalidate('services');
+    } catch (err) {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = 'Save Changes to Menu →';
       }
+      this.showToast(err.message, 'error');
+    }
+  });
+}
 
-      const selectedStylistIds = Array.from(document.querySelectorAll('.edit-svc-staff-assign-chk:checked')).map((c) => c.value);
+showEditStaffModal(staff) {
+  const modalContainer = document.getElementById('modal-container');
 
-      const payload = {
-        name: document.getElementById('edit-svc-name').value.trim(),
-        price: parseFloat(document.getElementById('edit-svc-price').value),
-        durationMinutes: dur,
-        category: finalCategory,
-        targetGender: genderInput?.value || 'UNISEX',
-        description: document.getElementById('edit-svc-desc').value.trim(),
-        stylistIds: selectedStylistIds,
-      };
-
-      try {
-        this.lastLocalActionTimestamp = Date.now();
-        const updated = await ApiClient.updateService(service.id, payload);
-
-        // Immediate in-memory state update for 0ms reactivity
-        const idx = this.servicesList.findIndex((s) => String(s.id) === String(service.id));
-        if (idx !== -1) {
-          this.servicesList[idx] = {
-            ...this.servicesList[idx],
-            ...payload,
-            ...(updated && typeof updated === 'object' ? updated : {}),
-          };
-        }
-
-        modalContainer.innerHTML = '';
-        this.showToast(`Service "${payload.name}" updated!`, 'success');
-        this.render();
-        SalonRepository.invalidate('services');
-      } catch (err) {
-        if (submitBtn) {
-          submitBtn.disabled = false;
-          submitBtn.innerHTML = 'Save Changes to Menu →';
-        }
-        alert(err.message);
-      }
-    });
-  }
-
-  showEditStaffModal(staff) {
-    const modalContainer = document.getElementById('modal-container');
-
-    modalContainer.innerHTML = `
+  modalContainer.innerHTML = `
       <div class="modal-backdrop show">
         <div class="modal-content">
           <div class="modal-header">
@@ -11942,76 +12045,76 @@ export class SalonDashboard {
       </div>
     `;
 
-    document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+  document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
 
-    document.getElementById('edit-staff-form')?.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const submitBtn = e.target.querySelector('button[type="submit"]');
+  document.getElementById('edit-staff-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    if (submitBtn) {
+      if (submitBtn.disabled) return;
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving...';
+    }
+
+    const payload = {
+      name: document.getElementById('edit-staff-name').value.trim(),
+      phone: document.getElementById('edit-staff-phone').value.trim(),
+      email: document.getElementById('edit-staff-email').value.trim() || undefined,
+      profileImageUrl: document.getElementById('edit-staff-img').value.trim() || undefined,
+    };
+
+    try {
+      this.lastLocalActionTimestamp = Date.now();
+      const updated = await ApiClient.updateStaff(staff.id, payload);
+
+      // Immediate in-memory state update for 0ms reactivity
+      const idx = this.staffList.findIndex((s) => String(s.id) === String(staff.id));
+      if (idx !== -1) {
+        this.staffList[idx] = {
+          ...this.staffList[idx],
+          ...payload,
+          ...(updated && typeof updated === 'object' ? updated : {}),
+        };
+      }
+
+      modalContainer.innerHTML = '';
+      this.showToast('Stylist details saved!', 'success');
+      this.render();
+      SalonRepository.invalidate('staff');
+    } catch (err) {
       if (submitBtn) {
-        if (submitBtn.disabled) return;
-        submitBtn.disabled = true;
-        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving...';
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = 'Save Stylist Details →';
       }
+      this.showToast(`Failed: ${err.message}`, 'error');
+    }
+  });
+}
 
-      const payload = {
-        name: document.getElementById('edit-staff-name').value.trim(),
-        phone: document.getElementById('edit-staff-phone').value.trim(),
-        email: document.getElementById('edit-staff-email').value.trim() || undefined,
-        profileImageUrl: document.getElementById('edit-staff-img').value.trim() || undefined,
-      };
+showDeleteStaffModal(staffId, staffName) {
+  const modalContainer = document.getElementById('modal-container');
+  if (!modalContainer) return;
 
-      try {
-        this.lastLocalActionTimestamp = Date.now();
-        const updated = await ApiClient.updateStaff(staff.id, payload);
+  const targetStaff = (this.staffList || []).find((s) => String(s.id) === String(staffId)) || { name: staffName };
+  const initials = (targetStaff.name || staffName || 'ST')
+    .split(' ')
+    .map((n) => n[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2);
 
-        // Immediate in-memory state update for 0ms reactivity
-        const idx = this.staffList.findIndex((s) => String(s.id) === String(staff.id));
-        if (idx !== -1) {
-          this.staffList[idx] = {
-            ...this.staffList[idx],
-            ...payload,
-            ...(updated && typeof updated === 'object' ? updated : {}),
-          };
-        }
+  const servicesCount = (targetStaff.services || []).length;
 
-        modalContainer.innerHTML = '';
-        this.showToast('Stylist details saved!', 'success');
-        this.render();
-        SalonRepository.invalidate('staff');
-      } catch (err) {
-        if (submitBtn) {
-          submitBtn.disabled = false;
-          submitBtn.innerHTML = 'Save Stylist Details →';
-        }
-        alert(`Failed: ${err.message}`);
-      }
-    });
-  }
+  // Check if stylist has active / waiting queue appointments today
+  const queueItems = this.queueSync?.items || this.summaryData?.todayAppointments || [];
+  const activeAppts = queueItems.filter((a) => {
+    const aStaffId = a.stylistId || a.stylist?.id;
+    const status = (a.status || '').toUpperCase();
+    return String(aStaffId) === String(staffId) && !['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(status);
+  });
+  const hasActiveAppts = activeAppts.length > 0;
 
-  showDeleteStaffModal(staffId, staffName) {
-    const modalContainer = document.getElementById('modal-container');
-    if (!modalContainer) return;
-
-    const targetStaff = (this.staffList || []).find((s) => String(s.id) === String(staffId)) || { name: staffName };
-    const initials = (targetStaff.name || staffName || 'ST')
-      .split(' ')
-      .map((n) => n[0])
-      .join('')
-      .toUpperCase()
-      .slice(0, 2);
-
-    const servicesCount = (targetStaff.services || []).length;
-    
-    // Check if stylist has active / waiting queue appointments today
-    const queueItems = this.queueSync?.items || this.summaryData?.todayAppointments || [];
-    const activeAppts = queueItems.filter((a) => {
-      const aStaffId = a.stylistId || a.stylist?.id;
-      const status = (a.status || '').toUpperCase();
-      return String(aStaffId) === String(staffId) && !['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(status);
-    });
-    const hasActiveAppts = activeAppts.length > 0;
-
-    modalContainer.innerHTML = `
+  modalContainer.innerHTML = `
       <div class="modal-backdrop show" id="delete-staff-backdrop">
         <div class="modal-content modal-content-sheet" style="max-width: 440px; background: linear-gradient(160deg, #171b2d 0%, #0e1220 100%); border: 1px solid rgba(239, 68, 68, 0.3); box-shadow: 0 24px 60px rgba(0,0,0,0.7), 0 0 30px rgba(239,68,68,0.15); border-radius: 16px; padding: 22px 24px;">
           
@@ -12075,74 +12178,74 @@ export class SalonDashboard {
       </div>
     `;
 
-    const closeModal = () => {
-      modalContainer.innerHTML = '';
-      document.removeEventListener('keydown', handleEsc);
-    };
+  const closeModal = () => {
+    modalContainer.innerHTML = '';
+    document.removeEventListener('keydown', handleEsc);
+  };
 
-    const handleEsc = (e) => {
-      if (e.key === 'Escape') closeModal();
-    };
-    document.addEventListener('keydown', handleEsc);
+  const handleEsc = (e) => {
+    if (e.key === 'Escape') closeModal();
+  };
+  document.addEventListener('keydown', handleEsc);
 
-    document.getElementById('btn-cancel-delete-staff')?.addEventListener('click', closeModal);
-    document.getElementById('delete-staff-backdrop')?.addEventListener('click', (e) => {
-      if (e.target.id === 'delete-staff-backdrop') closeModal();
-    });
+  document.getElementById('btn-cancel-delete-staff')?.addEventListener('click', closeModal);
+  document.getElementById('delete-staff-backdrop')?.addEventListener('click', (e) => {
+    if (e.target.id === 'delete-staff-backdrop') closeModal();
+  });
 
-    document.getElementById('btn-confirm-delete-staff')?.addEventListener('click', async (e) => {
-      const confirmBtn = e.currentTarget;
-      const originalStaffList = [...this.staffList];
-      
-      // Loading state on button
-      confirmBtn.disabled = true;
-      confirmBtn.innerHTML = `
+  document.getElementById('btn-confirm-delete-staff')?.addEventListener('click', async (e) => {
+    const confirmBtn = e.currentTarget;
+    const originalStaffList = [...this.staffList];
+
+    // Loading state on button
+    confirmBtn.disabled = true;
+    confirmBtn.innerHTML = `
         <span style="display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 6px; vertical-align: middle;"></span>
         Deleting...
       `;
 
-      // Mark local action timestamp to suppress SSE self-echo notification
+    // Mark local action timestamp to suppress SSE self-echo notification
+    this.lastLocalActionTimestamp = Date.now();
+    window.lastDashboardActionTimestamp = Date.now();
+
+    // 1. Optimistic removal from in-memory state
+    this.staffList = this.staffList.filter((s) => String(s.id) !== String(staffId));
+    if (this.staffManager) {
+      this.staffManager.staffList = this.staffList;
+    }
+    closeModal();
+    this.render();
+
+    try {
+      await ApiClient.deleteStaff(staffId);
       this.lastLocalActionTimestamp = Date.now();
       window.lastDashboardActionTimestamp = Date.now();
+      this.showToast(`Stylist "${targetStaff?.name || staffName}" deleted successfully`, 'success');
 
-      // 1. Optimistic removal from in-memory state
-      this.staffList = this.staffList.filter((s) => String(s.id) !== String(staffId));
+      // Invalidate both staff & services caches so counts update across tabs
+      SalonRepository.invalidate('staff');
+      SalonRepository.invalidate('services');
+
+      // Re-fetch fresh staff & services silently
+      ApiClient.getStaff(true).catch(() => { });
+      ApiClient.getServices(true).then((fresh) => {
+        if (Array.isArray(fresh)) this.servicesList = fresh;
+      }).catch(() => { });
+    } catch (err) {
+      // Rollback state on error
+      this.staffList = originalStaffList;
       if (this.staffManager) {
-        this.staffManager.staffList = this.staffList;
+        this.staffManager.staffList = originalStaffList;
       }
-      closeModal();
       this.render();
-
-      try {
-        await ApiClient.deleteStaff(staffId);
-        this.lastLocalActionTimestamp = Date.now();
-        window.lastDashboardActionTimestamp = Date.now();
-        this.showToast(`Stylist "${targetStaff?.name || staffName}" deleted successfully`, 'success');
-        
-        // Invalidate both staff & services caches so counts update across tabs
-        SalonRepository.invalidate('staff');
-        SalonRepository.invalidate('services');
-        
-        // Re-fetch fresh staff & services silently
-        ApiClient.getStaff(true).catch(() => {});
-        ApiClient.getServices(true).then((fresh) => {
-          if (Array.isArray(fresh)) this.servicesList = fresh;
-        }).catch(() => {});
-      } catch (err) {
-        // Rollback state on error
-        this.staffList = originalStaffList;
-        if (this.staffManager) {
-          this.staffManager.staffList = originalStaffList;
-        }
-        this.render();
-        this.showToast(err.message || 'Failed to delete stylist. Please try again.', 'error');
-      }
-    });
-  }
+      this.showToast(err.message || 'Failed to delete stylist. Please try again.', 'error');
+    }
+  });
+}
 
   async showSalonScheduleModal() {
-    const modalContainer = document.getElementById('modal-container');
-    modalContainer.innerHTML = `
+  const modalContainer = document.getElementById('modal-container');
+  modalContainer.innerHTML = `
       <div class="modal-backdrop show">
         <div class="modal-content modal-content-sheet" style="max-width: 580px;">
           <div class="sheet-grab-handle"></div>
@@ -12186,61 +12289,61 @@ export class SalonDashboard {
       </div>
     `;
 
-    document.getElementById('btn-close-salon-sched')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
-    document.getElementById('btn-cancel-salon-sched')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+  document.getElementById('btn-close-salon-sched')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+  document.getElementById('btn-cancel-salon-sched')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
 
-    try {
-      const existingHours = await ApiClient.getSalonWorkingHours(true);
-      const loadingDiv = document.getElementById('salon-sched-loading');
-      const form = document.getElementById('form-salon-schedule');
-      if (loadingDiv) loadingDiv.style.display = 'none';
-      if (form) form.style.display = 'block';
+  try {
+    const existingHours = await ApiClient.getSalonWorkingHours(true);
+    const loadingDiv = document.getElementById('salon-sched-loading');
+    const form = document.getElementById('form-salon-schedule');
+    if (loadingDiv) loadingDiv.style.display = 'none';
+    if (form) form.style.display = 'block';
 
-      const days = [
-        { key: 'MONDAY', label: 'Monday' },
-        { key: 'TUESDAY', label: 'Tuesday' },
-        { key: 'WEDNESDAY', label: 'Wednesday' },
-        { key: 'THURSDAY', label: 'Thursday' },
-        { key: 'FRIDAY', label: 'Friday' },
-        { key: 'SATURDAY', label: 'Saturday' },
-        { key: 'SUNDAY', label: 'Sunday' },
-      ];
+    const days = [
+      { key: 'MONDAY', label: 'Monday' },
+      { key: 'TUESDAY', label: 'Tuesday' },
+      { key: 'WEDNESDAY', label: 'Wednesday' },
+      { key: 'THURSDAY', label: 'Thursday' },
+      { key: 'FRIDAY', label: 'Friday' },
+      { key: 'SATURDAY', label: 'Saturday' },
+      { key: 'SUNDAY', label: 'Sunday' },
+    ];
 
-      // Strict Schedule State Hydration Invariant:
-      // If found.breaks is an array (even []), PRESERVE IT VERBATIM as Continuous Operations.
-      let salonSchedState = days.map((d) => {
-        const found = (existingHours || []).find((h) => h.dayOfWeek === d.key) || {};
-        const isClosed = found.isClosed !== undefined ? found.isClosed : false;
-        let breaks = [];
-        if (Array.isArray(found.breaks)) {
-          breaks = found.breaks.map((b) => ({
-            id: b.id || `brk-${d.key}-${Math.random().toString(36).substring(2, 7)}`,
-            startTime: b.startTime || '13:00',
-            endTime: b.endTime || '14:00',
-            title: b.title || 'Lunch Break',
-          }));
-        } else if (found.breakStartTime && found.breakEndTime) {
-          breaks = [{ id: `brk-${d.key}-legacy`, startTime: found.breakStartTime, endTime: found.breakEndTime, title: 'Lunch Break' }];
-        } else {
-          // Zero breaks: default to Continuous Operations mode
-          breaks = [];
-        }
+    // Strict Schedule State Hydration Invariant:
+    // If found.breaks is an array (even []), PRESERVE IT VERBATIM as Continuous Operations.
+    let salonSchedState = days.map((d) => {
+      const found = (existingHours || []).find((h) => h.dayOfWeek === d.key) || {};
+      const isClosed = found.isClosed !== undefined ? found.isClosed : false;
+      let breaks = [];
+      if (Array.isArray(found.breaks)) {
+        breaks = found.breaks.map((b) => ({
+          id: b.id || `brk-${d.key}-${Math.random().toString(36).substring(2, 7)}`,
+          startTime: b.startTime || '13:00',
+          endTime: b.endTime || '14:00',
+          title: b.title || 'Lunch Break',
+        }));
+      } else if (found.breakStartTime && found.breakEndTime) {
+        breaks = [{ id: `brk-${d.key}-legacy`, startTime: found.breakStartTime, endTime: found.breakEndTime, title: 'Lunch Break' }];
+      } else {
+        // Zero breaks: default to Continuous Operations mode
+        breaks = [];
+      }
 
-        return {
-          dayOfWeek: d.key,
-          label: d.label,
-          isClosed,
-          startTime: found.startTime || '09:00',
-          endTime: found.endTime || '19:00',
-          breaks,
-        };
-      });
+      return {
+        dayOfWeek: d.key,
+        label: d.label,
+        isClosed,
+        startTime: found.startTime || '09:00',
+        endTime: found.endTime || '19:00',
+        breaks,
+      };
+    });
 
-      const renderDays = () => {
-        const container = document.getElementById('salon-sched-days-container');
-        if (!container) return;
+    const renderDays = () => {
+      const container = document.getElementById('salon-sched-days-container');
+      if (!container) return;
 
-        container.innerHTML = salonSchedState.map((day, idx) => `
+      container.innerHTML = salonSchedState.map((day, idx) => `
           <div class="day-sched-card ${day.isClosed ? 'is-closed' : ''}">
             <div class="day-sched-header">
               <div class="day-sched-title-wrap">
@@ -12308,268 +12411,268 @@ export class SalonDashboard {
           </div>
         `).join('');
 
-        // Handlers
-        container.querySelectorAll('.btn-toggle-salon-day').forEach((b) => {
-          b.addEventListener('click', (e) => {
-            const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-            salonSchedState[idx].isClosed = !salonSchedState[idx].isClosed;
-            renderDays();
-          });
+      // Handlers
+      container.querySelectorAll('.btn-toggle-salon-day').forEach((b) => {
+        b.addEventListener('click', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          salonSchedState[idx].isClosed = !salonSchedState[idx].isClosed;
+          renderDays();
         });
-
-        container.querySelectorAll('.salon-day-start').forEach((inp) => {
-          inp.addEventListener('change', (e) => {
-            const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-            salonSchedState[idx].startTime = e.currentTarget.value;
-          });
-        });
-
-        container.querySelectorAll('.salon-day-end').forEach((inp) => {
-          inp.addEventListener('change', (e) => {
-            const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-            salonSchedState[idx].endTime = e.currentTarget.value;
-          });
-        });
-
-        container.querySelectorAll('.btn-add-salon-break').forEach((b) => {
-          b.addEventListener('click', (e) => {
-            const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-            salonSchedState[idx].breaks.push({
-              id: `brk-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-              startTime: '13:00',
-              endTime: '14:00',
-              title: 'Lunch Break',
-            });
-            renderDays();
-          });
-        });
-
-        container.querySelectorAll('.btn-quick-lunch-break').forEach((b) => {
-          b.addEventListener('click', (e) => {
-            const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-            const day = salonSchedState[idx];
-            if (day) {
-              const alreadyHas = day.breaks.some(br => br.startTime === '13:00' && br.endTime === '14:00');
-              if (!alreadyHas) {
-                day.breaks.push({
-                  id: `brk-${day.dayOfWeek}-${Math.random().toString(36).substring(2, 7)}`,
-                  startTime: '13:00',
-                  endTime: '14:00',
-                  title: 'Lunch Break',
-                });
-                renderDays();
-              }
-            }
-          });
-        });
-
-        container.querySelectorAll('.btn-del-salon-break').forEach((b) => {
-          b.addEventListener('click', (e) => {
-            const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-            const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
-            salonSchedState[idx].breaks.splice(bIdx, 1);
-            renderDays();
-          });
-        });
-
-        container.querySelectorAll('.salon-brk-title').forEach((inp) => {
-          inp.addEventListener('change', (e) => {
-            const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-            const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
-            salonSchedState[idx].breaks[bIdx].title = e.currentTarget.value;
-          });
-        });
-
-        container.querySelectorAll('.salon-brk-start').forEach((inp) => {
-          inp.addEventListener('change', (e) => {
-            const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-            const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
-            salonSchedState[idx].breaks[bIdx].startTime = e.currentTarget.value;
-          });
-        });
-
-        container.querySelectorAll('.salon-brk-end').forEach((inp) => {
-          inp.addEventListener('change', (e) => {
-            const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-            const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
-            salonSchedState[idx].breaks[bIdx].endTime = e.currentTarget.value;
-          });
-        });
-      };
-
-      renderDays();
-
-      document.getElementById('btn-apply-mon-to-all')?.addEventListener('click', () => {
-        const mon = salonSchedState[0];
-        if (!mon) return;
-
-        for (let i = 1; i < salonSchedState.length; i++) {
-          if (!salonSchedState[i].isClosed) {
-            salonSchedState[i].startTime = mon.startTime;
-            salonSchedState[i].endTime = mon.endTime;
-            salonSchedState[i].breaks = (mon.breaks || []).map((b) => ({
-              id: `brk-${salonSchedState[i].dayOfWeek}-${Math.random().toString(36).substring(2, 7)}`,
-              startTime: b.startTime,
-              endTime: b.endTime,
-              title: b.title || 'Lunch Break',
-            }));
-          }
-        }
-
-        renderDays();
-        const notice = document.getElementById('salon-sched-error');
-        if (notice) {
-          notice.style.background = 'rgba(16,185,129,0.15)';
-          notice.style.borderColor = 'rgba(16,185,129,0.3)';
-          notice.style.color = '#34d399';
-          notice.textContent = '✨ Copied Monday shift hours and breaks to all open days! Review and click "Save Weekly Schedule" to confirm.';
-          notice.style.display = 'block';
-        }
       });
 
-      document.getElementById('form-salon-schedule')?.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const submitBtn = document.getElementById('btn-save-salon-sched');
-        const errorDiv = document.getElementById('salon-sched-error');
-        submitBtn.textContent = 'Saving Schedule...';
-        submitBtn.setAttribute('disabled', 'true');
-        errorDiv.style.display = 'none';
+      container.querySelectorAll('.salon-day-start').forEach((inp) => {
+        inp.addEventListener('change', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          salonSchedState[idx].startTime = e.currentTarget.value;
+        });
+      });
 
-        // Client-side validation
-        for (const d of salonSchedState) {
-          if (!d.isClosed) {
-            if (d.startTime >= d.endTime) {
-              errorDiv.textContent = `Opening time (${d.startTime}) must be earlier than closing time (${d.endTime}) for ${d.label}.`;
+      container.querySelectorAll('.salon-day-end').forEach((inp) => {
+        inp.addEventListener('change', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          salonSchedState[idx].endTime = e.currentTarget.value;
+        });
+      });
+
+      container.querySelectorAll('.btn-add-salon-break').forEach((b) => {
+        b.addEventListener('click', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          salonSchedState[idx].breaks.push({
+            id: `brk-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+            startTime: '13:00',
+            endTime: '14:00',
+            title: 'Lunch Break',
+          });
+          renderDays();
+        });
+      });
+
+      container.querySelectorAll('.btn-quick-lunch-break').forEach((b) => {
+        b.addEventListener('click', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          const day = salonSchedState[idx];
+          if (day) {
+            const alreadyHas = day.breaks.some(br => br.startTime === '13:00' && br.endTime === '14:00');
+            if (!alreadyHas) {
+              day.breaks.push({
+                id: `brk-${day.dayOfWeek}-${Math.random().toString(36).substring(2, 7)}`,
+                startTime: '13:00',
+                endTime: '14:00',
+                title: 'Lunch Break',
+              });
+              renderDays();
+            }
+          }
+        });
+      });
+
+      container.querySelectorAll('.btn-del-salon-break').forEach((b) => {
+        b.addEventListener('click', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
+          salonSchedState[idx].breaks.splice(bIdx, 1);
+          renderDays();
+        });
+      });
+
+      container.querySelectorAll('.salon-brk-title').forEach((inp) => {
+        inp.addEventListener('change', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
+          salonSchedState[idx].breaks[bIdx].title = e.currentTarget.value;
+        });
+      });
+
+      container.querySelectorAll('.salon-brk-start').forEach((inp) => {
+        inp.addEventListener('change', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
+          salonSchedState[idx].breaks[bIdx].startTime = e.currentTarget.value;
+        });
+      });
+
+      container.querySelectorAll('.salon-brk-end').forEach((inp) => {
+        inp.addEventListener('change', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
+          salonSchedState[idx].breaks[bIdx].endTime = e.currentTarget.value;
+        });
+      });
+    };
+
+    renderDays();
+
+    document.getElementById('btn-apply-mon-to-all')?.addEventListener('click', () => {
+      const mon = salonSchedState[0];
+      if (!mon) return;
+
+      for (let i = 1; i < salonSchedState.length; i++) {
+        if (!salonSchedState[i].isClosed) {
+          salonSchedState[i].startTime = mon.startTime;
+          salonSchedState[i].endTime = mon.endTime;
+          salonSchedState[i].breaks = (mon.breaks || []).map((b) => ({
+            id: `brk-${salonSchedState[i].dayOfWeek}-${Math.random().toString(36).substring(2, 7)}`,
+            startTime: b.startTime,
+            endTime: b.endTime,
+            title: b.title || 'Lunch Break',
+          }));
+        }
+      }
+
+      renderDays();
+      const notice = document.getElementById('salon-sched-error');
+      if (notice) {
+        notice.style.background = 'rgba(16,185,129,0.15)';
+        notice.style.borderColor = 'rgba(16,185,129,0.3)';
+        notice.style.color = '#34d399';
+        notice.textContent = '✨ Copied Monday shift hours and breaks to all open days! Review and click "Save Weekly Schedule" to confirm.';
+        notice.style.display = 'block';
+      }
+    });
+
+    document.getElementById('form-salon-schedule')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const submitBtn = document.getElementById('btn-save-salon-sched');
+      const errorDiv = document.getElementById('salon-sched-error');
+      submitBtn.textContent = 'Saving Schedule...';
+      submitBtn.setAttribute('disabled', 'true');
+      errorDiv.style.display = 'none';
+
+      // Client-side validation
+      for (const d of salonSchedState) {
+        if (!d.isClosed) {
+          if (d.startTime >= d.endTime) {
+            errorDiv.textContent = `Opening time (${d.startTime}) must be earlier than closing time (${d.endTime}) for ${d.label}.`;
+            errorDiv.style.display = 'block';
+            submitBtn.textContent = '💾 Save Weekly Schedule →';
+            submitBtn.removeAttribute('disabled');
+            return;
+          }
+          for (const b of d.breaks) {
+            if (b.startTime >= b.endTime) {
+              errorDiv.textContent = `Break start time (${b.startTime}) must be earlier than break end time (${b.endTime}) on ${d.label}.`;
               errorDiv.style.display = 'block';
               submitBtn.textContent = '💾 Save Weekly Schedule →';
               submitBtn.removeAttribute('disabled');
               return;
             }
-            for (const b of d.breaks) {
-              if (b.startTime >= b.endTime) {
-                errorDiv.textContent = `Break start time (${b.startTime}) must be earlier than break end time (${b.endTime}) on ${d.label}.`;
-                errorDiv.style.display = 'block';
-                submitBtn.textContent = '💾 Save Weekly Schedule →';
-                submitBtn.removeAttribute('disabled');
-                return;
-              }
-              if (b.startTime < d.startTime || b.endTime > d.endTime) {
-                errorDiv.textContent = `Break ${b.startTime}-${b.endTime} must fall inside operating hours (${d.startTime}-${d.endTime}) on ${d.label}.`;
-                errorDiv.style.display = 'block';
-                submitBtn.textContent = '💾 Save Weekly Schedule →';
-                submitBtn.removeAttribute('disabled');
-                return;
-              }
+            if (b.startTime < d.startTime || b.endTime > d.endTime) {
+              errorDiv.textContent = `Break ${b.startTime}-${b.endTime} must fall inside operating hours (${d.startTime}-${d.endTime}) on ${d.label}.`;
+              errorDiv.style.display = 'block';
+              submitBtn.textContent = '💾 Save Weekly Schedule →';
+              submitBtn.removeAttribute('disabled');
+              return;
             }
           }
         }
-
-        const hoursPayload = salonSchedState.map((d) => ({
-          dayOfWeek: d.dayOfWeek,
-          isClosed: d.isClosed,
-          startTime: d.startTime,
-          endTime: d.endTime,
-          breaks: d.isClosed ? [] : d.breaks.map((b) => ({
-            id: b.id,
-            startTime: b.startTime,
-            endTime: b.endTime,
-            title: b.title || 'Break',
-          })),
-        }));
-
-        try {
-          await ApiClient.updateSalonWorkingHours(hoursPayload);
-          modalContainer.innerHTML = '';
-          this.loadData(true).then(() => {
-            this.refreshActiveTab();
-          }).catch(() => { });
-        } catch (err) {
-          errorDiv.textContent = err.message || 'Failed to update salon schedule. Please check for conflicting appointments.';
-          errorDiv.style.display = 'block';
-          submitBtn.textContent = '💾 Save Weekly Schedule →';
-          submitBtn.removeAttribute('disabled');
-        }
-      });
-    } catch (err) {
-      alert(`Error loading salon operating schedule: ${err.message}`);
-    }
-  }
-
-  openSalonClosuresModal(dateStr = null) {
-    SalonClosuresModal.open({
-      initialDate: dateStr || this.getLocalDateString(),
-      salonWorkingHours: this.salonWorkingHours || [],
-      existingClosures: this.closuresList || [],
-      staffList: this.staffList || [],
-      onSuccess: async () => {
-        await this.loadData(true);
-        const container = document.getElementById('profile-subtab-container');
-        if (container) {
-          container.innerHTML = this.renderProfileSubtabContent();
-          this.attachProfileSubtabListeners();
-        }
-      },
-    });
-  }
-
-  async showEditStaffHoursModal(staffId, staffName) {
-    const modalContainer = document.getElementById('modal-container');
-    const staff = this.staffList.find((s) => s.id === staffId);
-    const existingHours = staff?.workingHours || [];
-    let followsSalonSchedule = staff?.followsSalonSchedule ?? true;
-
-    // Fetch salon working hours to show as reference
-    let salonHours = [];
-    try {
-      salonHours = await ApiClient.getSalonWorkingHours();
-    } catch (e) {
-      salonHours = [];
-    }
-
-    const days = [
-      { key: 'MONDAY', label: 'Monday' },
-      { key: 'TUESDAY', label: 'Tuesday' },
-      { key: 'WEDNESDAY', label: 'Wednesday' },
-      { key: 'THURSDAY', label: 'Thursday' },
-      { key: 'FRIDAY', label: 'Friday' },
-      { key: 'SATURDAY', label: 'Saturday' },
-      { key: 'SUNDAY', label: 'Sunday' },
-    ];
-
-    let staffState = days.map((d) => {
-      const sDay = (salonHours || []).find((sh) => sh.dayOfWeek === d.key) || { isClosed: false, startTime: '09:00', endTime: '19:00' };
-      const wh = (existingHours || []).find((h) => h.dayOfWeek === d.key) || {};
-
-      let hasBreakOverride = wh.hasBreakOverride === true;
-      let breaks = [];
-      if (Array.isArray(wh.breaks) && wh.breaks.length > 0) {
-        breaks = wh.breaks.map((b) => ({
-          id: b.id || `st-brk-${d.key}-${Math.random()}`,
-          startTime: b.startTime || '13:00',
-          endTime: b.endTime || '14:00',
-          title: b.title || 'Lunch Break',
-        }));
-      } else if (wh.breakStartTime && wh.breakEndTime) {
-        breaks = [{ id: `st-brk-${d.key}-legacy`, startTime: wh.breakStartTime, endTime: wh.breakEndTime, title: 'Lunch Break' }];
       }
 
-      return {
-        dayOfWeek: d.key,
-        label: d.label,
-        isWorking: wh.isWorking !== undefined ? wh.isWorking : !sDay.isClosed,
-        startTime: wh.startTime || sDay.startTime || '09:00',
-        endTime: wh.endTime || sDay.endTime || '19:00',
-        hasBreakOverride,
-        breaks,
-        salonOpen: sDay.startTime || '09:00',
-        salonClose: sDay.endTime || '19:00',
-        salonClosed: sDay.isClosed || false,
-        salonBreaks: sDay.breaks || (sDay.breakStartTime ? [{ startTime: sDay.breakStartTime, endTime: sDay.breakEndTime, title: 'Lunch Break' }] : []),
-      };
-    });
+      const hoursPayload = salonSchedState.map((d) => ({
+        dayOfWeek: d.dayOfWeek,
+        isClosed: d.isClosed,
+        startTime: d.startTime,
+        endTime: d.endTime,
+        breaks: d.isClosed ? [] : d.breaks.map((b) => ({
+          id: b.id,
+          startTime: b.startTime,
+          endTime: b.endTime,
+          title: b.title || 'Break',
+        })),
+      }));
 
-    const renderStaffModal = () => {
-      modalContainer.innerHTML = `
+      try {
+        await ApiClient.updateSalonWorkingHours(hoursPayload);
+        modalContainer.innerHTML = '';
+        this.loadData(true).then(() => {
+          this.refreshActiveTab();
+        }).catch(() => { });
+      } catch (err) {
+        errorDiv.textContent = err.message || 'Failed to update salon schedule. Please check for conflicting appointments.';
+        errorDiv.style.display = 'block';
+        submitBtn.textContent = '💾 Save Weekly Schedule →';
+        submitBtn.removeAttribute('disabled');
+      }
+    });
+  } catch (err) {
+    this.showToast(`Error loading salon operating schedule: ${err.message}`, 'error');
+  }
+}
+
+openSalonClosuresModal(dateStr = null) {
+  SalonClosuresModal.open({
+    initialDate: dateStr || this.getLocalDateString(),
+    salonWorkingHours: this.salonWorkingHours || [],
+    existingClosures: this.closuresList || [],
+    staffList: this.staffList || [],
+    onSuccess: async () => {
+      await this.loadData(true);
+      const container = document.getElementById('profile-subtab-container');
+      if (container) {
+        container.innerHTML = this.renderProfileSubtabContent();
+        this.attachProfileSubtabListeners();
+      }
+    },
+  });
+}
+
+  async showEditStaffHoursModal(staffId, staffName) {
+  const modalContainer = document.getElementById('modal-container');
+  const staff = this.staffList.find((s) => s.id === staffId);
+  const existingHours = staff?.workingHours || [];
+  let followsSalonSchedule = staff?.followsSalonSchedule ?? true;
+
+  // Fetch salon working hours to show as reference
+  let salonHours = [];
+  try {
+    salonHours = await ApiClient.getSalonWorkingHours();
+  } catch (e) {
+    salonHours = [];
+  }
+
+  const days = [
+    { key: 'MONDAY', label: 'Monday' },
+    { key: 'TUESDAY', label: 'Tuesday' },
+    { key: 'WEDNESDAY', label: 'Wednesday' },
+    { key: 'THURSDAY', label: 'Thursday' },
+    { key: 'FRIDAY', label: 'Friday' },
+    { key: 'SATURDAY', label: 'Saturday' },
+    { key: 'SUNDAY', label: 'Sunday' },
+  ];
+
+  let staffState = days.map((d) => {
+    const sDay = (salonHours || []).find((sh) => sh.dayOfWeek === d.key) || { isClosed: false, startTime: '09:00', endTime: '19:00' };
+    const wh = (existingHours || []).find((h) => h.dayOfWeek === d.key) || {};
+
+    let hasBreakOverride = wh.hasBreakOverride === true;
+    let breaks = [];
+    if (Array.isArray(wh.breaks) && wh.breaks.length > 0) {
+      breaks = wh.breaks.map((b) => ({
+        id: b.id || `st-brk-${d.key}-${Math.random()}`,
+        startTime: b.startTime || '13:00',
+        endTime: b.endTime || '14:00',
+        title: b.title || 'Lunch Break',
+      }));
+    } else if (wh.breakStartTime && wh.breakEndTime) {
+      breaks = [{ id: `st-brk-${d.key}-legacy`, startTime: wh.breakStartTime, endTime: wh.breakEndTime, title: 'Lunch Break' }];
+    }
+
+    return {
+      dayOfWeek: d.key,
+      label: d.label,
+      isWorking: wh.isWorking !== undefined ? wh.isWorking : !sDay.isClosed,
+      startTime: wh.startTime || sDay.startTime || '09:00',
+      endTime: wh.endTime || sDay.endTime || '19:00',
+      hasBreakOverride,
+      breaks,
+      salonOpen: sDay.startTime || '09:00',
+      salonClose: sDay.endTime || '19:00',
+      salonClosed: sDay.isClosed || false,
+      salonBreaks: sDay.breaks || (sDay.breakStartTime ? [{ startTime: sDay.breakStartTime, endTime: sDay.breakEndTime, title: 'Lunch Break' }] : []),
+    };
+  });
+
+  const renderStaffModal = () => {
+    modalContainer.innerHTML = `
         <div class="modal-backdrop show">
           <div class="modal-content modal-content-lg" style="max-height: 90vh; overflow-y: auto; padding: 24px;">
             <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
@@ -12601,8 +12704,8 @@ export class SalonDashboard {
             <form id="edit-hours-form">
               <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
                 ${staffState.map((d, idx) => {
-        const isDayActive = d.isWorking && !d.salonClosed;
-        return `
+      const isDayActive = d.isWorking && !d.salonClosed;
+      return `
                     <div class="schedule-day-row ${!isDayActive ? 'off-day' : ''}" style="padding: 9px 12px; border-radius: 9px; gap: 6px;">
                       <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
                         <div style="display: flex; align-items: center; gap: 10px;">
@@ -12673,8 +12776,8 @@ export class SalonDashboard {
                             ${d.breaks.length === 0 ? `
                               <div style="font-size: 0.7rem; color: var(--text-muted); font-style: italic;">No personal breaks added.</div>
                             ` : d.breaks.map((b, bIdx) => {
-          const hasOverlap = (d.salonBreaks || []).some(sb => b.startTime < sb.endTime && b.endTime > sb.startTime);
-          return `
+        const hasOverlap = (d.salonBreaks || []).some(sb => b.startTime < sb.endTime && b.endTime > sb.startTime);
+        return `
                                 <div class="day-sched-break-box" style="margin-bottom: 5px;">
                                   <div class="day-sched-break-row1">
                                     <input type="text" class="day-sched-break-name-inp st-brk-title" data-idx="${idx}" data-bidx="${bIdx}" value="${b.title || 'Personal Break'}" placeholder="Break Title" />
@@ -12694,13 +12797,13 @@ export class SalonDashboard {
                                   ` : ''}
                                 </div>
                               `;
-        }).join('')}
+      }).join('')}
                           </div>
                         </div>
                       ` : ''}
                     </div>
                   `;
-      }).join('')}
+    }).join('')}
               </div>
 
               <!-- Error Banner -->
@@ -12715,200 +12818,200 @@ export class SalonDashboard {
         </div>
       `;
 
-      // Event Listeners inside Staff Modal
-      document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
-      document.getElementById('btn-cancel-st-hours')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+    // Event Listeners inside Staff Modal
+    document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+    document.getElementById('btn-cancel-st-hours')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
 
-      document.getElementById('chk-follow-salon')?.addEventListener('change', (e) => {
-        followsSalonSchedule = e.target.checked;
+    document.getElementById('chk-follow-salon')?.addEventListener('change', (e) => {
+      followsSalonSchedule = e.target.checked;
+      renderStaffModal();
+    });
+
+    modalContainer.querySelectorAll('.st-day-chk').forEach((chk) => {
+      chk.addEventListener('change', (e) => {
+        const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+        staffState[idx].isWorking = e.currentTarget.checked;
         renderStaffModal();
       });
+    });
 
-      modalContainer.querySelectorAll('.st-day-chk').forEach((chk) => {
-        chk.addEventListener('change', (e) => {
-          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-          staffState[idx].isWorking = e.currentTarget.checked;
-          renderStaffModal();
-        });
+    modalContainer.querySelectorAll('.st-shift-start').forEach((inp) => {
+      inp.addEventListener('change', (e) => {
+        const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+        staffState[idx].startTime = e.currentTarget.value;
       });
+    });
 
-      modalContainer.querySelectorAll('.st-shift-start').forEach((inp) => {
-        inp.addEventListener('change', (e) => {
-          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-          staffState[idx].startTime = e.currentTarget.value;
-        });
+    modalContainer.querySelectorAll('.st-shift-end').forEach((inp) => {
+      inp.addEventListener('change', (e) => {
+        const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+        staffState[idx].endTime = e.currentTarget.value;
       });
+    });
 
-      modalContainer.querySelectorAll('.st-shift-end').forEach((inp) => {
-        inp.addEventListener('change', (e) => {
-          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-          staffState[idx].endTime = e.currentTarget.value;
-        });
+    modalContainer.querySelectorAll('.st-break-rad').forEach((rad) => {
+      rad.addEventListener('change', (e) => {
+        const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+        staffState[idx].hasBreakOverride = e.currentTarget.value === 'custom';
+        renderStaffModal();
       });
+    });
 
-      modalContainer.querySelectorAll('.st-break-rad').forEach((rad) => {
-        rad.addEventListener('change', (e) => {
-          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-          staffState[idx].hasBreakOverride = e.currentTarget.value === 'custom';
-          renderStaffModal();
+    modalContainer.querySelectorAll('.btn-st-add-break').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+        staffState[idx].breaks.push({
+          id: `st-brk-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          startTime: '14:00',
+          endTime: '15:00',
+          title: 'Lunch Break',
         });
+        renderStaffModal();
       });
+    });
 
-      modalContainer.querySelectorAll('.btn-st-add-break').forEach((btn) => {
-        btn.addEventListener('click', (e) => {
-          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-          staffState[idx].breaks.push({
-            id: `st-brk-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-            startTime: '14:00',
-            endTime: '15:00',
-            title: 'Lunch Break',
-          });
-          renderStaffModal();
-        });
+    modalContainer.querySelectorAll('.btn-st-del-break').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+        const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
+        staffState[idx].breaks.splice(bIdx, 1);
+        renderStaffModal();
       });
+    });
 
-      modalContainer.querySelectorAll('.btn-st-del-break').forEach((btn) => {
-        btn.addEventListener('click', (e) => {
-          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-          const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
-          staffState[idx].breaks.splice(bIdx, 1);
-          renderStaffModal();
-        });
+    modalContainer.querySelectorAll('.st-brk-title').forEach((inp) => {
+      inp.addEventListener('change', (e) => {
+        const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+        const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
+        staffState[idx].breaks[bIdx].title = e.currentTarget.value;
       });
+    });
 
-      modalContainer.querySelectorAll('.st-brk-title').forEach((inp) => {
-        inp.addEventListener('change', (e) => {
-          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-          const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
-          staffState[idx].breaks[bIdx].title = e.currentTarget.value;
-        });
+    modalContainer.querySelectorAll('.st-brk-start').forEach((inp) => {
+      inp.addEventListener('change', (e) => {
+        const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+        const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
+        staffState[idx].breaks[bIdx].startTime = e.currentTarget.value;
       });
+    });
 
-      modalContainer.querySelectorAll('.st-brk-start').forEach((inp) => {
-        inp.addEventListener('change', (e) => {
-          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-          const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
-          staffState[idx].breaks[bIdx].startTime = e.currentTarget.value;
-        });
+    modalContainer.querySelectorAll('.st-brk-end').forEach((inp) => {
+      inp.addEventListener('change', (e) => {
+        const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+        const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
+        staffState[idx].breaks[bIdx].endTime = e.currentTarget.value;
       });
+    });
 
-      modalContainer.querySelectorAll('.st-brk-end').forEach((inp) => {
-        inp.addEventListener('change', (e) => {
-          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-          const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
-          staffState[idx].breaks[bIdx].endTime = e.currentTarget.value;
-        });
-      });
+    document.getElementById('edit-hours-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const submitBtn = document.getElementById('btn-save-st-hours');
+      const errorDiv = document.getElementById('st-hours-error');
+      submitBtn.textContent = 'Saving Stylist Schedule...';
+      submitBtn.setAttribute('disabled', 'true');
+      errorDiv.style.display = 'none';
 
-      document.getElementById('edit-hours-form')?.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const submitBtn = document.getElementById('btn-save-st-hours');
-        const errorDiv = document.getElementById('st-hours-error');
-        submitBtn.textContent = 'Saving Stylist Schedule...';
-        submitBtn.setAttribute('disabled', 'true');
-        errorDiv.style.display = 'none';
+      // Update followsSalonSchedule property on staff member first
+      try {
+        await ApiClient.updateStaff(staffId, { followsSalonSchedule });
+      } catch (err) {
+        errorDiv.textContent = `Failed updating schedule inheritance: ${err.message}`;
+        errorDiv.style.display = 'block';
+        submitBtn.textContent = 'Save Stylist Schedule & Breaks →';
+        submitBtn.removeAttribute('disabled');
+        return;
+      }
 
-        // Update followsSalonSchedule property on staff member first
-        try {
-          await ApiClient.updateStaff(staffId, { followsSalonSchedule });
-        } catch (err) {
-          errorDiv.textContent = `Failed updating schedule inheritance: ${err.message}`;
-          errorDiv.style.display = 'block';
-          submitBtn.textContent = 'Save Stylist Schedule & Breaks →';
-          submitBtn.removeAttribute('disabled');
-          return;
-        }
-
-        // Validate client boundary rules
-        if (!followsSalonSchedule) {
-          for (const d of staffState) {
-            if (d.isWorking && !d.salonClosed) {
-              if (d.startTime < d.salonOpen || d.endTime > d.salonClose) {
-                errorDiv.textContent = `Stylist shift (${d.startTime}-${d.endTime}) on ${d.label} must fall within salon operating bounds (${d.salonOpen}-${d.salonClose}).`;
-                errorDiv.style.display = 'block';
-                submitBtn.textContent = 'Save Stylist Schedule & Breaks →';
-                submitBtn.removeAttribute('disabled');
-                return;
-              }
-              if (d.startTime >= d.endTime) {
-                errorDiv.textContent = `Shift start time (${d.startTime}) must be earlier than shift end time (${d.endTime}) on ${d.label}.`;
-                errorDiv.style.display = 'block';
-                submitBtn.textContent = 'Save Stylist Schedule & Breaks →';
-                submitBtn.removeAttribute('disabled');
-                return;
-              }
-              if (d.hasBreakOverride) {
-                for (const b of d.breaks) {
-                  if (b.startTime >= b.endTime) {
-                    errorDiv.textContent = `Break start (${b.startTime}) must be earlier than break end (${b.endTime}) on ${d.label}.`;
-                    errorDiv.style.display = 'block';
-                    submitBtn.textContent = 'Save Stylist Schedule & Breaks →';
-                    submitBtn.removeAttribute('disabled');
-                    return;
-                  }
-                  if (b.startTime < d.startTime || b.endTime > d.endTime) {
-                    errorDiv.textContent = `Break ${b.startTime}-${b.endTime} must fall within stylist working shift (${d.startTime}-${d.endTime}) on ${d.label}.`;
-                    errorDiv.style.display = 'block';
-                    submitBtn.textContent = 'Save Stylist Schedule & Breaks →';
-                    submitBtn.removeAttribute('disabled');
-                    return;
-                  }
+      // Validate client boundary rules
+      if (!followsSalonSchedule) {
+        for (const d of staffState) {
+          if (d.isWorking && !d.salonClosed) {
+            if (d.startTime < d.salonOpen || d.endTime > d.salonClose) {
+              errorDiv.textContent = `Stylist shift (${d.startTime}-${d.endTime}) on ${d.label} must fall within salon operating bounds (${d.salonOpen}-${d.salonClose}).`;
+              errorDiv.style.display = 'block';
+              submitBtn.textContent = 'Save Stylist Schedule & Breaks →';
+              submitBtn.removeAttribute('disabled');
+              return;
+            }
+            if (d.startTime >= d.endTime) {
+              errorDiv.textContent = `Shift start time (${d.startTime}) must be earlier than shift end time (${d.endTime}) on ${d.label}.`;
+              errorDiv.style.display = 'block';
+              submitBtn.textContent = 'Save Stylist Schedule & Breaks →';
+              submitBtn.removeAttribute('disabled');
+              return;
+            }
+            if (d.hasBreakOverride) {
+              for (const b of d.breaks) {
+                if (b.startTime >= b.endTime) {
+                  errorDiv.textContent = `Break start (${b.startTime}) must be earlier than break end (${b.endTime}) on ${d.label}.`;
+                  errorDiv.style.display = 'block';
+                  submitBtn.textContent = 'Save Stylist Schedule & Breaks →';
+                  submitBtn.removeAttribute('disabled');
+                  return;
+                }
+                if (b.startTime < d.startTime || b.endTime > d.endTime) {
+                  errorDiv.textContent = `Break ${b.startTime}-${b.endTime} must fall within stylist working shift (${d.startTime}-${d.endTime}) on ${d.label}.`;
+                  errorDiv.style.display = 'block';
+                  submitBtn.textContent = 'Save Stylist Schedule & Breaks →';
+                  submitBtn.removeAttribute('disabled');
+                  return;
                 }
               }
             }
           }
         }
+      }
 
-        const hoursPayload = staffState.map((d) => ({
-          dayOfWeek: d.dayOfWeek,
-          isWorking: followsSalonSchedule ? !d.salonClosed : d.isWorking,
-          startTime: followsSalonSchedule ? d.salonOpen : d.startTime,
-          endTime: followsSalonSchedule ? d.salonClose : d.endTime,
-          hasBreakOverride: d.breaks.length > 0,
-          breaks: d.breaks.map((b) => ({
-            id: b.id,
-            startTime: b.startTime,
-            endTime: b.endTime,
-            title: b.title || 'Personal Break',
-          })),
-        }));
+      const hoursPayload = staffState.map((d) => ({
+        dayOfWeek: d.dayOfWeek,
+        isWorking: followsSalonSchedule ? !d.salonClosed : d.isWorking,
+        startTime: followsSalonSchedule ? d.salonOpen : d.startTime,
+        endTime: followsSalonSchedule ? d.salonClose : d.endTime,
+        hasBreakOverride: d.breaks.length > 0,
+        breaks: d.breaks.map((b) => ({
+          id: b.id,
+          startTime: b.startTime,
+          endTime: b.endTime,
+          title: b.title || 'Personal Break',
+        })),
+      }));
 
-        try {
-          await ApiClient.updateStaffWorkingHours(staffId, hoursPayload, followsSalonSchedule);
-          const idx = this.staffList.findIndex((s) => String(s.id) === String(staffId));
-          if (idx !== -1) {
-            this.staffList[idx] = {
-              ...this.staffList[idx],
-              followsSalonSchedule,
-              workingHours: hoursPayload,
-            };
-          }
-          modalContainer.innerHTML = '';
-          this.render();
-
-          this.loadData(true).then(() => {
-            this.refreshActiveTab();
-          }).catch(() => { });
-        } catch (err) {
-          errorDiv.textContent = err.message || 'Failed to update stylist schedule. Please verify input hours.';
-          errorDiv.style.display = 'block';
-          submitBtn.textContent = 'Save Stylist Schedule & Breaks →';
-          submitBtn.removeAttribute('disabled');
+      try {
+        await ApiClient.updateStaffWorkingHours(staffId, hoursPayload, followsSalonSchedule);
+        const idx = this.staffList.findIndex((s) => String(s.id) === String(staffId));
+        if (idx !== -1) {
+          this.staffList[idx] = {
+            ...this.staffList[idx],
+            followsSalonSchedule,
+            workingHours: hoursPayload,
+          };
         }
-      });
-    };
+        modalContainer.innerHTML = '';
+        this.render();
 
-    renderStaffModal();
+        this.loadData(true).then(() => {
+          this.refreshActiveTab();
+        }).catch(() => { });
+      } catch (err) {
+        errorDiv.textContent = err.message || 'Failed to update stylist schedule. Please verify input hours.';
+        errorDiv.style.display = 'block';
+        submitBtn.textContent = 'Save Stylist Schedule & Breaks →';
+        submitBtn.removeAttribute('disabled');
+      }
+    });
+  };
+
+  renderStaffModal();
+}
+
+showDeleteServiceModal(serviceId, serviceName) {
+  if (serviceId && String(serviceId).startsWith('temp-')) {
+    this.showToast('Please wait a moment while this service finishes saving to the cloud...', 'info');
+    return;
   }
+  const modalContainer = document.getElementById('modal-container');
 
-  showDeleteServiceModal(serviceId, serviceName) {
-    if (serviceId && String(serviceId).startsWith('temp-')) {
-      this.showToast('Please wait a moment while this service finishes saving to the cloud...', 'info');
-      return;
-    }
-    const modalContainer = document.getElementById('modal-container');
-
-    modalContainer.innerHTML = `
+  modalContainer.innerHTML = `
       <div class="modal-backdrop show">
         <div class="modal-content" style="text-align: center;">
           <div style="font-size: 3rem; margin-bottom: 8px;">🗑️</div>
@@ -12927,48 +13030,48 @@ export class SalonDashboard {
       </div>
     `;
 
-    document.getElementById('btn-cancel-delete-svc')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+  document.getElementById('btn-cancel-delete-svc')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
 
-    document.getElementById('btn-confirm-delete-svc')?.addEventListener('click', async (e) => {
-      const confirmBtn = e.currentTarget;
-      if (confirmBtn.disabled) return;
-      confirmBtn.disabled = true;
+  document.getElementById('btn-confirm-delete-svc')?.addEventListener('click', async (e) => {
+    const confirmBtn = e.currentTarget;
+    if (confirmBtn.disabled) return;
+    confirmBtn.disabled = true;
 
-      // 1. Snapshot previous state for rollback safety
-      const previousServices = [...(this.servicesList || [])];
+    // 1. Snapshot previous state for rollback safety
+    const previousServices = [...(this.servicesList || [])];
 
-      // 2. Optimistic Update (Frame 1: 0ms delay)
-      this.servicesList = this.servicesList.filter((s) => s.id !== serviceId);
-      modalContainer.innerHTML = '';
+    // 2. Optimistic Update (Frame 1: 0ms delay)
+    this.servicesList = this.servicesList.filter((s) => s.id !== serviceId);
+    modalContainer.innerHTML = '';
+    this.render();
+    this.showToast('Service deleted.', 'info');
+
+    try {
+      // 3. Background Sync (Zero re-fetch!)
+      this.lastLocalActionTimestamp = Date.now();
+      await ApiClient.deleteService(serviceId);
+      SalonRepository.invalidate('services');
+    } catch (err) {
+      // 4. Safe Rollback on rejection (e.g. active bookings guard)
+      this.servicesList = previousServices;
       this.render();
-      this.showToast('Service deleted.', 'info');
+      this.showToast(`Failed to delete service: ${err.message}`, 'error');
+    }
+  });
+}
 
-      try {
-        // 3. Background Sync (Zero re-fetch!)
-        this.lastLocalActionTimestamp = Date.now();
-        await ApiClient.deleteService(serviceId);
-        SalonRepository.invalidate('services');
-      } catch (err) {
-        // 4. Safe Rollback on rejection (e.g. active bookings guard)
-        this.servicesList = previousServices;
-        this.render();
-        alert(`Failed to delete service: ${err.message}`);
-      }
-    });
-  }
+showQRCodeModal() {
+  BookingQrView.showQuickQrModal(this);
+}
 
-  showQRCodeModal() {
-    BookingQrView.showQuickQrModal(this);
-  }
-
-  showStandeePrintModal() {
-    BookingQrView.showStandeeModal(this);
-  }
+showStandeePrintModal() {
+  BookingQrView.showStandeeModal(this);
+}
 
   async showCustomerHistoryModal(customerId, customerName) {
-    const modalContainer = document.getElementById('modal-container');
+  const modalContainer = document.getElementById('modal-container');
 
-    modalContainer.innerHTML = `
+  modalContainer.innerHTML = `
       <div class="modal-backdrop show">
         <div class="modal-content modal-content-lg" style="max-width: 680px;">
           <!-- Sleek, Perfectly-Aligned Header -->
@@ -12990,22 +13093,22 @@ export class SalonDashboard {
       </div>
     `;
 
-    const closeModal = () => (modalContainer.innerHTML = '');
-    document.getElementById('btn-close-modal')?.addEventListener('click', closeModal);
-    document.getElementById('btn-back-to-customers')?.addEventListener('click', closeModal);
+  const closeModal = () => (modalContainer.innerHTML = '');
+  document.getElementById('btn-close-modal')?.addEventListener('click', closeModal);
+  document.getElementById('btn-back-to-customers')?.addEventListener('click', closeModal);
 
-    try {
-      const customer = await ApiClient.getCustomerById(customerId);
-      const historyBody = document.getElementById('cust-history-body');
-      if (!historyBody) return;
+  try {
+    const customer = await ApiClient.getCustomerById(customerId);
+    const historyBody = document.getElementById('cust-history-body');
+    if (!historyBody) return;
 
-      const appts = customer.appointments || [];
-      const strikes = customer.yearlyNoShowCount || 0;
-      const isBlocked = customer.isBookingBlocked || strikes >= 3;
-      const totalSpend = appts.reduce((acc, a) => acc + (Number(a.price) || 0), 0);
+    const appts = customer.appointments || [];
+    const strikes = customer.yearlyNoShowCount || 0;
+    const isBlocked = customer.isBookingBlocked || strikes >= 3;
+    const totalSpend = appts.reduce((acc, a) => acc + (Number(a.price) || 0), 0);
 
-      historyBody.style.textAlign = 'left';
-      historyBody.innerHTML = `
+    historyBody.style.textAlign = 'left';
+    historyBody.innerHTML = `
         <!-- Customer Summary Header Card (Ultra-Clean 2-Row Identity & Metrics) -->
         <div style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; padding: 10px 12px; margin-bottom: 12px;">
           <!-- Row 1: Identity & Strike Badge -->
@@ -13098,17 +13201,17 @@ export class SalonDashboard {
               </thead>
               <tbody>
                 ${appts.map((a) => {
-        const dateStr = a.startAt ? new Date(a.startAt).toLocaleDateString() : 'N/A';
-        const timeStr = a.startAt ? new Date(a.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-        const statusColors = {
-          CONFIRMED: 'rgba(139, 61, 255,0.2); color: #A855F7',
-          COMPLETED: 'rgba(16,185,129,0.2); color: #34d399',
-          CANCELLED: 'rgba(239,68,68,0.2); color: #f87171',
-          IN_SERVICE: 'rgba(168,85,247,0.2); color: #c084fc',
-          SEATED_IN_CHAIR: 'rgba(168,85,247,0.2); color: #c084fc',
-        };
-        const badgeStyle = statusColors[a.status] || 'rgba(255,255,255,0.1); color: #fff';
-        return `
+      const dateStr = a.startAt ? new Date(a.startAt).toLocaleDateString() : 'N/A';
+      const timeStr = a.startAt ? new Date(a.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+      const statusColors = {
+        CONFIRMED: 'rgba(139, 61, 255,0.2); color: #A855F7',
+        COMPLETED: 'rgba(16,185,129,0.2); color: #34d399',
+        CANCELLED: 'rgba(239,68,68,0.2); color: #f87171',
+        IN_SERVICE: 'rgba(168,85,247,0.2); color: #c084fc',
+        SEATED_IN_CHAIR: 'rgba(168,85,247,0.2); color: #c084fc',
+      };
+      const badgeStyle = statusColors[a.status] || 'rgba(255,255,255,0.1); color: #fff';
+      return `
                     <tr>
                       <td>
                         <div style="font-weight: 700; color: #fff;">${dateStr}</div>
@@ -13122,73 +13225,89 @@ export class SalonDashboard {
                       </td>
                     </tr>
                   `;
-      }).join('')}
+    }).join('')}
               </tbody>
             </table>
           </div>
         `}
       `;
 
-      // Event Listener: Unblock (Reset to 0)
-      document.getElementById('btn-modal-unblock')?.addEventListener('click', async () => {
-        if (confirm(`Reset strikes to 0 and unblock WhatsApp booking access for ${customer.name || customerName}?`)) {
-          try {
-            await ApiClient.unblockCustomer(customerId);
-            alert(`🎉 Successfully reset strikes to 0. Customer unblocked!`);
-            this.showCustomerHistoryModal(customerId, customerName);
-            this.loadCustomersTable(this.searchQuery);
-          } catch (err) {
-            alert(`Error resetting strikes: ${err.message}`);
-          }
+    // Event Listener: Unblock (Reset to 0)
+    document.getElementById('btn-modal-unblock')?.addEventListener('click', async () => {
+      const ok = await CalendarState.confirm({
+        title: 'Unblock Customer Access',
+        message: `Reset strikes to 0 and restore WhatsApp booking access for ${customer.name || customerName}?`,
+        confirmText: 'Unblock Customer',
+        cancelText: 'Cancel',
+        icon: '🎉',
+        type: 'warning',
+      });
+      if (ok) {
+        try {
+          await ApiClient.unblockCustomer(customerId);
+          this.showToast(`🎉 Successfully reset strikes to 0. Customer unblocked!`, 'success');
+          this.showCustomerHistoryModal(customerId, customerName);
+          this.loadCustomersTable(this.searchQuery);
+        } catch (err) {
+          this.showToast(`Error resetting strikes: ${err.message}`, 'error');
         }
-      });
-
-      // Event Listener: Block (Set to 3)
-      document.getElementById('btn-modal-block')?.addEventListener('click', async () => {
-        if (confirm(`Are you sure you want to block ${customer.name || customerName} from booking?`)) {
-          try {
-            await ApiClient.updateCustomerStrikes(customerId, 3, true);
-            alert(`🔒 Customer has been blocked.`);
-            this.showCustomerHistoryModal(customerId, customerName);
-            this.loadCustomersTable(this.searchQuery);
-          } catch (err) {
-            alert(`Error blocking customer: ${err.message}`);
-          }
-        }
-      });
-
-      // Event Listener: Manual Strike Adjuster Pills (0, 1, 2, 3)
-      historyBody.querySelectorAll('.btn-strike-set').forEach((btn) => {
-        btn.addEventListener('click', async (e) => {
-          const count = parseInt(e.currentTarget.getAttribute('data-count'), 10);
-          const blockState = count >= 3;
-          try {
-            if (count === 0) {
-              await ApiClient.unblockCustomer(customerId);
-            } else {
-              await ApiClient.updateCustomerStrikes(customerId, count, blockState);
-            }
-            this.showCustomerHistoryModal(customerId, customerName);
-            this.loadCustomersTable(this.searchQuery);
-          } catch (err) {
-            alert(`Error updating strikes: ${err.message}`);
-          }
-        });
-      });
-
-    } catch (err) {
-      const historyBody = document.getElementById('cust-history-body');
-      if (historyBody) {
-        historyBody.innerHTML = `<div style="color: var(--danger); padding: 20px;">Failed to load customer details: ${err.message}</div>`;
       }
+    });
+
+    // Event Listener: Block (Set to 3)
+    document.getElementById('btn-modal-block')?.addEventListener('click', async () => {
+      const ok = await CalendarState.confirm({
+        title: 'Block Customer',
+        message: `Are you sure you want to block ${customer.name || customerName} from booking appointments?`,
+        confirmText: 'Block Customer',
+        cancelText: 'Cancel',
+        icon: '🔒',
+        type: 'danger',
+      });
+      if (ok) {
+        try {
+          await ApiClient.updateCustomerStrikes(customerId, 3, true);
+          this.showToast(`🔒 Customer has been blocked.`, 'warning');
+          this.showCustomerHistoryModal(customerId, customerName);
+          this.loadCustomersTable(this.searchQuery);
+        } catch (err) {
+          this.showToast(`Error blocking customer: ${err.message}`, 'error');
+        }
+      }
+    });
+
+    // Event Listener: Manual Strike Adjuster Pills (0, 1, 2, 3)
+    historyBody.querySelectorAll('.btn-strike-set').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        const count = parseInt(e.currentTarget.getAttribute('data-count'), 10);
+        const blockState = count >= 3;
+        try {
+          if (count === 0) {
+            await ApiClient.unblockCustomer(customerId);
+          } else {
+            await ApiClient.updateCustomerStrikes(customerId, count, blockState);
+          }
+          this.showCustomerHistoryModal(customerId, customerName);
+          this.loadCustomersTable(this.searchQuery);
+        } catch (err) {
+          this.showToast(`Error updating strikes: ${err.message}`, 'error');
+        }
+      });
+    });
+
+  } catch (err) {
+    const historyBody = document.getElementById('cust-history-body');
+    if (historyBody) {
+      historyBody.innerHTML = `<div style="color: var(--danger); padding: 20px;">Failed to load customer details: ${err.message}</div>`;
     }
   }
+}
 
-  showAdjustStrikesModal(customer) {
-    const modalContainer = document.getElementById('modal-container');
-    const currentStrikes = customer.yearlyNoShowCount || 0;
+showAdjustStrikesModal(customer) {
+  const modalContainer = document.getElementById('modal-container');
+  const currentStrikes = customer.yearlyNoShowCount || 0;
 
-    modalContainer.innerHTML = `
+  modalContainer.innerHTML = `
       <div class="modal-backdrop show">
         <div class="modal-content" style="max-width: 440px;">
           <div class="modal-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding-bottom: 10px;">
@@ -13272,66 +13391,66 @@ export class SalonDashboard {
       </div>
     `;
 
-    const closeModal = () => (modalContainer.innerHTML = '');
-    document.getElementById('btn-close-modal')?.addEventListener('click', closeModal);
+  const closeModal = () => (modalContainer.innerHTML = '');
+  document.getElementById('btn-close-modal')?.addEventListener('click', closeModal);
 
-    // Direct Strike Tier Handler
-    modalContainer.querySelectorAll('.btn-strike-tier').forEach((btn) => {
-      btn.addEventListener('click', async (e) => {
-        const count = parseInt(e.currentTarget.getAttribute('data-count'), 10);
-        const blockState = count >= 3;
-        try {
-          if (count === 0) {
-            await ApiClient.unblockCustomer(customer.id);
-          } else {
-            await ApiClient.updateCustomerStrikes(customer.id, count, blockState);
-          }
-          alert(`⚡ Updated penalty strikes to ${count}/3 for ${customer.name || 'Customer'}.`);
-          closeModal();
-          this.loadCustomersTable(this.searchQuery);
-        } catch (err) {
-          alert(`Error updating strikes: ${err.message}`);
+  // Direct Strike Tier Handler
+  modalContainer.querySelectorAll('.btn-strike-tier').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      const count = parseInt(e.currentTarget.getAttribute('data-count'), 10);
+      const blockState = count >= 3;
+      try {
+        if (count === 0) {
+          await ApiClient.unblockCustomer(customer.id);
+        } else {
+          await ApiClient.updateCustomerStrikes(customer.id, count, blockState);
         }
-      });
-    });
-
-    // Handler: Reset All (Set to 0)
-    document.getElementById('btn-opt-reset-all')?.addEventListener('click', async () => {
-      try {
-        await ApiClient.unblockCustomer(customer.id);
-        alert(`🎉 Reset all strikes to 0 for ${customer.name || 'Customer'}. Account unblocked & WhatsApp notification sent!`);
+        this.showToast(`⚡ Updated penalty strikes to ${count}/3 for ${customer.name || 'Customer'}.`, 'info');
         closeModal();
         this.loadCustomersTable(this.searchQuery);
       } catch (err) {
-        alert(`Error resetting strikes: ${err.message}`);
+        this.showToast(`Error updating strikes: ${err.message}`, 'error');
       }
     });
+  });
 
-    // Handler: Remove 1 Strike
-    document.getElementById('btn-opt-remove-1')?.addEventListener('click', async () => {
-      const newCount = Math.max(0, currentStrikes - 1);
-      try {
-        await ApiClient.updateCustomerStrikes(customer.id, newCount, newCount >= 3);
-        alert(`⚡ Reduced penalty strikes to ${newCount}/3 for ${customer.name || 'Customer'}.`);
-        closeModal();
-        this.loadCustomersTable(this.searchQuery);
-      } catch (err) {
-        alert(`Error updating strikes: ${err.message}`);
-      }
-    });
+  // Handler: Reset All (Set to 0)
+  document.getElementById('btn-opt-reset-all')?.addEventListener('click', async () => {
+    try {
+      await ApiClient.unblockCustomer(customer.id);
+      this.showToast(`🎉 Reset all strikes to 0 for ${customer.name || 'Customer'}. Account unblocked & WhatsApp notification sent!`, 'success');
+      closeModal();
+      this.loadCustomersTable(this.searchQuery);
+    } catch (err) {
+      this.showToast(`Error resetting strikes: ${err.message}`, 'error');
+    }
+  });
 
-    // Handler: Block Customer (Set to 3)
-    document.getElementById('btn-opt-block')?.addEventListener('click', async () => {
-      try {
-        await ApiClient.updateCustomerStrikes(customer.id, 3, true);
-        alert(`🔒 ${customer.name || 'Customer'} has been blocked (3/3 strikes).`);
-        closeModal();
-        this.loadCustomersTable(this.searchQuery);
-      } catch (err) {
-        alert(`Error blocking customer: ${err.message}`);
-      }
-    });
-  }
+  // Handler: Remove 1 Strike
+  document.getElementById('btn-opt-remove-1')?.addEventListener('click', async () => {
+    const newCount = Math.max(0, currentStrikes - 1);
+    try {
+      await ApiClient.updateCustomerStrikes(customer.id, newCount, newCount >= 3);
+      this.showToast(`⚡ Reduced penalty strikes to ${newCount}/3 for ${customer.name || 'Customer'}.`, 'info');
+      closeModal();
+      this.loadCustomersTable(this.searchQuery);
+    } catch (err) {
+      this.showToast(`Error updating strikes: ${err.message}`, 'error');
+    }
+  });
+
+  // Handler: Block Customer (Set to 3)
+  document.getElementById('btn-opt-block')?.addEventListener('click', async () => {
+    try {
+      await ApiClient.updateCustomerStrikes(customer.id, 3, true);
+      this.showToast(`🔒 ${customer.name || 'Customer'} has been blocked (3/3 strikes).`, 'warning');
+      closeModal();
+      this.loadCustomersTable(this.searchQuery);
+    } catch (err) {
+      this.showToast(`Error blocking customer: ${err.message}`, 'error');
+    }
+  });
+}
 }
 
 

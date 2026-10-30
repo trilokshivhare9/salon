@@ -1,5 +1,6 @@
 import { ApiClient } from '../../api.js';
 import { ScheduleDayOffDialog } from '../salon-settings/schedule-day-off-dialog.js';
+import { CalendarState } from '../calendar/calendar-state.js';
 
 /**
  * StaffApplyLeaveDialog
@@ -1052,22 +1053,22 @@ export class StaffApplyLeaveDialog {
       const reason = reasonInput?.value?.trim() || undefined;
 
       if (!targetStaffId) {
-        alert('Please select a Specialist / Stylist.');
+        CalendarState.notify('Please select a Specialist / Stylist.', 'warning');
         return;
       }
 
       if (!startDate || !endDate) {
-        alert('Please provide valid start and end dates.');
+        CalendarState.notify('Please provide valid start and end dates.', 'warning');
         return;
       }
 
       if (startDate < todayStr) {
-        alert('Cannot record leave for dates that have already passed.');
+        CalendarState.notify('Cannot record leave for dates that have already passed.', 'warning');
         return;
       }
 
       if (endDate < startDate) {
-        alert('End date cannot be earlier than start date.');
+        CalendarState.notify('End date cannot be earlier than start date.', 'warning');
         return;
       }
 
@@ -1092,6 +1093,7 @@ export class StaffApplyLeaveDialog {
         submitBtn.disabled = true;
         submitBtn.innerHTML = `<span>⏳ Processing Leave & Rescheduling...</span>`;
       }
+      CalendarState.showLoading('Recording specialist leave & updating calendar...');
 
       try {
         const res = await ApiClient.markStaffAbsent(targetStaffId, payload);
@@ -1099,24 +1101,16 @@ export class StaffApplyLeaveDialog {
         const staffName = selectedStaffObj ? selectedStaffObj.name : (fixedStaffName || 'Specialist');
         const msg = res?.data?.message || res?.message || `Leave recorded successfully for ${staffName}!`;
 
-        if (window.salonDashboard?.showToast || window.dashboardApp?.showToast) {
-          (window.salonDashboard?.showToast || window.dashboardApp?.showToast)(msg, 'success');
-        } else {
-          alert(msg);
-        }
-
         closeModal();
-        if (typeof onSuccess === 'function') await onSuccess();
-        if (window.salonDashboard?.currentCalendarView?.refresh) {
-          await window.salonDashboard.currentCalendarView.refresh();
-        } else if (window.dashboardApp?.currentCalendarView?.refresh) {
-          await window.dashboardApp.currentCalendarView.refresh();
+        CalendarState.hideLoading(0);
+        CalendarState.notify(msg, 'success');
+        if (typeof onSuccess === 'function') {
+          try { onSuccess(); } catch (e) { console.warn(e); }
         }
-        if (window.salonDashboard?.loadData) {
-          await window.salonDashboard.loadData(true);
-        }
+        await CalendarState.refreshAll();
       } catch (err) {
-        alert(err.message || 'Failed to record specialist leave.');
+        CalendarState.hideLoading(0);
+        CalendarState.notify(err.message || 'Failed to record specialist leave.', 'error');
         if (submitBtn) {
           submitBtn.disabled = false;
           submitBtn.innerHTML = `<span>👤 Record Specialist Leave</span>`;

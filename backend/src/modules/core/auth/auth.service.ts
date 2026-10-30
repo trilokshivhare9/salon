@@ -15,6 +15,7 @@ import { LoginDto } from './dto/login.dto';
 import { RegisterSalonDto } from './dto/register.dto';
 import {
   ForgotPasswordDto,
+  VerifyResetOtpDto,
   ResetPasswordWithOtpDto,
   ChangePasswordDto,
   UpdateAdminProfileDto,
@@ -485,6 +486,60 @@ export class AuthService {
       message: 'A 6-digit verification code has been dispatched to your email.',
       maskedEmail: this.maskEmail(admin.email),
       expiresInSeconds: 600,
+    };
+  }
+
+  /**
+   * Step 1.5: Pre-verify OTP before unlocking password fields
+   */
+  async verifyResetOtp(dto: VerifyResetOtpDto) {
+    const admin = await this.findAdminByIdentifier(dto.identifier);
+    if (!admin) {
+      throw new BadRequestException('Invalid or expired verification code.');
+    }
+
+    const resetRecord = await this.prisma.adminPasswordReset.findFirst({
+      where: {
+        adminId: admin.id,
+        isUsed: false,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!resetRecord) {
+      throw new BadRequestException('No active password reset request found. Please request a new code.');
+    }
+
+    if (new Date() > resetRecord.expiresAt) {
+      await this.prisma.adminPasswordReset.update({
+        where: { id: resetRecord.id },
+        data: { isUsed: true },
+      });
+      throw new BadRequestException('Verification code has expired. Please request a new code.');
+    }
+
+    if (resetRecord.attempts >= 3) {
+      await this.prisma.adminPasswordReset.update({
+        where: { id: resetRecord.id },
+        data: { isUsed: true },
+      });
+      throw new BadRequestException('Too many failed attempts. This code has been invalidated for security. Please request a new code.');
+    }
+
+    const inputHash = crypto.createHash('sha256').update(dto.otp.trim()).digest('hex');
+    if (inputHash !== resetRecord.otpHash) {
+      await this.prisma.adminPasswordReset.update({
+        where: { id: resetRecord.id },
+        data: { attempts: resetRecord.attempts + 1 },
+      });
+      const remaining = 2 - resetRecord.attempts;
+      throw new BadRequestException(`Incorrect verification code. ${remaining > 0 ? `${remaining} attempt(s) remaining.` : 'Code locked.'}`);
+    }
+
+    return {
+      success: true,
+      verified: true,
+      message: 'Verification code confirmed! You can now set your new password.',
     };
   }
 

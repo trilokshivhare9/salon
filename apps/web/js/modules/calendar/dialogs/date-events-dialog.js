@@ -3,6 +3,7 @@ import { ScheduleDayOffDialog } from '../../salon-settings/schedule-day-off-dial
 import { StaffApplyLeaveDialog } from '../../staff/staff-apply-leave-dialog.js';
 import { ClosureDialog } from './closure-dialog.js';
 import { StaffLeaveDialog } from './staff-leave-dialog.js';
+import { CalendarState } from '../calendar-state.js';
 
 /**
  * DateEventsDialog
@@ -738,22 +739,29 @@ export class DateEventsDialog {
     modalContainer.querySelectorAll('.btn-reopen-closure-date').forEach((btn) => {
       btn.addEventListener('click', async (e) => {
         const id = e.currentTarget.getAttribute('data-id');
-        if (confirm('Are you sure you want to cancel this closure and reopen the booking calendar for these dates?')) {
+        const confirmed = await CalendarState.confirm({
+          title: 'Reopen Salon Calendar?',
+          message: 'Are you sure you want to cancel this closure and reopen client bookings for these dates?',
+          confirmText: 'Reopen Salon',
+          cancelText: 'Keep Closed',
+          type: 'danger',
+          icon: '🌴',
+        });
+        if (confirmed) {
+          CalendarState.showLoading('Reopening salon calendar...');
           try {
             await ApiClient.deleteSalonClosure(id);
-            if (app?.showToast || window.salonDashboard?.showToast || window.dashboardApp?.showToast) {
-              (app?.showToast || window.salonDashboard?.showToast || window.dashboardApp?.showToast)('Closure cancelled and calendar reopened.', 'success');
-            } else {
-              alert('Closure cancelled and calendar reopened.');
-            }
             closeModal();
-            await onRefresh();
-          } catch (err) {
-            if (app?.showToast || window.salonDashboard?.showToast || window.dashboardApp?.showToast) {
-              (app?.showToast || window.salonDashboard?.showToast || window.dashboardApp?.showToast)(err.message || 'Failed to cancel closure.', 'error');
-            } else {
-              alert(err.message || 'Failed to cancel closure.');
+            CalendarState.hideLoading(0);
+            CalendarState.optimisticRemoveClosure(id);
+            CalendarState.notify('Closure cancelled and calendar reopened.', 'success');
+            await CalendarState.refreshAll();
+            if (typeof onRefresh === 'function') {
+              try { onRefresh(); } catch (e) { console.warn(e); }
             }
+          } catch (err) {
+            CalendarState.hideLoading(0);
+            CalendarState.notify(err.message || 'Failed to cancel closure.', 'error');
           }
         }
       });
@@ -767,7 +775,10 @@ export class DateEventsDialog {
         if (l) {
           StaffLeaveDialog.showLeaveDetailModal(l, async () => {
             closeModal();
-            await onRefresh();
+            await CalendarState.refreshAll();
+            if (typeof onRefresh === 'function') {
+              try { await onRefresh(); } catch (e) { console.warn(e); }
+            }
           });
         }
       });
@@ -779,22 +790,29 @@ export class DateEventsDialog {
         const sId = e.currentTarget.getAttribute('data-staff-id');
         const aId = e.currentTarget.getAttribute('data-absence-id');
         const sName = e.currentTarget.getAttribute('data-name');
-        if (confirm(`Are you sure you want to cancel the scheduled leave for ${sName}?`)) {
+        const confirmed = await CalendarState.confirm({
+          title: 'Cancel Specialist Leave?',
+          message: `Are you sure you want to cancel the scheduled leave for ${sName}? Availability will be restored immediately.`,
+          confirmText: 'Cancel Leave',
+          cancelText: 'Keep Leave',
+          type: 'danger',
+          icon: '👤',
+        });
+        if (confirmed) {
+          CalendarState.showLoading('Cancelling specialist leave...');
           try {
             await ApiClient.cancelStaffAbsence(sId, aId);
-            if (app?.showToast || window.salonDashboard?.showToast || window.dashboardApp?.showToast) {
-              (app?.showToast || window.salonDashboard?.showToast || window.dashboardApp?.showToast)(`Leave cancelled for ${sName}.`, 'success');
-            } else {
-              alert(`Leave cancelled for ${sName}.`);
-            }
             closeModal();
-            await onRefresh();
-          } catch (err) {
-            if (app?.showToast || window.salonDashboard?.showToast || window.dashboardApp?.showToast) {
-              (app?.showToast || window.salonDashboard?.showToast || window.dashboardApp?.showToast)(err.message || 'Failed to cancel leave.', 'error');
-            } else {
-              alert(err.message || 'Failed to cancel leave.');
+            CalendarState.hideLoading(0);
+            CalendarState.optimisticRemoveLeave(aId);
+            CalendarState.notify(`Leave cancelled for ${sName}.`, 'success');
+            await CalendarState.refreshAll();
+            if (typeof onRefresh === 'function') {
+              try { onRefresh(); } catch (e) { console.warn(e); }
             }
+          } catch (err) {
+            CalendarState.hideLoading(0);
+            CalendarState.notify(err.message || 'Failed to cancel leave.', 'error');
           }
         }
       });

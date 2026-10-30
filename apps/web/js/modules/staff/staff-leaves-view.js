@@ -1,5 +1,6 @@
 import { WorkspaceHeader } from '../shared/workspace-header.js';
 import { CalendarView } from '../calendar/calendar-view.js';
+import { UniversalLoader } from '../shared/universal-loader.js';
 
 /**
  * StaffLeavesView
@@ -19,9 +20,11 @@ export class StaffLeavesView {
       <div class="staff-workspace-shell staff-leaves-workspace">
         ${headerHtml}
         <div class="workspace-body-content" id="staff-leaves-calendar-root">
-          <div style="display:flex;align-items:center;justify-content:center;min-height:360px;color:#a5b4fc;">
-            <div style="width:34px;height:34px;border:3px solid rgba(165,180,252,0.2);border-top-color:#818cf8;border-radius:50%;animation:spin .8s linear infinite;"></div>
-          </div>
+          ${UniversalLoader.render({
+            title: `Loading leaves for ${staff?.name || 'specialist'}...`,
+            subtitle: 'Syncing specialist schedule & time off...',
+            minHeight: '360px',
+          })}
         </div>
       </div>
     `;

@@ -18,6 +18,7 @@ export const ENDPOINTS = {
     FORGOT_PASSWORD_CONFIRM: '/auth/forgot-password/confirm',
     FORGOT_PASSWORD_LOOKUP: '/auth/forgot-password-lookup',
     FORGOT_PASSWORD: '/auth/forgot-password',
+    VERIFY_RESET_OTP: '/auth/verify-reset-otp',
     RESET_PASSWORD_OTP: '/auth/reset-password-otp',
     CHANGE_PASSWORD: '/auth/change-password',
     PROFILE: '/auth/profile',
