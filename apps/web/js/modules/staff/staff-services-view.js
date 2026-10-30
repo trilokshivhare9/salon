@@ -12,6 +12,8 @@
  */
 import { ApiClient, SalonRepository } from '../../api.js';
 import { LoadingOverlay } from '../shared/loading-overlay.js';
+import { AppSnackbar } from '../shared/app-snackbar.js';
+import { CalendarState } from '../calendar/index.js';
 
 export class StaffServicesView {
   static render(ctx, staff) {
@@ -564,13 +566,24 @@ export class StaffServicesView {
     // 3. Unsaved changes guard on Back button
     const backBtn = container.querySelector('#btn-back-to-profile');
     if (backBtn) {
-      backBtn.addEventListener('click', (e) => {
+      backBtn.addEventListener('click', async (e) => {
         if (isDirty()) {
-          const leave = confirm('You have unsaved changes to assigned services. Leave without saving?');
-          if (!leave) {
-            e.preventDefault();
-            e.stopPropagation();
-            return false;
+          e.preventDefault();
+          e.stopPropagation();
+          const leave = await CalendarState.confirm({
+            title: 'Unsaved Service Changes',
+            message: `You have unsaved changes to assigned services for ${staff.name}. Leave without saving?`,
+            confirmText: 'Leave Without Saving',
+            cancelText: 'Stay & Save',
+            icon: '⚠️',
+            type: 'warning',
+          });
+          if (leave) {
+            if (ctx && typeof ctx.renderStaffWorkingHours === 'function') {
+              ctx.renderStaffWorkingHours(staff.id);
+            } else if (ctx && typeof ctx.render === 'function') {
+              ctx.render();
+            }
           }
         }
       }, true);

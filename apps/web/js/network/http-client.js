@@ -34,6 +34,16 @@ export class ApiError extends Error {
   }
 }
 
+export function getClientId() {
+  if (typeof window === 'undefined' || !window.sessionStorage) return 'server-session';
+  let id = window.sessionStorage.getItem('salon_client_id');
+  if (!id) {
+    id = 'cid_' + (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now());
+    window.sessionStorage.setItem('salon_client_id', id);
+  }
+  return id;
+}
+
 export class HttpClient {
   /**
    * Dispatches an HTTP request through the resilient gateway.
@@ -46,6 +56,15 @@ export class HttpClient {
   static async request(endpoint, options = {}, session = SalonSession, retriesRemaining = 2) {
     const method = (options.method || 'GET').toUpperCase();
     const isGet = method === 'GET';
+
+    // Track user-initiated mutations to suppress duplicate SSE self-echoes across the entire app
+    if (!isGet && typeof window !== 'undefined') {
+      const now = Date.now();
+      window.lastLocalActionTimestamp = now;
+      window.lastDashboardActionTimestamp = now;
+      if (window.salonDashboard) window.salonDashboard.lastLocalActionTimestamp = now;
+      if (window.dashboardApp) window.dashboardApp.lastLocalActionTimestamp = now;
+    }
 
     // 1. In-flight deduplication key for concurrent identical GET requests
     const dedupeKey = isGet ? `${session?.namespace || 'public'}:${endpoint}` : null;
@@ -62,6 +81,13 @@ export class HttpClient {
 
     const requestPromise = this._execute(endpoint, options, session, retriesRemaining, isGet)
       .finally(() => {
+        if (!isGet && typeof window !== 'undefined') {
+          const finishedNow = Date.now();
+          window.lastLocalActionTimestamp = finishedNow;
+          window.lastDashboardActionTimestamp = finishedNow;
+          if (window.salonDashboard) window.salonDashboard.lastLocalActionTimestamp = finishedNow;
+          if (window.dashboardApp) window.dashboardApp.lastLocalActionTimestamp = finishedNow;
+        }
         if (dedupeKey) inFlightRequests.delete(dedupeKey);
         if (mutationKey) inFlightMutations.delete(mutationKey);
       });
@@ -87,6 +113,7 @@ export class HttpClient {
       'Content-Type': 'application/json',
       'Cache-Control': 'no-cache, no-store, must-revalidate',
       'Pragma': 'no-cache',
+      'X-Client-Id': getClientId(),
       ...options.headers,
     };
 

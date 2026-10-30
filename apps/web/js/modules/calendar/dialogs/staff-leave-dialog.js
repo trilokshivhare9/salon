@@ -1,5 +1,6 @@
 import { ApiClient } from '../../../api.js';
 import { StaffApplyLeaveDialog } from '../../staff/staff-apply-leave-dialog.js';
+import { CalendarState } from '../calendar-state.js';
 
 /**
  * StaffLeaveDialog
@@ -341,22 +342,29 @@ export class StaffLeaveDialog {
         const sId = e.currentTarget.getAttribute('data-staff-id');
         const aId = e.currentTarget.getAttribute('data-absence-id');
         const sName = e.currentTarget.getAttribute('data-name');
-        if (confirm(`Are you sure you want to cancel the scheduled leave for ${sName}?`)) {
+        const confirmed = await CalendarState.confirm({
+          title: 'Cancel Specialist Leave?',
+          message: `Are you sure you want to cancel the scheduled leave for ${sName}? Specialist availability will be restored immediately.`,
+          confirmText: 'Cancel Leave',
+          cancelText: 'Keep Leave',
+          type: 'danger',
+          icon: '👤',
+        });
+        if (confirmed) {
+          CalendarState.showLoading('Cancelling specialist leave...');
           try {
             await ApiClient.cancelStaffAbsence(sId, aId);
-            if (app?.showToast || window.salonDashboard?.showToast || window.dashboardApp?.showToast) {
-              (app?.showToast || window.salonDashboard?.showToast || window.dashboardApp?.showToast)(`Leave cancelled for ${sName}.`, 'success');
-            } else {
-              alert(`Leave cancelled for ${sName}.`);
-            }
             closeModal();
-            await onRefresh();
-          } catch (err) {
-            if (app?.showToast || window.salonDashboard?.showToast || window.dashboardApp?.showToast) {
-              (app?.showToast || window.salonDashboard?.showToast || window.dashboardApp?.showToast)(err.message || 'Failed to cancel leave.', 'error');
-            } else {
-              alert(err.message || 'Failed to cancel leave.');
+            CalendarState.hideLoading(0);
+            CalendarState.optimisticRemoveLeave(aId);
+            CalendarState.notify(`Leave cancelled for ${sName}.`, 'success');
+            await CalendarState.refreshAll();
+            if (typeof onRefresh === 'function') {
+              try { onRefresh(); } catch (e) { console.warn(e); }
             }
+          } catch (err) {
+            CalendarState.hideLoading(0);
+            CalendarState.notify(err.message || 'Failed to cancel leave.', 'error');
           }
         }
       });
@@ -547,13 +555,29 @@ export class StaffLeaveDialog {
     });
 
     detailContainer.querySelector('#btn-detail-cancel-leave')?.addEventListener('click', async () => {
-      if (confirm(`Are you sure you want to cancel the scheduled leave for ${stylistName}?`)) {
+      const confirmed = await CalendarState.confirm({
+        title: 'Cancel Specialist Leave?',
+        message: `Are you sure you want to cancel the scheduled leave for ${stylistName}? Specialist availability will be restored immediately.`,
+        confirmText: 'Cancel Leave',
+        cancelText: 'Keep Leave',
+        type: 'danger',
+        icon: '👤',
+      });
+      if (confirmed) {
+        CalendarState.showLoading('Cancelling specialist leave...');
         try {
           await ApiClient.cancelStaffAbsence(leave.stylistId, leave.id || leave.absenceId);
           closeDetail();
-          await onCancelled();
+          CalendarState.hideLoading(0);
+          CalendarState.optimisticRemoveLeave(leave.id || leave.absenceId);
+          CalendarState.notify(`Leave cancelled for ${stylistName}.`, 'success');
+          await CalendarState.refreshAll();
+          if (typeof onCancelled === 'function') {
+            try { onCancelled(); } catch (e) { console.warn(e); }
+          }
         } catch (err) {
-          alert(err.message || 'Failed to cancel leave.');
+          CalendarState.hideLoading(0);
+          CalendarState.notify(err.message || 'Failed to cancel leave.', 'error');
         }
       }
     });

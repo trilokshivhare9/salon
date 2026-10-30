@@ -16,6 +16,17 @@ export class ForgotPasswordDto {
   identifier?: string;
 }
 
+export class VerifyResetOtpDto {
+  @IsString()
+  @IsNotEmpty({ message: 'Owner registered mobile number or email is required' })
+  identifier: string;
+
+  @IsString()
+  @IsNotEmpty({ message: '6-digit OTP code is required' })
+  @Matches(/^\d{6}$/, { message: 'OTP must be exactly 6 digits' })
+  otp: string;
+}
+
 export class ResetPasswordWithOtpDto {
   @IsString()
   @IsNotEmpty({ message: 'Phone number or email is required' })

@@ -1,5 +1,8 @@
 import { ApiClient } from './api.js';
 import { StaffApplyLeaveDialog } from './modules/staff/index.js';
+import { PageDataLoader } from './modules/shared/app-loaders.js';
+import { AppSnackbar } from './modules/shared/app-snackbar.js';
+import { CalendarState } from './modules/calendar/index.js';
 
 /**
  * EMPLOYEE LEAVE & AVAILABILITY OVERRIDE FRONTEND MODULE
@@ -143,10 +146,10 @@ export class LeaveManagementUI {
 
   // Show Toast wrapper
   toast(msg, type = 'info') {
-    if (typeof this.app.showToast === 'function') {
+    if (typeof this.app?.showToast === 'function') {
       this.app.showToast(msg, type);
     } else {
-      alert(msg);
+      AppSnackbar.show(msg, type);
     }
   }
 
@@ -286,11 +289,8 @@ export class LeaveManagementUI {
             <button class="close-btn" id="btn-close-history-modal">&times;</button>
           </div>
 
-          <div id="leave-history-content" style="min-height: 200px;">
-            <div style="display: flex; align-items: center; justify-content: center; height: 160px; color: var(--text-secondary); gap: 10px;">
-              <div class="spinner-small" style="width: 20px; height: 20px; border: 2px solid rgba(255,255,255,0.2); border-top-color: #A855F7; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
-              <span>Loading leave records...</span>
-            </div>
+          <div id="leave-history-content" style="min-height: 180px;">
+            ${PageDataLoader.render({ title: 'Loading leave records...', minHeight: '160px', variant: 'compact' })}
           </div>
         </div>
       </div>
@@ -461,7 +461,15 @@ export class LeaveManagementUI {
       container.querySelectorAll('.btn-cancel-leave-action').forEach((btn) => {
         btn.addEventListener('click', async (e) => {
           const abId = e.currentTarget.getAttribute('data-absence-id');
-          if (confirm(`Cancel leave for ${staffName}? Specialist availability will be restored for unblocked intervals. Existing reassigned appointments will not automatically revert.`)) {
+          const ok = await CalendarState.confirm({
+            title: 'Cancel Leave',
+            message: `Cancel leave for ${staffName}? Specialist availability will be restored for unblocked intervals.`,
+            confirmText: 'Cancel Leave',
+            cancelText: 'Keep Leave',
+            icon: '🌴',
+            type: 'warning',
+          });
+          if (ok) {
             try {
               await ApiClient.cancelStaffAbsence(staffId, abId);
               this.toast(`Leave cancelled for ${staffName}`, 'success');
@@ -776,7 +784,15 @@ export class LeaveManagementUI {
       });
 
       document.getElementById('btn-detail-cancel')?.addEventListener('click', async () => {
-        if (confirm(`Cancel leave for ${staffName}? Specialist availability will be restored for unblocked intervals.`)) {
+        const ok = await CalendarState.confirm({
+          title: 'Cancel Leave',
+          message: `Cancel leave for ${staffName}? Specialist availability will be restored for unblocked intervals.`,
+          confirmText: 'Cancel Leave',
+          cancelText: 'Keep Leave',
+          icon: '🌴',
+          type: 'warning',
+        });
+        if (ok) {
           try {
             await ApiClient.cancelStaffAbsence(staffId, absence.id);
             this.toast(`Leave cancelled for ${staffName}`, 'success');

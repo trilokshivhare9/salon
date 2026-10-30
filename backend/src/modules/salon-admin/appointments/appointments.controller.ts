@@ -50,10 +50,13 @@ export class AppointmentsController {
   stream(
     @Param('salonId') salonId: string,
     @Headers('last-event-id') lastEventIdHeader?: string,
+    @Headers('x-client-id') clientIdHeader?: string,
     @Query('lastEventId') lastEventIdQuery?: string,
+    @Query('clientId') clientIdQuery?: string,
   ): Observable<MessageEvent> {
     const lastEventId = lastEventIdHeader || lastEventIdQuery;
-    const events$ = this.appointmentsService.getSalonEvents(salonId, lastEventId).pipe(
+    const clientId = clientIdHeader || clientIdQuery;
+    const events$ = this.appointmentsService.getSalonEvents(salonId, lastEventId, clientId).pipe(
       map((event) => ({
         id: String(event.id || ''),
         data: event,

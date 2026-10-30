@@ -1,5 +1,6 @@
 import { Icons } from '../../icons.js';
 import { ApiClient } from '../../api.js';
+import { AppSnackbar } from '../shared/app-snackbar.js';
 
 /**
  * BookingQrView
@@ -300,7 +301,7 @@ export class BookingQrView {
         if (typeof this.app?.showToast === 'function') {
           this.app.showToast('WhatsApp booking link copied!', 'success');
         } else {
-          alert('Link copied to clipboard!\n' + url);
+          AppSnackbar.success('WhatsApp booking link copied!');
         }
       }
     });
@@ -313,7 +314,7 @@ export class BookingQrView {
         if (typeof this.app?.showToast === 'function') {
           this.app.showToast('Online booking link copied!', 'success');
         } else {
-          alert('Link copied to clipboard!\n' + url);
+          AppSnackbar.success('Online booking link copied!');
         }
       }
     });
@@ -413,7 +414,7 @@ export class BookingQrView {
     document.getElementById('btn-trigger-print-standee')?.addEventListener('click', () => {
       const printWin = window.open('', '_blank', 'width=650,height=850');
       if (!printWin) {
-        alert('Popup blocked! Please allow popups for this site to print the standee.');
+        AppSnackbar.warning('Popup blocked! Please allow popups for this site in your browser to print the standee.');
         return;
       }
       printWin.document.write(`
@@ -611,7 +612,7 @@ export class BookingQrView {
       if (typeof this.app?.showToast === 'function') {
         this.app.showToast('Booking link copied to clipboard!', 'success');
       } else {
-        alert('Link copied to clipboard!\n' + targetUrl);
+        AppSnackbar.success('Booking link copied to clipboard!');
       }
     });
   }

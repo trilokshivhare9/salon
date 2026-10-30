@@ -152,6 +152,54 @@ describe('AuthService: Password Reset, Email OTP & Profile Management', () => {
     });
   });
 
+  describe('verifyResetOtp', () => {
+    const rawOtp = '123456';
+    const otpHash = crypto.createHash('sha256').update(rawOtp).digest('hex');
+
+    it('should throw BadRequestException if reset request not found', async () => {
+      prismaService.adminPasswordReset.findFirst.mockResolvedValue(null);
+
+      await expect(
+        authService.verifyResetOtp({
+          identifier: mockEmail,
+          otp: rawOtp,
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should throw BadRequestException if OTP code is incorrect', async () => {
+      prismaService.adminPasswordReset.findFirst.mockResolvedValue({
+        id: 'reset-1',
+        attempts: 1,
+        otpHash,
+      });
+
+      await expect(
+        authService.verifyResetOtp({
+          identifier: mockEmail,
+          otp: '999999',
+        }),
+      ).rejects.toThrow(/Incorrect verification code/);
+    });
+
+    it('should successfully verify valid OTP without consuming it', async () => {
+      prismaService.adminPasswordReset.findFirst.mockResolvedValue({
+        id: 'reset-1',
+        attempts: 0,
+        otpHash,
+        expiresAt: new Date(Date.now() + 100000),
+      });
+
+      const result = await authService.verifyResetOtp({
+        identifier: mockEmail,
+        otp: rawOtp,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.verified).toBe(true);
+    });
+  });
+
   describe('resetPasswordWithOtp', () => {
     const rawOtp = '123456';
     const otpHash = crypto.createHash('sha256').update(rawOtp).digest('hex');

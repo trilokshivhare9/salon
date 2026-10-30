@@ -9,6 +9,8 @@ import { FestivalDialog } from './dialogs/festival-dialog.js';
 import { DateEventsDialog } from './dialogs/date-events-dialog.js';
 import { ScheduleDayOffDialog } from '../salon-settings/schedule-day-off-dialog.js';
 import { StaffApplyLeaveDialog } from '../staff/staff-apply-leave-dialog.js';
+import { CalendarState } from './calendar-state.js';
+import { UniversalLoader } from '../shared/universal-loader.js';
 export function getFestivalIcon(name = '', religion = '') {
   const lower = String(name || '').toLowerCase();
   if (lower.includes('diwali') || lower.includes('deepavali')) return '🪔';
@@ -64,7 +66,7 @@ export class CalendarView {
   }
 
   _toast(msg, type = 'info') {
-    if (this.app?.showToast) this.app.showToast(msg, type);
+    CalendarState.notify(msg, type);
   }
 
   static async mount(container, options = {}) {
@@ -76,6 +78,7 @@ export class CalendarView {
   async mount(container, opts = {}) {
     if (!container) return;
     this.container = container;
+    CalendarState.registerActiveView(this);
     if (this.app) this.app.currentCalendarView = this;
     if (opts.calendarFor !== undefined) this.calendarFor = opts.calendarFor;
     if (opts.staffId !== undefined) this.staffId = opts.staffId;
@@ -91,37 +94,108 @@ export class CalendarView {
     this.attachListeners();
   }
 
-  _showLoading() {
+  _showLoading(title = 'Loading live calendar...') {
     if (!this.container) return;
-    this.container.innerHTML = `
-      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:360px;gap:14px;color:#a5b4fc;">
-        <div style="width:38px;height:38px;border:3px solid rgba(165,180,252,0.2);border-top-color:#818cf8;border-radius:50%;animation:spin .8s linear infinite;"></div>
-        <div style="font-size:0.88rem;font-weight:600;color:#cbd5e1;">Loading live calendar...</div>
-      </div>`;
+    this.container.innerHTML = UniversalLoader.render({
+      title,
+      subtitle: this.calendarFor === 'STAFF' ? 'Syncing specialist roster & leaves...' : 'Syncing operating shifts, leaves & closures...',
+      minHeight: '380px',
+    });
   }
 
   async fetchFreshSchedule() {
+    if (this._inFlightSchedulePromise) {
+      return this._inFlightSchedulePromise;
+    }
     const targetMonth = `${this.year}-${String(this.month + 1).padStart(2, '0')}`;
     const isStaff = this.calendarFor === 'STAFF' && !!this.staffId;
-    try {
-      const res = await ApiClient.getCalendarSchedule({
-        month: targetMonth,
-        calendarFor: isStaff ? 'STAFF' : 'SALON',
-        ...(isStaff ? { staffId: this.staffId } : {}),
-      }, true);
+    this._inFlightSchedulePromise = (async () => {
+      try {
+        const res = await ApiClient.getCalendarSchedule({
+          month: targetMonth,
+          calendarFor: isStaff ? 'STAFF' : 'SALON',
+          ...(isStaff ? { staffId: this.staffId } : {}),
+        }, true);
 
-      const schedule = (res && res.data !== undefined) ? res.data : res;
-      if (schedule) {
-        this.scheduleData = schedule;
-        if (this.app) {
-          this.app.calendarSchedule = schedule;
-          if (schedule.salonSchedule?.closures) this.app.closuresList = schedule.salonSchedule.closures;
-          if (schedule.salonSchedule?.weeklyHours) this.app.salonWorkingHours = schedule.salonSchedule.weeklyHours;
+        const schedule = (res && res.data !== undefined) ? res.data : res;
+        if (schedule) {
+          this.scheduleData = schedule;
+          if (this.app) {
+            this.app.calendarSchedule = schedule;
+            if (schedule.salonSchedule?.closures) this.app.closuresList = schedule.salonSchedule.closures;
+            if (schedule.salonSchedule?.weeklyHours) this.app.salonWorkingHours = schedule.salonSchedule.weeklyHours;
+          }
         }
+      } catch (err) {
+        console.warn('[CalendarView] fetchFreshSchedule error:', err);
       }
-    } catch (err) {
-      console.warn('[CalendarView] fetchFreshSchedule error:', err);
+    })().finally(() => {
+      this._inFlightSchedulePromise = null;
+    });
+
+    return this._inFlightSchedulePromise;
+  }
+
+  /**
+   * Optimistically remove a salon closure from active state and re-render in 0ms.
+   * @param {string} closureId
+   */
+  removeClosure(closureId) {
+    if (!this.scheduleData) return;
+    const cid = String(closureId);
+    if (Array.isArray(this.scheduleData.salonSchedule?.closures)) {
+      this.scheduleData.salonSchedule.closures = this.scheduleData.salonSchedule.closures.filter(
+        (c) => String(c.id) !== cid
+      );
     }
+    if (Array.isArray(this.app?.closuresList)) {
+      this.app.closuresList = this.app.closuresList.filter((c) => String(c.id) !== cid);
+    }
+    if (Array.isArray(this.scheduleData.calendarDays)) {
+      this.scheduleData.calendarDays.forEach((day) => {
+        if (Array.isArray(day.closures)) {
+          day.closures = day.closures.filter((c) => String(c.id) !== cid);
+          if (day.closures.length === 0 && day.status === 'CLOSED') {
+            day.isClosed = false;
+            day.status = 'OPEN';
+          }
+        }
+      });
+    }
+    this.render();
+    this.attachListeners();
+  }
+
+  /**
+   * Optimistically remove a staff leave from active state and re-render in 0ms.
+   * @param {string} absenceId
+   */
+  removeStaffLeave(absenceId) {
+    if (!this.scheduleData) return;
+    const aid = String(absenceId);
+    if (Array.isArray(this.scheduleData.leaves)) {
+      this.scheduleData.leaves = this.scheduleData.leaves.filter(
+        (l) => String(l.id || l.absenceId) !== aid
+      );
+    }
+    if (Array.isArray(this.scheduleData.calendarDays)) {
+      this.scheduleData.calendarDays.forEach((day) => {
+        if (Array.isArray(day.stylistAbsences)) {
+          day.stylistAbsences = day.stylistAbsences.filter(
+            (a) => String(a.id || a.absenceId) !== aid
+          );
+        }
+      });
+    }
+    if (Array.isArray(this.app?.staffList)) {
+      this.app.staffList.forEach((st) => {
+        if (Array.isArray(st.absences)) {
+          st.absences = st.absences.filter((a) => String(a.id) !== aid);
+        }
+      });
+    }
+    this.render();
+    this.attachListeners();
   }
 
   async changeMonth(delta) {
@@ -424,8 +498,6 @@ export class CalendarView {
       return (sy == this.year && sm == mStr) || (ey == this.year && em == mStr) || (s <= `${this.year}-${mStr}-01` && e >= `${this.year}-${mStr}-28`);
     });
 
-    const upcomingFestivals = (this.getFestivalsList() || []).filter((f) => f.date >= todayISO).slice(0, 4);
-
     return `
       <!-- Card 1: Closures or Leaves -->
       <div class="cal-side-card">
@@ -505,42 +577,6 @@ export class CalendarView {
             </div>
           `}
         `}
-      </div>
-
-      <!-- Card 2: Upcoming Recognized Festivals -->
-      <div class="cal-side-card">
-        <div class="cal-side-header">
-          <span style="color:#d8b4fe;">🪔 Upcoming Recognized Festivals</span>
-          <span style="font-size:0.65rem;color:#a855f7;font-weight:700;">AUTO-DETECT</span>
-        </div>
-        <div class="festivals-list-container">
-          ${upcomingFestivals.length === 0 ? `
-            <div style="font-size:0.74rem;color:#94a3b8;text-align:center;padding:12px 0;">No upcoming festivals.</div>
-          ` : upcomingFestivals.map((f) => {
-            const isClosed = monthClosures.some((c) => {
-              const s = String(c.startDate).split('T')[0];
-              const e = String(c.endDate).split('T')[0];
-              return f.date >= s && f.date <= e;
-            });
-            const festDow = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'][new Date(f.date + 'T00:00:00').getDay()];
-            const isWeeklyOff = f.isSalonWeeklyOff !== undefined
-              ? f.isSalonWeeklyOff
-              : (this.scheduleData?.salonSchedule?.weeklyHours || this.app?.salonWorkingHours || []).find((h) => h.dayOfWeek === festDow)?.isClosed ?? false;
-            const df = new Date(f.date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
-            return `
-              <div class="festival-item-row">
-                <div class="festival-item-info">
-                  <span class="festival-item-name">${f.icon || '🪔'} ${f.name}</span>
-                  <span class="festival-item-date">${df} · ${f.type}</span>
-                </div>
-                <div>
-                  ${isClosed ? '<span class="btn-declare-festival is-already-closed">✓ Closed</span>' : (isWeeklyOff ? '<span class="btn-declare-festival is-already-closed" style="color:#38bdf8;border-color:rgba(56,189,248,0.35);background:rgba(56,189,248,0.1);">💤 Weekly Off</span>' : (!isStaff ? `
-                    <button type="button" class="btn-declare-festival btn-quick-declare-festival" data-date="${f.date}" data-name="${f.name.replace(/"/g, '&quot;')}" data-type="${f.type || 'FESTIVAL'}" data-icon="${f.icon || '🪔'}">+ Close Salon</button>
-                  ` : '<span style="font-size:0.68rem;color:#a855f7;">Festival</span>'))}
-                </div>
-              </div>`;
-          }).join('')}
-        </div>
       </div>`;
   }
 
@@ -597,7 +633,6 @@ export class CalendarView {
       </div>`;
 
     const legendHtml = this._legendHtml(counts, isStaff);
-    const sidePanelHtml = this._sidePanelHtml(counts, allMonthLeaves, isStaff);
 
     if (isStaff) {
       // STAFF MODE LAYOUT
@@ -614,9 +649,6 @@ export class CalendarView {
             </div>
             <div class="holiday-cal-weekdays stylist-cal-weekdays">${weekdaysHtml}</div>
             <div class="holiday-cal-grid stylist-cal-grid">${cellsHtml}</div>
-          </div>
-          <div class="holiday-cal-side" id="holiday-management-section">
-            ${sidePanelHtml}
           </div>
         </div>`;
     } else {
@@ -638,7 +670,7 @@ export class CalendarView {
 
           <div class="settings-panel-body" style="gap:8px;">
             <div class="holiday-cal-layout">
-              <div class="holiday-cal-main">
+              <div class="holiday-cal-main" style="width:100%;">
                 <div class="holiday-cal-grid-wrapper">
                   <div class="holiday-cal-header-card">
                     ${navHtml}
@@ -647,9 +679,6 @@ export class CalendarView {
                   <div class="holiday-cal-weekdays">${weekdaysHtml}</div>
                   <div class="holiday-cal-grid">${cellsHtml}</div>
                 </div>
-              </div>
-              <div class="holiday-cal-side" id="holiday-management-section">
-                ${sidePanelHtml}
               </div>
             </div>
           </div>
@@ -664,11 +693,7 @@ export class CalendarView {
       existingClosures: this.scheduleData?.salonSchedule?.closures || this.app?.closuresList || [],
       staffList: this.app?.staffList || [],
       onSuccess: async () => {
-        this._toast('Day off scheduled!', 'success');
-        this._showLoading();
-        await this.fetchFreshSchedule();
-        this.render();
-        this.attachListeners();
+        await CalendarState.refreshAll();
       },
     });
   }
@@ -682,11 +707,7 @@ export class CalendarView {
       salonWorkingHours: this.scheduleData?.salonSchedule?.weeklyHours || this.app?.salonWorkingHours || [],
       staffList: this.app?.staffList || [],
       onSuccess: async () => {
-        this._toast('Specialist leave recorded!', 'success');
-        this._showLoading();
-        await this.fetchFreshSchedule();
-        this.render();
-        this.attachListeners();
+        await CalendarState.refreshAll();
       },
     });
   }
@@ -742,7 +763,6 @@ export class CalendarView {
             staffId: this.staffId,
             staffName: this.staffName,
             onRefresh: async () => {
-              this._showLoading();
               await this.fetchFreshSchedule();
               this.render();
               this.attachListeners();
@@ -773,7 +793,6 @@ export class CalendarView {
             scheduleData: this.scheduleData,
             getFestivalForDate: (dt) => this.getFestivalForDate(dt),
             onRefresh: async () => {
-              this._showLoading();
               await this.fetchFreshSchedule();
               this.render();
               this.attachListeners();
@@ -783,44 +802,28 @@ export class CalendarView {
       });
     });
 
-    $$('.btn-quick-declare-festival').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        const fd = e.currentTarget.getAttribute('data-date');
-        const fn = e.currentTarget.getAttribute('data-name');
-        const ft = e.currentTarget.getAttribute('data-type') || 'FESTIVAL';
-        const fi = e.currentTarget.getAttribute('data-icon') || '🪔';
-        ScheduleDayOffDialog.open({
-          initialDate: fd,
-          closureType: 'FESTIVAL',
-          reason: fn,
-          festivalInfo: { name: fn, type: ft, icon: fi, date: fd },
-          salonWorkingHours: this.scheduleData?.salonSchedule?.weeklyHours || this.app?.salonWorkingHours || [],
-          existingClosures: this.scheduleData?.salonSchedule?.closures || this.app?.closuresList || [],
-          staffList: this.app?.staffList || [],
-          onSuccess: async () => {
-            this._toast(`Salon closed for ${fn}!`, 'success');
-            this._showLoading();
-            await this.fetchFreshSchedule();
-            this.render();
-            this.attachListeners();
-          },
-        });
-      });
-    });
-
     $$('.btn-delete-closure-direct').forEach((btn) => {
       btn.addEventListener('click', async (e) => {
         const id = e.currentTarget.getAttribute('data-id');
-        if (confirm('Reopen salon for these dates?')) {
+        const confirmed = await CalendarState.confirm({
+          title: 'Reopen Salon Calendar?',
+          message: 'Are you sure you want to cancel this closure and reopen client bookings for these dates?',
+          confirmText: 'Reopen Salon',
+          cancelText: 'Keep Closed',
+          type: 'danger',
+          icon: '🌴',
+        });
+        if (confirmed) {
+          CalendarState.showLoading('Reopening salon calendar...');
           try {
             await ApiClient.deleteSalonClosure(id);
-            this._toast('Salon reopened!', 'success');
-            this._showLoading();
-            await this.fetchFreshSchedule();
-            this.render();
-            this.attachListeners();
+            CalendarState.hideLoading(0);
+            this.removeClosure(id);
+            CalendarState.notify('Salon reopened successfully!', 'success');
+            await CalendarState.refreshAll();
           } catch (err) {
-            this._toast(err.message, 'error');
+            CalendarState.hideLoading(0);
+            CalendarState.notify(err.message || 'Failed to reopen salon.', 'error');
           }
         }
       });
@@ -831,16 +834,25 @@ export class CalendarView {
         const sid = e.currentTarget.getAttribute('data-staff-id');
         const aid = e.currentTarget.getAttribute('data-absence-id');
         const sname = e.currentTarget.getAttribute('data-staff-name') || 'Specialist';
-        if (confirm(`Cancel leave for ${sname}?`)) {
+        const confirmed = await CalendarState.confirm({
+          title: 'Cancel Specialist Leave?',
+          message: `Are you sure you want to cancel the scheduled leave for ${sname}? Availability will be restored immediately.`,
+          confirmText: 'Cancel Leave',
+          cancelText: 'Keep Leave',
+          type: 'danger',
+          icon: '👤',
+        });
+        if (confirmed) {
+          CalendarState.showLoading('Cancelling specialist leave...');
           try {
             await ApiClient.cancelStaffAbsence(sid, aid);
-            this._toast(`Leave cancelled for ${sname}.`, 'success');
-            this._showLoading();
-            await this.fetchFreshSchedule();
-            this.render();
-            this.attachListeners();
+            CalendarState.hideLoading(0);
+            this.removeStaffLeave(aid);
+            CalendarState.notify(`Leave cancelled for ${sname}.`, 'success');
+            await CalendarState.refreshAll();
           } catch (err) {
-            this._toast(err.message, 'error');
+            CalendarState.hideLoading(0);
+            CalendarState.notify(err.message || 'Failed to cancel leave.', 'error');
           }
         }
       });

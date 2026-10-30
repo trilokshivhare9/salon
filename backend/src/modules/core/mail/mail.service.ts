@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 
@@ -22,15 +22,17 @@ export class MailService {
 
     if (user && pass) {
       try {
-        this.transporter = nodemailer.createTransport({
+        const transportOptions: nodemailer.TransportOptions = {
           host: host || 'smtp.gmail.com',
           port: port || 465,
           secure,
           auth: { user, pass },
           connectionTimeout: 10000,
-        });
+        } as any;
+
+        this.transporter = nodemailer.createTransport(transportOptions);
         this.isConfigured = true;
-        this.logger.log(`[MailService] SMTP configured with host: ${host || 'smtp.gmail.com'}`);
+        this.logger.log(`[MailService] SMTP configured with host: ${host || 'smtp.gmail.com'} on port ${port}`);
       } catch (err: any) {
         this.logger.warn(`[MailService] Failed to initialize SMTP transporter: ${err.message}. Using console fallback.`);
       }
@@ -113,8 +115,17 @@ Expires In: 10 minutes
 ================================================================================
     `);
 
+    const isProduction =
+      this.configService.get<string>('NODE_ENV') === 'production' ||
+      process.env.NODE_ENV === 'production';
+
     if (!this.isConfigured || !this.transporter) {
-      // In dev fallback mode, return true after logging
+      if (isProduction) {
+        throw new ServiceUnavailableException(
+          'Email delivery service is not configured on the production server. Please configure SMTP credentials (SMTP_USER and SMTP_PASS) in Render Environment.',
+        );
+      }
+      // In local dev fallback mode, return true after logging
       return true;
     }
 
@@ -130,7 +141,12 @@ Expires In: 10 minutes
       return true;
     } catch (err: any) {
       this.logger.error(`[MailService] Failed to send email to ${toEmail}: ${err.message}`);
-      // Even if outbound network fails in dev, don't crash the request
+      if (isProduction) {
+        throw new ServiceUnavailableException(
+          `Failed to dispatch verification email: ${err.message}. Please check your SMTP settings on Render.`,
+        );
+      }
+      // In local dev fallback, don't crash the request
       return true;
     }
   }

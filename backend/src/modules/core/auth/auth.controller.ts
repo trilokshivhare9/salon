@@ -5,6 +5,7 @@ import { RegisterSalonDto } from './dto/register.dto';
 import {
   LookupSalonByMobileDto,
   ForgotPasswordDto,
+  VerifyResetOtpDto,
   ResetPasswordWithOtpDto,
   ChangePasswordDto,
   UpdateAdminProfileDto,
@@ -75,6 +76,13 @@ export class AuthController {
     const userAgent = req.headers['user-agent'];
     const ipAddress = req.ip || req.connection?.remoteAddress;
     return this.authService.forgotPassword(dto, ipAddress, userAgent);
+  }
+
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Post('verify-reset-otp')
+  async verifyResetOtp(@Body() dto: VerifyResetOtpDto) {
+    return this.authService.verifyResetOtp(dto);
   }
 
   @Public()

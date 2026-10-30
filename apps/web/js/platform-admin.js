@@ -1,5 +1,7 @@
 import { ApiClient, PlatformAuth } from './api.js';
 import { LocationPicker } from './location-picker.js';
+import { AppSnackbar } from './modules/shared/app-snackbar.js';
+import { CalendarState } from './modules/calendar/index.js';
 
 export class PlatformAdminPortal {
   constructor(containerId, currentUser = null) {
@@ -541,7 +543,7 @@ export class PlatformAdminPortal {
           modalContainer.innerHTML = '';
           this.renderErrorLogsView();
         } catch (err) {
-          alert(`Error resolving issue: ${err.message}`);
+          this.showToast(err.message || 'Error resolving issue', 'error');
           submitBtn.textContent = '✅ Mark as RESOLVED';
           submitBtn.removeAttribute('disabled');
         }
@@ -1259,17 +1261,17 @@ export class PlatformAdminPortal {
       const lunchEnd = document.getElementById('tmpl-lunch-end')?.value || '14:00';
 
       if (tmplOpen >= tmplClose) {
-        if (!silent) alert('Default Opening Time must be earlier than Default Closing Time.');
+        if (!silent) this.showToast('Default Opening Time must be earlier than Default Closing Time.', 'warning');
         return;
       }
 
       if (hasLunch) {
         if (lunchStart >= lunchEnd) {
-          if (!silent) alert('Lunch Start Time must be earlier than Lunch End Time.');
+          if (!silent) this.showToast('Lunch Start Time must be earlier than Lunch End Time.', 'warning');
           return;
         }
         if (lunchStart < tmplOpen || lunchEnd > tmplClose) {
-          if (!silent) alert(`Lunch Break (${lunchStart}-${lunchEnd}) must fall strictly inside operating hours (${tmplOpen}-${tmplClose}).`);
+          if (!silent) this.showToast(`Lunch Break (${lunchStart}-${lunchEnd}) must fall strictly inside operating hours (${tmplOpen}-${tmplClose}).`, 'warning');
           return;
         }
       }
@@ -1350,7 +1352,7 @@ export class PlatformAdminPortal {
       const city = document.getElementById('prov-city').value.trim();
 
       if (!name || !ownerName || !email || !password || !city) {
-        alert('Please complete all required fields in Step 1.');
+        this.showToast('Please complete all required fields in Step 1.', 'warning');
         return;
       }
       goToStep(2);
@@ -1362,23 +1364,23 @@ export class PlatformAdminPortal {
       for (const d of provScheduleState) {
         if (!d.isClosed) {
           if (d.startTime >= d.endTime) {
-            alert(`Opening time must be earlier than closing time for ${d.label}.`);
+            this.showToast(`Opening time must be earlier than closing time for ${d.label}.`, 'warning');
             return;
           }
           for (let i = 0; i < d.breaks.length; i++) {
             const b = d.breaks[i];
             if (b.startTime >= b.endTime) {
-              alert(`Break start time (${b.startTime}) must be earlier than break end time (${b.endTime}) on ${d.label}.`);
+              this.showToast(`Break start time (${b.startTime}) must be earlier than break end time (${b.endTime}) on ${d.label}.`, 'warning');
               return;
             }
             if (b.startTime < d.startTime || b.endTime > d.endTime) {
-              alert(`Break ${b.startTime}-${b.endTime} must fall inside operating hours (${d.startTime}-${d.endTime}) on ${d.label}.`);
+              this.showToast(`Break ${b.startTime}-${b.endTime} must fall inside operating hours (${d.startTime}-${d.endTime}) on ${d.label}.`, 'warning');
               return;
             }
             for (let j = i + 1; j < d.breaks.length; j++) {
               const b2 = d.breaks[j];
               if (b.startTime < b2.endTime && b2.startTime < b.endTime) {
-                alert(`Multiple breaks on ${d.label} overlap: ${b.startTime}-${b.endTime} and ${b2.startTime}-${b2.endTime}.`);
+                this.showToast(`Multiple breaks on ${d.label} overlap: ${b.startTime}-${b.endTime} and ${b2.startTime}-${b2.endTime}.`, 'warning');
                 return;
               }
             }
@@ -1768,7 +1770,7 @@ export class PlatformAdminPortal {
     document.getElementById('btn-copy-onboarding')?.addEventListener('click', () => {
       const msg = `🎉 StyleSlot Salon Portal Ready!\n\n🏢 Salon: ${salon.name}\n📱 Login Mobile: ${salon.phone}\n🔑 Password: ${rawPassword}\n🌐 Login Link: ${window.location.origin}/#login\n\nLogin with your mobile number and password to access your salon operations hub.`;
       navigator.clipboard.writeText(msg);
-      alert('Copied login details to clipboard!');
+      this.showToast('Copied login details to clipboard!', 'success');
     });
   }
 
@@ -1821,7 +1823,15 @@ export class PlatformAdminPortal {
             if (inChair > 0) warnMsg += ` (${inChair} currently in chair)`;
             warnMsg += `.\n\nDeactivating this salon will AUTOMATICALLY CANCEL all ${count} active booking(s) and dispatch WhatsApp cancellation notifications to customers.\n\nDo you want to cancel all active bookings and deactivate this salon?`;
 
-            if (window.confirm(warnMsg)) {
+            const ok = await CalendarState.confirm({
+              title: 'Deactivate Salon & Cancel Bookings',
+              message: `Salon "${salonName}" has ${count} active/future booking(s). Deactivating will automatically cancel them and notify customers on WhatsApp. Do you want to proceed?`,
+              confirmText: 'Deactivate & Cancel All',
+              cancelText: 'Cancel',
+              icon: '⚠️',
+              type: 'danger',
+            });
+            if (ok) {
               try {
                 btn.textContent = 'Cancelling & Deactivating...';
                 btn.setAttribute('disabled', 'true');
@@ -2010,7 +2020,15 @@ export class PlatformAdminPortal {
           btn.addEventListener('click', async (e) => {
             const id = e.currentTarget.getAttribute('data-id');
             const name = e.currentTarget.getAttribute('data-name');
-            if (confirm(`Delete master category "${name}"? Future new salons will not receive this category.`)) {
+            const ok = await CalendarState.confirm({
+              title: 'Delete Master Category',
+              message: `Delete master category "${name}"? Future new salons will not receive this category.`,
+              confirmText: 'Delete Category',
+              cancelText: 'Cancel',
+              icon: '🗑️',
+              type: 'danger',
+            });
+            if (ok) {
               try {
                 await ApiClient.deleteMasterCategory(id);
                 this.showToast(`Master category "${name}" deleted`, 'success');
@@ -2075,34 +2093,6 @@ export class PlatformAdminPortal {
   }
 
   showToast(message, type = 'info') {
-    let toastContainer = document.getElementById('platform-toast-container');
-    if (!toastContainer) {
-      toastContainer = document.createElement('div');
-      toastContainer.id = 'platform-toast-container';
-      toastContainer.style.cssText = 'position: fixed; top: calc(env(safe-area-inset-top, 0px) + 16px); right: 16px; left: 16px; max-width: 440px; margin: 0 auto; z-index: 99999; display: flex; flex-direction: column; gap: 10px; pointer-events: none;';
-      document.body.appendChild(toastContainer);
-    }
-
-    // Dismiss existing toasts to avoid stacking multiple warning/error banners
-    while (toastContainer.firstChild) {
-      toastContainer.removeChild(toastContainer.firstChild);
-    }
-
-    const toast = document.createElement('div');
-    const bg = type === 'success' ? '#10b981' : type === 'warning' ? '#f59e0b' : '#f43f5e';
-    toast.style.cssText = `background: ${bg}; color: #fff; padding: 12px 18px; border-radius: 8px; font-size: 0.85rem; font-weight: 600; box-shadow: 0 10px 30px rgba(0,0,0,0.5); pointer-events: auto; transition: all 0.3s ease; transform: translateY(-10px); opacity: 0; line-height: 1.4;`;
-    toast.textContent = message;
-
-    toastContainer.appendChild(toast);
-    requestAnimationFrame(() => {
-      toast.style.transform = 'translateY(0)';
-      toast.style.opacity = '1';
-    });
-
-    setTimeout(() => {
-      toast.style.opacity = '0';
-      toast.style.transform = 'translateY(-10px)';
-      setTimeout(() => toast.remove(), 300);
-    }, 4500);
+    return AppSnackbar.show(message, type);
   }
 }

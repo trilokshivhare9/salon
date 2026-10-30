@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Subject, Observable, concat, from } from 'rxjs';
 import { filter } from 'rxjs/operators';
+import { getRequestClientId } from '../../../../common/middleware/correlation-id.middleware';
 
 export interface SalonRealtimeEvent {
   id: number;
@@ -16,6 +17,7 @@ export interface SalonRealtimeEvent {
     | 'SERVICE_UPDATED';
   data: any;
   timestamp: string;
+  originatorClientId?: string;
 }
 
 @Injectable()
@@ -30,19 +32,27 @@ export class AppointmentEventsService {
   private readonly ringBuffer = new Map<string, SalonRealtimeEvent[]>();
   private static readonly MAX_BUFFER_PER_SALON = 100;
 
-  getSalonEvents(salonId: string, lastEventId?: string | number): Observable<SalonRealtimeEvent> {
+  getSalonEvents(
+    salonId: string,
+    lastEventId?: string | number,
+    clientId?: string,
+  ): Observable<SalonRealtimeEvent> {
     const liveEvents$ = this.events$.asObservable().pipe(
       filter((event) => event.salonId === salonId),
+      // Architectural suppression: never echo an event back to the client that originated it
+      filter((event) => !clientId || !event.originatorClientId || event.originatorClientId !== clientId),
     );
 
     if (lastEventId !== undefined && lastEventId !== null && lastEventId !== '') {
       const parsedLastId = typeof lastEventId === 'number' ? lastEventId : parseInt(String(lastEventId), 10);
       if (!isNaN(parsedLastId) && parsedLastId >= 0) {
         const salonBuffer = this.ringBuffer.get(salonId) || [];
-        const missedEvents = salonBuffer.filter((e) => e.id > parsedLastId);
+        const missedEvents = salonBuffer
+          .filter((e) => e.id > parsedLastId)
+          .filter((e) => !clientId || !e.originatorClientId || e.originatorClientId !== clientId);
         if (missedEvents.length > 0) {
           this.logger.log(
-            `[AppointmentEventsService] 🔁 Replaying ${missedEvents.length} missed events for salon ${salonId} (Last-Event-ID: ${parsedLastId})`,
+            `[AppointmentEventsService] 🔁 Replaying ${missedEvents.length} missed events for salon ${salonId} (Last-Event-ID: ${parsedLastId}, clientId: ${clientId || 'anonymous'})`,
           );
           return concat(from(missedEvents), liveEvents$);
         }
@@ -52,14 +62,21 @@ export class AppointmentEventsService {
     return liveEvents$;
   }
 
-  emitSalonEvent(salonId: string, type: SalonRealtimeEvent['type'], data: any) {
+  emitSalonEvent(
+    salonId: string,
+    type: SalonRealtimeEvent['type'],
+    data: any,
+    explicitClientId?: string,
+  ) {
     this.currentEventId++;
+    const originatorClientId = explicitClientId || getRequestClientId();
     const event: SalonRealtimeEvent = {
       id: this.currentEventId,
       salonId,
       type,
       data,
       timestamp: new Date().toISOString(),
+      ...(originatorClientId ? { originatorClientId } : {}),
     };
 
     // Store in ring buffer

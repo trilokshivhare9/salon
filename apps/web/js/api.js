@@ -1,10 +1,10 @@
-import { HttpClient, API_BASE, ApiError } from './network/http-client.js';
+import { HttpClient, API_BASE, ApiError, getClientId } from './network/http-client.js';
 import { SalonSession, PlatformSession, SessionRealm } from './network/session-manager.js';
 import { SalonRepository } from './repositories/salon-repository.js';
 import { ENDPOINTS } from './network/endpoints.js';
 import { NetworkHealth, ConnectionState } from './network/network-health.js';
 
-export { API_BASE, ApiError, SalonRepository, ENDPOINTS, NetworkHealth, ConnectionState };
+export { API_BASE, ApiError, getClientId, SalonRepository, ENDPOINTS, NetworkHealth, ConnectionState };
 
 // Dual-Realm Session Bindings
 export const PlatformRealm = PlatformSession;
@@ -125,6 +125,13 @@ export class SalonAuth {
     return executeRealmRequest(SalonRealm, ENDPOINTS.AUTH.FORGOT_PASSWORD, {
       method: 'POST',
       body: JSON.stringify({ mobile }),
+    });
+  }
+
+  static async verifyResetOtp(identifier, otp) {
+    return executeRealmRequest(SalonRealm, ENDPOINTS.AUTH.VERIFY_RESET_OTP, {
+      method: 'POST',
+      body: JSON.stringify({ identifier, otp }),
     });
   }
 
@@ -680,20 +687,30 @@ export class ApiClient {
 
   static async markStaffAbsent(staffId, payload) {
     this.invalidateCache('/staff');
+    this.invalidateCache('/salons/closures/calendar-schedule');
+    this.invalidateCache('/salons/closures');
+    this.invalidateCache('/appointments');
     const res = await this.request(ENDPOINTS.STAFF.ABSENCE(staffId), {
       method: 'POST',
       body: JSON.stringify(payload),
     });
     this.invalidateCache('/staff');
+    this.invalidateCache('/salons/closures/calendar-schedule');
+    SalonRepository.invalidate('staff');
     return res;
   }
 
   static async cancelStaffAbsence(staffId, absenceId) {
     this.invalidateCache('/staff');
+    this.invalidateCache('/salons/closures/calendar-schedule');
+    this.invalidateCache('/salons/closures');
+    this.invalidateCache('/appointments');
     const res = await this.request(ENDPOINTS.STAFF.ABSENCE_BY_ID(staffId, absenceId), {
       method: 'DELETE',
     });
     this.invalidateCache('/staff');
+    this.invalidateCache('/salons/closures/calendar-schedule');
+    SalonRepository.invalidate('staff');
     return res;
   }
 
