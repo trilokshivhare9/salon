@@ -6,6 +6,7 @@
  */
 
 import { ENDPOINTS } from './endpoints.js';
+import { NetworkHealth } from './network-health.js';
 
 export class SessionRealm {
   constructor(namespace, defaultLoginRoute) {
@@ -133,10 +134,7 @@ export class SessionRealm {
       throw new Error('Refresh token missing');
     }
 
-    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    const forceCloud = new URLSearchParams(window.location.search).get('cloud') === '1' || localStorage.getItem('use_cloud_backend') === 'true';
-    const useLocal = (isLocalhost && !forceCloud) || new URLSearchParams(window.location.search).get('local') === '1' || localStorage.getItem('use_local_backend') === 'true';
-    const apiBase = useLocal ? `http://${window.location.hostname || 'localhost'}:3000/api/v1` : 'https://salon-api-tuwo.onrender.com/api/v1';
+    const apiBase = NetworkHealth.getApiBase();
 
     const refreshRes = await fetch(`${apiBase}${ENDPOINTS.AUTH.REFRESH}`, {
       method: 'POST',

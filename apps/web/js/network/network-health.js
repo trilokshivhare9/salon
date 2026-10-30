@@ -103,13 +103,37 @@ class NetworkHealthManager {
   getApiBase() {
     if (typeof window === 'undefined') return 'http://localhost:3000/api/v1';
 
-    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    const forceCloud = new URLSearchParams(window.location.search).get('cloud') === '1' || localStorage.getItem('use_cloud_backend') === 'true';
-    const useLocal = (isLocalhost && !forceCloud) || new URLSearchParams(window.location.search).get('local') === '1' || localStorage.getItem('use_local_backend') === 'true';
+    const host = window.location.hostname;
+    const isLocalhost = host === 'localhost' || host === '127.0.0.1';
+    const params = new URLSearchParams(window.location.search);
 
-    return useLocal
-      ? `http://${window.location.hostname || 'localhost'}:3000/api/v1`
-      : 'https://salon-api-tuwo.onrender.com/api/v1';
+    // 1. Explicit query parameter or localStorage overrides
+    if (params.get('render') === '1' || localStorage.getItem('use_render_backend') === 'true') {
+      return 'https://salon-api-tuwo.onrender.com/api/v1';
+    }
+    if (params.get('vps') === '1' || localStorage.getItem('use_vps_backend') === 'true') {
+      return 'http://129.121.133.105/api/v1';
+    }
+    if (params.get('local') === '1' || localStorage.getItem('use_local_backend') === 'true') {
+      return `http://${host || 'localhost'}:3000/api/v1`;
+    }
+
+    // 2. If running locally on development machine (port 5173, 8080, etc.)
+    if (isLocalhost) {
+      if (params.get('cloud') === '1' || localStorage.getItem('use_cloud_backend') === 'true') {
+        return 'http://129.121.133.105/api/v1';
+      }
+      return `http://${host}:3000/api/v1`;
+    }
+
+    // 3. If running on legacy Render frontend
+    if (host.includes('onrender.com')) {
+      return 'https://salon-api-tuwo.onrender.com/api/v1';
+    }
+
+    // 4. Production Mumbai VPS (129.121.133.105 or custom domain):
+    // Nginx directly reverse-proxies /api/ to the local NestJS backend on port 3000!
+    return `${window.location.origin}/api/v1`;
   }
 
   isUsingLocal() {
@@ -117,12 +141,21 @@ class NetworkHealthManager {
     return base.includes('localhost') || base.includes('127.0.0.1');
   }
 
-  switchBackend(target = 'cloud') {
-    if (target === 'cloud') {
-      localStorage.setItem('use_cloud_backend', 'true');
+  switchBackend(target = 'vps') {
+    if (target === 'render') {
+      localStorage.setItem('use_render_backend', 'true');
       localStorage.removeItem('use_local_backend');
-    } else {
+      localStorage.removeItem('use_vps_backend');
+      localStorage.removeItem('use_cloud_backend');
+    } else if (target === 'local') {
       localStorage.setItem('use_local_backend', 'true');
+      localStorage.removeItem('use_render_backend');
+      localStorage.removeItem('use_vps_backend');
+      localStorage.removeItem('use_cloud_backend');
+    } else {
+      localStorage.removeItem('use_render_backend');
+      localStorage.removeItem('use_local_backend');
+      localStorage.removeItem('use_vps_backend');
       localStorage.removeItem('use_cloud_backend');
     }
     console.log(`[NetworkHealth] Switched backend target to ${target}. New target: ${this.getApiBase()}`);
