@@ -21,31 +21,115 @@ jobs:
           port: 22
           script_stop: true
           script: |
-            echo "🚀 [1/4] Pulling latest production code..."
+            echo "🚀 [1/5] Pulling latest production code..."
             cd /var/www/styleslot
             git reset --hard
             git pull origin production
 
-            echo "📦 [2/4] Building NestJS Backend & Syncing Database..."
+            echo "🔑 [2/5] Updating Production Environment Variables with Meta WhatsApp Token..."
+            cat << 'ENVEOF' > /var/www/styleslot/backend/.env
+PORT=3000
+NODE_ENV=production
+APP_ENV=production
+DATABASE_URL="postgresql://styleslot_user:StyleSlotProd2026Pass@localhost:5432/styleslot_prod?schema=public"
+JWT_SECRET="styleslot-super-secure-production-jwt-key-2026-mumbai-32chars"
+JWT_EXPIRES_IN="60d"
+CORS_ORIGINS="*"
+REDIS_HOST="localhost"
+REDIS_PORT=6379
+WHATSAPP_PHONE_NUMBER_ID="1344691785393273"
+WHATSAPP_ACCESS_TOKEN="EAA7FciyDOmYBS0ZCe07F4daN0JXf0x1Bt1Trkc4QajShyo6A0nVklAbgeY5ZCcpgMZBSZCzc8QJYkCSKwziDDbtSS8kw0caeu915pphPOnwtZAxuyZBeFy1ZAvzwsHjLLZCZBqSbuIv6qswxUz2DoR5EXdLsB7s85MldvufAJfFns00IEne8V36NYZAtxkfFIhOAZDZD"
+WHATSAPP_VERIFY_TOKEN="salon_webhook_verify_token_prod"
+ENVEOF
+
+            echo "📦 [3/5] Building NestJS Backend & Syncing Database..."
             cd /var/www/styleslot/backend
             npm install --production=false
             npx prisma db push --accept-data-loss
             npm run build
             pm2 restart styleslot-api || pm2 start dist/main.js --name "styleslot-api"
 
-            echo "🌐 [3/4] Building Vite Frontend Bundle..."
+            echo "🌐 [4/5] Building Vite Frontend Bundle..."
             cd /var/www/styleslot/apps/web
             npm install
             npm run build
 
-            echo "🔒 [4/5] Setting up Free HTTPS / SSL (Required by Meta WhatsApp Webhooks)..."
-            which certbot || (apt update && apt install -y certbot python3-certbot-nginx)
-            grep -q "129.121.133.105.sslip.io" /etc/nginx/sites-available/default || sed -i 's/server_name _;/server_name _ 129.121.133.105.sslip.io;/g' /etc/nginx/sites-available/default
-            certbot --nginx -d 129.121.133.105.sslip.io --non-interactive --agree-tos -m trilokshivhare9@gmail.com --redirect || true
+            echo "🔒 [5/5] Configuring Nginx Reverse Proxy (HTTP & HTTPS)..."
+            cat << 'NGINXEOF' > /etc/nginx/sites-available/default
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _ 129.121.133.105 129.121.133.105.sslip.io;
 
-            echo "🔄 [5/5] Reloading Nginx Web Server..."
-            systemctl reload nginx
+    client_max_body_size 50M;
+
+    # Frontend SPA
+    location / {
+        root /var/www/styleslot/apps/web/dist;
+        index index.html;
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Backend API Reverse Proxy
+    location /api/ {
+        proxy_pass http://127.0.0.1:3000/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    # Health Check
+    location /health {
+        proxy_pass http://127.0.0.1:3000/health;
+        proxy_set_header Host $host;
+    }
+}
+
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _ 129.121.133.105 129.121.133.105.sslip.io;
+
+    ssl_certificate /etc/letsencrypt/live/129.121.133.105.sslip.io/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/129.121.133.105.sslip.io/privkey.pem;
+
+    client_max_body_size 50M;
+
+    # Frontend SPA
+    location / {
+        root /var/www/styleslot/apps/web/dist;
+        index index.html;
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Backend API Reverse Proxy
+    location /api/ {
+        proxy_pass http://127.0.0.1:3000/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    # Health Check
+    location /health {
+        proxy_pass http://127.0.0.1:3000/health;
+        proxy_set_header Host $host;
+    }
+}
+NGINXEOF
+
+            nginx -t && systemctl reload nginx
 
             echo "=================================================="
-            echo "🎉 DEPLOYMENT COMPLETE! VPS is updated and online."
+            echo "🎉 DEPLOYMENT COMPLETE! Meta Token & Nginx active."
             echo "=================================================="
