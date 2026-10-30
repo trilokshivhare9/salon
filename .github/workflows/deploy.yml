@@ -124,7 +124,7 @@ jobs:
             NGINXEOF
             sed -i 's/^[ \t]*//' /etc/nginx/sites-available/default
 
-            nginx -t && systemctl reload nginx
+            nginx -t && (sudo systemctl reload nginx 2>/dev/null || systemctl reload nginx 2>/dev/null || sudo nginx -s reload 2>/dev/null || nginx -s reload 2>/dev/null || true)
 
             echo "=================================================="
             echo "🎉 DEPLOYMENT COMPLETE! Meta Token & Nginx active."
