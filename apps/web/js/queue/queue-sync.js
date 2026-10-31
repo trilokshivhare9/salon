@@ -135,10 +135,22 @@ export class QueueSyncManager {
       }
 
       case 'BOOKING_CANCELLED':
-      case 'CANCELLED': {
+      case 'CANCELLED':
+      case 'BOOKING_REJECTED':
+      case 'REJECTED': {
+        const newStatus = data.status || (type.includes('REJECT') ? 'REJECTED' : 'CANCELLED');
         if (idx !== -1) {
-          this.items[idx] = { ...this.items[idx], ...data, status: 'CANCELLED' };
+          this.items[idx] = { ...this.items[idx], ...data, status: newStatus };
           this.sortItemsInPlace();
+          this.recalculateSummary();
+          mutated = true;
+        } else if (this.page === 1) {
+          this.items.unshift({ ...data, status: newStatus });
+          this.sortItemsInPlace();
+          this.pagination.totalItems = (this.pagination.totalItems || 0) + 1;
+          this.recalculateSummary();
+          mutated = true;
+        } else {
           this.recalculateSummary();
           mutated = true;
         }

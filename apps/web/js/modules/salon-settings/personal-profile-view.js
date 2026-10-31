@@ -343,6 +343,63 @@ export class PersonalProfileView {
   }
 
   /**
+   * Helper to perform high-precision reverse geocoding (Colony, Street, Landmark, PIN).
+   * Combines Photon (OSM Komoot) and Nominatim OpenStreetMap for Indian addresses.
+   */
+  async reverseGeocodeCoordinates(lat, lng) {
+    let street = '';
+    let landmark = '';
+    let city = '';
+    let pincode = '';
+
+    // 1. High-precision Colony & Street via Photon
+    try {
+      const pRes = await fetch(`https://photon.komoot.io/reverse?lat=${lat}&lon=${lng}`);
+      if (pRes.ok) {
+        const pData = await pRes.json();
+        const props = pData.features?.[0]?.properties || {};
+        street = props.street || props.name || '';
+        city = props.city || props.district || '';
+        const areaParts = [props.county, props.district].filter(Boolean).filter((x) => x !== city);
+        landmark = areaParts.join(', ');
+        if (props.postcode && /^\d{6}$/.test(props.postcode.trim())) {
+          pincode = props.postcode.trim();
+        }
+      }
+    } catch (_) {}
+
+    // 2. OpenStreetMap Nominatim for exact PIN code, Suburb and District details
+    try {
+      const nRes = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1`,
+        { headers: { 'User-Agent': 'Styleslot/1.0' } }
+      );
+      if (nRes.ok) {
+        const nData = await nRes.json();
+        const addr = nData.address || {};
+        if (!pincode && addr.postcode && /^\d{6}$/.test(addr.postcode.trim())) {
+          pincode = addr.postcode.trim();
+        }
+        if (!city && (addr.city || addr.town || addr.village)) {
+          city = addr.city || addr.town || addr.village;
+        }
+        if (!street) {
+          const sParts = [addr.road, addr.suburb || addr.neighbourhood].filter(Boolean);
+          street = sParts.join(', ');
+        }
+        if (!landmark) {
+          const lParts = [addr.suburb || addr.neighbourhood, addr.county || addr.city_district]
+            .filter(Boolean)
+            .filter((x) => x !== city);
+          landmark = [...new Set(lParts)].join(', ');
+        }
+      }
+    } catch (_) {}
+
+    return { street, landmark, city, pincode };
+  }
+
+  /**
    * Auto-detects GPS coordinates with automatic multi-tier fallback:
    * Tier 1: Hardware satellite GPS (navigator.geolocation)
    * Tier 2: Network IP Geolocation (https://ipwho.is/)
@@ -365,36 +422,23 @@ export class PersonalProfileView {
             this.googleMapsUrl = `https://www.google.com/maps?q=${this.latitude},${this.longitude}`;
             this.locationType = 'NETWORK_IP';
 
-            if (data.city) {
-              this.salonCity = data.city;
-              const cityInput = document.getElementById('pp-salon-city');
-              if (cityInput) cityInput.value = data.city;
-            }
-
-            if (data.postal && /^\d{6}$/.test(data.postal.trim())) {
-              this.salonPincode = data.postal.trim();
-              const pinInput = document.getElementById('pp-salon-pincode');
-              if (pinInput) pinInput.value = this.salonPincode;
-            }
-
-            if (data.region && !this.salonLandmark) {
-              this.salonLandmark = data.region;
-              const landmarkInput = document.getElementById('pp-salon-landmark');
-              if (landmarkInput) landmarkInput.value = data.region;
-            }
+            const geo = await this.reverseGeocodeCoordinates(this.latitude, this.longitude);
+            if (geo.street) this.salonStreet = geo.street;
+            if (geo.landmark) this.salonLandmark = geo.landmark;
+            this.salonCity = geo.city || data.city || this.salonCity || 'Indore';
+            this.salonPincode = geo.pincode || (data.postal && /^\d{6}$/.test(data.postal.trim()) ? data.postal.trim() : this.salonPincode);
 
             this.isLocating = false;
             if (btnText) btnText.textContent = '✓ GPS Active';
 
             const successNote = reasonMsg
-              ? `📍 ${data.city || 'City'}, ${data.region || ''} detected via network (${this.latitude.toFixed(4)}, ${this.longitude.toFixed(4)}).`
-              : `📍 Location detected: ${data.city || ''} (${this.latitude.toFixed(4)}, ${this.longitude.toFixed(4)})`;
+              ? `📍 ${this.salonCity} (${this.latitude.toFixed(4)}, ${this.longitude.toFixed(4)}) locked via network.`
+              : `📍 Location detected: ${this.salonCity} (${this.latitude.toFixed(4)}, ${this.longitude.toFixed(4)})`;
 
             this.showAlert(successNote, 'success');
             if (this.app?.showToast) {
               this.app.showToast('Location coordinates detected and locked!', 'success');
             }
-            this.syncInputsToState();
             this.render();
             return true;
           }
@@ -423,50 +467,23 @@ export class PersonalProfileView {
         this.locationType = 'GPS';
         this.isLocating = false;
 
-        try {
-          const res = await fetch(
-            `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`
-          );
-          if (res.ok) {
-            const geo = await res.json();
-            const locality = geo.locality || geo.localityInfo?.administrative?.[3]?.name || '';
-            const city = geo.city || geo.principalSubdivision || '';
-            const postcode = geo.postcode || '';
+        // Perform deep reverse geocoding to resolve Colony, Road & Landmark
+        const geo = await this.reverseGeocodeCoordinates(lat, lng);
 
-            if (locality && !this.salonLandmark) {
-              this.salonLandmark = locality;
-              const landmarkInput = document.getElementById('pp-salon-landmark');
-              if (landmarkInput) landmarkInput.value = locality;
-            }
-
-            if (city) {
-              this.salonCity = city;
-              const cityInput = document.getElementById('pp-salon-city');
-              if (cityInput) cityInput.value = city;
-            }
-
-            if (postcode && /^\d{6}$/.test(postcode.trim())) {
-              this.salonPincode = postcode.trim();
-              const pinInput = document.getElementById('pp-salon-pincode');
-              if (pinInput) pinInput.value = this.salonPincode;
-            }
-          }
-        } catch {
-          // Keep coordinates intact on network error
-        }
+        if (geo.street) this.salonStreet = geo.street;
+        if (geo.landmark) this.salonLandmark = geo.landmark;
+        if (geo.city) this.salonCity = geo.city;
+        if (geo.pincode) this.salonPincode = geo.pincode;
 
         if (btnText) btnText.textContent = '✓ GPS Active';
 
         if (this.app?.showToast) {
-          this.app.showToast('Current GPS coordinates locked successfully!', 'success');
+          this.app.showToast('Current GPS coordinates & street address locked!', 'success');
         }
 
-        // Re-render so directions link updates cleanly
-        this.syncInputsToState();
         this.render();
       },
       async (err) => {
-        // Fall back gracefully to Tier 2 IP Geolocation
         await runIpFallback('Browser GPS permission restricted. Location estimated via network.');
       },
       { timeout: 8000, enableHighAccuracy: true }

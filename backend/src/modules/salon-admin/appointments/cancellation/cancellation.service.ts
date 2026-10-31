@@ -208,11 +208,14 @@ export class CancellationService {
     };
   }
 
-  /**
-   * Determines the final appointment status based on cancellation context.
-   * All cancellations transition to CANCELLED.
-   */
-  private determineCancelStatus(_context: CancelBookingContext): AppointmentStatus {
+  private determineCancelStatus(context: CancelBookingContext): AppointmentStatus {
+    if (
+      context.source === 'SALON_REJECTED' ||
+      context.reasonCategory === 'SALON_REJECTED' ||
+      context.source === 'SYSTEM_CAPACITY_CONFLICT'
+    ) {
+      return AppointmentStatus.REJECTED;
+    }
     return AppointmentStatus.CANCELLED;
   }
 
