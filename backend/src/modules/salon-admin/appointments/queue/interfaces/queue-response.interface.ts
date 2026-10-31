@@ -29,6 +29,10 @@ export interface QueueItem {
   bookingType: string;
   startAt: string | Date;
   endAt: string | Date;
+  proposedStartAt?: string | Date | null;
+  proposedEndAt?: string | Date | null;
+  proposedStylistId?: string | null;
+  expiresAt?: string | Date | null;
   customer: QueueItemCustomer;
   stylist: QueueItemStylist;
   services: QueueItemService[];

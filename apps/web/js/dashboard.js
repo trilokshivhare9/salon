@@ -2635,15 +2635,25 @@ export class SalonDashboard {
         if (status === 'PENDING_RESCHEDULE') {
           const propStart = appt.proposedStartAt ? new Date(appt.proposedStartAt) : null;
           const propEnd = appt.proposedEndAt ? new Date(appt.proposedEndAt) : null;
-          const propSlot = propStart ? `${formatTime12h(propStart)} – ${formatTime12h(propEnd || propStart)}` : 'Proposed Slot';
+          let propSlotTag = 'Proposed Slot';
+          let detailSlotText = '';
+          if (propStart && !isNaN(propStart.getTime())) {
+            const dateStr = propStart.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+            const timeStr = `${formatTime12h(propStart)} – ${formatTime12h(propEnd || propStart)}`;
+            propSlotTag = `${dateStr} · ${timeStr}`;
+            detailSlotText = `Proposed for <strong>${propSlotTag}</strong>`;
+          }
+          const stylistName = appt.stylist?.name ? ` with <strong>${appt.stylist.name}</strong>` : '';
           return `
             <div class="qc__lifecycle-alert qc__lifecycle-alert--warn">
               <div class="qc__alert-top">
                 ${Icons.clock({ size: 12, color: '#fbbf24' })}
-                <span class="qc__alert-title">Reschedule Proposal Pending</span>
-                <span class="qc__alert-tag">${propSlot}</span>
+                <span class="qc__alert-title">Reschedule Proposal Sent</span>
+                <span class="qc__alert-tag">${propSlotTag}</span>
               </div>
-              <div class="qc__alert-sub">Waiting client confirmation on WhatsApp</div>
+              <div class="qc__alert-sub">
+                WhatsApp offer sent to customer: ${detailSlotText || 'Pending customer confirmation'}${stylistName}. Auto-expires if unconfirmed.
+              </div>
             </div>
           `;
         }
@@ -2980,17 +2990,39 @@ export class SalonDashboard {
                   </div>
                 ` : ''}
 
-                ${appt.status === 'PENDING_RESCHEDULE' ? `
+                ${appt.status === 'PENDING_RESCHEDULE' ? (() => {
+                  const cutoffTarget = appt.expiresAt || appt.nextActionAt;
+                  const cutoffTargetMs = cutoffTarget ? new Date(cutoffTarget).getTime() : 0;
+                  const initialDiffMs = cutoffTargetMs ? cutoffTargetMs - Date.now() : 0;
+                  let initialCountdown = '';
+                  if (initialDiffMs > 0) {
+                    const totalSecs = Math.floor(initialDiffMs / 1000);
+                    const hours = Math.floor(totalSecs / 3600);
+                    const mins = Math.floor((totalSecs % 3600) / 60);
+                    const secs = totalSecs % 60;
+                    initialCountdown = hours > 0 ? `${hours}h ${mins}m left` : `${mins}m ${secs}s left`;
+                  } else if (cutoffTargetMs) {
+                    initialCountdown = 'Expired';
+                  }
+                  return `
                   <div class="qc__actions-group">
-                    <button class="qc__btn qc__btn--disabled" disabled>
-                      ${Icons.clock({ size: 13, color: '#fbbf24' })}
-                      <span>Waiting Customer Approval</span>
+                    <button class="qc__btn qc__btn--disabled" disabled style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%;">
+                      <span style="display: flex; align-items: center; gap: 6px;">
+                        ${Icons.clock({ size: 13, color: '#fbbf24' })}
+                        <span>Waiting Customer Approval</span>
+                      </span>
+                      ${cutoffTargetMs ? `
+                        <span class="qc__reschedule-cutoff-timer" data-cutoff-target="${cutoffTargetMs}" style="font-size: 0.74rem; font-weight: 700; background: rgba(251, 191, 36, 0.18); border: 1px solid rgba(251, 191, 36, 0.35); color: #fbbf24; padding: 2px 8px; border-radius: 6px; letter-spacing: 0.2px;">
+                          ⏳ ${initialCountdown}
+                        </span>
+                      ` : ''}
                     </button>
                     <button class="qc__icon-btn qc__icon-btn--danger btn-open-cancel" data-id="${appt.id}" data-name="${customerName}" title="Cancel Booking">
                       ${Icons.x({ size: 13 })}
                     </button>
                   </div>
-                ` : ''}
+                  `;
+                })() : ''}
 
                 ${isDone ? `
                   <div class="qc__terminal-pill qc__terminal-pill--done">
@@ -10588,6 +10620,34 @@ startLiveTimerTicks() {
       } else {
         const timeStr = timerEl.getAttribute('data-time-str') || '';
         timerEl.textContent = timeStr ? `⏰ ${timeStr}` : '';
+      }
+    });
+
+    // 3) Live Reschedule Proposal Cutoff Timers (Waiting Customer Approval)
+    const rescheduleTimers = document.querySelectorAll('.qc__reschedule-cutoff-timer[data-cutoff-target]');
+    rescheduleTimers.forEach((timerEl) => {
+      const targetMs = Number(timerEl.getAttribute('data-cutoff-target'));
+      if (!targetMs || isNaN(targetMs)) return;
+      const diffMs = targetMs - Date.now();
+
+      if (diffMs > 0) {
+        const totalSecs = Math.floor(diffMs / 1000);
+        const hours = Math.floor(totalSecs / 3600);
+        const mins = Math.floor((totalSecs % 3600) / 60);
+        const secs = totalSecs % 60;
+
+        if (hours > 0) {
+          timerEl.textContent = `⏳ ${hours}h ${mins}m ${secs}s left`;
+        } else if (mins > 0) {
+          timerEl.textContent = `⏳ ${mins}m ${secs}s left`;
+        } else {
+          timerEl.textContent = `⏳ ${secs}s left`;
+        }
+      } else {
+        timerEl.textContent = '⚠️ Cutoff Expired';
+        timerEl.style.color = '#fb7185';
+        timerEl.style.borderColor = 'rgba(251, 113, 133, 0.4)';
+        timerEl.style.background = 'rgba(251, 113, 133, 0.15)';
       }
     });
   }, 1000);

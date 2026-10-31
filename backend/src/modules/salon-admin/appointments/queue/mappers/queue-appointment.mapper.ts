@@ -51,6 +51,10 @@ export function mapToQueueItem(appt: any): QueueItem {
     bookingType: String(appt.bookingType || 'NORMAL'),
     startAt: appt.startAt,
     endAt: appt.endAt,
+    proposedStartAt: appt.proposedStartAt || null,
+    proposedEndAt: appt.proposedEndAt || null,
+    proposedStylistId: appt.proposedStylistId ? String(appt.proposedStylistId) : null,
+    expiresAt: appt.expiresAt || null,
     customer: {
       id: String(appt.salonUser?.id || appt.salonUserId || ''),
       name: String(appt.salonUser?.user?.name || appt.customer?.name || appt.user?.name || 'Client'),
