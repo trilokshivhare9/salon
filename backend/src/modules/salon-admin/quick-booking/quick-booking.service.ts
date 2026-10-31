@@ -5,6 +5,7 @@ import {
   forwardRef,
   NotFoundException,
   BadRequestException,
+  ConflictException,
   Optional,
 } from '@nestjs/common';
 import { DateTime } from 'luxon';
@@ -365,6 +366,27 @@ export class QuickBookingService {
       );
     }
 
+    // Guard against concurrent double-booking: verify stylist is not already occupied in this slot
+    if (appointment.stylistId) {
+      const activeConflict = await this.prisma.appointment.findFirst({
+        where: {
+          salonId,
+          stylistId: appointment.stylistId,
+          id: { not: appointmentId },
+          status: { in: [AppointmentStatus.CONFIRMED, AppointmentStatus.CHECKED_IN, AppointmentStatus.SEATED_IN_CHAIR] },
+          startAt: { lt: appointment.endAt },
+          endAt: { gt: appointment.startAt },
+        },
+        select: { id: true, appointmentNumber: true, status: true },
+      });
+
+      if (activeConflict) {
+        throw new ConflictException(
+          `Cannot accept: Assigned specialist already has an active ${activeConflict.status.replace(/_/g, ' ')} appointment during this time window.`,
+        );
+      }
+    }
+
     // 1. Mutate status via AppointmentModifierService (or fallback to Prisma)
     const updated = this.modifierService
       ? await this.modifierService.modifyStatus(salonId, appointmentId, {
@@ -379,7 +401,37 @@ export class QuickBookingService {
           data: { status: targetStatus },
         });
 
-    // 2. Dispatch WhatsApp Notification asynchronously
+    // 2. Auto-cancel colliding requests synchronously so database & queue are immediately consistent
+    if (updated.stylistId && this.cancellationService) {
+      try {
+        const competing = await this.prisma.appointment.findMany({
+          where: {
+            salonId,
+            stylistId: updated.stylistId,
+            status: AppointmentStatus.PENDING_ACCEPTANCE,
+            id: { not: updated.id },
+            startAt: { lt: updated.endAt },
+            endAt: { gt: updated.startAt },
+          },
+        });
+
+        for (const comp of competing) {
+          await this.cancellationService.cancelBooking(salonId, comp.id, {
+            source: 'SYSTEM_CAPACITY_CONFLICT',
+            fault: 'SYSTEM',
+            cancelledBy: CancelledBy.SYSTEM,
+            noPenalty: true,
+            reason: 'Stylist slot accepted for another customer',
+          }).catch((err) =>
+            this.logger.warn(`Failed cancelling competing appointment ${comp.id}: ${err?.message}`),
+          );
+        }
+      } catch (err: any) {
+        this.logger.error(`[acceptQuickBooking] Error cancelling competing requests: ${err?.message || err}`);
+      }
+    }
+
+    // 3. Dispatch WhatsApp Notification asynchronously
     setImmediate(async () => {
       try {
         const salon = appointment.salon;
@@ -398,34 +450,8 @@ export class QuickBookingService {
             this.logger.error(`Failed to send WhatsApp acceptance message: ${err?.message || err}`);
           });
         }
-
-        // 3. Auto-cancel colliding requests ONLY for the same stylist
-        if (updated.stylistId && this.cancellationService) {
-          const competing = await this.prisma.appointment.findMany({
-            where: {
-              salonId,
-              stylistId: updated.stylistId,
-              status: AppointmentStatus.PENDING_ACCEPTANCE,
-              id: { not: updated.id },
-              startAt: { lt: updated.endAt },
-              endAt: { gt: updated.startAt },
-            },
-          });
-
-          for (const comp of competing) {
-            await this.cancellationService.cancelBooking(salonId, comp.id, {
-              source: 'SYSTEM_CAPACITY_CONFLICT',
-              fault: 'SYSTEM',
-              cancelledBy: CancelledBy.SYSTEM,
-              noPenalty: true,
-              reason: 'Stylist slot accepted for another customer',
-            }).catch((err) =>
-              this.logger.warn(`Failed cancelling competing appointment ${comp.id}: ${err?.message}`),
-            );
-          }
-        }
       } catch (err: any) {
-        this.logger.error(`[acceptQuickBooking] Background task error: ${err?.message || err}`);
+        this.logger.error(`[acceptQuickBooking] WhatsApp dispatch error: ${err?.message || err}`);
       }
     });
 

@@ -150,28 +150,45 @@ export class LocationPicker {
         this.render();
 
         try {
-          const res = await fetch(
-            `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`
-          );
-          if (res.ok) {
-            const geo = await res.json();
-            const parts = [
-              geo.locality || geo.principalSubdivisionCode || '',
-              geo.localityInfo?.administrative?.[3]?.name || '',
-              geo.localityInfo?.administrative?.[2]?.name || '',
-            ].filter(Boolean);
+          let street = '';
+          let city = '';
+          let state = '';
 
-            const street = parts.join(', ') || geo.locality || 'Shop Location';
-            const city = geo.city || geo.principalSubdivision || 'City';
-            const state = geo.principalSubdivision || '';
-
-            if (!this.state.address || this.state.locationType === 'GPS') {
-              this.state.address = street;
+          // 1. Photon for detailed Colony & Street
+          try {
+            const pRes = await fetch(`https://photon.komoot.io/reverse?lat=${lat}&lon=${lng}`);
+            if (pRes.ok) {
+              const pData = await pRes.json();
+              const props = pData.features?.[0]?.properties || {};
+              street = props.street || props.name || '';
+              city = props.city || props.district || '';
+              state = props.state || '';
             }
-            if (city) this.state.city = city;
-            if (state) this.state.state = state;
+          } catch (_) {}
+
+          // 2. Nominatim fallback
+          if (!street || !city) {
+            try {
+              const nRes = await fetch(
+                `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1`,
+                { headers: { 'User-Agent': 'Styleslot/1.0' } }
+              );
+              if (nRes.ok) {
+                const nData = await nRes.json();
+                const addr = nData.address || {};
+                if (!street) {
+                  street = [addr.road, addr.suburb || addr.neighbourhood, addr.county].filter(Boolean).join(', ');
+                }
+                if (!city) city = addr.city || addr.town || addr.village || '';
+                if (!state) state = addr.state || '';
+              }
+            } catch (_) {}
           }
-        } catch {
+
+          if (street) this.state.address = street;
+          if (city) this.state.city = city;
+          if (state) this.state.state = state;
+        } catch (_) {
           // Keep coordinates intact on network error
         }
 

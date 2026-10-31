@@ -303,27 +303,30 @@ export class RealtimeNotifier {
         } else if (
           payload.type === 'BOOKING_CANCELLED' ||
           payload.type === 'CANCELLED' ||
-          (payload.type === 'STATUS_UPDATED' && payload.data?.status === 'CANCELLED')
+          payload.type === 'BOOKING_REJECTED' ||
+          payload.type === 'REJECTED' ||
+          (payload.type === 'STATUS_UPDATED' && (payload.data?.status === 'CANCELLED' || payload.data?.status === 'REJECTED'))
         ) {
           const appt = payload.data;
+          const isRejected = appt?.status === 'REJECTED' || payload.type.includes('REJECT');
           const clientName = appt?.customer?.name || appt?.user?.name || appt?.salonUser?.user?.name || 'Client';
           const svcs = (typeof window !== 'undefined' && window.getApptServices) ? window.getApptServices(appt) : [];
           const serviceName = svcs.length > 0
             ? svcs.map((s) => s.name).join(' + ')
             : (appt?.serviceNameSnapshot || appt?.service?.name || 'Service');
           const timeStr = appt?.startTime ? formatTime12h(appt.startTime) : (appt?.startAt ? formatTime12h(appt.startAt) : '');
-          const reason = appt?.cancellationReason || appt?.reason || 'Reservation cancelled';
-          const eventKey = `cancel:${appt?.id || 'unknown'}`;
+          const reason = appt?.cancellationReason || appt?.reason || (isRejected ? 'Declined or slot conflict' : 'Reservation cancelled');
+          const eventKey = `${isRejected ? 'reject' : 'cancel'}:${appt?.id || 'unknown'}`;
 
           SoundManager.playCancelAlert();
 
           this.dispatchNotification({
-            badgeText: 'Slot Released',
-            title: '❌ Appointment Cancelled',
+            badgeText: isRejected ? 'Booking Declined' : 'Slot Released',
+            title: isRejected ? 'Booking Request Declined' : '❌ Appointment Cancelled',
             clientName,
-            details: `${serviceName}${timeStr ? ` • ${timeStr}` : ''} cancelled (${reason})`,
-            icon: '✕',
-            variant: 'danger',
+            details: `${serviceName}${timeStr ? ` • ${timeStr}` : ''} (${reason})`,
+            icon: isRejected ? '✕' : '✕',
+            variant: isRejected ? 'warning' : 'danger',
             eventKey,
             actionCallback: () => {
               if (window.salonDashboard) {
@@ -334,11 +337,7 @@ export class RealtimeNotifier {
 
           // Auto-refresh the quick requests modal if it's already open
           if (document.getElementById('modal-quick-requests')) {
-            setTimeout(() => {
-              if (window.salonDashboard?.openQuickRequestsModal) {
-                window.salonDashboard.openQuickRequestsModal();
-              }
-            }, 300);
+            window.salonDashboard?.openQuickRequestsModal?.();
           }
 
         } else if (payload.type === 'STATUS_UPDATED') {
