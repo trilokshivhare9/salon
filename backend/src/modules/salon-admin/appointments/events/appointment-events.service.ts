@@ -39,8 +39,6 @@ export class AppointmentEventsService {
   ): Observable<SalonRealtimeEvent> {
     const liveEvents$ = this.events$.asObservable().pipe(
       filter((event) => event.salonId === salonId),
-      // Architectural suppression: never echo an event back to the client that originated it
-      filter((event) => !clientId || !event.originatorClientId || event.originatorClientId !== clientId),
     );
 
     if (lastEventId !== undefined && lastEventId !== null && lastEventId !== '') {
@@ -48,8 +46,7 @@ export class AppointmentEventsService {
       if (!isNaN(parsedLastId) && parsedLastId >= 0) {
         const salonBuffer = this.ringBuffer.get(salonId) || [];
         const missedEvents = salonBuffer
-          .filter((e) => e.id > parsedLastId)
-          .filter((e) => !clientId || !e.originatorClientId || e.originatorClientId !== clientId);
+          .filter((e) => e.id > parsedLastId);
         if (missedEvents.length > 0) {
           this.logger.log(
             `[AppointmentEventsService] 🔁 Replaying ${missedEvents.length} missed events for salon ${salonId} (Last-Event-ID: ${parsedLastId}, clientId: ${clientId || 'anonymous'})`,

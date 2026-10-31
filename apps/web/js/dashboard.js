@@ -382,6 +382,10 @@ export class SalonDashboard {
       onStateChange: ({ items, summary }) => {
         if (this.summaryData && items) {
           this.summaryData.todayAppointments = items;
+          this.summaryData.quickRequests = items.filter((a) => a.status === 'PENDING_ACCEPTANCE');
+          if (this.summaryData.pulse) {
+            this.summaryData.pulse.pendingRequestsCount = this.summaryData.quickRequests.length;
+          }
         }
         if (summary) {
           this.queueSummary = summary;
@@ -421,14 +425,9 @@ export class SalonDashboard {
       onOpenServices: () => this.switchTab('services'),
       onViewStaff: () => this.switchTab('staff'),
       onCopyLink: () => {
-        const slug = this.salonProfile?.slug || 'salon';
-        const url = `${window.location.origin}/#book/${slug}`;
+        const url = this.getBookingShareUrl();
         navigator.clipboard.writeText(url);
-        if (typeof showNotification === 'function') {
-          showNotification('📋 Booking link copied to clipboard!', 'success');
-        } else {
-          showNotification(`Booking link copied: ${url}`, 'success');
-        }
+        this.showToast('💬 WhatsApp booking link copied to clipboard!', 'success');
       },
       onFilterQueue: (filter) => {
         this.queueFilter = filter;
@@ -440,7 +439,7 @@ export class SalonDashboard {
           if (typeof showNotification === 'function') {
             showNotification(`Updated appointment status to ${status}`, 'success');
           }
-          if (this.activeTab === 'home') {
+          if (this.activeTab === 'dashboard') {
             const fresh = await ApiClient.getDashboardSummary(this.selectedDate, true).catch(() => null);
             if (fresh) this.summaryData = fresh;
             this.refreshActiveTab();
@@ -528,9 +527,11 @@ export class SalonDashboard {
   }
 
   openQuickRequestsModal() {
-    const pool = (Array.isArray(this.summaryData?.quickRequests) && this.summaryData.quickRequests.length > 0)
-      ? this.summaryData.quickRequests
-      : (this.summaryData?.todayAppointments || this.queueSync?.items || []);
+    const pool = (Array.isArray(this.summaryData?.todayAppointments) && this.summaryData.todayAppointments.length > 0)
+      ? this.summaryData.todayAppointments
+      : (Array.isArray(this.queueSync?.items) && this.queueSync.items.length > 0
+          ? this.queueSync.items
+          : (this.summaryData?.quickRequests || []));
     const pendingRequests = pool.filter(
       (a) => a.status === 'PENDING_ACCEPTANCE' || (a.source === 'QUICK_BOOK' && a.status === 'PENDING_ACCEPTANCE')
     );
@@ -998,24 +999,66 @@ export class SalonDashboard {
         this.realtime = new RealtimeNotifier(this.salonProfile.id, async (payload) => {
           if (payload?.type === 'PING') return;
 
+          const data = payload?.data;
+          // Synchronize in-memory cache for quickRequests, todayAppointments & pulse
+          if (data && data.id) {
+            if (Array.isArray(this.summaryData?.quickRequests)) {
+              if (data.status === 'PENDING_ACCEPTANCE') {
+                const qIdx = this.summaryData.quickRequests.findIndex((r) => r.id === data.id);
+                if (qIdx !== -1) {
+                  this.summaryData.quickRequests[qIdx] = { ...this.summaryData.quickRequests[qIdx], ...data };
+                } else {
+                  this.summaryData.quickRequests.unshift(data);
+                }
+              } else {
+                // Remove accepted or declined/cancelled requests from quickRequests pool
+                this.summaryData.quickRequests = this.summaryData.quickRequests.filter((r) => r.id !== data.id);
+              }
+            }
+
+            if (Array.isArray(this.summaryData?.todayAppointments)) {
+              const tIdx = this.summaryData.todayAppointments.findIndex((r) => r.id === data.id);
+              if (tIdx !== -1) {
+                this.summaryData.todayAppointments[tIdx] = { ...this.summaryData.todayAppointments[tIdx], ...data };
+              } else if (payload?.type === 'NEW_BOOKING' || data.status === 'PENDING_ACCEPTANCE') {
+                this.summaryData.todayAppointments.unshift(data);
+              }
+            }
+
+            if (this.summaryData?.pulse) {
+              const pendingCount = (this.summaryData.todayAppointments || [])
+                .filter((a) => a.status === 'PENDING_ACCEPTANCE').length;
+              this.summaryData.pulse.pendingRequestsCount = pendingCount;
+            }
+
+            // If Quick Requests Modal is open in DOM, immediately re-render it with updated state
+            if (document.getElementById('modal-quick-requests')) {
+              this.openQuickRequestsModal();
+            }
+          }
+
           // 1. In-Memory Zero-Latency Queue Event Dispatch
           const syncResult = this.queueSync.handleRealtimeEvent(payload);
-          if (syncResult && syncResult.handled && syncResult.mutated && syncResult.isCurrentDate) {
-            // Handled completely in memory without redundant HTTP requests!
-            this.updateQuickRequestsBadge();
-            // Re-sync Home pulse in background so revenue and floor metrics stay 100% accurate
-            if (this.activeTab === 'home') {
-              ApiClient.getDashboardSummary(this.selectedDate, true).then((fresh) => {
-                if (fresh) {
-                  this.summaryData = fresh;
-                  this.refreshActiveTab();
+          this.updateQuickRequestsBadge();
+
+          // 2. Instant tab refresh for dashboard and queue views
+          if (this.activeTab === 'dashboard' || this.activeTab === 'queue') {
+            this.refreshActiveTab();
+            // Re-sync aggregates in background to guarantee full parity with database
+            ApiClient.getDashboardSummary(this.selectedDate, true).then((fresh) => {
+              if (fresh) {
+                this.summaryData = fresh;
+                if (Array.isArray(this.queueSync.items)) {
+                  this.summaryData.todayAppointments = this.queueSync.items;
                 }
-              }).catch(() => { });
-            }
+                this.updateQuickRequestsBadge();
+                this.refreshActiveTab();
+              }
+            }).catch(() => { });
             return;
           }
 
-          // 2. Staff or Services updates
+          // 3. Staff or Services updates
           const isStaffOrService = payload?.type === 'STAFF_UPDATED' || payload?.type === 'SERVICE_UPDATED';
           if (isStaffOrService) {
             if (payload?.type === 'STAFF_UPDATED') {
@@ -1024,29 +1067,13 @@ export class SalonDashboard {
             if (payload?.type === 'SERVICE_UPDATED') {
               this.servicesList = await ApiClient.getServices(true).catch(() => this.servicesList);
             }
-            // If currently on Home tab, refresh the Home feed directly so Staff & Services summaries update instantly
-            if (this.activeTab === 'home') {
-              const fresh = await ApiClient.getDashboardSummary(this.selectedDate, true).catch(() => null);
-              if (fresh) this.summaryData = fresh;
-              this.refreshActiveTab();
-              return;
-            }
             if (this.activeTab === 'staff' || this.activeTab === 'services') {
               this.render();
             }
             return;
           }
 
-          // 3. Fallback for other events: If on Home tab, execute fast single-call sync
-          if (this.activeTab === 'home') {
-            const fresh = await ApiClient.getDashboardSummary(this.selectedDate, true).catch(() => null);
-            if (fresh) this.summaryData = fresh;
-            this.updateQuickRequestsBadge();
-            this.refreshActiveTab();
-            return;
-          }
-
-          // Multi-tab deep reload
+          // 4. Multi-tab deep reload fallback
           await this.loadData(true);
           this.updateQuickRequestsBadge();
           this.refreshActiveTab();
@@ -2347,7 +2374,7 @@ export class SalonDashboard {
       // Format Cancellation Details and Timestamp (12-Hour AM/PM)
       const formatCancellationDetails = (appt) => {
         const historyList = Array.isArray(appt.statusHistory) ? appt.statusHistory : [];
-        const cancelEntry = historyList.find((h) => h.newStatus === 'CANCELLED') || historyList[0];
+        const cancelEntry = historyList.find((h) => h.newStatus === 'CANCELLED' || h.newStatus === 'REJECTED') || historyList[0];
         const cancelledDt = cancelEntry?.createdAt
           ? new Date(cancelEntry.createdAt)
           : (appt.updatedAt ? new Date(appt.updatedAt) : null);
@@ -2363,7 +2390,7 @@ export class SalonDashboard {
           else relativeAgo = cancelledDt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         }
 
-        const reason = cancelEntry?.reason || appt.cancellationReason || 'Cancelled by customer or operator';
+        const reason = cancelEntry?.reason || appt.cancellationReason || (appt.status === 'REJECTED' ? 'Declined or capacity conflict' : 'Cancelled by customer or operator');
         return { timeStr, relativeAgo, reason };
       };
 
@@ -2608,15 +2635,25 @@ export class SalonDashboard {
         if (status === 'PENDING_RESCHEDULE') {
           const propStart = appt.proposedStartAt ? new Date(appt.proposedStartAt) : null;
           const propEnd = appt.proposedEndAt ? new Date(appt.proposedEndAt) : null;
-          const propSlot = propStart ? `${formatTime12h(propStart)} – ${formatTime12h(propEnd || propStart)}` : 'Proposed Slot';
+          let propSlotTag = 'Proposed Slot';
+          let detailSlotText = '';
+          if (propStart && !isNaN(propStart.getTime())) {
+            const dateStr = propStart.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+            const timeStr = `${formatTime12h(propStart)} – ${formatTime12h(propEnd || propStart)}`;
+            propSlotTag = `${dateStr} · ${timeStr}`;
+            detailSlotText = `Proposed for <strong>${propSlotTag}</strong>`;
+          }
+          const stylistName = appt.stylist?.name ? ` with <strong>${appt.stylist.name}</strong>` : '';
           return `
             <div class="qc__lifecycle-alert qc__lifecycle-alert--warn">
               <div class="qc__alert-top">
                 ${Icons.clock({ size: 12, color: '#fbbf24' })}
-                <span class="qc__alert-title">Reschedule Proposal Pending</span>
-                <span class="qc__alert-tag">${propSlot}</span>
+                <span class="qc__alert-title">Reschedule Proposal Sent</span>
+                <span class="qc__alert-tag">${propSlotTag}</span>
               </div>
-              <div class="qc__alert-sub">Waiting client confirmation on WhatsApp</div>
+              <div class="qc__alert-sub">
+                WhatsApp offer sent to customer: ${detailSlotText || 'Pending customer confirmation'}${stylistName}. Auto-expires if unconfirmed.
+              </div>
             </div>
           `;
         }
@@ -2953,17 +2990,39 @@ export class SalonDashboard {
                   </div>
                 ` : ''}
 
-                ${appt.status === 'PENDING_RESCHEDULE' ? `
+                ${appt.status === 'PENDING_RESCHEDULE' ? (() => {
+                  const cutoffTarget = appt.expiresAt || appt.nextActionAt;
+                  const cutoffTargetMs = cutoffTarget ? new Date(cutoffTarget).getTime() : 0;
+                  const initialDiffMs = cutoffTargetMs ? cutoffTargetMs - Date.now() : 0;
+                  let initialCountdown = '';
+                  if (initialDiffMs > 0) {
+                    const totalSecs = Math.floor(initialDiffMs / 1000);
+                    const hours = Math.floor(totalSecs / 3600);
+                    const mins = Math.floor((totalSecs % 3600) / 60);
+                    const secs = totalSecs % 60;
+                    initialCountdown = hours > 0 ? `${hours}h ${mins}m left` : `${mins}m ${secs}s left`;
+                  } else if (cutoffTargetMs) {
+                    initialCountdown = 'Expired';
+                  }
+                  return `
                   <div class="qc__actions-group">
-                    <button class="qc__btn qc__btn--disabled" disabled>
-                      ${Icons.clock({ size: 13, color: '#fbbf24' })}
-                      <span>Waiting Customer Approval</span>
+                    <button class="qc__btn qc__btn--disabled" disabled style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%;">
+                      <span style="display: flex; align-items: center; gap: 6px;">
+                        ${Icons.clock({ size: 13, color: '#fbbf24' })}
+                        <span>Waiting Customer Approval</span>
+                      </span>
+                      ${cutoffTargetMs ? `
+                        <span class="qc__reschedule-cutoff-timer" data-cutoff-target="${cutoffTargetMs}" style="font-size: 0.74rem; font-weight: 700; background: rgba(251, 191, 36, 0.18); border: 1px solid rgba(251, 191, 36, 0.35); color: #fbbf24; padding: 2px 8px; border-radius: 6px; letter-spacing: 0.2px;">
+                          ⏳ ${initialCountdown}
+                        </span>
+                      ` : ''}
                     </button>
                     <button class="qc__icon-btn qc__icon-btn--danger btn-open-cancel" data-id="${appt.id}" data-name="${customerName}" title="Cancel Booking">
                       ${Icons.x({ size: 13 })}
                     </button>
                   </div>
-                ` : ''}
+                  `;
+                })() : ''}
 
                 ${isDone ? `
                   <div class="qc__terminal-pill qc__terminal-pill--done">
@@ -8419,10 +8478,9 @@ export class SalonDashboard {
     }
 
     const copyLinkHandler = () => {
-      const slug = this.salonProfile?.slug || 'salon';
-      const url = `${window.location.origin}/#book/${slug}`;
+      const url = this.getBookingShareUrl();
       navigator.clipboard.writeText(url);
-      this.showToast('Web booking link copied to clipboard!', 'success');
+      this.showToast('💬 WhatsApp booking link copied to clipboard!', 'success');
     };
     document.getElementById('btn-copy-invite')?.addEventListener('click', copyLinkHandler);
     document.getElementById('btn-copy-invite-subtab')?.addEventListener('click', copyLinkHandler);
@@ -9265,10 +9323,9 @@ export class SalonDashboard {
 
     // Reception Desk Quick Bar
     document.getElementById('btn-quick-copy')?.addEventListener('click', () => {
-      const slug = this.salonProfile?.slug || 'glamour-studio';
-      const url = `${window.location.origin}/#book/${slug}`;
+      const url = this.getBookingShareUrl();
       navigator.clipboard.writeText(url);
-      this.showToast('Booking link copied to clipboard!', 'success');
+      this.showToast('💬 WhatsApp booking link copied to clipboard!', 'success');
     });
     document.getElementById('btn-quick-standee')?.addEventListener('click', () => {
       this.showStandeePrintModal();
@@ -9285,10 +9342,9 @@ export class SalonDashboard {
       this.switchTab('queue');
     });
     document.getElementById('card-action-copy')?.addEventListener('click', () => {
-      const slug = this.salonProfile?.slug || 'glamour-studio';
-      const url = `${window.location.origin}/#book/${slug}`;
+      const url = this.getBookingShareUrl();
       navigator.clipboard.writeText(url);
-      this.showToast('Booking link copied to clipboard!', 'success');
+      this.showToast('💬 WhatsApp booking link copied to clipboard!', 'success');
     });
     document.getElementById('btn-goto-staff')?.addEventListener('click', () => {
       this.switchTab('staff');
@@ -9448,10 +9504,9 @@ export class SalonDashboard {
 
     // Copy Invite Link
     document.getElementById('btn-copy-invite')?.addEventListener('click', () => {
-      const slug = this.salonProfile?.slug || 'glamour-studio';
-      const url = `${window.location.origin}/#book/${slug}`;
+      const url = this.getBookingShareUrl();
       navigator.clipboard.writeText(url);
-      this.showToast('Booking link copied to clipboard!', 'success');
+      this.showToast('💬 WhatsApp booking link copied to clipboard!', 'success');
     });
 
     // Open QR & WhatsApp Modal
@@ -10017,10 +10072,9 @@ attachTabEventListeners() {
     this.attachProfileSubtabListeners();
   }
   document.getElementById('btn-copy-invite')?.addEventListener('click', () => {
-    const slug = this.salonProfile?.slug || 'the-grand-royal-barber-1';
-    const url = `${window.location.origin}/#book/${slug}`;
+    const url = this.getBookingShareUrl();
     navigator.clipboard.writeText(url);
-    this.showToast('Booking link copied to clipboard!', 'success');
+    this.showToast('💬 WhatsApp booking link copied to clipboard!', 'success');
   });
   tabContent.querySelectorAll('.btn-open-closures-modal').forEach((b) => {
     b.onclick = () => {
@@ -10180,113 +10234,236 @@ showWalkInModal() {
 
 showRescheduleModal(appointmentId, serviceId, staffId, clientName) {
   const modalContainer = document.getElementById('modal-container');
+  if (!modalContainer) return;
+
+  const currentAppt = (this.summaryData?.todayAppointments || this.queueSync?.items || []).find((a) => a.id === appointmentId);
+  const resolvedServiceId = serviceId || currentAppt?.serviceId || currentAppt?.service?.id || this.servicesList?.[0]?.id;
+  const apptDuration = currentAppt?.durationMinutes || currentAppt?.service?.durationMinutes || 30;
+  const slug = this.salonProfile?.slug || 'salon';
+
   const todayIso = this.getLocalDateString();
   const maxDays = this.salonProfile?.maxAdvanceDays || 3;
   const maxDateIso = this.addDaysToDateString(todayIso, maxDays);
 
+  let selectedStaffId = staffId || currentAppt?.stylistId || '';
+  let selectedDate = this.selectedDate && this.selectedDate >= todayIso ? this.selectedDate : todayIso;
+  let selectedSlotTime = null;
+  let availableSlotsList = [];
+
+  // Helper to format 24h string (e.g. "17:00") to 12h readable string (e.g. "5:00 PM")
+  const format12h = (timeStr) => {
+    if (!timeStr) return '';
+    const [hStr, mStr] = timeStr.split(':');
+    let h = parseInt(hStr, 10);
+    const m = mStr ? mStr.padStart(2, '0') : '00';
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12;
+    h = h ? h : 12;
+    return `${h}:${m} ${ampm}`;
+  };
+
+  // Helper to calculate minutes from midnight
+  const parseTimeMin = (timeStr) => {
+    const [h, m] = timeStr.split(':').map(Number);
+    return h * 60 + m;
+  };
+
+  // Filter viable slots with >= 2 hour lead time rule for today
+  const filterSlots = (slots, dateIso) => {
+    if (!Array.isArray(slots)) return [];
+    const now = new Date();
+    const isToday = dateIso === todayIso;
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    const minRequiredMinutes = nowMinutes + 120; // At least 2 hours in the future
+
+    return slots.filter((s) => {
+      if (!isToday) return true;
+      const slotMin = parseTimeMin(s.startTime);
+      return slotMin >= minRequiredMinutes;
+    });
+  };
+
   modalContainer.innerHTML = `
-      <div class="modal-backdrop show">
-        <div class="modal-content">
-          <div class="modal-header">
-            <h3>🔄 Reschedule Appointment</h3>
-            <button class="close-btn" id="btn-close-modal">&times;</button>
+    <div class="modal-backdrop show">
+      <div class="modal-content" style="max-width: 440px; width: 100%; max-height: 85vh; display: flex; flex-direction: column; border-radius: 20px 20px 0 0; padding: 0; overflow: hidden;">
+        <!-- Header -->
+        <div class="modal-header" style="padding: 14px 18px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <div style="width: 28px; height: 28px; border-radius: 8px; background: rgba(139, 92, 246, 0.16); display: flex; align-items: center; justify-content: center; color: #a78bfa;">
+              ${Icons.calendar ? Icons.calendar({ size: 14 }) : '🔄'}
+            </div>
+            <div>
+              <h3 style="margin: 0; font-size: 1rem; font-weight: 700; color: #f8fafc;">Propose Reschedule</h3>
+              <div style="font-size: 0.72rem; color: #94a3b8; margin-top: 1px;">
+                Client: <strong style="color: #cbd5e1;">${clientName || 'Customer'}</strong> • ${apptDuration} mins
+              </div>
+            </div>
           </div>
-          <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 16px;">Client: <strong>${clientName}</strong></p>
+          <button class="close-btn" id="btn-close-modal" style="background: none; border: none; font-size: 1.3rem; color: #94a3b8; cursor: pointer; padding: 2px 6px;">&times;</button>
+        </div>
 
-          <form id="reschedule-form">
-            <div class="form-group">
-              <label>New Date *</label>
-              <input type="date" class="form-control" id="reschedule-date" value="${this.selectedDate}" min="${todayIso}" max="${maxDateIso}" required />
+        <div style="padding: 14px 16px calc(16px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden;">
+          <!-- 1. Specialist (Top) -->
+          <div class="form-group" style="margin-bottom: 10px; flex-shrink: 0;">
+            <label style="display: block; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #a78bfa; margin-bottom: 4px;">
+              Specialist
+            </label>
+            <select class="form-control" id="reschedule-staff" style="width: 100%; border-radius: 8px; padding: 8px 10px; font-size: 0.85rem;">
+              <option value="">👤 Any Available Specialist</option>
+              ${this.staffList.filter((s) => s.status !== 'INACTIVE').map((st) => `<option value="${st.id}" ${st.id === selectedStaffId ? 'selected' : ''}>💈 ${st.name}</option>`).join('')}
+            </select>
+          </div>
+
+          <!-- 2. Date (Middle) -->
+          <div class="form-group" style="margin-bottom: 12px; flex-shrink: 0;">
+            <label style="display: block; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #a78bfa; margin-bottom: 4px;">
+              Date
+            </label>
+            <input type="date" class="form-control" id="reschedule-date" value="${selectedDate}" min="${todayIso}" max="${maxDateIso}" required style="width: 100%; border-radius: 8px; padding: 8px 10px; font-size: 0.85rem;" />
+          </div>
+
+          <!-- 3. Available Slots (Stretches with content) -->
+          <div class="form-group" style="margin-bottom: 12px; flex: 1; min-height: 0; display: flex; flex-direction: column;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-shrink: 0;">
+              <label style="margin: 0; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #a78bfa;">
+                Available Slots
+              </label>
+              <span id="slot-count-badge" style="font-size: 0.7rem; color: #94a3b8; font-weight: 600;">Loading...</span>
             </div>
-
-            <div class="form-group">
-              <label>New Start Time (HH:mm) *</label>
-              <input type="time" class="form-control" id="reschedule-time" value="12:00" required />
+            <div id="reschedule-slots-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; flex: 1; min-height: 120px; max-height: 48vh; overflow-y: auto; padding: 4px 2px 8px 2px; -webkit-overflow-scrolling: touch;">
+              <!-- Slot chips inserted dynamically -->
             </div>
+          </div>
 
-            <div class="form-group">
-              <label>Stylist</label>
-              <select class="form-control" id="reschedule-staff">
-                <option value="">👤 Keep Auto / Any Stylist</option>
-                ${this.staffList.map((st) => `<option value="${st.id}" ${st.id === staffId ? 'selected' : ''}>💈 ${st.name}</option>`).join('')}
-              </select>
-            </div>
+          <div id="reschedule-error" style="color: #fb7185; font-size: 0.78rem; margin-bottom: 8px; display: none;"></div>
 
-            <div class="form-group">
-              <label>Reason for Reschedule</label>
-              <input type="text" class="form-control" id="reschedule-reason" placeholder="Client requested time shift" />
-            </div>
-
-            <div id="reschedule-error" style="color: var(--danger); font-size: 0.85rem; margin-bottom: 12px; display: none;"></div>
-
-            <div style="display: flex; flex-direction: column; gap: 10px;">
-              <button type="submit" class="btn btn-primary" style="width: 100%;" id="btn-submit-reschedule">
-                ⚡ Update Schedule Immediately
-              </button>
-              <button type="button" class="btn btn-secondary" style="width: 100%; background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35);" id="btn-propose-reschedule">
-                📩 Propose to Client via WhatsApp
-              </button>
-            </div>
-          </form>
+          <!-- 4. Action Button (Pinned at Bottom) -->
+          <button type="button" class="btn btn-primary" id="btn-submit-proposal" disabled style="width: 100%; padding: 12px; font-weight: 700; font-size: 0.88rem; border-radius: 10px; background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%); border: none; box-shadow: 0 4px 15px rgba(124, 58, 237, 0.35); cursor: not-allowed; opacity: 0.55; transition: all 0.2s ease; flex-shrink: 0; margin-top: auto;">
+            📩 Propose via WhatsApp
+          </button>
         </div>
       </div>
-    `;
+    </div>
+  `;
 
-  document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+  const slotsGrid = document.getElementById('reschedule-slots-grid');
+  const slotBadge = document.getElementById('slot-count-badge');
+  const submitBtn = document.getElementById('btn-submit-proposal');
+  const errorDiv = document.getElementById('reschedule-error');
+  const staffSelect = document.getElementById('reschedule-staff');
+  const dateInput = document.getElementById('reschedule-date');
 
-  document.getElementById('reschedule-form')?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const errorDiv = document.getElementById('reschedule-error');
-    const submitBtn = document.getElementById('btn-submit-reschedule');
-    submitBtn.textContent = 'Rescheduling...';
+  const loadSlots = async () => {
+    selectedSlotTime = null;
     submitBtn.setAttribute('disabled', 'true');
+    submitBtn.style.opacity = '0.55';
+    submitBtn.style.cursor = 'not-allowed';
+    errorDiv.style.display = 'none';
+
+    slotsGrid.innerHTML = `
+      <div style="grid-column: 1 / -1; padding: 18px; text-align: center; color: #94a3b8; font-size: 0.76rem;">
+        <i class="fas fa-spinner fa-spin" style="margin-right: 6px;"></i> Checking available slots...
+      </div>
+    `;
+    slotBadge.textContent = 'Checking...';
 
     try {
-      await ApiClient.rescheduleAppointment(appointmentId, {
-        newDate: document.getElementById('reschedule-date').value,
-        newStartTime: document.getElementById('reschedule-time').value,
-        newStaffId: document.getElementById('reschedule-staff').value || undefined,
-        reason: document.getElementById('reschedule-reason').value,
-      });
+      const staffVal = staffSelect.value || null;
+      const dateVal = dateInput.value;
+      const res = await ApiClient.getPublicAvailability(slug, resolvedServiceId, dateVal, staffVal);
+      const rawSlots = res?.availableSlots || [];
+      availableSlotsList = filterSlots(rawSlots, dateVal);
 
-      modalContainer.innerHTML = '';
-      await this.loadData();
-      this.render();
+      if (availableSlotsList.length === 0) {
+        slotsGrid.innerHTML = `
+          <div style="grid-column: 1 / -1; padding: 14px; text-align: center; background: rgba(255, 255, 255, 0.03); border-radius: 8px; color: #94a3b8; font-size: 0.74rem;">
+            ⚠️ No slots available for this specialist on ${dateVal} (at least 2 hours ahead). Please try another date or specialist.
+          </div>
+        `;
+        slotBadge.textContent = '0 slots';
+        return;
+      }
+
+      slotBadge.textContent = `${availableSlotsList.length} slots`;
+      slotsGrid.innerHTML = availableSlotsList.map((s) => `
+        <button type="button" class="btn-slot-chip" data-time="${s.startTime}" style="background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.12); color: #f1f5f9; padding: 7px 4px; border-radius: 6px; font-size: 0.74rem; font-weight: 600; cursor: pointer; transition: all 0.15s ease; text-align: center;">
+          ${format12h(s.startTime)}
+        </button>
+      `).join('');
+
+      // Attach slot click listeners
+      slotsGrid.querySelectorAll('.btn-slot-chip').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          slotsGrid.querySelectorAll('.btn-slot-chip').forEach((b) => {
+            b.style.background = 'rgba(255, 255, 255, 0.05)';
+            b.style.borderColor = 'rgba(255, 255, 255, 0.12)';
+            b.style.color = '#f1f5f9';
+            b.style.boxShadow = 'none';
+          });
+          btn.style.background = 'rgba(139, 92, 246, 0.25)';
+          btn.style.borderColor = '#8b5cf6';
+          btn.style.color = '#fff';
+          btn.style.boxShadow = '0 0 10px rgba(139, 92, 246, 0.4)';
+
+          selectedSlotTime = btn.getAttribute('data-time');
+          submitBtn.removeAttribute('disabled');
+          submitBtn.style.opacity = '1';
+          submitBtn.style.cursor = 'pointer';
+        });
+      });
     } catch (err) {
-      errorDiv.textContent = err.message || 'Rescheduling failed.';
-      errorDiv.style.display = 'block';
-      submitBtn.textContent = '⚡ Update Schedule Immediately';
-      submitBtn.removeAttribute('disabled');
+      console.warn('[Reschedule] Slot load error:', err);
+      slotsGrid.innerHTML = `
+        <div style="grid-column: 1 / -1; padding: 12px; text-align: center; color: #fb7185; font-size: 0.74rem;">
+          Failed to load available slots. ${err.message || ''}
+        </div>
+      `;
+      slotBadge.textContent = 'Error';
     }
+  };
+
+  // Event listeners for reactive reloading
+  staffSelect.addEventListener('change', loadSlots);
+  dateInput.addEventListener('change', loadSlots);
+
+  // Initial load
+  loadSlots();
+
+  // Close button
+  document.getElementById('btn-close-modal')?.addEventListener('click', () => {
+    modalContainer.innerHTML = '';
   });
 
-  document.getElementById('btn-propose-reschedule')?.addEventListener('click', async () => {
-    const errorDiv = document.getElementById('reschedule-error');
-    const proposeBtn = document.getElementById('btn-propose-reschedule');
-    proposeBtn.textContent = 'Sending WhatsApp Proposal...';
-    proposeBtn.setAttribute('disabled', 'true');
+  // Submit Proposal button
+  submitBtn.addEventListener('click', async () => {
+    if (!selectedSlotTime) return;
+    submitBtn.setAttribute('disabled', 'true');
+    submitBtn.textContent = 'Sending WhatsApp Proposal...';
+    errorDiv.style.display = 'none';
 
     try {
-      const dateVal = document.getElementById('reschedule-date').value;
-      const timeVal = document.getElementById('reschedule-time').value;
+      const dateVal = dateInput.value;
       const [y, m, d] = dateVal.split('-').map(Number);
-      const [hh, mm] = timeVal.split(':').map(Number);
+      const [hh, mm] = selectedSlotTime.split(':').map(Number);
       const proposedStartAt = new Date(y, m - 1, d, hh, mm, 0);
-      const proposedEndAt = new Date(proposedStartAt.getTime() + 30 * 60000);
+      const proposedEndAt = new Date(proposedStartAt.getTime() + apptDuration * 60000);
+      const proposedStylistId = staffSelect.value || undefined;
 
       await ApiClient.proposeAdminReschedule(appointmentId, {
         newStartAt: proposedStartAt.toISOString(),
         newEndAt: proposedEndAt.toISOString(),
+        proposedStylistId,
       });
 
       modalContainer.innerHTML = '';
-      await this.loadData();
-      this.render();
+      this.showToast('💬 Reschedule proposal sent to client via WhatsApp! Slot locked for 1 hr.', 'success');
+      await this.loadData(true);
+      this.refreshActiveTab();
     } catch (err) {
-      errorDiv.textContent = err.message || 'Failed to propose reschedule.';
+      errorDiv.textContent = err.message || 'Failed to send reschedule proposal.';
       errorDiv.style.display = 'block';
-      proposeBtn.textContent = '📩 Propose to Client via WhatsApp';
-      proposeBtn.removeAttribute('disabled');
+      submitBtn.removeAttribute('disabled');
+      submitBtn.textContent = '📩 Propose via WhatsApp';
     }
   });
 }
@@ -10445,6 +10622,34 @@ startLiveTimerTicks() {
         timerEl.textContent = timeStr ? `⏰ ${timeStr}` : '';
       }
     });
+
+    // 3) Live Reschedule Proposal Cutoff Timers (Waiting Customer Approval)
+    const rescheduleTimers = document.querySelectorAll('.qc__reschedule-cutoff-timer[data-cutoff-target]');
+    rescheduleTimers.forEach((timerEl) => {
+      const targetMs = Number(timerEl.getAttribute('data-cutoff-target'));
+      if (!targetMs || isNaN(targetMs)) return;
+      const diffMs = targetMs - Date.now();
+
+      if (diffMs > 0) {
+        const totalSecs = Math.floor(diffMs / 1000);
+        const hours = Math.floor(totalSecs / 3600);
+        const mins = Math.floor((totalSecs % 3600) / 60);
+        const secs = totalSecs % 60;
+
+        if (hours > 0) {
+          timerEl.textContent = `⏳ ${hours}h ${mins}m ${secs}s left`;
+        } else if (mins > 0) {
+          timerEl.textContent = `⏳ ${mins}m ${secs}s left`;
+        } else {
+          timerEl.textContent = `⏳ ${secs}s left`;
+        }
+      } else {
+        timerEl.textContent = '⚠️ Cutoff Expired';
+        timerEl.style.color = '#fb7185';
+        timerEl.style.borderColor = 'rgba(251, 113, 133, 0.4)';
+        timerEl.style.background = 'rgba(251, 113, 133, 0.15)';
+      }
+    });
   }, 1000);
 }
 
@@ -10453,42 +10658,61 @@ startLiveTimerTicks() {
 
 showCancelModal(appointmentId, clientName) {
   const modalContainer = document.getElementById('modal-container');
+  if (!modalContainer) return;
 
   modalContainer.innerHTML = `
       <div class="modal-backdrop show">
-        <div class="modal-content">
-          <div class="modal-header">
-            <h3 style="color: var(--danger);">✕ Cancel Appointment</h3>
-            <button class="close-btn" id="btn-close-modal">&times;</button>
+        <div class="modal-content" style="max-width: 420px; width: 100%; border-radius: 16px; padding: 20px; background: #16121e; border: 1px solid rgba(255, 255, 255, 0.1); box-shadow: 0 20px 40px rgba(0,0,0,0.6);">
+          <!-- Header -->
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.08);">
+            <div>
+              <h3 style="margin: 0; font-size: 1.05rem; font-weight: 700; color: #f8fafc;">Cancel Appointment</h3>
+              <p style="margin: 4px 0 0; font-size: 0.82rem; color: #94a3b8;">
+                Client: <strong style="color: #f1f5f9;">${clientName || 'Customer'}</strong>
+              </p>
+            </div>
+            <button class="close-btn" id="btn-close-modal" style="background: none; border: none; font-size: 1.4rem; color: #94a3b8; cursor: pointer; line-height: 1; padding: 0 4px;">&times;</button>
           </div>
-          <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 16px;">
-            Cancel booking for <strong>${clientName}</strong>. Select the cancellation reason category below:
-          </p>
 
           <form id="cancel-form">
-            <div class="form-group">
-              <label>Penalty Setting *</label>
-              <select class="form-control" id="cancel-penalty-select" required>
-                <option value="NO_PENALTY">🟢 Cancel WITHOUT Penalty (Waive Strike / 0 Strikes)</option>
-                <option value="APPLY_PENALTY">🔴 Cancel WITH Penalty (+1 Strike to Customer)</option>
+            <!-- 1. Customer Penalty Setting (First) -->
+            <div class="form-group" style="margin-bottom: 14px;">
+              <label style="display: block; font-size: 0.78rem; font-weight: 600; color: #cbd5e1; margin-bottom: 6px;">
+                Customer Penalty *
+              </label>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; background: rgba(0, 0, 0, 0.25); padding: 4px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.08);">
+                <button type="button" id="btn-penalty-none" style="padding: 10px 8px; border-radius: 8px; border: 1.5px solid #10b981; background: rgba(16, 185, 129, 0.18); color: #34d399; font-size: 0.84rem; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: all 0.15s ease;">
+                  <span>🟢</span> No Penalty
+                </button>
+                <button type="button" id="btn-penalty-apply" style="padding: 10px 8px; border-radius: 8px; border: 1.5px solid transparent; background: transparent; color: #94a3b8; font-size: 0.84rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: all 0.15s ease;">
+                  <span>🔴</span> +1 Strike
+                </button>
+              </div>
+            </div>
+
+            <!-- 2. Cancellation Reason (Second, with Icons) -->
+            <div class="form-group" style="margin-bottom: 14px;">
+              <label style="display: block; font-size: 0.78rem; font-weight: 600; color: #cbd5e1; margin-bottom: 6px;">
+                Cancellation Reason *
+              </label>
+              <select class="form-control" id="cancel-category-select" required style="width: 100%; background: #221c2e; border: 1px solid rgba(255, 255, 255, 0.12); color: #fff; border-radius: 8px; padding: 10px 12px; font-size: 0.85rem;">
+                <option value="CLIENT_CANCELLED">🙋 Customer Requested Cancellation</option>
+                <option value="SALON_EMERGENCY">💈 Salon Emergency / Barber Unavailable</option>
+                <option value="CLIENT_UNRESPONSIVE">📞 Customer No-Show / Unresponsive</option>
+                <option value="SCHEDULE_CONFLICT">🔄 Scheduling Conflict / Other</option>
               </select>
             </div>
 
-            <div class="form-group">
-              <label>Cancellation Reason Category *</label>
-              <select class="form-control" id="cancel-category-select" required>
-                <option value="SALON_EMERGENCY">🔵 Salon Emergency / Barber Unavailable</option>
-                <option value="CLIENT_UNRESPONSIVE">🔴 Client Unresponsive / Client Mistake</option>
-                <option value="CLIENT_CANCELLED">⚪ Customer Requested Cancellation</option>
-              </select>
+            <!-- 3. Specific Note (Optional, Third) -->
+            <div class="form-group" style="margin-bottom: 18px;">
+              <label style="display: block; font-size: 0.78rem; font-weight: 600; color: #cbd5e1; margin-bottom: 6px;">
+                Specific Note (Optional)
+              </label>
+              <input type="text" class="form-control" id="cancel-reason-note" placeholder="e.g. Client called to cancel..." style="width: 100%; background: #221c2e; border: 1px solid rgba(255, 255, 255, 0.12); color: #fff; border-radius: 8px; padding: 10px 12px; font-size: 0.85rem;" />
             </div>
 
-            <div class="form-group">
-              <label>Specific Note (Optional)</label>
-              <input type="text" class="form-control" id="cancel-reason-note" placeholder="Client didn't answer phone call..." />
-            </div>
-
-            <button type="submit" class="btn btn-secondary" style="width: 100%; color: var(--danger); border-color: var(--danger);" id="btn-submit-cancel">
+            <!-- Action Button -->
+            <button type="submit" class="btn" id="btn-submit-cancel" style="width: 100%; padding: 12px; background: #e11d48; color: #fff; font-weight: 700; font-size: 0.9rem; border-radius: 8px; border: none; cursor: pointer; transition: background 0.2s ease;">
               Confirm Cancellation
             </button>
           </form>
@@ -10498,15 +10722,57 @@ showCancelModal(appointmentId, clientName) {
 
   document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
 
+  const reasonSelect = document.getElementById('cancel-category-select');
+  const btnNone = document.getElementById('btn-penalty-none');
+  const btnApply = document.getElementById('btn-penalty-apply');
+  let penaltyMode = 'NO_PENALTY';
+
+  const setPenaltyMode = (mode) => {
+    penaltyMode = mode;
+    if (!btnNone || !btnApply) return;
+    if (mode === 'NO_PENALTY') {
+      btnNone.style.background = 'rgba(16, 185, 129, 0.18)';
+      btnNone.style.borderColor = '#10b981';
+      btnNone.style.color = '#34d399';
+      btnNone.style.fontWeight = '700';
+
+      btnApply.style.background = 'transparent';
+      btnApply.style.borderColor = 'transparent';
+      btnApply.style.color = '#94a3b8';
+      btnApply.style.fontWeight = '600';
+    } else {
+      btnApply.style.background = 'rgba(239, 68, 68, 0.18)';
+      btnApply.style.borderColor = '#ef4444';
+      btnApply.style.color = '#f87171';
+      btnApply.style.fontWeight = '700';
+
+      btnNone.style.background = 'transparent';
+      btnNone.style.borderColor = 'transparent';
+      btnNone.style.color = '#94a3b8';
+      btnNone.style.fontWeight = '600';
+    }
+  };
+
+  btnNone?.addEventListener('click', () => setPenaltyMode('NO_PENALTY'));
+  btnApply?.addEventListener('click', () => setPenaltyMode('APPLY_PENALTY'));
+
+  // Auto-set penalty when reason changes (simple & helpful for non-tech users)
+  reasonSelect?.addEventListener('change', () => {
+    if (reasonSelect.value === 'CLIENT_UNRESPONSIVE') {
+      setPenaltyMode('APPLY_PENALTY');
+    } else {
+      setPenaltyMode('NO_PENALTY');
+    }
+  });
+
   document.getElementById('cancel-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const submitBtn = document.getElementById('btn-submit-cancel');
     submitBtn.textContent = 'Processing Cancellation...';
     submitBtn.setAttribute('disabled', 'true');
 
-    const penaltyMode = document.getElementById('cancel-penalty-select').value;
     const reasonCategory = document.getElementById('cancel-category-select').value;
-    const reasonNote = document.getElementById('cancel-reason-note').value || '';
+    const reasonNote = document.getElementById('cancel-reason-note')?.value?.trim() || '';
     const applyPenalty = penaltyMode === 'APPLY_PENALTY';
     const noPenalty = penaltyMode === 'NO_PENALTY';
 
@@ -13967,6 +14233,17 @@ showQRCodeModal() {
 
 showStandeePrintModal() {
   BookingQrView.showStandeeModal(this);
+}
+
+getBookingShareUrl() {
+  const rawPhone = this.salonProfile?.phone || this.currentUser?.phone || '';
+  let digits = (rawPhone || '').replace(/[^\d]/g, '');
+  if (digits.length === 10) digits = '91' + digits;
+  if (digits.length >= 10) {
+    return `https://wa.me/${digits}?text=Hi`;
+  }
+  const slug = this.salonProfile?.slug || 'salon';
+  return `${window.location.origin}/#book/${slug}`;
 }
 
   async showCustomerHistoryModal(customerId, customerName) {

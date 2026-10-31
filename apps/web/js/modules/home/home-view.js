@@ -131,37 +131,29 @@ export class HomeView {
     const sc = summary.statusCounts || {};
 
     // 1. COMPLETED: Finished visits today
-    const completedCount = pulse?.completed !== undefined
-      ? pulse.completed
-      : (appts.length > 0 ? appts.filter((a) => a.status === 'COMPLETED').length : (sc.completed || 0));
+    const completedCount = appts.length > 0
+      ? appts.filter((a) => a.status === 'COMPLETED').length
+      : (pulse?.completed ?? sc.completed ?? 0);
 
     // 2. IN CHAIR: Clients currently seated receiving styling/services
-    const inChairCount = pulse?.inChair !== undefined
-      ? pulse.inChair
-      : (appts.length > 0
-          ? appts.filter((a) => a.status === 'SEATED_IN_CHAIR' || a.status === 'IN_SERVICE').length
-          : Math.max(sc.seatedInChair || 0, sc.inService || 0));
+    const inChairCount = appts.length > 0
+      ? appts.filter((a) => a.status === 'SEATED_IN_CHAIR' || a.status === 'IN_SERVICE').length
+      : (pulse?.inChair ?? Math.max(sc.seatedInChair || 0, sc.inService || 0));
 
     // 3. IN QUEUE: Confirmed clients scheduled in line today
-    const upcomingCount = pulse?.inQueue !== undefined
-      ? pulse.inQueue
-      : (appts.length > 0
-          ? appts.filter((a) => ['CONFIRMED', 'BOOKED', 'CHECKED_IN', 'ON_THE_WAY'].includes(a.status)).length
-          : ((sc.confirmed || 0) + (sc.booked || 0) + (sc.checkedIn || 0) + (sc.onTheWay || 0)));
+    const upcomingCount = appts.length > 0
+      ? appts.filter((a) => ['CONFIRMED', 'BOOKED', 'CHECKED_IN', 'ON_THE_WAY'].includes(a.status)).length
+      : (pulse?.inQueue ?? ((sc.confirmed || 0) + (sc.booked || 0) + (sc.checkedIn || 0) + (sc.onTheWay || 0)));
 
     // 4. TOTAL BOOKED: All valid appointments booked for today
-    const totalBookedCount = pulse?.totalBooked !== undefined
-      ? pulse.totalBooked
-      : (appts.length > 0
-          ? appts.filter((a) => a.status !== 'CANCELLED' && a.status !== 'REJECTED').length
-          : (sc.total !== undefined ? Math.max(0, (sc.total || 0) - (sc.cancelled || 0) - (sc.rejected || 0)) : (completedCount + inChairCount + upcomingCount)));
+    const totalBookedCount = appts.length > 0
+      ? appts.filter((a) => a.status !== 'CANCELLED' && a.status !== 'REJECTED').length
+      : (pulse?.totalBooked ?? (sc.total !== undefined ? Math.max(0, (sc.total || 0) - (sc.cancelled || 0) - (sc.rejected || 0)) : (completedCount + inChairCount + upcomingCount)));
 
     // 5. PENDING REQUESTS: Incoming quick bookings awaiting acceptance
-    const pendingCount = pulse?.pendingRequestsCount !== undefined
-      ? pulse.pendingRequestsCount
-      : (appts.length > 0
-          ? appts.filter((a) => a.status === 'PENDING_ACCEPTANCE').length
-          : (sc.pendingAcceptance || 0));
+    const pendingCount = appts.length > 0
+      ? appts.filter((a) => a.status === 'PENDING_ACCEPTANCE').length
+      : (pulse?.pendingRequestsCount ?? sc.pendingAcceptance ?? 0);
 
     // 6. Floor & Stylist Capacity Calculations
     let availableStaffCount = pulse?.floorCapacity?.availableStaff;
@@ -279,88 +271,67 @@ export class HomeView {
 
         </div>
 
-        <!-- Secondary Floor & Automation Readiness Pulse Bar -->
-        <div style="margin-top: 12px; padding-top: 10px; border-top: 1px dashed rgba(255, 255, 255, 0.06); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 0.72rem; color: #94a3b8;">
-          <div style="display: flex; align-items: center; gap: 6px;">
-            <span style="color: #34d399; font-size: 0.70rem;">●</span>
-            <span>Floor: <strong style="color: #34d399;">${availableStaffCount}</strong> / ${onDutyStaffCount} Chairs Free for Walk-In</span>
-          </div>
-
-          <div style="display: flex; align-items: center; gap: 10px;">
-            ${pendingCount > 0 ? `
-              <span style="color: #fbbf24; font-weight: 700; background: rgba(245, 158, 11, 0.15); padding: 1px 7px; border-radius: 4px;">
-                ⚡ ${pendingCount} Pending Action
-              </span>
-            ` : ''}
-            <span style="color: #cbd5e1;">
-              💬 WhatsApp: <strong style="color: #34d399;">Active</strong> (${whatsappRemaining} free)
-            </span>
-          </div>
-        </div>
-
       </div>
     `;
   }
 
   /**
-   * CARD 2: DEDICATED QUICK BOOKING REQUESTS HUB
-   * Pixel-perfect professional layout:
-   * - Big font count (2.1rem) vertically centered with stacked label & status
-   * - Compact vertical height (~84px when 0 pending, reduced padding 12px 16px)
-   * - Flawless 2-row alignment with zero broken line wraps
-   * - Prominent View Requests button in header
+   * CARD 2: QUICK BOOKING REQUESTS HUB
+   * Number-driven, front-desk first layout:
+   * - Big number for immediate visibility
+   * - Short labels that never truncate on mobile
+   * - Zero fluff text, purely actionable metrics
    */
   static renderQuickBookingCard(todayAppointments = [], precomputedQuickRequests = null) {
-    const pendingRequests = Array.isArray(precomputedQuickRequests)
-      ? precomputedQuickRequests.filter((a) => a.status === 'PENDING_ACCEPTANCE')
-      : (todayAppointments || []).filter((a) => a.status === 'PENDING_ACCEPTANCE');
+    const apptsPool = Array.isArray(todayAppointments) && todayAppointments.length > 0
+      ? todayAppointments
+      : (Array.isArray(precomputedQuickRequests) ? precomputedQuickRequests : []);
+    const pendingRequests = apptsPool.filter((a) => a.status === 'PENDING_ACCEPTANCE');
     const pendingCount = pendingRequests.length;
     const isPending = pendingCount > 0;
 
     return `
-      <div id="home-quick-booking-card" class="glass-panel" style="background: linear-gradient(145deg, #181324 0%, #0d0a14 100%); border: 1px solid ${isPending ? 'rgba(245, 158, 11, 0.45)' : 'rgba(245, 158, 11, 0.22)'}; border-radius: 16px; padding: 14px 18px; position: relative; overflow: hidden; box-shadow: 0 8px 25px rgba(0,0,0,0.4); cursor: pointer; transition: all 0.25s ease;">
+      <div id="home-quick-booking-card" class="glass-panel" style="background: linear-gradient(145deg, #181324 0%, #0d0a14 100%); border: 1px solid ${isPending ? 'rgba(245, 158, 11, 0.45)' : 'rgba(255, 255, 255, 0.1)'}; border-radius: 16px; padding: 14px 16px; position: relative; overflow: hidden; box-shadow: 0 8px 25px rgba(0,0,0,0.35); cursor: pointer; transition: all 0.25s ease;">
         
-        <!-- Subtle Top Ambient Glow -->
-        <div style="position: absolute; top: -30px; right: -30px; width: 100px; height: 100px; background: radial-gradient(circle, rgba(245, 158, 11, ${isPending ? '0.18' : '0.08'}) 0%, transparent 70%); pointer-events: none;"></div>
-
-        <!-- Row 1: Header (Channel Info & View Requests Action) -->
+        <!-- Row 1: Header (Short, Crisp Title & Action Button) -->
         <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
           <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
             <div style="width: 28px; height: 28px; border-radius: 8px; background: rgba(245, 158, 11, 0.16); display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
               ${Icons.zap({ size: 15, color: '#fbbf24' })}
             </div>
             <div style="min-width: 0;">
-              <div style="font-size: 0.72rem; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase; color: #fbbf24; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                QUICK BOOKINGS
+              <div style="font-size: 0.78rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: #fbbf24; line-height: 1.1; white-space: nowrap;">
+                Quick Bookings
               </div>
-              <div style="font-size: 0.66rem; color: #94a3b8; line-height: 1.1; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                WhatsApp & QR Online Dispatch
+              <div style="font-size: 0.65rem; color: #94a3b8; line-height: 1.1; margin-top: 2px; white-space: nowrap;">
+                WhatsApp & QR Requests
               </div>
             </div>
           </div>
 
-          <!-- View Requests Action Button -->
-          <button type="button" class="btn-open-quick-modal" style="background: ${isPending ? 'rgba(245, 158, 11, 0.20)' : 'rgba(255, 255, 255, 0.06)'}; border: 1px solid ${isPending ? 'rgba(245, 158, 11, 0.5)' : 'rgba(255, 255, 255, 0.12)'}; color: ${isPending ? '#fbbf24' : '#cbd5e1'}; font-size: 0.72rem; font-weight: 700; padding: 5px 12px; border-radius: 8px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; flex-shrink: 0; transition: all 0.2s ease;">
-            <span>View Requests</span>
-            <span style="font-size: 0.76rem;">→</span>
+          <!-- Action Button -->
+          <button type="button" class="btn-open-quick-modal" style="background: ${isPending ? 'rgba(245, 158, 11, 0.22)' : 'rgba(255, 255, 255, 0.06)'}; border: 1px solid ${isPending ? 'rgba(245, 158, 11, 0.5)' : 'rgba(255, 255, 255, 0.12)'}; color: ${isPending ? '#fbbf24' : '#cbd5e1'}; font-size: 0.70rem; font-weight: 700; padding: 5px 12px; border-radius: 8px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; flex-shrink: 0; transition: all 0.2s ease;">
+            <span>${isPending ? `Review (${pendingCount})` : 'View Requests'}</span>
+            <span style="font-size: 0.74rem;">→</span>
           </button>
         </div>
 
-        <!-- Row 2: Metric & Live Status (Cleanly Aligned Horizontal Bar) -->
+        <!-- Row 2: Big Number Metric & Live Status -->
         <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 12px;">
-          <!-- Left: Big Number + Stacked Labels (Vertically Centered) -->
+          
+          <!-- Left: Big Number + Labels -->
           <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
             <span style="font-size: 2.2rem; font-weight: 900; letter-spacing: -0.02em; color: ${isPending ? '#fbbf24' : '#ffffff'}; line-height: 1; font-family: var(--font-heading, sans-serif); flex-shrink: 0;">
               ${pendingCount}
             </span>
             <div style="display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 0;">
-              <span style="font-size: 0.68rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: #fbbf24; line-height: 1.2; white-space: nowrap;">
-                PENDING REQUESTS
+              <span style="font-size: 0.68rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: ${isPending ? '#fbbf24' : '#cbd5e1'}; line-height: 1.2; white-space: nowrap;">
+                Pending Requests
               </span>
-              <span style="font-size: 0.68rem; color: #94a3b8; line-height: 1.2; white-space: nowrap;">
+              <span style="font-size: 0.66rem; color: #94a3b8; line-height: 1.2; white-space: nowrap;">
                 ${isPending 
                   ? `<strong style="color: #f87171;">${pendingCount} waiting for approval</strong>` 
-                  : `✓ All requests processed`}
+                  : 'All requests processed'}
               </span>
             </div>
           </div>
@@ -370,7 +341,7 @@ export class HomeView {
             ${isPending ? `
               <span style="background: rgba(239, 68, 68, 0.16); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); font-size: 0.68rem; font-weight: 800; padding: 4px 10px; border-radius: 9999px; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;">
                 <span style="width: 6px; height: 6px; border-radius: 50%; background: #f87171; box-shadow: 0 0 6px #f87171;"></span>
-                ${pendingRequests.length} Pending
+                ${pendingCount} Pending
               </span>
             ` : `
               <span style="background: rgba(16, 185, 129, 0.12); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.25); font-size: 0.68rem; font-weight: 700; padding: 4px 10px; border-radius: 9999px; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;">
@@ -379,6 +350,7 @@ export class HomeView {
               </span>
             `}
           </div>
+
         </div>
 
       </div>
