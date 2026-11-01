@@ -186,4 +186,196 @@ export class AppointmentAddonService {
       extraService,
     };
   }
+
+  /**
+   * Calculates the remaining continuous free time for the specialist assigned to an appointment,
+   * taking into account their next upcoming booking, salon/stylist breaks, and salon closing time.
+   * Returns a complete list of salon services flagged as eligible (fits within available window)
+   * or ineligible (exceeds window).
+   */
+  async getEligibleAddonServices(salonId: string, appointmentId: string) {
+    const appointment = await this.prisma.appointment.findFirst({
+      where: { id: appointmentId, salonId },
+      include: {
+        stylist: true,
+        service: true,
+        salon: {
+          include: { workingHours: true, salonBreaks: true },
+        },
+      },
+    });
+
+    if (!appointment) {
+      throw new NotFoundException('Appointment not found.');
+    }
+
+    const tz = appointment.salon?.timezone || 'Asia/Kolkata';
+    const apptEndDt = DateTime.fromJSDate(appointment.endAt).setZone(tz);
+    const dayOfWeek = apptEndDt.weekdayLong?.toUpperCase() as any;
+
+    // 1. Salon Closing Time
+    const workingHours = appointment.salon?.workingHours?.find((wh) => wh.dayOfWeek === dayOfWeek);
+    let salonClosingAt: Date | null = null;
+    let salonClosingStr: string | null = null;
+    if (workingHours && !workingHours.isClosed) {
+      const [closeHour, closeMin] = workingHours.endTime.split(':').map(Number);
+      const closeDt = apptEndDt.set({ hour: closeHour, minute: closeMin, second: 0, millisecond: 0 });
+      salonClosingAt = closeDt.toJSDate();
+      salonClosingStr = closeDt.toFormat('hh:mm a');
+    }
+
+    // 2. Next Salon / Staff Break
+    const activeBreaks = (appointment.salon?.salonBreaks || []).filter((b) => b.dayOfWeek === dayOfWeek);
+    let nextBreakAt: Date | null = null;
+    let nextBreakTitle: string | null = null;
+    let nextBreakStr: string | null = null;
+
+    for (const b of activeBreaks) {
+      const [bStartH, bStartM] = b.startTime.split(':').map(Number);
+      const breakStartDt = apptEndDt.set({ hour: bStartH, minute: bStartM, second: 0, millisecond: 0 });
+      const bDate = breakStartDt.toJSDate();
+      if (bDate >= appointment.endAt) {
+        if (!nextBreakAt || bDate < nextBreakAt) {
+          nextBreakAt = bDate;
+          nextBreakTitle = b.title || 'Salon Break';
+          nextBreakStr = breakStartDt.toFormat('hh:mm a');
+        }
+      }
+    }
+
+    // 3. Next Appointment for the same Stylist
+    let nextApptAt: Date | null = null;
+    let nextApptInfo: any = null;
+    let nextApptStr: string | null = null;
+
+    if (appointment.stylistId) {
+      const nextBooking = await this.prisma.appointment.findFirst({
+        where: {
+          salonId,
+          stylistId: appointment.stylistId,
+          appointmentDate: appointment.appointmentDate,
+          id: { not: appointmentId },
+          status: {
+            in: [
+              AppointmentStatus.BOOKED,
+              AppointmentStatus.CONFIRMED,
+              AppointmentStatus.ON_THE_WAY,
+              AppointmentStatus.CHECKED_IN,
+              AppointmentStatus.SEATED_IN_CHAIR,
+            ],
+          },
+          startAt: { gte: appointment.endAt },
+        },
+        orderBy: { startAt: 'asc' },
+        include: {
+          salonUser: { include: { user: true } },
+          service: true,
+        },
+      });
+
+      if (nextBooking) {
+        nextApptAt = nextBooking.startAt;
+        const cName = nextBooking.salonUser?.user?.name || nextBooking.appointmentNumber || 'Next Client';
+        nextApptStr = DateTime.fromJSDate(nextBooking.startAt).setZone(tz).toFormat('hh:mm a');
+        nextApptInfo = {
+          id: nextBooking.id,
+          appointmentNumber: nextBooking.appointmentNumber,
+          customerName: cName,
+          serviceName: nextBooking.service?.name,
+          startAt: nextBooking.startAt,
+          timeStr: nextApptStr,
+        };
+      }
+    }
+
+    // 4. Determine Earliest Blocker
+    let earliestBoundary: Date | null = null;
+    let blockerType: 'APPOINTMENT' | 'BREAK' | 'CLOSING' | 'NONE' = 'NONE';
+    let blockerTitle = 'No upcoming blockers today';
+    let blockerTimeStr: string | null = null;
+
+    if (nextApptAt) {
+      earliestBoundary = nextApptAt;
+      blockerType = 'APPOINTMENT';
+      blockerTitle = `Next client: ${nextApptInfo.customerName}`;
+      blockerTimeStr = nextApptStr;
+    }
+
+    if (nextBreakAt && (!earliestBoundary || nextBreakAt < earliestBoundary)) {
+      earliestBoundary = nextBreakAt;
+      blockerType = 'BREAK';
+      blockerTitle = `Scheduled ${nextBreakTitle}`;
+      blockerTimeStr = nextBreakStr;
+    }
+
+    if (salonClosingAt && (!earliestBoundary || salonClosingAt < earliestBoundary)) {
+      earliestBoundary = salonClosingAt;
+      blockerType = 'CLOSING';
+      blockerTitle = 'Salon Closing';
+      blockerTimeStr = salonClosingStr;
+    }
+
+    let maxContinuousMinutes = 0;
+    if (earliestBoundary) {
+      const diffMs = earliestBoundary.getTime() - appointment.endAt.getTime();
+      maxContinuousMinutes = Math.max(0, Math.floor(diffMs / (60 * 1000)));
+    } else {
+      maxContinuousMinutes = 180; // If no boundaries exist, default to 3 hours
+    }
+
+    // 5. Fetch all Active Services
+    const services = await this.prisma.service.findMany({
+      where: { salonId, status: 'ACTIVE' },
+      include: { serviceCategory: true },
+      orderBy: [{ durationMinutes: 'asc' }, { price: 'asc' }],
+    });
+
+    const mappedServices = services.map((s) => {
+      const isEligible = s.durationMinutes <= maxContinuousMinutes;
+      const remainingAfter = maxContinuousMinutes - s.durationMinutes;
+      let reason = '';
+      if (isEligible) {
+        reason = `Fits in slot (+${s.durationMinutes}m)`;
+      } else if (maxContinuousMinutes === 0) {
+        reason = `Back-to-back: ${blockerTitle} at ${blockerTimeStr}`;
+      } else {
+        reason = `Needs ${s.durationMinutes}m (only ${maxContinuousMinutes}m free before ${blockerTimeStr})`;
+      }
+
+      return {
+        id: s.id,
+        name: s.name,
+        durationMinutes: s.durationMinutes,
+        price: Number(s.price),
+        categoryId: s.categoryId,
+        categoryName: s.serviceCategory?.name || s.category || 'General',
+        categoryIcon: s.serviceCategory?.icon || '✂️',
+        isEligible,
+        remainingAfter,
+        reason,
+      };
+    });
+
+    return {
+      appointmentId,
+      currentEndAt: appointment.endAt,
+      currentEndTimeStr: apptEndDt.toFormat('hh:mm a'),
+      stylist: appointment.stylist
+        ? {
+            id: appointment.stylist.id,
+            name: appointment.stylist.name,
+            profileImageUrl: appointment.stylist.profileImageUrl,
+          }
+        : null,
+      maxContinuousMinutes,
+      blocker: {
+        type: blockerType,
+        title: blockerTitle,
+        timeStr: blockerTimeStr,
+      },
+      eligibleCount: mappedServices.filter((s) => s.isEligible).length,
+      totalCount: mappedServices.length,
+      services: mappedServices,
+    };
+  }
 }

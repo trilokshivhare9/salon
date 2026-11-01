@@ -106,6 +106,7 @@ export const ENDPOINTS = {
     RESCHEDULE: (id) => `/appointments/${id}/reschedule`,
     PROPOSE_RESCHEDULE: (id) => `/appointments/${id}/propose-reschedule`,
     ADDONS: (id) => `/appointments/${id}/addons`,
+    ELIGIBLE_ADDONS: (id) => `/appointments/${id}/eligible-addons`,
   },
 
   // Customer Directory

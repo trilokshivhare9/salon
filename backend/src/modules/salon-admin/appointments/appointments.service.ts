@@ -303,6 +303,10 @@ export class AppointmentsService {
     return this.getAddonService().addServiceToAppointment(salonId, appointmentId, serviceId);
   }
 
+  async getEligibleAddons(salonId: string, appointmentId: string) {
+    return this.getAddonService().getEligibleAddonServices(salonId, appointmentId);
+  }
+
 
 
   async cancelBooking(
