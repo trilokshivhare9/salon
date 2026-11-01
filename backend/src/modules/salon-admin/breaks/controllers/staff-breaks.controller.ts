@@ -19,7 +19,7 @@ import { CurrentSalonId } from '../../../../common/decorators/tenant.decorator';
 import { StaffBreaksService } from '../services/staff-breaks.service';
 import { CreateStaffBreakDto } from '../dto/create-staff-break.dto';
 import { UpdateStaffBreakDto } from '../dto/update-staff-break.dto';
-import { UpdateRoutineBreakDto, DeleteRoutineBreakDto } from '../dto/routine-break.dto';
+import { UpdateRoutineBreakDto, DeleteRoutineBreakDto, ResetRoutineBreakDto } from '../dto/routine-break.dto';
 import { InheritSalonBreakDto } from '../dto/inherit-salon-break.dto';
 
 @ApiTags('Staff Specialist Breaks')
@@ -82,6 +82,17 @@ export class StaffBreaksController {
     @Body() dto: DeleteRoutineBreakDto,
   ) {
     return this.staffBreaksService.deleteStaffRoutineBreak(salonId, staffId, dto);
+  }
+
+  @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)
+  @Post('routine/reset')
+  @ApiOperation({ summary: 'Reset a customized stylist routine break pattern in-place back to salon facility timing' })
+  async resetStaffRoutineBreak(
+    @CurrentSalonId() salonId: string,
+    @Param('id') staffId: string,
+    @Body() dto: ResetRoutineBreakDto,
+  ) {
+    return this.staffBreaksService.resetStaffRoutineBreak(salonId, staffId, dto);
   }
 
   @Roles(AdminRole.SALON_OWNER, AdminRole.SUPER_ADMIN)

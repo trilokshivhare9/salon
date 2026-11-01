@@ -689,6 +689,16 @@ export class ApiClient {
     return res;
   }
 
+  static async resetStaffRoutineBreak(staffId, payload) {
+    this.invalidateCache('/staff');
+    const res = await this.request(ENDPOINTS.STAFF.BREAKS_ROUTINE_RESET(staffId), {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    this.invalidateCache('/staff');
+    return res;
+  }
+
   static async markStaffAbsent(staffId, payload) {
     this.invalidateCache('/staff');
     this.invalidateCache('/salons/closures/calendar-schedule');

@@ -270,7 +270,7 @@ export class AvailabilityService {
             where: { dayOfWeek },
           },
           breaks: {
-            where: { dayOfWeek },
+            where: { days: { has: dayOfWeek } },
           },
         },
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],

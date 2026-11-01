@@ -87,7 +87,18 @@ export class QueueSyncManager {
     if (!data || !data.id) return { handled: false };
 
     const idx = this.items.findIndex((a) => a.id === data.id);
-    const eventDateStr = (data.startAt || data.startTime || '').split('T')[0];
+
+    let eventDateStr = '';
+    if (data.startAt || data.startTime || data.proposedStartAt) {
+      const raw = data.startAt || data.startTime || data.proposedStartAt;
+      const d = new Date(raw);
+      if (!isNaN(d.getTime())) {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        eventDateStr = `${y}-${m}-${day}`;
+      }
+    }
     const isCurrentDate = idx !== -1 || !eventDateStr || eventDateStr === this.selectedDate;
 
     // 1. If event is for a different operational date, do not disrupt current view
@@ -107,12 +118,15 @@ export class QueueSyncManager {
       case 'STATUS_UPDATED':
       case 'APPOINTMENT_UPDATED':
       case 'RESCHEDULED': {
+        const newStatus = data.status || (idx !== -1 ? this.items[idx]?.status : undefined);
         if (idx !== -1) {
           // Unified model allows direct object merge
-          this.items[idx] = { ...this.items[idx], ...data };
-        } else if (this.page === 1) {
-          this.items.unshift(data);
-          this.pagination.totalItems = (this.pagination.totalItems || 0) + 1;
+          this.items[idx] = { ...this.items[idx], ...data, ...(newStatus ? { status: newStatus } : {}) };
+        } else {
+          if (this.page === 1) {
+            this.items.unshift({ ...data, ...(newStatus ? { status: newStatus } : {}) });
+            this.pagination.totalItems = (this.pagination.totalItems || 0) + 1;
+          }
         }
         this.sortItemsInPlace();
         this.recalculateSummary();
@@ -130,6 +144,11 @@ export class QueueSyncManager {
           this.pagination.totalItems = (this.pagination.totalItems || 0) + 1;
           this.recalculateSummary();
           mutated = true;
+        } else if (idx !== -1) {
+          this.items[idx] = { ...this.items[idx], ...data };
+          this.sortItemsInPlace();
+          this.recalculateSummary();
+          mutated = true;
         }
         break;
       }
@@ -141,19 +160,15 @@ export class QueueSyncManager {
         const newStatus = data.status || (type.includes('REJECT') ? 'REJECTED' : 'CANCELLED');
         if (idx !== -1) {
           this.items[idx] = { ...this.items[idx], ...data, status: newStatus };
-          this.sortItemsInPlace();
-          this.recalculateSummary();
-          mutated = true;
-        } else if (this.page === 1) {
-          this.items.unshift({ ...data, status: newStatus });
-          this.sortItemsInPlace();
-          this.pagination.totalItems = (this.pagination.totalItems || 0) + 1;
-          this.recalculateSummary();
-          mutated = true;
         } else {
-          this.recalculateSummary();
-          mutated = true;
+          if (this.page === 1) {
+            this.items.unshift({ ...data, status: newStatus });
+            this.pagination.totalItems = (this.pagination.totalItems || 0) + 1;
+          }
         }
+        this.sortItemsInPlace();
+        this.recalculateSummary();
+        mutated = true;
         break;
       }
 

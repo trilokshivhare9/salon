@@ -675,9 +675,8 @@ export class HomeView {
           return;
         }
 
-        // 3. On Break
         const isBreak = st.operationalStatus === 'ON_BREAK' || (Array.isArray(st.breaks) && st.breaks.some((b) => {
-          if (b.dayOfWeek && b.dayOfWeek !== currentDay) return false;
+          if (Array.isArray(b.days) ? !b.days.includes(currentDay) : (b.dayOfWeek && b.dayOfWeek !== currentDay)) return false;
           return b.startTime && b.endTime && curTime >= b.startTime && curTime <= b.endTime;
         }));
 

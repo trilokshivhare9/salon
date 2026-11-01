@@ -12,27 +12,25 @@ export class BreakPropagationEngine {
    * Propagates a master SalonBreak to all eligible stylists in the salon.
    * Protects stylist customization invariants:
    * 1. Never overwrites a customized break (isCustomized === true).
-   * 2. Never assigns breaks to a day where the stylist is explicitly off-duty (isWorking === false).
-   * 3. Avoids creating overlapping/conflicting breaks.
+   * 2. Avoids creating overlapping/conflicting breaks on shared days.
    */
   async propagateSalonBreak(
     tx: any,
     params: {
       salonId: string;
       salonBreakId: string;
-      dayOfWeek: DayOfWeek;
+      days: DayOfWeek[];
       title: string;
       startTime: string;
       endTime: string;
     },
   ): Promise<{ propagatedCount: number; skippedStylists: string[] }> {
-    const { salonId, salonBreakId, dayOfWeek, title, startTime, endTime } = params;
+    const { salonId, salonBreakId, days, title, startTime, endTime } = params;
 
     const stylists = await tx.stylist.findMany({
       where: { salonId, status: 'ACTIVE' },
       include: {
-        workingHours: { where: { dayOfWeek } },
-        breaks: { where: { dayOfWeek } },
+        breaks: true,
       },
     });
 
@@ -48,16 +46,20 @@ export class BreakPropagationEngine {
         if (!existingSameBreak.isCustomized) {
           await tx.stylistBreak.update({
             where: { id: existingSameBreak.id },
-            data: { title, startTime, endTime },
+            data: { title, startTime, endTime, days },
           });
           propagatedCount++;
         }
         continue;
       }
 
-      // Check for overlap against existing breaks
+      // Check for overlap against existing breaks on overlapping days
       const hasOverlap = st.breaks.some(
-        (b: any) => b.startTime < endTime && b.endTime > startTime,
+        (b: any) =>
+          b.startTime < endTime &&
+          b.endTime > startTime &&
+          Array.isArray(b.days) &&
+          b.days.some((d: DayOfWeek) => days.includes(d)),
       );
 
       if (hasOverlap) {
@@ -70,7 +72,7 @@ export class BreakPropagationEngine {
           salonId,
           stylistId: st.id,
           salonBreakId,
-          dayOfWeek,
+          days,
           title,
           startTime,
           endTime,

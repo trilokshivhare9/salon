@@ -69,8 +69,12 @@ export class UpdateWorkingHoursDto {
 
 export class CreateSalonBreakDto {
   @IsEnum(DayOfWeek)
-  @IsNotEmpty()
-  dayOfWeek: DayOfWeek;
+  @IsOptional()
+  dayOfWeek?: DayOfWeek;
+
+  @IsArray()
+  @IsOptional()
+  days?: DayOfWeek[];
 
   @IsString()
   @IsNotEmpty()

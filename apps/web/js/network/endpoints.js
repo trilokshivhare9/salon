@@ -69,6 +69,7 @@ export const ENDPOINTS = {
     BREAKS_RESET: (staffId, breakId) => `/staff/${staffId}/breaks/${breakId}/reset`,
     BREAKS_INHERIT: (staffId) => `/staff/${staffId}/breaks/inherit`,
     BREAKS_ROUTINE: (staffId) => `/staff/${staffId}/breaks/routine`,
+    BREAKS_ROUTINE_RESET: (staffId) => `/staff/${staffId}/breaks/routine/reset`,
     ABSENCE: (staffId) => `/staff/${staffId}/absence`,
     ABSENCE_BY_ID: (staffId, absenceId) => `/staff/${staffId}/absence/${absenceId}`,
     ABSENCE_PREVIEW: (staffId, query = '') => `/staff/${staffId}/absence/preview${query ? (query.startsWith('?') ? query : `?${query}`) : ''}`,

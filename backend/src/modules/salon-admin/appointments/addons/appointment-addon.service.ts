@@ -93,7 +93,7 @@ export class AppointmentAddonService {
       }
     }
 
-    const activeBreaks = (salon?.salonBreaks || []).filter((b) => b.dayOfWeek === dayOfWeek);
+    const activeBreaks = (salon?.salonBreaks || []).filter((b) => b.days.includes(dayOfWeek));
     for (const b of activeBreaks) {
       const [bStartH, bStartM] = b.startTime.split(':').map(Number);
       const [bEndH, bEndM] = b.endTime.split(':').map(Number);
@@ -225,7 +225,7 @@ export class AppointmentAddonService {
     }
 
     // 2. Next Salon / Staff Break
-    const activeBreaks = (appointment.salon?.salonBreaks || []).filter((b) => b.dayOfWeek === dayOfWeek);
+    const activeBreaks = (appointment.salon?.salonBreaks || []).filter((b) => b.days.includes(dayOfWeek));
     let nextBreakAt: Date | null = null;
     let nextBreakTitle: string | null = null;
     let nextBreakStr: string | null = null;

@@ -434,17 +434,19 @@ export class StylistStatusEngine {
     }
 
     // 2f. Scheduled Break Window: ON_BREAK
-    let breaksList: Array<{ start: number; end: number; name?: string }> = salonWh ? this.extractBreaks(salonWh) : [];
-    if (stylist.breaks && Array.isArray(stylist.breaks) && stylist.breaks.length > 0) {
+    let breaksList: Array<{ start: number; end: number; name?: string }> = [];
+    if (Array.isArray(stylist.breaks)) {
       breaksList = (stylist.breaks as any[])
-        .filter((b) => b.dayOfWeek === dayOfWeek)
+        .filter((b) => (Array.isArray(b.days) ? b.days.includes(dayOfWeek) : b.dayOfWeek === dayOfWeek))
         .map((b) => ({
           start: this.parseTimeToMinutes(b.startTime),
           end: this.parseTimeToMinutes(b.endTime),
           name: b.title || b.name,
         }));
-    } else if (customWh && customWh.breaks && Array.isArray(customWh.breaks) && customWh.breaks.length > 0) {
+    } else if (customWh && customWh.breaks && Array.isArray(customWh.breaks)) {
       breaksList = this.extractBreaks(customWh);
+    } else if (salonWh) {
+      breaksList = this.extractBreaks(salonWh);
     }
 
     const activeBreak = breaksList.find((b) => evalMin >= b.start && evalMin < b.end);
