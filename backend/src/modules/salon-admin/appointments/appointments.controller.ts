@@ -206,6 +206,14 @@ export class AppointmentsController {
     );
   }
 
+  @Get(':id/eligible-addons')
+  async getEligibleAddons(
+    @CurrentSalonId() salonId: string,
+    @Param('id') appointmentId: string,
+  ) {
+    return this.appointmentsService.getEligibleAddons(salonId, appointmentId);
+  }
+
   @Post(':id/addons')
   async addAddon(
     @CurrentSalonId() salonId: string,

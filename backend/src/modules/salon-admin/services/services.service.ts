@@ -103,10 +103,19 @@ export class ServicesService {
     if (icon !== undefined) data.icon = icon;
     if (sortOrder !== undefined) data.sortOrder = sortOrder;
 
-    return this.prisma.serviceCategory.update({
+    const updated = await this.prisma.serviceCategory.update({
       where: { id: categoryId },
       data,
     });
+
+    if (data.name) {
+      await this.prisma.service.updateMany({
+        where: { categoryId, salonId },
+        data: { category: data.name },
+      });
+    }
+
+    return updated;
   }
 
   async deleteServiceCategory(salonId: string, categoryId: string) {

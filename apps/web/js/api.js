@@ -414,6 +414,10 @@ export class ApiClient {
     });
   }
 
+  static async getEligibleAddons(id) {
+    return this.request(ENDPOINTS.APPOINTMENTS.ELIGIBLE_ADDONS(id));
+  }
+
   static async addAddonService(id, serviceId) {
     this.invalidateCache('/reports');
     this.invalidateCache('/appointments');
@@ -758,6 +762,18 @@ export class ApiClient {
     this.invalidateCache('/services');
     const res = await this.request(ENDPOINTS.SERVICES.CATEGORY_CREATE, {
       method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    SalonRepository.invalidate('categories');
+    SalonRepository.invalidate('services');
+    return res;
+  }
+
+  static async updateServiceCategory(id, payload) {
+    this.invalidateCache('/services/categories');
+    this.invalidateCache('/services');
+    const res = await this.request(ENDPOINTS.SERVICES.CATEGORY_UPDATE(id), {
+      method: 'PATCH',
       body: JSON.stringify(payload),
     });
     SalonRepository.invalidate('categories');

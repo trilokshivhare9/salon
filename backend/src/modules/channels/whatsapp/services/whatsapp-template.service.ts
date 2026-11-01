@@ -244,6 +244,56 @@ export class WhatsAppTemplateService {
     };
   }
 
+  // 5.1. Add-on Category Selection Menu Template
+  buildAddonCategoryMenu(categories: any[], maxContinuousMinutes: number, stylistName?: string) {
+    const rows: InteractiveListRow[] = categories.map((cat) => ({
+      id: `addon_cat_${cat.id}`,
+      title: cat.name.slice(0, 24),
+      description: `🟢 Eligible · +${maxContinuousMinutes}m free window`.slice(0, 72),
+    }));
+
+    rows.push({
+      id: WhatsAppButtonId.START,
+      title: '🏠 Main Menu',
+      description: 'Keep current appointment unchanged',
+    });
+
+    const stylistText = stylistName ? `*${stylistName}*` : 'Your specialist';
+
+    return {
+      headerText: '➕ Add-on Categories',
+      bodyText: `🟢 *${maxContinuousMinutes} Mins Available* with ${stylistText}!\n\nPlease choose a category to see services that fit within this window:`,
+      buttonText: 'View Categories',
+      interactiveType: 'list' as const,
+      listRows: rows,
+    };
+  }
+
+  // 5.2. Add-on Service Selection Menu Template
+  buildAddonServiceMenu(services: any[], categoryName: string, maxContinuousMinutes: number, stylistName?: string) {
+    const rows: InteractiveListRow[] = services.map((svc) => ({
+      id: `addon_svc_${svc.id}`,
+      title: svc.name.slice(0, 24),
+      description: `🟢 Eligible (+${svc.durationMinutes || 15}m) · ₹${svc.price || 0} · Fits slot`.slice(0, 72),
+    }));
+
+    rows.push({
+      id: WhatsAppButtonId.ADD_SERVICE,
+      title: '🔙 Back to Categories',
+      description: 'Choose a different category',
+    });
+
+    const specialistNote = stylistName ? ` with *${stylistName}*` : '';
+
+    return {
+      headerText: `➕ ${categoryName.slice(0, 20)}`,
+      bodyText: `🟢 *${maxContinuousMinutes} mins available*${specialistNote}.\nSelect an eligible service to add:`,
+      buttonText: 'Choose Service',
+      interactiveType: 'list' as const,
+      listRows: rows,
+    };
+  }
+
   // 6. Staff Selection Menu Template
   buildStaffSelectionMenu(staffList: any[]) {
     const rows: InteractiveListRow[] = [

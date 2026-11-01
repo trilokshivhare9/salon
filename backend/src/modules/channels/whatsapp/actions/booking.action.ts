@@ -50,9 +50,22 @@ export class BookingAction {
     const { input, normalizedInput, cleanNumber, conversation } = ctx;
     this.logger.log(`[BookingAction] Handling input="${input}" in state="${conversation.state}" for user=${cleanNumber}`);
 
-    // 1. Add-on Service Action
+    // 1. Add-on Service Action & Handlers
     if (input === WhatsAppButtonId.ADD_SERVICE || input === 'btn_add_service') {
       return this.handleAddService(ctx);
+    }
+    if (
+      input.startsWith('addon_cat_') ||
+      (conversation.state === ConversationState.SELECT_ADDON && input.startsWith('cat_') && input !== 'cat_back')
+    ) {
+      return this.handleAddonCategorySelected(ctx);
+    }
+    if (
+      input.startsWith('addon_svc_') ||
+      input.startsWith('addon_') ||
+      (conversation.state === ConversationState.SELECT_ADDON && input.startsWith('svc_'))
+    ) {
+      return this.handleAddonServiceSelected(ctx);
     }
 
     // 2. Start Booking / Services / New Booking
@@ -138,10 +151,12 @@ export class BookingAction {
   }
 
   /**
-   * Add-on Service: filters out already-booked service
+   * Add-on Service: queries specialist's schedule via AppointmentAddonService (reusing Admin logic)
+   * and displays categories that contain eligible add-on services that fit within the free time window.
    */
   private async handleAddService(ctx: ActionContext): Promise<ActionResult> {
-    const { cleanNumber, phoneNumberId, salonId, salon, conversation, activeAppointment, pendingAppointment } = ctx;
+    const { cleanNumber, phoneNumberId, salonId, salon, conversation, pendingAppointment } = ctx;
+    let activeAppointment = ctx.activeAppointment;
 
     if (!activeAppointment && pendingAppointment) {
       const blockedReply = this.templates.buildPendingModificationBlockedReply();
@@ -149,10 +164,15 @@ export class BookingAction {
       return { replyMessage: blockedReply.bodyText, state: conversation.state };
     }
 
-    const availableAddons = (salon.services || []).filter((s: any) => !activeAppointment || s.id !== activeAppointment.serviceId);
+    if (!activeAppointment && conversation.activeAppointmentId) {
+      activeAppointment = await this.prisma.appointment.findFirst({
+        where: { id: conversation.activeAppointmentId, salonId },
+        include: { service: true, stylist: true },
+      });
+    }
 
-    if (availableAddons.length === 0) {
-      const reply = `You already have all available services included in your visit!`;
+    if (!activeAppointment) {
+      const reply = `⚠️ You don't have an active confirmed reservation to add services to right now.`;
       await this.sendMessage(
         cleanNumber,
         {
@@ -166,11 +186,207 @@ export class BookingAction {
       return { replyMessage: reply, state: ConversationState.START };
     }
 
-    await this.session.updateConversationState(conversation.id, ConversationState.SELECT_CATEGORY);
-    const categoryMenu = this.templates.buildCategoryMenu(salon.serviceCategories || []);
-    categoryMenu.bodyText = `✨ *Choose a service category to add to your appointment:*`;
+    // Reuse the exact same engine as Admin Dashboard:
+    const addonData = await this.appointmentsService.getEligibleAddons(salonId, activeAppointment.id);
+    const { maxContinuousMinutes, blocker, services, eligibleCount, stylist } = addonData;
+
+    // 1. If 0 minutes available or no services eligible, explain blocker directly to client
+    if (maxContinuousMinutes <= 0 || eligibleCount === 0) {
+      const stylistName = stylist?.name || 'Your specialist';
+      const blockerTime = blocker?.timeStr ? ` at ${blocker.timeStr}` : '';
+      const blockerDesc = blocker?.title ? `(${blocker.title}${blockerTime})` : `(Booked back-to-back)`;
+      const reply = `⏱️ *No Extra Time Available*\n\n*${stylistName}* is fully booked with back-to-back appointments today ${blockerDesc}.\n\nTo ensure all clients are served on time, additional services cannot be extended right now.`;
+      await this.sendMessage(
+        cleanNumber,
+        {
+          bodyText: reply,
+          interactiveType: 'button',
+          buttons: [{ id: WhatsAppButtonId.START, title: '🏠 Main Menu' }],
+        },
+        phoneNumberId,
+        salonId,
+      );
+      return { replyMessage: reply, state: ConversationState.START };
+    }
+
+    // 2. Filter categories with at least 1 eligible service
+    const eligibleServices = (services || []).filter((s: any) => s.isEligible);
+    const eligibleCategoryIds = new Set(
+      eligibleServices.map((s: any) => s.categoryId || s.serviceCategoryId).filter(Boolean),
+    );
+
+    let eligibleCategories = (salon.serviceCategories || []).filter((c: any) => eligibleCategoryIds.has(c.id));
+
+    if (eligibleCategories.length === 0) {
+      // Group by category name if category IDs don't map directly
+      const catMap = new Map<string, { id: string; name: string }>();
+      for (const s of eligibleServices) {
+        const cName = s.categoryName || 'General';
+        const cId = s.categoryId || cName;
+        if (!catMap.has(cId)) {
+          catMap.set(cId, { id: cId, name: cName });
+        }
+      }
+      eligibleCategories = Array.from(catMap.values());
+    }
+
+    // 3. Store conversation state as SELECT_ADDON with activeAppointmentId
+    await this.session.updateConversationState(
+      conversation.id,
+      ConversationState.SELECT_ADDON,
+      activeAppointment.id,
+      ActionUtils.getClearDraftData(),
+    );
+
+    // 4. Send Add-on category menu
+    const categoryMenu = this.templates.buildAddonCategoryMenu(
+      eligibleCategories,
+      maxContinuousMinutes,
+      stylist?.name,
+    );
     await this.sendMessage(cleanNumber, categoryMenu, phoneNumberId, salonId);
-    return { replyMessage: categoryMenu.bodyText, state: ConversationState.SELECT_CATEGORY };
+    return { replyMessage: categoryMenu.bodyText, state: ConversationState.SELECT_ADDON };
+  }
+
+  /**
+   * Add-on Category Selected: shows eligible services in that category that fit in the stylist's window
+   */
+  private async handleAddonCategorySelected(ctx: ActionContext): Promise<ActionResult> {
+    const { input, cleanNumber, phoneNumberId, salonId, salon, conversation } = ctx;
+    const catId = input.replace('addon_cat_', '').replace('cat_', '');
+
+    let appointmentId = conversation.activeAppointmentId;
+    if (!appointmentId && ctx.activeAppointment) {
+      appointmentId = ctx.activeAppointment.id;
+    }
+
+    if (!appointmentId) {
+      return this.handleAddService(ctx);
+    }
+
+    const addonData = await this.appointmentsService.getEligibleAddons(salonId, appointmentId);
+    const { maxContinuousMinutes, services, stylist } = addonData;
+
+    // Filter eligible services belonging to this category
+    const matchingServices = (services || []).filter(
+      (s: any) =>
+        s.isEligible &&
+        ((s.categoryId && s.categoryId === catId) ||
+          (s.serviceCategoryId && s.serviceCategoryId === catId) ||
+          s.categoryName === catId),
+    );
+
+    if (matchingServices.length === 0) {
+      const reply = `⚠️ No services in this category fit within your specialist's available window (+${maxContinuousMinutes}m). Please pick another category:`;
+      await this.sendMessage(
+        cleanNumber,
+        {
+          bodyText: reply,
+          interactiveType: 'button',
+          buttons: [{ id: WhatsAppButtonId.ADD_SERVICE, title: '📂 Other Categories' }],
+        },
+        phoneNumberId,
+        salonId,
+      );
+      return { replyMessage: reply, state: ConversationState.SELECT_ADDON };
+    }
+
+    const selectedCategory = (salon.serviceCategories || []).find((c: any) => c.id === catId);
+    const categoryName = selectedCategory?.name || matchingServices[0]?.categoryName || 'Services';
+
+    const serviceMenu = this.templates.buildAddonServiceMenu(
+      matchingServices,
+      categoryName,
+      maxContinuousMinutes,
+      stylist?.name,
+    );
+    await this.sendMessage(cleanNumber, serviceMenu, phoneNumberId, salonId);
+    return { replyMessage: serviceMenu.bodyText, state: ConversationState.SELECT_ADDON };
+  }
+
+  /**
+   * Add-on Service Selected: transactionally attaches the service, updates alarms & queue, and confirms
+   */
+  private async handleAddonServiceSelected(ctx: ActionContext): Promise<ActionResult> {
+    const { input, cleanNumber, phoneNumberId, salonId, salon, conversation } = ctx;
+    const serviceId = input.replace('addon_svc_', '').replace('addon_', '').replace('svc_', '');
+
+    let appointmentId = conversation.activeAppointmentId;
+    if (!appointmentId && ctx.activeAppointment) {
+      appointmentId = ctx.activeAppointment.id;
+    }
+
+    if (!appointmentId) {
+      return this.handleAddService(ctx);
+    }
+
+    // Call the Admin Add-on engine
+    const result = await this.appointmentsService.addServiceToAppointment(salonId, appointmentId, serviceId);
+
+    if (result.conflict) {
+      const reply = `⚠️ *Schedule Conflict*\n\nAnother booking just filled the remaining free window before this service could be confirmed. Your original booking remains unchanged!`;
+      await this.sendMessage(
+        cleanNumber,
+        {
+          bodyText: reply,
+          interactiveType: 'button',
+          buttons: [{ id: WhatsAppButtonId.START, title: '🏠 Main Menu' }],
+        },
+        phoneNumberId,
+        salonId,
+      );
+      await this.session.updateConversationState(
+        conversation.id,
+        ConversationState.START,
+        appointmentId,
+        ActionUtils.getClearDraftData(),
+      );
+      return { replyMessage: reply, state: ConversationState.START };
+    }
+
+    if (!result.success || !result.updatedAppointment) {
+      const reply = `⚠️ Could not add the requested service at this time. Please speak with the front desk upon arrival.`;
+      await this.sendMessage(
+        cleanNumber,
+        {
+          bodyText: reply,
+          interactiveType: 'button',
+          buttons: [{ id: WhatsAppButtonId.START, title: '🏠 Main Menu' }],
+        },
+        phoneNumberId,
+        salonId,
+      );
+      return { replyMessage: reply, state: ConversationState.START };
+    }
+
+    // Reset conversation state to START
+    await this.session.updateConversationState(
+      conversation.id,
+      ConversationState.START,
+      appointmentId,
+      ActionUtils.getClearDraftData(),
+    );
+
+    const extraSvc = result.extraService;
+    const updated = result.updatedAppointment;
+    const tz = salon?.timezone || 'Asia/Kolkata';
+    const endVal = updated.endAt || updated.endTime;
+    const endStr = endVal ? TimeUtility.formatTime12h(endVal, tz) : '';
+
+    const reply = `🎉 *Add-On Service Confirmed!*\n\n✨ Added: *${extraSvc.name}* (+${extraSvc.durationMinutes} mins)\n💰 Updated Total: *₹${updated.price}*\n⏱️ Estimated Completion: *${endStr}*\n\nYour specialist and front desk have been updated in real-time.`;
+
+    await this.sendMessage(
+      cleanNumber,
+      {
+        bodyText: reply,
+        interactiveType: 'button',
+        buttons: [{ id: WhatsAppButtonId.START, title: '🏠 Main Menu' }],
+      },
+      phoneNumberId,
+      salonId,
+    );
+
+    return { replyMessage: reply, state: ConversationState.START };
   }
 
   /**

@@ -24,6 +24,8 @@ import { SalonDayOffView } from './modules/salon-settings/salon-day-off-view.js'
 import { PersonalProfileView } from './modules/salon-settings/personal-profile-view.js';
 import { BookingQrView } from './modules/salon-settings/booking-qr-view.js';
 import { PasswordSecurityView } from './modules/salon-settings/password-security-view.js';
+import { CustomerCrmView } from './modules/salon-settings/customer-crm-view.js';
+import { ServiceCategoriesModal, formatCategoryIcon } from './modules/salon-settings/service-categories-modal.js';
 import { ServicesAiScannerModal } from './modules/services-ai/services-ai-scanner.js';
 import {
   SERVICE_DURATION_OPTIONS,
@@ -530,8 +532,8 @@ export class SalonDashboard {
     const pool = (Array.isArray(this.summaryData?.todayAppointments) && this.summaryData.todayAppointments.length > 0)
       ? this.summaryData.todayAppointments
       : (Array.isArray(this.queueSync?.items) && this.queueSync.items.length > 0
-          ? this.queueSync.items
-          : (this.summaryData?.quickRequests || []));
+        ? this.queueSync.items
+        : (this.summaryData?.quickRequests || []));
     const pendingRequests = pool.filter(
       (a) => a.status === 'PENDING_ACCEPTANCE' || (a.source === 'QUICK_BOOK' && a.status === 'PENDING_ACCEPTANCE')
     );
@@ -2631,28 +2633,47 @@ export class SalonDashboard {
           `;
         }
 
-        // Pending Reschedule Proposal
+        // Pending Reschedule Proposal: Clean, purpose-built structured card block
         if (status === 'PENDING_RESCHEDULE') {
-          const propStart = appt.proposedStartAt ? new Date(appt.proposedStartAt) : null;
-          const propEnd = appt.proposedEndAt ? new Date(appt.proposedEndAt) : null;
-          let propSlotTag = 'Proposed Slot';
-          let detailSlotText = '';
+          const rawStart = appt.proposedStartAt || appt.newStartAt;
+          const rawEnd = appt.proposedEndAt || appt.newEndAt;
+          const propStart = rawStart ? new Date(rawStart) : null;
+          const propEnd = rawEnd ? new Date(rawEnd) : null;
+          let propDateStr = 'Date Pending';
+          let propTimeStr = 'Time Pending';
           if (propStart && !isNaN(propStart.getTime())) {
-            const dateStr = propStart.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-            const timeStr = `${formatTime12h(propStart)} – ${formatTime12h(propEnd || propStart)}`;
-            propSlotTag = `${dateStr} · ${timeStr}`;
-            detailSlotText = `Proposed for <strong>${propSlotTag}</strong>`;
+            const today = new Date();
+            const tomorrow = new Date();
+            tomorrow.setDate(today.getDate() + 1);
+
+            if (propStart.toDateString() === today.toDateString()) {
+              propDateStr = `Today (${propStart.toLocaleDateString('en-US', { day: 'numeric', month: 'short' })})`;
+            } else if (propStart.toDateString() === tomorrow.toDateString()) {
+              propDateStr = `Tomorrow (${propStart.toLocaleDateString('en-US', { day: 'numeric', month: 'short' })})`;
+            } else {
+              propDateStr = propStart.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' });
+            }
+            propTimeStr = `${formatTime12h(propStart)} – ${formatTime12h(propEnd || propStart)}`;
           }
-          const stylistName = appt.stylist?.name ? ` with <strong>${appt.stylist.name}</strong>` : '';
+
           return `
-            <div class="qc__lifecycle-alert qc__lifecycle-alert--warn">
-              <div class="qc__alert-top">
-                ${Icons.clock({ size: 12, color: '#fbbf24' })}
-                <span class="qc__alert-title">Reschedule Proposal Sent</span>
-                <span class="qc__alert-tag">${propSlotTag}</span>
+            <div style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 8px; padding: 8px 10px; margin: 8px 0 6px 0;">
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
+                <span style="font-size: 0.68rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; color: #fbbf24; display: flex; align-items: center; gap: 4px;">
+                  ${Icons.calendar({ size: 11, color: '#fbbf24' })}
+                  <span>Proposed New Slot</span>
+                </span>
+                <span style="font-size: 0.66rem; font-weight: 700; color: #f59e0b; background: rgba(245, 158, 11, 0.16); border: 1px solid rgba(245, 158, 11, 0.28); padding: 1px 6px; border-radius: 4px; letter-spacing: 0.2px;">
+                  WhatsApp Sent
+                </span>
               </div>
-              <div class="qc__alert-sub">
-                WhatsApp offer sent to customer: ${detailSlotText || 'Pending customer confirmation'}${stylistName}. Auto-expires if unconfirmed.
+              <div style="display: flex; align-items: center; justify-content: space-between; font-size: 0.77rem; font-weight: 700; color: #f8fafc;">
+                <span style="display: flex; align-items: center; gap: 4px;">
+                  <span>📅</span> <span>${propDateStr}</span>
+                </span>
+                <span style="color: #fbbf24; display: flex; align-items: center; gap: 4px;">
+                  <span>⏰</span> <span>${propTimeStr}</span>
+                </span>
               </div>
             </div>
           `;
@@ -2991,38 +3012,38 @@ export class SalonDashboard {
                 ` : ''}
 
                 ${appt.status === 'PENDING_RESCHEDULE' ? (() => {
-                  const cutoffTarget = appt.expiresAt || appt.nextActionAt;
-                  const cutoffTargetMs = cutoffTarget ? new Date(cutoffTarget).getTime() : 0;
-                  const initialDiffMs = cutoffTargetMs ? cutoffTargetMs - Date.now() : 0;
-                  let initialCountdown = '';
-                  if (initialDiffMs > 0) {
-                    const totalSecs = Math.floor(initialDiffMs / 1000);
-                    const hours = Math.floor(totalSecs / 3600);
-                    const mins = Math.floor((totalSecs % 3600) / 60);
-                    const secs = totalSecs % 60;
-                    initialCountdown = hours > 0 ? `${hours}h ${mins}m left` : `${mins}m ${secs}s left`;
-                  } else if (cutoffTargetMs) {
-                    initialCountdown = 'Expired';
-                  }
-                  return `
-                  <div class="qc__actions-group">
-                    <button class="qc__btn qc__btn--disabled" disabled style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%;">
-                      <span style="display: flex; align-items: center; gap: 6px;">
-                        ${Icons.clock({ size: 13, color: '#fbbf24' })}
-                        <span>Waiting Customer Approval</span>
+            const cutoffTarget = appt.expiresAt || appt.nextActionAt;
+            const cutoffTargetMs = cutoffTarget ? new Date(cutoffTarget).getTime() : 0;
+            const initialDiffMs = cutoffTargetMs ? cutoffTargetMs - Date.now() : 0;
+            let initialCountdown = '';
+            if (initialDiffMs > 0) {
+              const totalSecs = Math.floor(initialDiffMs / 1000);
+              const hours = Math.floor(totalSecs / 3600);
+              const mins = Math.floor((totalSecs % 3600) / 60);
+              const secs = totalSecs % 60;
+              initialCountdown = hours > 0 ? `${hours}h ${mins}m left` : `${mins}m ${secs}s left`;
+            } else if (cutoffTargetMs) {
+              initialCountdown = 'Expired';
+            }
+            return `
+                  <div class="qc__actions-group" style="display: flex; align-items: center; gap: 6px; width: 100%;">
+                    <div style="flex: 1; min-width: 0; height: 34px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px;">
+                      <span style="display: flex; align-items: center; gap: 6px; font-size: 0.73rem; font-weight: 600; color: #cbd5e1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                        ${Icons.clock({ size: 12, color: '#fbbf24' })}
+                        <span>Waiting Client Approval</span>
                       </span>
                       ${cutoffTargetMs ? `
-                        <span class="qc__reschedule-cutoff-timer" data-cutoff-target="${cutoffTargetMs}" style="font-size: 0.74rem; font-weight: 700; background: rgba(251, 191, 36, 0.18); border: 1px solid rgba(251, 191, 36, 0.35); color: #fbbf24; padding: 2px 8px; border-radius: 6px; letter-spacing: 0.2px;">
+                        <span class="qc__reschedule-cutoff-timer" data-cutoff-target="${cutoffTargetMs}" style="font-size: 0.69rem; font-weight: 700; color: #fbbf24; background: rgba(251, 191, 36, 0.15); border: 1px solid rgba(251, 191, 36, 0.3); padding: 2px 7px; border-radius: 5px; flex-shrink: 0; white-space: nowrap; letter-spacing: 0.1px;">
                           ⏳ ${initialCountdown}
                         </span>
                       ` : ''}
-                    </button>
-                    <button class="qc__icon-btn qc__icon-btn--danger btn-open-cancel" data-id="${appt.id}" data-name="${customerName}" title="Cancel Booking">
-                      ${Icons.x({ size: 13 })}
+                    </div>
+                    <button class="qc__icon-btn qc__icon-btn--danger btn-open-cancel" data-id="${appt.id}" data-name="${customerName}" title="Cancel Booking" style="flex-shrink: 0; width: 34px; height: 34px; min-width: 34px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 8px;">
+                      ${Icons.x({ size: 14 })}
                     </button>
                   </div>
                   `;
-                })() : ''}
+          })() : ''}
 
                 ${isDone ? `
                   <div class="qc__terminal-pill qc__terminal-pill--done">
@@ -3651,8 +3672,8 @@ export class SalonDashboard {
 
               <!-- Dedicated Quick-Sync Banner Directly Above Monday -->
               ${(() => {
-                const differs = this.doesStaffDifferFromSalon();
-                return `
+        const differs = this.doesStaffDifferFromSalon();
+        return `
                   <div class="roster-sync-banner ${differs ? '' : 'is-synced'}" id="roster-sync-banner-row" role="button" tabindex="0">
                     <div class="roster-sync-banner-left">
                       <span class="roster-sync-banner-icon">🏬</span>
@@ -3666,7 +3687,7 @@ export class SalonDashboard {
                     </button>
                   </div>
                 `;
-              })()}
+      })()}
 
               <div id="stylist-roster-rows-container">
                 ${this.renderStaffRosterRowsHtml()}
@@ -7409,303 +7430,31 @@ export class SalonDashboard {
 
 
   // =========================================================================
-  // TAB 4: CUSTOMER MANAGEMENT & STRIKE HUB
+  // TAB 4: CUSTOMER MANAGEMENT & STRIKE HUB (Delegated to CustomerCrmView)
   // =========================================================================
   renderCustomersTab() {
-    const activeFilter = this.activeCustomerFilter || 'ALL';
+    setTimeout(() => {
+      const mount = document.getElementById('customer-crm-mount-point');
+      if (mount) {
+        CustomerCrmView.init(mount, this);
+      }
+    }, 0);
     return `
-      <div class="glass-panel" style="padding: 16px;">
-        <div class="cust-panel-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
-          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-            <button class="btn-back-nav" id="btn-cust-back" title="Back to Live Queue Overview">
-              ← Back
-            </button>
-            <div>
-              <h3 style="font-size: 1.15rem; font-family: var(--font-heading); font-weight: 800; margin: 0 0 2px 0;">Customer CRM & Strike Hub</h3>
-              <p class="settings-panel-subtitle" style="color: var(--text-secondary); font-size: 0.8rem; margin: 0;">Manage customer directory, penalty strikes (0–3), and visit history.</p>
-            </div>
-          </div>
-          <div class="cust-search-wrap">
-            <input type="text" class="form-control" id="customer-search-input" placeholder="Search customer by name or phone..." value="${this.searchQuery || ''}" />
-          </div>
-        </div>
-
-        <!-- Strike Status Filter Segmented Control -->
-        <div id="customer-strike-filters">
-          <button class="cust-filter-btn ${activeFilter === 'ALL' ? 'active' : ''}" data-filter="ALL">
-            <span class="cust-filter-text">All</span>
-            <span class="cust-filter-count">0</span>
-          </button>
-          <button class="cust-filter-btn ${activeFilter === 'BLOCKED' ? 'active' : ''}" data-filter="BLOCKED">
-            <span class="cust-filter-text">Blocked</span>
-            <span class="cust-filter-count">0</span>
-          </button>
-          <button class="cust-filter-btn ${activeFilter === 'WARNING' ? 'active' : ''}" data-filter="WARNING">
-            <span class="cust-filter-text">Warn</span>
-            <span class="cust-filter-count">0</span>
-          </button>
-          <button class="cust-filter-btn ${activeFilter === 'CLEAN' ? 'active' : ''}" data-filter="CLEAN">
-            <span class="cust-filter-text">Clean</span>
-            <span class="cust-filter-count">0</span>
-          </button>
-        </div>
-
-        <div id="customers-table-container">
-          ${PageDataLoader.render({ title: 'Loading customer records...', subtitle: 'Fetching client CRM directory...', minHeight: '160px', variant: 'compact' })}
-        </div>
-      </div>
+      <div id="customer-crm-mount-point" class="customer-crm-view-root"></div>
     `;
   }
 
   renderStrikeBadge(c) {
     const strikes = c.yearlyNoShowCount || 0;
-    if (c.isBookingBlocked || strikes >= 3) {
-      return `<span class="strike-badge strike-blocked" title="Customer is blocked from booking new slots via WhatsApp due to 3 penalty no-shows">🔴 3/3 Blocked</span>`;
-    }
-    if (strikes === 2) {
-      return `<span class="strike-badge strike-2" title="2 Penalty strikes incurred. 1 more no-show will block customer.">⚠️ 2/3 Strikes</span>`;
-    }
-    if (strikes === 1) {
-      return `<span class="strike-badge strike-1" title="1 Penalty strike incurred.">⚡ 1/3 Strike</span>`;
-    }
-    return `<span class="strike-badge strike-0" title="Clean record. 0 Penalty strikes.">✓ 0/3 Clean</span>`;
+    return CustomerCrmView.formatStrikeBadge(strikes, c.isBookingBlocked);
   }
 
   async loadCustomersTable(searchTerm = this.searchQuery || '', filterCategory = this.activeCustomerFilter || 'ALL') {
-    const tableContainer = document.getElementById('customers-table-container');
-    if (!tableContainer) return;
-
-    try {
-      const res = await ApiClient.getCustomers(searchTerm);
-      const allCustomers = Array.isArray(res) ? res : res.data || [];
-
-      // Dynamically update actual user count badges on filter buttons
-      const filterContainer = document.getElementById('customer-strike-filters');
-      if (filterContainer) {
-        const totalCount = allCustomers.length;
-        const blockedCount = allCustomers.filter((c) => c.isBookingBlocked || (c.yearlyNoShowCount || 0) >= 3).length;
-        const warningCount = allCustomers.filter((c) => !c.isBookingBlocked && (c.yearlyNoShowCount || 0) > 0 && (c.yearlyNoShowCount || 0) < 3).length;
-        const cleanCount = allCustomers.filter((c) => !c.isBookingBlocked && (c.yearlyNoShowCount || 0) === 0).length;
-
-        const countAll = filterContainer.querySelector('[data-filter="ALL"] .cust-filter-count');
-        const countBlocked = filterContainer.querySelector('[data-filter="BLOCKED"] .cust-filter-count');
-        const countWarning = filterContainer.querySelector('[data-filter="WARNING"] .cust-filter-count');
-        const countClean = filterContainer.querySelector('[data-filter="CLEAN"] .cust-filter-count');
-
-        if (countAll) countAll.textContent = totalCount;
-        if (countBlocked) countBlocked.textContent = blockedCount;
-        if (countWarning) countWarning.textContent = warningCount;
-        if (countClean) countClean.textContent = cleanCount;
-      }
-
-      let customers = [...allCustomers];
-
-      // Sort by Penalty Strike Priority:
-      // 1. Blocked (3/3 strikes or isBookingBlocked = true) -> TOP
-      // 2. 2 Strikes (2/3)
-      // 3. 1 Strike (1/3)
-      // 4. 0 Strikes (0/3 Clean)
-      customers.sort((a, b) => {
-        const scoreA = (a.isBookingBlocked || (a.yearlyNoShowCount || 0) >= 3) ? 99 : (a.yearlyNoShowCount || 0);
-        const scoreB = (b.isBookingBlocked || (b.yearlyNoShowCount || 0) >= 3) ? 99 : (b.yearlyNoShowCount || 0);
-        if (scoreB !== scoreA) {
-          return scoreB - scoreA;
-        }
-        return (a.name || '').localeCompare(b.name || '');
-      });
-
-      // Filter by selected category chip
-      if (filterCategory === 'BLOCKED') {
-        customers = customers.filter((c) => c.isBookingBlocked || (c.yearlyNoShowCount || 0) >= 3);
-      } else if (filterCategory === 'WARNING') {
-        customers = customers.filter((c) => !c.isBookingBlocked && (c.yearlyNoShowCount || 0) > 0 && (c.yearlyNoShowCount || 0) < 3);
-      } else if (filterCategory === 'CLEAN') {
-        customers = customers.filter((c) => !c.isBookingBlocked && (c.yearlyNoShowCount || 0) === 0);
-      }
-
-      if (customers.length === 0) {
-        tableContainer.innerHTML = `<div style="text-align: center; padding: 40px; color: var(--text-muted);">No customer records found matching filter.</div>`;
-        return;
-      }
-
-      tableContainer.innerHTML = `
-        <!-- Desktop Compact Table Layout (Screens ≥ 768px) -->
-        <div class="desktop-only" style="overflow-x: auto; width: 100%;">
-          <table class="cust-table">
-            <thead>
-              <tr>
-                <th style="min-width: 170px;">Customer & Contact</th>
-                <th style="min-width: 95px;">Strikes</th>
-                <th style="min-width: 70px;">Visits</th>
-                <th style="min-width: 70px;">Spend</th>
-                <th style="min-width: 85px;">Last Visit</th>
-                <th style="text-align: right; min-width: 130px;">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${customers.map((c) => {
-        const isBlocked = c.isBookingBlocked || (c.yearlyNoShowCount || 0) >= 3;
-        const hasStrikes = (c.yearlyNoShowCount || 0) > 0 || isBlocked;
-        return `
-                <tr class="clickable-customer-row" data-id="${c.id}" data-name="${c.name}">
-                  <td>
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                      <div class="customer-avatar">${(c.name || 'C').charAt(0).toUpperCase()}</div>
-                      <div style="min-width: 0;">
-                        <div style="font-weight: 700; color: #f8fafc; font-size: 0.84rem; line-height: 1.25; white-space: nowrap;">${c.name || 'Customer'}</div>
-                        <div style="font-size: 0.72rem; color: #94a3b8; font-family: var(--font-mono, monospace); line-height: 1.2; white-space: nowrap;">${c.phone || 'No phone'}${c.email ? ` · ${c.email}` : ''}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td>${this.renderStrikeBadge(c)}</td>
-                  <td><span class="cust-visit-pill">${c.totalVisits || 0} visits</span></td>
-                  <td style="font-weight: 700; color: #34d399; font-size: 0.84rem;">₹${Number(c.totalSpend || 0).toLocaleString()}</td>
-                  <td style="color: #94a3b8; font-size: 0.76rem;">${c.lastVisitAt ? new Date(c.lastVisitAt).toLocaleDateString() : 'New Client'}</td>
-                  <td style="text-align: right;">
-                    <div style="display: flex; gap: 5px; justify-content: flex-end; align-items: center; white-space: nowrap;">
-                      <button class="btn btn-secondary btn-xs btn-view-customer-history" data-id="${c.id}" data-name="${c.name}" title="View client visit history">
-                        ${Icons.history({ size: 12 })}
-                        <span>History</span>
-                      </button>
-                      ${hasStrikes ? `
-                        <button class="btn btn-success btn-xs btn-adjust-strikes" data-id="${c.id}" data-name="${c.name}" title="Adjust or reset penalty strikes">
-                          ${Icons.sliders({ size: 12 })}
-                          <span>Adjust</span>
-                        </button>
-                      ` : `
-                        <button class="btn btn-outline-danger btn-xs btn-block-customer" data-id="${c.id}" data-name="${c.name}" title="Manually block customer from booking">
-                          ${Icons.lock({ size: 12 })}
-                          <span>Block</span>
-                        </button>
-                      `}
-                    </div>
-                  </td>
-                </tr>
-              `;
-      }).join('')}
-            </tbody>
-          </table>
-        </div>
-
-        <!-- Mobile Ultra-Compact Card Grid Layout (Screens < 768px) -->
-        <div class="mobile-only customer-cards-grid">
-          ${customers.map((c) => {
-        const isBlocked = c.isBookingBlocked || (c.yearlyNoShowCount || 0) >= 3;
-        const hasStrikes = (c.yearlyNoShowCount || 0) > 0 || isBlocked;
-        return `
-              <div class="customer-card clickable-customer-card" data-id="${c.id}" data-name="${c.name}">
-                <!-- Row 1: Identity & Strike Badge -->
-                <div class="customer-card-row-top">
-                  <div style="display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1;">
-                    <div class="customer-avatar">${(c.name || 'C').charAt(0).toUpperCase()}</div>
-                    <div style="min-width: 0; flex: 1;">
-                      <div style="font-weight: 700; color: #f8fafc; font-size: 0.86rem; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${c.name || 'Customer'}</div>
-                      <div style="font-size: 0.73rem; color: #94a3b8; font-family: var(--font-mono, monospace); line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px;">${c.phone || 'No phone'}</div>
-                    </div>
-                  </div>
-                  <div style="flex-shrink: 0;">${this.renderStrikeBadge(c)}</div>
-                </div>
-
-                <!-- Row 2: Metrics Strip & Micro Actions -->
-                <div class="customer-card-row-bottom">
-                  <div class="customer-card-meta">
-                    <span class="card-meta-pill">${c.totalVisits || 0} visits</span>
-                    <span class="card-meta-dot">·</span>
-                    <span class="card-meta-spend">₹${Number(c.totalSpend || 0).toLocaleString()}</span>
-                    <span class="card-meta-dot">·</span>
-                    <span class="card-meta-sub">${c.lastVisitAt ? new Date(c.lastVisitAt).toLocaleDateString() : 'New'}</span>
-                  </div>
-
-                  <div style="display: flex; gap: 6px; flex-shrink: 0;">
-                    <button class="btn btn-secondary btn-micro btn-view-customer-history" data-id="${c.id}" data-name="${c.name}" title="View client visit history">
-                      ${Icons.history({ size: 12 })}
-                      <span>History</span>
-                    </button>
-                    ${hasStrikes ? `
-                      <button class="btn btn-success btn-micro btn-adjust-strikes" data-id="${c.id}" data-name="${c.name}" title="Adjust penalty strikes">
-                        ${Icons.sliders({ size: 12 })}
-                        <span>Adjust</span>
-                      </button>
-                    ` : `
-                      <button class="btn btn-outline-danger btn-micro btn-block-customer" data-id="${c.id}" data-name="${c.name}" title="Block customer">
-                        ${Icons.lock({ size: 12 })}
-                        <span>Block</span>
-                      </button>
-                    `}
-                  </div>
-                </div>
-              </div>
-            `;
-      }).join('')}
-        </div>
-      `;
-
-      this.currentCustomerList = customers;
-
-      // Re-attach customer action button handlers
-      this.attachCustomerTableListeners();
-    } catch (err) {
-      tableContainer.innerHTML = `<div style="color: var(--danger); padding: 20px;">${err.message}</div>`;
+    if (this.customerCrmView) {
+      this.customerCrmView.searchQuery = searchTerm;
+      this.customerCrmView.activeFilter = filterCategory;
+      await this.customerCrmView.fetchCustomers();
     }
-  }
-
-  attachCustomerTableListeners() {
-    const container = document.getElementById('customers-table-container');
-    if (!container) return;
-
-    // Clickable Row / Card handler to open Customer Details modal
-    container.querySelectorAll('.clickable-customer-row, .clickable-customer-card').forEach((el) => {
-      el.addEventListener('click', (e) => {
-        if (e.target.closest('button')) return;
-        const id = el.getAttribute('data-id');
-        const name = el.getAttribute('data-name');
-        if (id) {
-          this.showCustomerHistoryModal(id, name);
-        }
-      });
-    });
-
-    // View History Buttons
-    container.querySelectorAll('.btn-view-customer-history').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        const id = e.currentTarget.getAttribute('data-id');
-        const name = e.currentTarget.getAttribute('data-name');
-        this.showCustomerHistoryModal(id, name);
-      });
-    });
-
-    // Adjust / Reset Strikes Modal Opener
-    container.querySelectorAll('.btn-adjust-strikes').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        const id = e.currentTarget.getAttribute('data-id');
-        const customer = (this.currentCustomerList || []).find((c) => c.id === id) || { id, name: e.currentTarget.getAttribute('data-name') };
-        this.showAdjustStrikesModal(customer);
-      });
-    });
-
-    // Block Buttons
-    container.querySelectorAll('.btn-block-customer').forEach((btn) => {
-      btn.addEventListener('click', async (e) => {
-        const id = e.currentTarget.getAttribute('data-id');
-        const ok = await CalendarState.confirm({
-          title: 'Block Customer',
-          message: `Are you sure you want to block ${name} from booking new appointment slots?`,
-          confirmText: 'Block Customer',
-          cancelText: 'Cancel',
-          icon: '🔒',
-          type: 'danger',
-        });
-        if (ok) {
-          try {
-            await ApiClient.updateCustomerStrikes(id, 3, true);
-            this.showToast(`🔒 ${name} has been blocked from booking.`, 'warning');
-            this.loadCustomersTable(this.searchQuery);
-          } catch (err) {
-            this.showToast(`Error blocking customer: ${err.message}`, 'error');
-          }
-        }
-      });
-    });
   }
 
 
@@ -7964,52 +7713,10 @@ export class SalonDashboard {
       return `<div id="profile-subtab-container-loading">${UniversalLoader.render({ title: 'Loading live salon calendar...', minHeight: '380px' })}</div>`;
     }
 
-    // SECTION 5: STORE USERS & CUSTOMER CRM
+    // SECTION 5: STORE USERS & CUSTOMER CRM (Modular CustomerCrmView)
     if (subtab === 'customers') {
-      const activeFilter = this.activeCustomerFilter || 'ALL';
       return `
-        <div class="settings-panel-card">
-          <div class="settings-panel-header cust-panel-header">
-            <div class="settings-header-left">
-              <div class="settings-header-icon" style="background: rgba(139, 61, 255, 0.15); color: #A855F7;">
-                ${Icons.users({ size: 20 })}
-              </div>
-              <div>
-                <h3 class="settings-panel-title">Store Users & Customer CRM</h3>
-                <p class="settings-panel-subtitle">Manage customer directory, track penalty strikes (0–3), restrict no-show abusers, and review visit history.</p>
-              </div>
-            </div>
-            <div class="cust-search-wrap">
-              <input type="text" class="form-control" id="customer-search-input" placeholder="Search customer by name or phone..." value="${this.searchQuery || ''}" />
-            </div>
-          </div>
-
-          <div class="settings-panel-body" style="gap: 8px;">
-            <!-- Strike Status Filter Segmented Control (100% Fit, Zero-Scroll on Mobile) -->
-            <div id="customer-strike-filters">
-              <button class="cust-filter-btn ${activeFilter === 'ALL' ? 'active' : ''}" data-filter="ALL">
-                <span class="cust-filter-text">All</span>
-                <span class="cust-filter-count">0</span>
-              </button>
-              <button class="cust-filter-btn ${activeFilter === 'BLOCKED' ? 'active' : ''}" data-filter="BLOCKED">
-                <span class="cust-filter-text">Blocked</span>
-                <span class="cust-filter-count">0</span>
-              </button>
-              <button class="cust-filter-btn ${activeFilter === 'WARNING' ? 'active' : ''}" data-filter="WARNING">
-                <span class="cust-filter-text">Warn</span>
-                <span class="cust-filter-count">0</span>
-              </button>
-              <button class="cust-filter-btn ${activeFilter === 'CLEAN' ? 'active' : ''}" data-filter="CLEAN">
-                <span class="cust-filter-text">Clean</span>
-                <span class="cust-filter-count">0</span>
-              </button>
-            </div>
-
-            <div id="customers-table-container">
-              ${PageDataLoader.render({ title: 'Loading customer records...', subtitle: 'Fetching client CRM directory...', minHeight: '160px', variant: 'compact' })}
-            </div>
-          </div>
-        </div>
+        <div id="customer-crm-mount-point" class="customer-crm-view-root"></div>
       `;
     }
 
@@ -8526,31 +8233,14 @@ export class SalonDashboard {
       window.location.reload();
     });
 
-    // 7. Subtab: Store Users & Customer CRM Table Initialization
+    // 7. Subtab: Store Users & Customer CRM Table Initialization (CustomerCrmView)
     if (this.activeProfileSubtab === 'customers') {
-      this.loadCustomersTable(this.searchQuery || '', this.activeCustomerFilter || 'ALL');
-
-      const searchInput = document.getElementById('customer-search-input');
-      if (searchInput) {
-        searchInput.oninput = (e) => {
-          clearTimeout(this.customerSearchDebounce);
-          const val = e.target.value.trim();
-          this.searchQuery = val;
-          this.customerSearchDebounce = setTimeout(() => {
-            this.loadCustomersTable(val, this.activeCustomerFilter || 'ALL');
-          }, 300);
-        };
+      const crmMount = document.getElementById('customer-crm-mount-point');
+      if (crmMount) {
+        CustomerCrmView.init(crmMount, this).then((view) => {
+          this.customerCrmView = view;
+        });
       }
-
-      document.querySelectorAll('#customer-strike-filters .cust-filter-btn').forEach((btn) => {
-        btn.onclick = () => {
-          const filter = btn.getAttribute('data-filter') || 'ALL';
-          this.activeCustomerFilter = filter;
-          document.querySelectorAll('#customer-strike-filters .cust-filter-btn').forEach((b) => b.classList.remove('active'));
-          btn.classList.add('active');
-          this.loadCustomersTable(this.searchQuery || '', filter);
-        };
-      });
     }
   }
 
@@ -9649,497 +9339,497 @@ export class SalonDashboard {
     };
 
     this.container.querySelectorAll('.btn-cancel-absent').forEach((btn) => {
-    btn.addEventListener('click', handleCancelAbsent);
-  });
-this.attachStaffScheduleListeners(this.container);
-
-// Edit Service Modal
-this.container.querySelectorAll('.btn-edit-service').forEach((btn) => {
-  btn.addEventListener('click', (e) => {
-    const id = e.currentTarget.getAttribute('data-id');
-    const service = (this.servicesList || []).find((s) => String(s.id) === String(id)) || {
-      id,
-      name: e.currentTarget.getAttribute('data-name'),
-      price: e.currentTarget.getAttribute('data-price'),
-      durationMinutes: e.currentTarget.getAttribute('data-duration'),
-      category: e.currentTarget.getAttribute('data-category'),
-      description: e.currentTarget.getAttribute('data-desc'),
-    };
-    this.showEditServiceModal(service);
-  });
-});
-
-// Delete Service Modal
-this.container.querySelectorAll('.btn-delete-service').forEach((btn) => {
-  btn.addEventListener('click', (e) => {
-    const id = e.currentTarget.getAttribute('data-id');
-    const name = e.currentTarget.getAttribute('data-name');
-    this.showDeleteServiceModal(id, name);
-  });
-});
-
-// CRM Search Debounce
-const searchInput = document.getElementById('customer-search-input');
-let debounceTimer;
-searchInput?.addEventListener('input', (e) => {
-  this.searchQuery = e.target.value;
-  clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(() => {
-    this.loadCustomersTable(this.searchQuery, this.activeCustomerFilter || 'ALL');
-  }, 300);
-});
-
-// Customer Strike Filter Chips
-this.container.querySelectorAll('.cust-filter-btn').forEach((btn) => {
-  btn.addEventListener('click', (e) => {
-    this.container.querySelectorAll('.cust-filter-btn').forEach((b) => {
-      b.style.background = 'rgba(255,255,255,0.05)';
+      btn.addEventListener('click', handleCancelAbsent);
     });
-    e.currentTarget.style.background = 'rgba(139, 61, 255,0.3)';
-    const filter = e.currentTarget.getAttribute('data-filter');
-    this.activeCustomerFilter = filter;
-    this.loadCustomersTable(this.searchQuery, filter);
-  });
-});
+    this.attachStaffScheduleListeners(this.container);
 
-// View Customer History
-this.container.querySelectorAll('.btn-view-customer-history').forEach((btn) => {
-  btn.addEventListener('click', async (e) => {
-    const id = e.currentTarget.getAttribute('data-id');
-    const name = e.currentTarget.getAttribute('data-name');
-    this.showCustomerHistoryModal(id, name);
-  });
-});
-
-// WhatsApp Log Filter
-document.getElementById('btn-fetch-wa-logs')?.addEventListener('click', () => {
-  const phone = document.getElementById('whatsapp-log-phone-filter')?.value || '';
-  this.loadWhatsAppLogs(phone);
-});
-
-// Load table on initial tab switch
-if (this.activeTab === 'customers') this.loadCustomersTable();
-if (this.activeTab === 'whatsapp-logs') this.loadWhatsAppLogs();
-
-// Profile Tab: Initialize settings subtab listeners
-if (this.activeTab === 'profile') {
-  this.attachProfileSubtabListeners();
-}
-
-// Delegated click listener on root container for settings navigation subtabs (guarantees click always works)
-if (!this._settingsNavDelegated && this.container) {
-  this._settingsNavDelegated = true;
-  this.container.addEventListener('click', (e) => {
-    const navBtn = e.target.closest('.settings-nav-row[data-subtab]');
-    if (navBtn) {
-      e.preventDefault();
-      const sub = navBtn.getAttribute('data-subtab');
-      if (sub) this.switchProfileSubtab(sub);
-    }
-  });
-}
-
-// Call tab event listeners for active tab content
-this.attachTabEventListeners();
-
-// Global Delegated Filter Drawer Controller (guarantees filter trigger button always works)
-if (!this._servicesFilterGlobalDelegated) {
-  this._servicesFilterGlobalDelegated = true;
-
-  document.addEventListener('click', (e) => {
-    const openTrigger = e.target.closest('#btn-open-filter-drawer');
-    if (openTrigger) {
-      e.preventDefault();
-      e.stopPropagation();
-      this.openServicesFilterDrawer();
-      return;
-    }
-
-    const catTrigger = e.target.closest('#btn-manage-categories, #btn-drawer-manage-cat-link');
-    if (catTrigger) {
-      e.preventDefault();
-      e.stopPropagation();
-      this.closeServicesFilterDrawer();
-      this.showManageCategoriesModal();
-      return;
-    }
-
-    const closeTrigger = e.target.closest('#btn-close-filter-drawer, .drawer-close-btn, #btn-drawer-apply-filters');
-    if (closeTrigger) {
-      e.preventDefault();
-      this.closeServicesFilterDrawer();
-      return;
-    }
-
-    const backdropTrigger = e.target.closest('#svc-filter-drawer-backdrop');
-    if (backdropTrigger) {
-      e.preventDefault();
-      this.closeServicesFilterDrawer();
-      return;
-    }
-
-    // Delegated Filter Chip Selection (Reliable even when drawer is relocated to document.body)
-    const chipTrigger = e.target.closest('.filter-chip-btn');
-    if (chipTrigger) {
-      e.preventDefault();
-      const type = chipTrigger.getAttribute('data-filter-type');
-      const val = chipTrigger.getAttribute('data-value');
-      if (type && val) {
-        if (!this.serviceFilters) {
-          this.serviceFilters = { category: 'ALL', gender: 'ALL', staff: 'ALL' };
-        }
-        this.serviceFilters[type] = val;
-        this.syncServicesFilterPills();
-        this.triggerServicesFilter();
-      }
-      return;
-    }
-
-    // Delegated Reset All Filters
-    const resetTrigger = e.target.closest('#btn-drawer-reset-filters, #btn-clear-all-filters, #btn-reset-empty-search');
-    if (resetTrigger) {
-      e.preventDefault();
-      this.serviceFilters = { category: 'ALL', gender: 'ALL', staff: 'ALL' };
-      const searchInput = document.getElementById('svc-search-input');
-      if (searchInput) searchInput.value = '';
-      this.syncServicesFilterPills();
-      this.triggerServicesFilter();
-      return;
-    }
-
-    // Delegated Remove Filter Pill
-    const removePillTrigger = e.target.closest('.btn-remove-filter');
-    if (removePillTrigger) {
-      e.preventDefault();
-      const type = removePillTrigger.getAttribute('data-filter-type');
-      if (type) {
-        if (!this.serviceFilters) {
-          this.serviceFilters = { category: 'ALL', gender: 'ALL', staff: 'ALL' };
-        }
-        this.serviceFilters[type] = 'ALL';
-        this.syncServicesFilterPills();
-        this.triggerServicesFilter();
-      }
-      return;
-    }
-  });
-
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      const drawer = document.getElementById('svc-filter-drawer');
-      if (drawer && drawer.classList.contains('is-open')) {
-        this.closeServicesFilterDrawer();
-      }
-    }
-  });
-}
-  }
-
-setupQueueTabListeners(tabContent) {
-  if (!tabContent) return;
-
-  // Queue Filter Pills (All, Waiting, In Chair, Done, Cancelled)
-  tabContent.querySelectorAll('.q-chip').forEach((pill) => {
-    pill.addEventListener('click', (e) => {
-      const filter = e.currentTarget.getAttribute('data-filter');
-      if (filter) {
-        this.queueFilter = filter;
-        this.render();
-      }
-    });
-  });
-
-  // Date Navigation Controls (Prev, Next, Today)
-  const prevBtn = tabContent.querySelector('#btn-date-prev');
-  if (prevBtn) {
-    prevBtn.onclick = (e) => {
-      e.preventDefault();
-      this.handleQueueDateChange(this.addDaysToDateString(this.selectedDate, -1));
-    };
-  }
-
-  const nextBtn = tabContent.querySelector('#btn-date-next');
-  if (nextBtn) {
-    nextBtn.onclick = (e) => {
-      e.preventDefault();
-      this.handleQueueDateChange(this.addDaysToDateString(this.selectedDate, 1));
-    };
-  }
-
-  const todayBtn = tabContent.querySelector('#btn-date-today');
-  if (todayBtn) {
-    todayBtn.onclick = (e) => {
-      e.preventDefault();
-      this.handleQueueDateChange(this.getLocalDateString());
-    };
-  }
-
-  // Interactive Calendar Popover Trigger - Single Canonical Controller
-  const calPopover = tabContent.querySelector('#q-calendar-popover') || document.getElementById('q-calendar-popover');
-  const calToggleBtn = tabContent.querySelector('#btn-toggle-cal-popover') || document.getElementById('btn-toggle-cal-popover');
-
-  if (calToggleBtn) {
-    calToggleBtn.onclick = (e) => this.toggleCalendarPopover(e);
-  }
-
-  if (calPopover) {
-    this.wireCalendarPopoverEvents(calPopover, (d) => this.handleQueueDateChange(d));
-  }
-
-  // Ensure clean state for outside-click listener on tab re-render
-  if (this._handlePopoverDocClick) {
-    document.removeEventListener('click', this._handlePopoverDocClick);
-    this._handlePopoverDocClick = null;
-  }
-
-  // Right-Side Filter Drawer Controls
-  const filterDrawer = tabContent.querySelector('#queue-drawer') || document.getElementById('queue-drawer');
-  const drawerBackdrop = tabContent.querySelector('#queue-drawer-backdrop') || document.getElementById('queue-drawer-backdrop');
-
-  const openQueueDrawer = () => {
-    filterDrawer?.classList.add('is-open');
-    drawerBackdrop?.classList.add('is-open');
-    document.body.style.overflow = 'hidden';
-  };
-
-  const closeQueueDrawer = () => {
-    filterDrawer?.classList.remove('is-open');
-    drawerBackdrop?.classList.remove('is-open');
-    document.body.style.overflow = '';
-  };
-
-  tabContent.querySelector('#btn-open-queue-drawer')?.addEventListener('click', openQueueDrawer);
-  document.getElementById('btn-open-queue-drawer')?.addEventListener('click', openQueueDrawer);
-  filterDrawer?.querySelector('#btn-close-queue-drawer')?.addEventListener('click', closeQueueDrawer);
-  drawerBackdrop?.addEventListener('click', closeQueueDrawer);
-
-  // Drawer Chips Selection
-  filterDrawer?.querySelectorAll('.qd-chips').forEach((groupEl) => {
-    groupEl.querySelectorAll('.qd-chip').forEach((chip) => {
-      chip.addEventListener('click', () => {
-        groupEl.querySelectorAll('.qd-chip').forEach((c) => c.classList.remove('active'));
-        chip.classList.add('active');
+    // Edit Service Modal
+    this.container.querySelectorAll('.btn-edit-service').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const service = (this.servicesList || []).find((s) => String(s.id) === String(id)) || {
+          id,
+          name: e.currentTarget.getAttribute('data-name'),
+          price: e.currentTarget.getAttribute('data-price'),
+          durationMinutes: e.currentTarget.getAttribute('data-duration'),
+          category: e.currentTarget.getAttribute('data-category'),
+          description: e.currentTarget.getAttribute('data-desc'),
+        };
+        this.showEditServiceModal(service);
       });
     });
-  });
 
-  // Apply Drawer Filters
-  filterDrawer?.querySelector('#btn-apply-queue-filters')?.addEventListener('click', () => {
-    const newFilters = { stylistId: '', bookingType: '', status: '', categoryId: '' };
-    filterDrawer.querySelectorAll('.qd-chips').forEach((groupEl) => {
-      const groupKey = groupEl.getAttribute('data-filter-group');
-      const activeChip = groupEl.querySelector('.qd-chip.active');
-      if (activeChip && groupKey) {
-        newFilters[groupKey] = activeChip.getAttribute('data-val') || '';
-      }
+    // Delete Service Modal
+    this.container.querySelectorAll('.btn-delete-service').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const name = e.currentTarget.getAttribute('data-name');
+        this.showDeleteServiceModal(id, name);
+      });
     });
-    this.queueDrawerFilters = newFilters;
-    closeQueueDrawer();
-    this.render();
-  });
 
-  // Reset Drawer Filters
-  filterDrawer?.querySelector('#btn-reset-queue-filters')?.addEventListener('click', () => {
-    this.queueDrawerFilters = { stylistId: '', bookingType: '', status: '', categoryId: '' };
-    closeQueueDrawer();
-    this.render();
-  });
-}
+    // CRM Search Debounce
+    const searchInput = document.getElementById('customer-search-input');
+    let debounceTimer;
+    searchInput?.addEventListener('input', (e) => {
+      this.searchQuery = e.target.value;
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        this.loadCustomersTable(this.searchQuery, this.activeCustomerFilter || 'ALL');
+      }, 300);
+    });
 
-/**
- * PERFORMANCE: Re-attach only event listeners inside #tab-content.
- * Called during targeted SSE re-renders to avoid re-binding global header/nav listeners.
- */
-attachTabEventListeners() {
-  const tabContent = document.getElementById('tab-content');
-  if (!tabContent) return;
+    // Customer Strike Filter Chips
+    this.container.querySelectorAll('.cust-filter-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        this.container.querySelectorAll('.cust-filter-btn').forEach((b) => {
+          b.style.background = 'rgba(255,255,255,0.05)';
+        });
+        e.currentTarget.style.background = 'rgba(139, 61, 255,0.3)';
+        const filter = e.currentTarget.getAttribute('data-filter');
+        this.activeCustomerFilter = filter;
+        this.loadCustomersTable(this.searchQuery, filter);
+      });
+    });
 
-  // Home Dashboard Event Delegation
-  if (this.activeTab === 'dashboard') {
-    this.homeManager.attachEventListeners(tabContent);
+    // View Customer History
+    this.container.querySelectorAll('.btn-view-customer-history').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const name = e.currentTarget.getAttribute('data-name');
+        this.showCustomerHistoryModal(id, name);
+      });
+    });
+
+    // WhatsApp Log Filter
+    document.getElementById('btn-fetch-wa-logs')?.addEventListener('click', () => {
+      const phone = document.getElementById('whatsapp-log-phone-filter')?.value || '';
+      this.loadWhatsAppLogs(phone);
+    });
+
+    // Load table on initial tab switch
+    if (this.activeTab === 'customers') this.loadCustomersTable();
+    if (this.activeTab === 'whatsapp-logs') this.loadWhatsAppLogs();
+
+    // Profile Tab: Initialize settings subtab listeners
+    if (this.activeTab === 'profile') {
+      this.attachProfileSubtabListeners();
+    }
+
+    // Delegated click listener on root container for settings navigation subtabs (guarantees click always works)
+    if (!this._settingsNavDelegated && this.container) {
+      this._settingsNavDelegated = true;
+      this.container.addEventListener('click', (e) => {
+        const navBtn = e.target.closest('.settings-nav-row[data-subtab]');
+        if (navBtn) {
+          e.preventDefault();
+          const sub = navBtn.getAttribute('data-subtab');
+          if (sub) this.switchProfileSubtab(sub);
+        }
+      });
+    }
+
+    // Call tab event listeners for active tab content
+    this.attachTabEventListeners();
+
+    // Global Delegated Filter Drawer Controller (guarantees filter trigger button always works)
+    if (!this._servicesFilterGlobalDelegated) {
+      this._servicesFilterGlobalDelegated = true;
+
+      document.addEventListener('click', (e) => {
+        const openTrigger = e.target.closest('#btn-open-filter-drawer');
+        if (openTrigger) {
+          e.preventDefault();
+          e.stopPropagation();
+          this.openServicesFilterDrawer();
+          return;
+        }
+
+        const catTrigger = e.target.closest('#btn-manage-categories, #btn-drawer-manage-cat-link');
+        if (catTrigger) {
+          e.preventDefault();
+          e.stopPropagation();
+          this.closeServicesFilterDrawer();
+          this.showManageCategoriesModal();
+          return;
+        }
+
+        const closeTrigger = e.target.closest('#btn-close-filter-drawer, .drawer-close-btn, #btn-drawer-apply-filters');
+        if (closeTrigger) {
+          e.preventDefault();
+          this.closeServicesFilterDrawer();
+          return;
+        }
+
+        const backdropTrigger = e.target.closest('#svc-filter-drawer-backdrop');
+        if (backdropTrigger) {
+          e.preventDefault();
+          this.closeServicesFilterDrawer();
+          return;
+        }
+
+        // Delegated Filter Chip Selection (Reliable even when drawer is relocated to document.body)
+        const chipTrigger = e.target.closest('.filter-chip-btn');
+        if (chipTrigger) {
+          e.preventDefault();
+          const type = chipTrigger.getAttribute('data-filter-type');
+          const val = chipTrigger.getAttribute('data-value');
+          if (type && val) {
+            if (!this.serviceFilters) {
+              this.serviceFilters = { category: 'ALL', gender: 'ALL', staff: 'ALL' };
+            }
+            this.serviceFilters[type] = val;
+            this.syncServicesFilterPills();
+            this.triggerServicesFilter();
+          }
+          return;
+        }
+
+        // Delegated Reset All Filters
+        const resetTrigger = e.target.closest('#btn-drawer-reset-filters, #btn-clear-all-filters, #btn-reset-empty-search');
+        if (resetTrigger) {
+          e.preventDefault();
+          this.serviceFilters = { category: 'ALL', gender: 'ALL', staff: 'ALL' };
+          const searchInput = document.getElementById('svc-search-input');
+          if (searchInput) searchInput.value = '';
+          this.syncServicesFilterPills();
+          this.triggerServicesFilter();
+          return;
+        }
+
+        // Delegated Remove Filter Pill
+        const removePillTrigger = e.target.closest('.btn-remove-filter');
+        if (removePillTrigger) {
+          e.preventDefault();
+          const type = removePillTrigger.getAttribute('data-filter-type');
+          if (type) {
+            if (!this.serviceFilters) {
+              this.serviceFilters = { category: 'ALL', gender: 'ALL', staff: 'ALL' };
+            }
+            this.serviceFilters[type] = 'ALL';
+            this.syncServicesFilterPills();
+            this.triggerServicesFilter();
+          }
+          return;
+        }
+      });
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          const drawer = document.getElementById('svc-filter-drawer');
+          if (drawer && drawer.classList.contains('is-open')) {
+            this.closeServicesFilterDrawer();
+          }
+        }
+      });
+    }
   }
 
-  // Queue Screen Interactive Listeners (Date Popover, Filter Drawer, Chips)
-  this.setupQueueTabListeners(tabContent);
+  setupQueueTabListeners(tabContent) {
+    if (!tabContent) return;
 
-  // Status Updates
-  tabContent.querySelectorAll('.btn-status').forEach((btn) => {
-    btn.addEventListener('click', async (e) => {
-      const targetBtn = e.currentTarget;
-      if (targetBtn.disabled) return;
-      targetBtn.disabled = true;
-      const id = targetBtn.getAttribute('data-id');
-      const status = targetBtn.getAttribute('data-status');
+    // Queue Filter Pills (All, Waiting, In Chair, Done, Cancelled)
+    tabContent.querySelectorAll('.q-chip').forEach((pill) => {
+      pill.addEventListener('click', (e) => {
+        const filter = e.currentTarget.getAttribute('data-filter');
+        if (filter) {
+          this.queueFilter = filter;
+          this.render();
+        }
+      });
+    });
 
-      // Optimistic in-memory update (0ms Frame 1)
-      const targetItem = (this.queueSync?.items || []).find((item) => item.id === id);
-      const prevStatus = targetItem ? targetItem.status : null;
-      if (targetItem) {
-        targetItem.status = status;
-        this.render();
-      }
+    // Date Navigation Controls (Prev, Next, Today)
+    const prevBtn = tabContent.querySelector('#btn-date-prev');
+    if (prevBtn) {
+      prevBtn.onclick = (e) => {
+        e.preventDefault();
+        this.handleQueueDateChange(this.addDaysToDateString(this.selectedDate, -1));
+      };
+    }
 
-      try {
-        if (prevStatus === 'PENDING_ACCEPTANCE') {
-          if (status === 'CHECKED_IN' || status === 'CONFIRMED') {
-            await ApiClient.acceptQuickBooking(id);
-          } else if (status === 'REJECTED' || status === 'CANCELLED') {
-            await ApiClient.declineQuickBooking(id);
+    const nextBtn = tabContent.querySelector('#btn-date-next');
+    if (nextBtn) {
+      nextBtn.onclick = (e) => {
+        e.preventDefault();
+        this.handleQueueDateChange(this.addDaysToDateString(this.selectedDate, 1));
+      };
+    }
+
+    const todayBtn = tabContent.querySelector('#btn-date-today');
+    if (todayBtn) {
+      todayBtn.onclick = (e) => {
+        e.preventDefault();
+        this.handleQueueDateChange(this.getLocalDateString());
+      };
+    }
+
+    // Interactive Calendar Popover Trigger - Single Canonical Controller
+    const calPopover = tabContent.querySelector('#q-calendar-popover') || document.getElementById('q-calendar-popover');
+    const calToggleBtn = tabContent.querySelector('#btn-toggle-cal-popover') || document.getElementById('btn-toggle-cal-popover');
+
+    if (calToggleBtn) {
+      calToggleBtn.onclick = (e) => this.toggleCalendarPopover(e);
+    }
+
+    if (calPopover) {
+      this.wireCalendarPopoverEvents(calPopover, (d) => this.handleQueueDateChange(d));
+    }
+
+    // Ensure clean state for outside-click listener on tab re-render
+    if (this._handlePopoverDocClick) {
+      document.removeEventListener('click', this._handlePopoverDocClick);
+      this._handlePopoverDocClick = null;
+    }
+
+    // Right-Side Filter Drawer Controls
+    const filterDrawer = tabContent.querySelector('#queue-drawer') || document.getElementById('queue-drawer');
+    const drawerBackdrop = tabContent.querySelector('#queue-drawer-backdrop') || document.getElementById('queue-drawer-backdrop');
+
+    const openQueueDrawer = () => {
+      filterDrawer?.classList.add('is-open');
+      drawerBackdrop?.classList.add('is-open');
+      document.body.style.overflow = 'hidden';
+    };
+
+    const closeQueueDrawer = () => {
+      filterDrawer?.classList.remove('is-open');
+      drawerBackdrop?.classList.remove('is-open');
+      document.body.style.overflow = '';
+    };
+
+    tabContent.querySelector('#btn-open-queue-drawer')?.addEventListener('click', openQueueDrawer);
+    document.getElementById('btn-open-queue-drawer')?.addEventListener('click', openQueueDrawer);
+    filterDrawer?.querySelector('#btn-close-queue-drawer')?.addEventListener('click', closeQueueDrawer);
+    drawerBackdrop?.addEventListener('click', closeQueueDrawer);
+
+    // Drawer Chips Selection
+    filterDrawer?.querySelectorAll('.qd-chips').forEach((groupEl) => {
+      groupEl.querySelectorAll('.qd-chip').forEach((chip) => {
+        chip.addEventListener('click', () => {
+          groupEl.querySelectorAll('.qd-chip').forEach((c) => c.classList.remove('active'));
+          chip.classList.add('active');
+        });
+      });
+    });
+
+    // Apply Drawer Filters
+    filterDrawer?.querySelector('#btn-apply-queue-filters')?.addEventListener('click', () => {
+      const newFilters = { stylistId: '', bookingType: '', status: '', categoryId: '' };
+      filterDrawer.querySelectorAll('.qd-chips').forEach((groupEl) => {
+        const groupKey = groupEl.getAttribute('data-filter-group');
+        const activeChip = groupEl.querySelector('.qd-chip.active');
+        if (activeChip && groupKey) {
+          newFilters[groupKey] = activeChip.getAttribute('data-val') || '';
+        }
+      });
+      this.queueDrawerFilters = newFilters;
+      closeQueueDrawer();
+      this.render();
+    });
+
+    // Reset Drawer Filters
+    filterDrawer?.querySelector('#btn-reset-queue-filters')?.addEventListener('click', () => {
+      this.queueDrawerFilters = { stylistId: '', bookingType: '', status: '', categoryId: '' };
+      closeQueueDrawer();
+      this.render();
+    });
+  }
+
+  /**
+   * PERFORMANCE: Re-attach only event listeners inside #tab-content.
+   * Called during targeted SSE re-renders to avoid re-binding global header/nav listeners.
+   */
+  attachTabEventListeners() {
+    const tabContent = document.getElementById('tab-content');
+    if (!tabContent) return;
+
+    // Home Dashboard Event Delegation
+    if (this.activeTab === 'dashboard') {
+      this.homeManager.attachEventListeners(tabContent);
+    }
+
+    // Queue Screen Interactive Listeners (Date Popover, Filter Drawer, Chips)
+    this.setupQueueTabListeners(tabContent);
+
+    // Status Updates
+    tabContent.querySelectorAll('.btn-status').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        const targetBtn = e.currentTarget;
+        if (targetBtn.disabled) return;
+        targetBtn.disabled = true;
+        const id = targetBtn.getAttribute('data-id');
+        const status = targetBtn.getAttribute('data-status');
+
+        // Optimistic in-memory update (0ms Frame 1)
+        const targetItem = (this.queueSync?.items || []).find((item) => item.id === id);
+        const prevStatus = targetItem ? targetItem.status : null;
+        if (targetItem) {
+          targetItem.status = status;
+          this.render();
+        }
+
+        try {
+          if (prevStatus === 'PENDING_ACCEPTANCE') {
+            if (status === 'CHECKED_IN' || status === 'CONFIRMED') {
+              await ApiClient.acceptQuickBooking(id);
+            } else if (status === 'REJECTED' || status === 'CANCELLED') {
+              await ApiClient.declineQuickBooking(id);
+            } else {
+              await ApiClient.updateAppointmentStatus(id, status);
+            }
           } else {
             await ApiClient.updateAppointmentStatus(id, status);
           }
-        } else {
-          await ApiClient.updateAppointmentStatus(id, status);
+        } catch (err) {
+          if (targetItem && prevStatus) {
+            targetItem.status = prevStatus;
+            this.render();
+          }
+          this.showToast(`Could not update status: ${err.message}`, 'error');
         }
-      } catch (err) {
-        if (targetItem && prevStatus) {
-          targetItem.status = prevStatus;
-          this.render();
-        }
-        this.showToast(`Could not update status: ${err.message}`, 'error');
-      }
-    });
-  });
-
-  // Reschedule Button
-  tabContent.querySelectorAll('.btn-open-reschedule').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      const id = e.currentTarget.getAttribute('data-id');
-      const serviceId = e.currentTarget.getAttribute('data-service');
-      const staffId = e.currentTarget.getAttribute('data-staff');
-      const clientName = e.currentTarget.getAttribute('data-name');
-      this.showRescheduleModal(id, serviceId, staffId, clientName);
-    });
-  });
-
-  // Add Service / Add-on Button
-  tabContent.querySelectorAll('.btn-open-add-addon').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      const id = e.currentTarget.getAttribute('data-id');
-      const clientName = e.currentTarget.getAttribute('data-name');
-      this.showAddAddonModal(id, clientName);
-    });
-  });
-
-  // Start Live 10-Minute Timer Ticks
-  this.startLiveTimerTicks();
-
-  // Cancel Button
-  tabContent.querySelectorAll('.btn-open-cancel').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      const id = e.currentTarget.getAttribute('data-id');
-      const clientName = e.currentTarget.getAttribute('data-name');
-      this.showCancelModal(id, clientName);
-    });
-  });
-
-
-  // Quick Onboarding Action Buttons
-  document.getElementById('btn-quick-add-staff')?.addEventListener('click', () => this.showAddStaffModal());
-  document.getElementById('btn-empty-add-staff')?.addEventListener('click', () => this.showAddStaffModal());
-
-  // Staff Tab Master-Detail Workspace Listeners
-  if (this.activeTab === 'staff') {
-    this.attachStaffTabListeners(tabContent);
-  }
-
-  // Services Tab Buttons
-  if (this.activeTab === 'services') {
-    this.attachServicesTabListeners(tabContent);
-  }
-  tabContent.querySelectorAll('.btn-edit-service').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      const id = e.currentTarget.getAttribute('data-id');
-      const service = (this.servicesList || []).find((s) => String(s.id) === String(id)) || {
-        id,
-        name: e.currentTarget.getAttribute('data-name'),
-        price: e.currentTarget.getAttribute('data-price'),
-        durationMinutes: e.currentTarget.getAttribute('data-duration'),
-        category: e.currentTarget.getAttribute('data-category'),
-        description: e.currentTarget.getAttribute('data-desc'),
-      };
-      this.showEditServiceModal(service);
-    });
-  });
-  tabContent.querySelectorAll('.btn-delete-service').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      this.showDeleteServiceModal(e.currentTarget.getAttribute('data-id'), e.currentTarget.getAttribute('data-name'));
-    });
-  });
-
-  // Profile Tab
-  if (this.activeTab === 'profile') {
-    this.attachProfileSubtabListeners();
-  }
-  document.getElementById('btn-copy-invite')?.addEventListener('click', () => {
-    const url = this.getBookingShareUrl();
-    navigator.clipboard.writeText(url);
-    this.showToast('💬 WhatsApp booking link copied to clipboard!', 'success');
-  });
-  tabContent.querySelectorAll('.btn-open-closures-modal').forEach((b) => {
-    b.onclick = () => {
-      this.switchTab('profile');
-      this.switchProfileSubtab('closures');
-    };
-  });
-  document.getElementById('btn-open-qr')?.addEventListener('click', () => this.showQRCodeModal());
-  document.getElementById('btn-block-time')?.addEventListener('click', () => this.showBlockTimeModal());
-
-
-  // Back button listener for Customer Management Tab (Navigates to previously active tab)
-  document.getElementById('btn-cust-back')?.addEventListener('click', () => {
-    const target = this.previousTab || 'queue';
-    this.switchTab(target);
-  });
-
-  // CRM Search & Customer Filter Chips
-  const searchInput = document.getElementById('customer-search-input');
-  let debounceTimer;
-  searchInput?.addEventListener('input', (e) => {
-    this.searchQuery = e.target.value;
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => this.loadCustomersTable(this.searchQuery, this.activeCustomerFilter || 'ALL'), 300);
-  });
-
-  const custFilterBtns = tabContent.querySelectorAll('.cust-filter-btn');
-  custFilterBtns.forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      const filter = e.currentTarget.getAttribute('data-filter');
-      this.activeCustomerFilter = filter;
-      custFilterBtns.forEach((b) => {
-        b.classList.toggle('active', b.getAttribute('data-filter') === filter);
       });
-      this.loadCustomersTable(this.searchQuery || '', filter);
     });
-  });
 
-  tabContent.querySelectorAll('.btn-view-customer-history').forEach((btn) => {
-    btn.addEventListener('click', async (e) => {
-      this.showCustomerHistoryModal(e.currentTarget.getAttribute('data-id'), e.currentTarget.getAttribute('data-name'));
+    // Reschedule Button
+    tabContent.querySelectorAll('.btn-open-reschedule').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const serviceId = e.currentTarget.getAttribute('data-service');
+        const staffId = e.currentTarget.getAttribute('data-staff');
+        const clientName = e.currentTarget.getAttribute('data-name');
+        this.showRescheduleModal(id, serviceId, staffId, clientName);
+      });
     });
-  });
 
-  // WhatsApp Log Filter
-  document.getElementById('btn-fetch-wa-logs')?.addEventListener('click', () => {
-    const phone = document.getElementById('whatsapp-log-phone-filter')?.value || '';
-    this.loadWhatsAppLogs(phone);
-  });
+    // Add Service / Add-on Button
+    tabContent.querySelectorAll('.btn-open-add-addon').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const clientName = e.currentTarget.getAttribute('data-name');
+        this.showAddAddonModal(id, clientName);
+      });
+    });
 
-  // Load table on tab switch
-  if (this.activeTab === 'customers') this.loadCustomersTable(this.searchQuery || '', this.activeCustomerFilter || 'ALL');
-  if (this.activeTab === 'whatsapp-logs') this.loadWhatsAppLogs();
-}
+    // Start Live 10-Minute Timer Ticks
+    this.startLiveTimerTicks();
 
-// =========================================================================
-// MODALS
-// =========================================================================
-showWalkInModal() {
-  const modalContainer = document.getElementById('modal-container');
-  const todayIso = this.getLocalDateString();
-  const maxDays = this.salonProfile?.maxAdvanceDays || 3;
-  const maxDateIso = this.addDaysToDateString(todayIso, maxDays);
+    // Cancel Button
+    tabContent.querySelectorAll('.btn-open-cancel').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const clientName = e.currentTarget.getAttribute('data-name');
+        this.showCancelModal(id, clientName);
+      });
+    });
 
-  modalContainer.innerHTML = `
+
+    // Quick Onboarding Action Buttons
+    document.getElementById('btn-quick-add-staff')?.addEventListener('click', () => this.showAddStaffModal());
+    document.getElementById('btn-empty-add-staff')?.addEventListener('click', () => this.showAddStaffModal());
+
+    // Staff Tab Master-Detail Workspace Listeners
+    if (this.activeTab === 'staff') {
+      this.attachStaffTabListeners(tabContent);
+    }
+
+    // Services Tab Buttons
+    if (this.activeTab === 'services') {
+      this.attachServicesTabListeners(tabContent);
+    }
+    tabContent.querySelectorAll('.btn-edit-service').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const service = (this.servicesList || []).find((s) => String(s.id) === String(id)) || {
+          id,
+          name: e.currentTarget.getAttribute('data-name'),
+          price: e.currentTarget.getAttribute('data-price'),
+          durationMinutes: e.currentTarget.getAttribute('data-duration'),
+          category: e.currentTarget.getAttribute('data-category'),
+          description: e.currentTarget.getAttribute('data-desc'),
+        };
+        this.showEditServiceModal(service);
+      });
+    });
+    tabContent.querySelectorAll('.btn-delete-service').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        this.showDeleteServiceModal(e.currentTarget.getAttribute('data-id'), e.currentTarget.getAttribute('data-name'));
+      });
+    });
+
+    // Profile Tab
+    if (this.activeTab === 'profile') {
+      this.attachProfileSubtabListeners();
+    }
+    document.getElementById('btn-copy-invite')?.addEventListener('click', () => {
+      const url = this.getBookingShareUrl();
+      navigator.clipboard.writeText(url);
+      this.showToast('💬 WhatsApp booking link copied to clipboard!', 'success');
+    });
+    tabContent.querySelectorAll('.btn-open-closures-modal').forEach((b) => {
+      b.onclick = () => {
+        this.switchTab('profile');
+        this.switchProfileSubtab('closures');
+      };
+    });
+    document.getElementById('btn-open-qr')?.addEventListener('click', () => this.showQRCodeModal());
+    document.getElementById('btn-block-time')?.addEventListener('click', () => this.showBlockTimeModal());
+
+
+    // Back button listener for Customer Management Tab (Navigates to previously active tab)
+    document.getElementById('btn-cust-back')?.addEventListener('click', () => {
+      const target = this.previousTab || 'queue';
+      this.switchTab(target);
+    });
+
+    // CRM Search & Customer Filter Chips
+    const searchInput = document.getElementById('customer-search-input');
+    let debounceTimer;
+    searchInput?.addEventListener('input', (e) => {
+      this.searchQuery = e.target.value;
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => this.loadCustomersTable(this.searchQuery, this.activeCustomerFilter || 'ALL'), 300);
+    });
+
+    const custFilterBtns = tabContent.querySelectorAll('.cust-filter-btn');
+    custFilterBtns.forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const filter = e.currentTarget.getAttribute('data-filter');
+        this.activeCustomerFilter = filter;
+        custFilterBtns.forEach((b) => {
+          b.classList.toggle('active', b.getAttribute('data-filter') === filter);
+        });
+        this.loadCustomersTable(this.searchQuery || '', filter);
+      });
+    });
+
+    tabContent.querySelectorAll('.btn-view-customer-history').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        this.showCustomerHistoryModal(e.currentTarget.getAttribute('data-id'), e.currentTarget.getAttribute('data-name'));
+      });
+    });
+
+    // WhatsApp Log Filter
+    document.getElementById('btn-fetch-wa-logs')?.addEventListener('click', () => {
+      const phone = document.getElementById('whatsapp-log-phone-filter')?.value || '';
+      this.loadWhatsAppLogs(phone);
+    });
+
+    // Load table on tab switch
+    if (this.activeTab === 'customers') this.loadCustomersTable(this.searchQuery || '', this.activeCustomerFilter || 'ALL');
+    if (this.activeTab === 'whatsapp-logs') this.loadWhatsAppLogs();
+  }
+
+  // =========================================================================
+  // MODALS
+  // =========================================================================
+  showWalkInModal() {
+    const modalContainer = document.getElementById('modal-container');
+    const todayIso = this.getLocalDateString();
+    const maxDays = this.salonProfile?.maxAdvanceDays || 3;
+    const maxDateIso = this.addDaysToDateString(todayIso, maxDays);
+
+    modalContainer.innerHTML = `
       <div class="modal-backdrop show">
         <div class="modal-content modal-content-lg">
           <div class="modal-header">
@@ -10198,92 +9888,92 @@ showWalkInModal() {
       </div>
     `;
 
-  document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+    document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
 
-  document.getElementById('fast-booking-form')?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const errorDiv = document.getElementById('walkin-error');
-    const submitBtn = document.getElementById('btn-submit-walkin');
-    submitBtn.textContent = 'Verifying Slot & Booking...';
-    submitBtn.setAttribute('disabled', 'true');
-    errorDiv.style.display = 'none';
+    document.getElementById('fast-booking-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errorDiv = document.getElementById('walkin-error');
+      const submitBtn = document.getElementById('btn-submit-walkin');
+      submitBtn.textContent = 'Verifying Slot & Booking...';
+      submitBtn.setAttribute('disabled', 'true');
+      errorDiv.style.display = 'none';
 
-    try {
-      const payload = {
-        serviceId: document.getElementById('walkin-service').value,
-        staffId: document.getElementById('walkin-staff').value || undefined,
-        date: document.getElementById('walkin-date').value,
-        startTime: document.getElementById('walkin-time').value,
-        customerName: document.getElementById('walkin-name').value,
-        customerPhone: document.getElementById('walkin-phone').value,
-        source: 'WALK_IN',
-      };
+      try {
+        const payload = {
+          serviceId: document.getElementById('walkin-service').value,
+          staffId: document.getElementById('walkin-staff').value || undefined,
+          date: document.getElementById('walkin-date').value,
+          startTime: document.getElementById('walkin-time').value,
+          customerName: document.getElementById('walkin-name').value,
+          customerPhone: document.getElementById('walkin-phone').value,
+          source: 'WALK_IN',
+        };
 
-      await ApiClient.createAppointment(payload);
-      modalContainer.innerHTML = '';
-      await this.loadData();
-      this.render();
-    } catch (err) {
-      errorDiv.textContent = err.message || 'Could not create appointment.';
-      errorDiv.style.display = 'block';
-      submitBtn.textContent = 'Confirm & Book Appointment →';
-      submitBtn.removeAttribute('disabled');
-    }
-  });
-}
-
-showRescheduleModal(appointmentId, serviceId, staffId, clientName) {
-  const modalContainer = document.getElementById('modal-container');
-  if (!modalContainer) return;
-
-  const currentAppt = (this.summaryData?.todayAppointments || this.queueSync?.items || []).find((a) => a.id === appointmentId);
-  const resolvedServiceId = serviceId || currentAppt?.serviceId || currentAppt?.service?.id || this.servicesList?.[0]?.id;
-  const apptDuration = currentAppt?.durationMinutes || currentAppt?.service?.durationMinutes || 30;
-  const slug = this.salonProfile?.slug || 'salon';
-
-  const todayIso = this.getLocalDateString();
-  const maxDays = this.salonProfile?.maxAdvanceDays || 3;
-  const maxDateIso = this.addDaysToDateString(todayIso, maxDays);
-
-  let selectedStaffId = staffId || currentAppt?.stylistId || '';
-  let selectedDate = this.selectedDate && this.selectedDate >= todayIso ? this.selectedDate : todayIso;
-  let selectedSlotTime = null;
-  let availableSlotsList = [];
-
-  // Helper to format 24h string (e.g. "17:00") to 12h readable string (e.g. "5:00 PM")
-  const format12h = (timeStr) => {
-    if (!timeStr) return '';
-    const [hStr, mStr] = timeStr.split(':');
-    let h = parseInt(hStr, 10);
-    const m = mStr ? mStr.padStart(2, '0') : '00';
-    const ampm = h >= 12 ? 'PM' : 'AM';
-    h = h % 12;
-    h = h ? h : 12;
-    return `${h}:${m} ${ampm}`;
-  };
-
-  // Helper to calculate minutes from midnight
-  const parseTimeMin = (timeStr) => {
-    const [h, m] = timeStr.split(':').map(Number);
-    return h * 60 + m;
-  };
-
-  // Filter viable slots with >= 2 hour lead time rule for today
-  const filterSlots = (slots, dateIso) => {
-    if (!Array.isArray(slots)) return [];
-    const now = new Date();
-    const isToday = dateIso === todayIso;
-    const nowMinutes = now.getHours() * 60 + now.getMinutes();
-    const minRequiredMinutes = nowMinutes + 120; // At least 2 hours in the future
-
-    return slots.filter((s) => {
-      if (!isToday) return true;
-      const slotMin = parseTimeMin(s.startTime);
-      return slotMin >= minRequiredMinutes;
+        await ApiClient.createAppointment(payload);
+        modalContainer.innerHTML = '';
+        await this.loadData();
+        this.render();
+      } catch (err) {
+        errorDiv.textContent = err.message || 'Could not create appointment.';
+        errorDiv.style.display = 'block';
+        submitBtn.textContent = 'Confirm & Book Appointment →';
+        submitBtn.removeAttribute('disabled');
+      }
     });
-  };
+  }
 
-  modalContainer.innerHTML = `
+  showRescheduleModal(appointmentId, serviceId, staffId, clientName) {
+    const modalContainer = document.getElementById('modal-container');
+    if (!modalContainer) return;
+
+    const currentAppt = (this.summaryData?.todayAppointments || this.queueSync?.items || []).find((a) => a.id === appointmentId);
+    const resolvedServiceId = serviceId || currentAppt?.serviceId || currentAppt?.service?.id || this.servicesList?.[0]?.id;
+    const apptDuration = currentAppt?.durationMinutes || currentAppt?.service?.durationMinutes || 30;
+    const slug = this.salonProfile?.slug || 'salon';
+
+    const todayIso = this.getLocalDateString();
+    const maxDays = this.salonProfile?.maxAdvanceDays || 3;
+    const maxDateIso = this.addDaysToDateString(todayIso, maxDays);
+
+    let selectedStaffId = staffId || currentAppt?.stylistId || '';
+    let selectedDate = this.selectedDate && this.selectedDate >= todayIso ? this.selectedDate : todayIso;
+    let selectedSlotTime = null;
+    let availableSlotsList = [];
+
+    // Helper to format 24h string (e.g. "17:00") to 12h readable string (e.g. "5:00 PM")
+    const format12h = (timeStr) => {
+      if (!timeStr) return '';
+      const [hStr, mStr] = timeStr.split(':');
+      let h = parseInt(hStr, 10);
+      const m = mStr ? mStr.padStart(2, '0') : '00';
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      h = h % 12;
+      h = h ? h : 12;
+      return `${h}:${m} ${ampm}`;
+    };
+
+    // Helper to calculate minutes from midnight
+    const parseTimeMin = (timeStr) => {
+      const [h, m] = timeStr.split(':').map(Number);
+      return h * 60 + m;
+    };
+
+    // Filter viable slots with >= 2 hour lead time rule for today
+    const filterSlots = (slots, dateIso) => {
+      if (!Array.isArray(slots)) return [];
+      const now = new Date();
+      const isToday = dateIso === todayIso;
+      const nowMinutes = now.getHours() * 60 + now.getMinutes();
+      const minRequiredMinutes = nowMinutes + 120; // At least 2 hours in the future
+
+      return slots.filter((s) => {
+        if (!isToday) return true;
+        const slotMin = parseTimeMin(s.startTime);
+        return slotMin >= minRequiredMinutes;
+      });
+    };
+
+    modalContainer.innerHTML = `
     <div class="modal-backdrop show">
       <div class="modal-content" style="max-width: 440px; width: 100%; max-height: 85vh; display: flex; flex-direction: column; border-radius: 20px 20px 0 0; padding: 0; overflow: hidden;">
         <!-- Header -->
@@ -10346,321 +10036,454 @@ showRescheduleModal(appointmentId, serviceId, staffId, clientName) {
     </div>
   `;
 
-  const slotsGrid = document.getElementById('reschedule-slots-grid');
-  const slotBadge = document.getElementById('slot-count-badge');
-  const submitBtn = document.getElementById('btn-submit-proposal');
-  const errorDiv = document.getElementById('reschedule-error');
-  const staffSelect = document.getElementById('reschedule-staff');
-  const dateInput = document.getElementById('reschedule-date');
+    const slotsGrid = document.getElementById('reschedule-slots-grid');
+    const slotBadge = document.getElementById('slot-count-badge');
+    const submitBtn = document.getElementById('btn-submit-proposal');
+    const errorDiv = document.getElementById('reschedule-error');
+    const staffSelect = document.getElementById('reschedule-staff');
+    const dateInput = document.getElementById('reschedule-date');
 
-  const loadSlots = async () => {
-    selectedSlotTime = null;
-    submitBtn.setAttribute('disabled', 'true');
-    submitBtn.style.opacity = '0.55';
-    submitBtn.style.cursor = 'not-allowed';
-    errorDiv.style.display = 'none';
+    const loadSlots = async () => {
+      selectedSlotTime = null;
+      submitBtn.setAttribute('disabled', 'true');
+      submitBtn.style.opacity = '0.55';
+      submitBtn.style.cursor = 'not-allowed';
+      errorDiv.style.display = 'none';
 
-    slotsGrid.innerHTML = `
+      slotsGrid.innerHTML = `
       <div style="grid-column: 1 / -1; padding: 18px; text-align: center; color: #94a3b8; font-size: 0.76rem;">
         <i class="fas fa-spinner fa-spin" style="margin-right: 6px;"></i> Checking available slots...
       </div>
     `;
-    slotBadge.textContent = 'Checking...';
+      slotBadge.textContent = 'Checking...';
 
-    try {
-      const staffVal = staffSelect.value || null;
-      const dateVal = dateInput.value;
-      const res = await ApiClient.getPublicAvailability(slug, resolvedServiceId, dateVal, staffVal);
-      const rawSlots = res?.availableSlots || [];
-      availableSlotsList = filterSlots(rawSlots, dateVal);
+      try {
+        const staffVal = staffSelect.value || null;
+        const dateVal = dateInput.value;
+        const res = await ApiClient.getPublicAvailability(slug, resolvedServiceId, dateVal, staffVal);
+        const rawSlots = res?.availableSlots || [];
+        availableSlotsList = filterSlots(rawSlots, dateVal);
 
-      if (availableSlotsList.length === 0) {
-        slotsGrid.innerHTML = `
+        if (availableSlotsList.length === 0) {
+          slotsGrid.innerHTML = `
           <div style="grid-column: 1 / -1; padding: 14px; text-align: center; background: rgba(255, 255, 255, 0.03); border-radius: 8px; color: #94a3b8; font-size: 0.74rem;">
             ⚠️ No slots available for this specialist on ${dateVal} (at least 2 hours ahead). Please try another date or specialist.
           </div>
         `;
-        slotBadge.textContent = '0 slots';
-        return;
-      }
+          slotBadge.textContent = '0 slots';
+          return;
+        }
 
-      slotBadge.textContent = `${availableSlotsList.length} slots`;
-      slotsGrid.innerHTML = availableSlotsList.map((s) => `
+        slotBadge.textContent = `${availableSlotsList.length} slots`;
+        slotsGrid.innerHTML = availableSlotsList.map((s) => `
         <button type="button" class="btn-slot-chip" data-time="${s.startTime}" style="background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.12); color: #f1f5f9; padding: 7px 4px; border-radius: 6px; font-size: 0.74rem; font-weight: 600; cursor: pointer; transition: all 0.15s ease; text-align: center;">
           ${format12h(s.startTime)}
         </button>
       `).join('');
 
-      // Attach slot click listeners
-      slotsGrid.querySelectorAll('.btn-slot-chip').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          slotsGrid.querySelectorAll('.btn-slot-chip').forEach((b) => {
-            b.style.background = 'rgba(255, 255, 255, 0.05)';
-            b.style.borderColor = 'rgba(255, 255, 255, 0.12)';
-            b.style.color = '#f1f5f9';
-            b.style.boxShadow = 'none';
-          });
-          btn.style.background = 'rgba(139, 92, 246, 0.25)';
-          btn.style.borderColor = '#8b5cf6';
-          btn.style.color = '#fff';
-          btn.style.boxShadow = '0 0 10px rgba(139, 92, 246, 0.4)';
+        // Attach slot click listeners
+        slotsGrid.querySelectorAll('.btn-slot-chip').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            slotsGrid.querySelectorAll('.btn-slot-chip').forEach((b) => {
+              b.style.background = 'rgba(255, 255, 255, 0.05)';
+              b.style.borderColor = 'rgba(255, 255, 255, 0.12)';
+              b.style.color = '#f1f5f9';
+              b.style.boxShadow = 'none';
+            });
+            btn.style.background = 'rgba(139, 92, 246, 0.25)';
+            btn.style.borderColor = '#8b5cf6';
+            btn.style.color = '#fff';
+            btn.style.boxShadow = '0 0 10px rgba(139, 92, 246, 0.4)';
 
-          selectedSlotTime = btn.getAttribute('data-time');
-          submitBtn.removeAttribute('disabled');
-          submitBtn.style.opacity = '1';
-          submitBtn.style.cursor = 'pointer';
+            selectedSlotTime = btn.getAttribute('data-time');
+            submitBtn.removeAttribute('disabled');
+            submitBtn.style.opacity = '1';
+            submitBtn.style.cursor = 'pointer';
+          });
         });
-      });
-    } catch (err) {
-      console.warn('[Reschedule] Slot load error:', err);
-      slotsGrid.innerHTML = `
+      } catch (err) {
+        console.warn('[Reschedule] Slot load error:', err);
+        slotsGrid.innerHTML = `
         <div style="grid-column: 1 / -1; padding: 12px; text-align: center; color: #fb7185; font-size: 0.74rem;">
           Failed to load available slots. ${err.message || ''}
         </div>
       `;
-      slotBadge.textContent = 'Error';
-    }
-  };
+        slotBadge.textContent = 'Error';
+      }
+    };
 
-  // Event listeners for reactive reloading
-  staffSelect.addEventListener('change', loadSlots);
-  dateInput.addEventListener('change', loadSlots);
+    // Event listeners for reactive reloading
+    staffSelect.addEventListener('change', loadSlots);
+    dateInput.addEventListener('change', loadSlots);
 
-  // Initial load
-  loadSlots();
+    // Initial load
+    loadSlots();
 
-  // Close button
-  document.getElementById('btn-close-modal')?.addEventListener('click', () => {
-    modalContainer.innerHTML = '';
-  });
-
-  // Submit Proposal button
-  submitBtn.addEventListener('click', async () => {
-    if (!selectedSlotTime) return;
-    submitBtn.setAttribute('disabled', 'true');
-    submitBtn.textContent = 'Sending WhatsApp Proposal...';
-    errorDiv.style.display = 'none';
-
-    try {
-      const dateVal = dateInput.value;
-      const [y, m, d] = dateVal.split('-').map(Number);
-      const [hh, mm] = selectedSlotTime.split(':').map(Number);
-      const proposedStartAt = new Date(y, m - 1, d, hh, mm, 0);
-      const proposedEndAt = new Date(proposedStartAt.getTime() + apptDuration * 60000);
-      const proposedStylistId = staffSelect.value || undefined;
-
-      await ApiClient.proposeAdminReschedule(appointmentId, {
-        newStartAt: proposedStartAt.toISOString(),
-        newEndAt: proposedEndAt.toISOString(),
-        proposedStylistId,
-      });
-
+    // Close button
+    document.getElementById('btn-close-modal')?.addEventListener('click', () => {
       modalContainer.innerHTML = '';
-      this.showToast('💬 Reschedule proposal sent to client via WhatsApp! Slot locked for 1 hr.', 'success');
-      await this.loadData(true);
-      this.refreshActiveTab();
-    } catch (err) {
-      errorDiv.textContent = err.message || 'Failed to send reschedule proposal.';
-      errorDiv.style.display = 'block';
-      submitBtn.removeAttribute('disabled');
-      submitBtn.textContent = '📩 Propose via WhatsApp';
-    }
-  });
-}
+    });
 
-showAddAddonModal(appointmentId, clientName) {
-  const modalContainer = document.getElementById('modal-container');
-  if (!modalContainer) return;
-  const services = Array.isArray(this.servicesList) ? this.servicesList.filter((s) => s.status !== 'INACTIVE') : [];
+    // Submit Proposal button
+    submitBtn.addEventListener('click', async () => {
+      if (!selectedSlotTime) return;
+      submitBtn.setAttribute('disabled', 'true');
+      submitBtn.textContent = 'Sending WhatsApp Proposal...';
+      errorDiv.style.display = 'none';
 
-  modalContainer.innerHTML = `
-      <div class="modal-backdrop show">
-        <div class="modal-content" style="max-width: 480px; width: 100%; border: 1px solid rgba(245, 158, 11, 0.35); box-shadow: 0 20px 40px rgba(0,0,0,0.6);">
-          <div class="modal-header" style="border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <span style="font-size: 1.2rem;">✨</span>
-              <h3 style="margin: 0; font-size: 1.05rem; font-weight: 700; color: #f8fafc;">Add Service / Add-on</h3>
-            </div>
-            <button class="close-btn" id="btn-close-modal">&times;</button>
-          </div>
-          <p style="color: #94a3b8; font-size: 0.82rem; margin: 12px 0 16px 0;">
-            Add an extra service or add-on to <strong>${clientName}</strong>'s active visit. Duration and total billing will update automatically.
-          </p>
+      try {
+        const dateVal = dateInput.value;
+        const [y, m, d] = dateVal.split('-').map(Number);
+        const [hh, mm] = selectedSlotTime.split(':').map(Number);
+        const proposedStartAt = new Date(y, m - 1, d, hh, mm, 0);
+        const proposedEndAt = new Date(proposedStartAt.getTime() + apptDuration * 60000);
+        const proposedStylistId = staffSelect.value || undefined;
 
-          <div style="margin-bottom: 12px;">
-            <input type="text" id="addon-search-inp" class="form-control" placeholder="Search service menu..." style="background: rgba(15, 23, 42, 0.6); font-size: 0.82rem; border-color: rgba(255,255,255,0.1);" />
-          </div>
+        await ApiClient.proposeAdminReschedule(appointmentId, {
+          newStartAt: proposedStartAt.toISOString(),
+          newEndAt: proposedEndAt.toISOString(),
+          proposedStylistId,
+        });
 
-          <div id="addon-services-list" style="max-height: 280px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px;">
-            ${services.length === 0 ? `
-              <div style="text-align: center; color: #94a3b8; padding: 24px;">No services found in menu.</div>
-            ` : services.map((s) => `
-              <div class="addon-item" data-name="${s.name.toLowerCase()}" style="display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; transition: all 0.15s ease;">
-                <div>
-                  <div style="font-weight: 700; color: #f8fafc; font-size: 0.86rem;">${s.name}</div>
-                  <div style="font-size: 0.72rem; color: #94a3b8; margin-top: 2px;">
-                    ⏱️ ${s.durationMinutes} mins · <span style="color: #34d399; font-weight: 700;">₹${s.price}</span>
-                  </div>
-                </div>
-                <button class="btn btn-primary btn-sm btn-select-addon" data-appt-id="${appointmentId}" data-service-id="${s.id}" data-service-name="${s.name}" style="padding: 5px 12px; font-size: 0.75rem; font-weight: 700; border-radius: 6px; background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.5); color: #fbbf24; cursor: pointer;">
-                  + Add
-                </button>
+        modalContainer.innerHTML = '';
+        this.showToast('💬 Reschedule proposal sent to client via WhatsApp! Slot locked for 1 hr.', 'success');
+        await this.loadData(true);
+        this.refreshActiveTab();
+      } catch (err) {
+        errorDiv.textContent = err.message || 'Failed to send reschedule proposal.';
+        errorDiv.style.display = 'block';
+        submitBtn.removeAttribute('disabled');
+        submitBtn.textContent = '📩 Propose via WhatsApp';
+      }
+    });
+  }
+
+  async showAddAddonModal(appointmentId, clientName) {
+    const modalContainer = document.getElementById('modal-container');
+    if (!modalContainer) return;
+
+    // 1. Initial Loading State with zero unwanted padding
+    modalContainer.innerHTML = `
+      <div class="modal-backdrop show" id="addon-modal-backdrop" style="position: fixed; inset: 0; background: rgba(0,0,0,0.82); backdrop-filter: blur(5px); z-index: 1050; display: flex; align-items: center; justify-content: center; padding: 12px; box-sizing: border-box;">
+        <div class="modal-content" style="max-width: 480px; width: 100%; max-height: 88vh; padding: 0 !important; display: flex; flex-direction: column; background: #13131c; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 16px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.9); overflow: hidden; position: relative;">
+          <!-- Header -->
+          <div class="modal-header" style="display: flex; align-items: center; justify-content: space-between; padding: 16px 18px 12px 18px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); background: rgba(255, 255, 255, 0.02);">
+            <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
+              <div style="width: 36px; height: 36px; border-radius: 9px; background: rgba(245, 158, 11, 0.16); border: 1px solid rgba(245, 158, 11, 0.35); display: flex; align-items: center; justify-content: center; font-size: 1.2rem; flex-shrink: 0;">
+                ✨
               </div>
-            `).join('')}
+              <div style="min-width: 0;">
+                <h3 style="font-size: 1.05rem; font-family: var(--font-heading); font-weight: 700; margin: 0; color: #fff; line-height: 1.2;">
+                  Add-on Service
+                </h3>
+                <p style="margin: 2px 0 0 0; font-size: 0.72rem; color: #94a3b8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                  Client: <strong style="color: #f1f5f9;">${clientName}</strong> · Checking schedule...
+                </p>
+              </div>
+            </div>
+            <button class="close-btn" id="btn-close-modal" style="width: 30px; height: 30px; font-size: 1.15rem; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.1); color: #cbd5e1; cursor: pointer; flex-shrink: 0; transition: all 0.2s ease;">&times;</button>
           </div>
 
-          <div id="addon-error" style="color: #f87171; font-size: 0.82rem; margin-top: 12px; display: none; padding: 8px; background: rgba(239, 68, 68, 0.1); border-radius: 6px;"></div>
-
-          <div class="modal-footer" style="margin-top: 16px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 12px; display: flex; justify-content: flex-end;">
-            <button class="btn btn-secondary btn-sm" id="btn-cancel-addon">Close</button>
+          <!-- Body loader -->
+          <div class="modal-body" style="padding: 32px 18px; text-align: center; color: #94a3b8;">
+            <div class="spinner-border" style="width: 28px; height: 28px; border-width: 2px; margin-bottom: 10px;"></div>
+            <div style="font-size: 0.85rem; font-weight: 600; color: #cbd5e1;">Calculating continuous free slot...</div>
           </div>
         </div>
       </div>
     `;
 
-  const close = () => { modalContainer.innerHTML = ''; };
-  document.getElementById('btn-close-modal')?.addEventListener('click', close);
-  document.getElementById('btn-cancel-addon')?.addEventListener('click', close);
-
-  const searchInp = document.getElementById('addon-search-inp');
-  searchInp?.addEventListener('input', (e) => {
-    const q = (e.target.value || '').toLowerCase().trim();
-    modalContainer.querySelectorAll('.addon-item').forEach((el) => {
-      const name = el.getAttribute('data-name') || '';
-      el.style.display = name.includes(q) ? 'flex' : 'none';
+    const close = () => { modalContainer.innerHTML = ''; };
+    document.getElementById('btn-close-modal')?.addEventListener('click', close);
+    document.getElementById('addon-modal-backdrop')?.addEventListener('click', (e) => {
+      if (e.target.id === 'addon-modal-backdrop') close();
     });
-  });
 
-  modalContainer.querySelectorAll('.btn-select-addon').forEach((btn) => {
-    btn.addEventListener('click', async (e) => {
-      const apptId = e.currentTarget.getAttribute('data-appt-id');
-      const svcId = e.currentTarget.getAttribute('data-service-id');
-      const svcName = e.currentTarget.getAttribute('data-service-name');
-      const errDiv = document.getElementById('addon-error');
-      if (errDiv) errDiv.style.display = 'none';
+    let addonData;
+    try {
+      addonData = await ApiClient.getEligibleAddons(appointmentId);
+    } catch (err) {
+      console.warn('[AddonModal] Fallback to local services:', err?.message);
+      addonData = {
+        maxContinuousMinutes: 180,
+        stylist: null,
+        currentEndTimeStr: '',
+        blocker: { type: 'NONE', title: 'Schedule check offline', timeStr: '' },
+        eligibleCount: (this.servicesList || []).length,
+        totalCount: (this.servicesList || []).length,
+        services: (this.servicesList || []).map((s) => ({
+          ...s,
+          isEligible: true,
+          remainingAfter: 180 - s.durationMinutes,
+          reason: 'Slot check standard',
+        })),
+      };
+    }
 
-      e.currentTarget.textContent = 'Adding...';
-      e.currentTarget.disabled = true;
+    const { stylist, maxContinuousMinutes, blocker, services, eligibleCount, totalCount } = addonData;
+    const hasFreeTime = maxContinuousMinutes > 0;
 
-      try {
-        const res = await ApiClient.addAddonService(apptId, svcId);
-        if (res?.conflict) {
+    const modalBodyHtml = `
+      <div class="modal-body" style="padding: 16px 18px; overflow-y: auto; overflow-x: hidden; flex: 1; display: flex; flex-direction: column; gap: 12px;">
+        
+        <!-- Specialist Schedule Banner -->
+        <div style="background: ${hasFreeTime ? 'rgba(16, 185, 129, 0.08)' : 'rgba(239, 68, 68, 0.1)'}; border: 1px solid ${hasFreeTime ? 'rgba(16, 185, 129, 0.28)' : 'rgba(239, 68, 68, 0.3)'}; border-radius: 12px; padding: 12px 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
+            <div style="width: 36px; height: 36px; border-radius: 9px; background: ${hasFreeTime ? 'rgba(16, 185, 129, 0.16)' : 'rgba(239, 68, 68, 0.2)'}; display: flex; align-items: center; justify-content: center; font-size: 1.15rem; flex-shrink: 0;">
+              ${hasFreeTime ? '⏱️' : '🚫'}
+            </div>
+            <div style="min-width: 0;">
+              <div style="font-size: 0.88rem; font-weight: 700; color: ${hasFreeTime ? '#34d399' : '#f87171'};">
+                ${hasFreeTime ? `${maxContinuousMinutes} Mins Available` : '0 Mins Available (Back-to-Back)'}
+              </div>
+              <div style="font-size: 0.72rem; color: #94a3b8; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                ${stylist ? `${stylist.name} · ` : ''}${blocker.title}${blocker.timeStr ? ` at ${blocker.timeStr}` : ''}
+              </div>
+            </div>
+          </div>
+          <span class="badge" style="font-size: 0.68rem; font-weight: 700; padding: 4px 8px; border-radius: 6px; flex-shrink: 0; background: ${hasFreeTime ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)'}; color: ${hasFreeTime ? '#6ee7b7' : '#fca5a5'}; border: 1px solid ${hasFreeTime ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)'};">
+            ${eligibleCount} Eligible
+          </span>
+        </div>
+
+        <!-- Filter & Search Controls -->
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <div style="flex: 1; min-width: 0;">
+            <input type="text" id="addon-search-inp" class="form-control" placeholder="Search service..." style="height: 38px; font-size: 0.84rem; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 8px; padding: 0 12px; color: #fff;" />
+          </div>
+          <div style="display: flex; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; padding: 2px;">
+            <button type="button" id="tab-filter-eligible" class="btn btn-sm" style="height: 32px; padding: 0 10px; font-size: 0.74rem; font-weight: 700; border-radius: 6px; background: rgba(139, 61, 255, 0.35); color: #c4b5fd; border: none; cursor: pointer;">
+              Eligible (${eligibleCount})
+            </button>
+            <button type="button" id="tab-filter-all" class="btn btn-sm" style="height: 32px; padding: 0 10px; font-size: 0.74rem; font-weight: 600; border-radius: 6px; background: transparent; color: #94a3b8; border: none; cursor: pointer;">
+              All (${totalCount})
+            </button>
+          </div>
+        </div>
+
+        <!-- Services List -->
+        <div id="addon-services-list" style="max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 2px;">
+          ${services.length === 0 ? `
+            <div style="text-align: center; color: #94a3b8; padding: 28px 16px; font-size: 0.84rem; background: rgba(0,0,0,0.2); border-radius: 10px;">
+              No services found in menu.
+            </div>
+          ` : services.map((s) => {
+      const isEligible = s.isEligible;
+      return `
+              <div class="addon-item" data-id="${s.id}" data-name="${s.name.toLowerCase()}" data-eligible="${isEligible ? 'true' : 'false'}"
+                style="display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px; background: ${isEligible ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.01)'}; border: 1px solid ${isEligible ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.03)'}; border-radius: 10px; opacity: ${isEligible ? '1' : '0.45'}; transition: all 0.15s ease;">
+                <div style="min-width: 0; flex: 1;">
+                  <div style="display: flex; align-items: center; gap: 6px;">
+                    <span style="font-size: 1.05rem;">${formatCategoryIcon(s.categoryIcon)}</span>
+                    <span style="font-weight: 700; color: #fff; font-size: 0.88rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                      ${s.name}
+                    </span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 8px; margin-top: 3px; font-size: 0.72rem; color: #94a3b8;">
+                    <span>⏱️ ${s.durationMinutes}m</span>
+                    <span>·</span>
+                    <span style="color: #34d399; font-weight: 700;">₹${s.price}</span>
+                    <span>·</span>
+                    <span style="color: ${isEligible ? '#a5b4fc' : '#f87171'}; font-size: 0.68rem;">
+                      ${s.reason}
+                    </span>
+                  </div>
+                </div>
+
+                <button class="btn btn-primary btn-sm btn-select-addon" 
+                  data-appt-id="${appointmentId}" 
+                  data-service-id="${s.id}" 
+                  data-service-name="${s.name}" 
+                  data-duration="${s.durationMinutes}"
+                  ${!isEligible ? 'disabled' : ''}
+                  style="height: 32px; padding: 0 12px; font-size: 0.75rem; font-weight: 700; border-radius: 7px; background: ${isEligible ? 'linear-gradient(135deg, #7c3aed, #6366f1)' : 'rgba(255,255,255,0.08)'}; border: none; color: ${isEligible ? '#fff' : '#64748b'}; cursor: ${isEligible ? 'pointer' : 'not-allowed'}; flex-shrink: 0; box-shadow: ${isEligible ? '0 2px 8px rgba(124, 58, 237, 0.3)' : 'none'};">
+                  ${isEligible ? '➕ Add' : 'Exceeds'}
+                </button>
+              </div>
+            `;
+    }).join('')}
+        </div>
+
+        <div id="addon-error" style="color: #f87171; font-size: 0.80rem; display: none; padding: 8px 12px; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px;"></div>
+      </div>
+    `;
+
+    const bodyContainer = modalContainer.querySelector('.modal-body');
+    if (bodyContainer) {
+      bodyContainer.outerHTML = modalBodyHtml;
+    }
+
+    // Filter Logic
+    let filterMode = 'eligible'; // 'eligible' or 'all'
+    const tabEligible = modalContainer.querySelector('#tab-filter-eligible');
+    const tabAll = modalContainer.querySelector('#tab-filter-all');
+    const searchInp = modalContainer.querySelector('#addon-search-inp');
+
+    const applyFilters = () => {
+      const q = (searchInp?.value || '').toLowerCase().trim();
+      modalContainer.querySelectorAll('.addon-item').forEach((item) => {
+        const name = item.getAttribute('data-name') || '';
+        const isEligible = item.getAttribute('data-eligible') === 'true';
+        const matchesSearch = name.includes(q);
+        const matchesTab = filterMode === 'all' || isEligible;
+        item.style.display = (matchesSearch && matchesTab) ? 'flex' : 'none';
+      });
+    };
+
+    tabEligible?.addEventListener('click', () => {
+      filterMode = 'eligible';
+      tabEligible.style.background = 'rgba(139, 61, 255, 0.35)';
+      tabEligible.style.color = '#c4b5fd';
+      tabAll.style.background = 'transparent';
+      tabAll.style.color = '#94a3b8';
+      applyFilters();
+    });
+
+    tabAll?.addEventListener('click', () => {
+      filterMode = 'all';
+      tabAll.style.background = 'rgba(139, 61, 255, 0.35)';
+      tabAll.style.color = '#c4b5fd';
+      tabEligible.style.background = 'transparent';
+      tabEligible.style.color = '#94a3b8';
+      applyFilters();
+    });
+
+    searchInp?.addEventListener('input', applyFilters);
+    applyFilters();
+
+    // Select Addon Action
+    modalContainer.querySelectorAll('.btn-select-addon').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        const targetBtn = e.currentTarget;
+        const apptId = targetBtn.getAttribute('data-appt-id');
+        const svcId = targetBtn.getAttribute('data-service-id');
+        const svcName = targetBtn.getAttribute('data-service-name');
+        const errDiv = modalContainer.querySelector('#addon-error');
+        if (errDiv) errDiv.style.display = 'none';
+
+        targetBtn.textContent = 'Adding...';
+        targetBtn.disabled = true;
+
+        try {
+          const res = await ApiClient.addAddonService(apptId, svcId);
+          if (res?.conflict) {
+            if (errDiv) {
+              errDiv.textContent = `Cannot add ${svcName}: Time slot conflicts with ${res.conflictBooking?.name || 'another booking'}.`;
+              errDiv.style.display = 'block';
+            }
+            targetBtn.textContent = '➕ Add';
+            targetBtn.disabled = false;
+            return;
+          }
+
+          close();
+          this.showToast(`✨ Added ${svcName} to ${clientName}'s visit!`, 'success');
+          await this.loadData();
+          this.render();
+        } catch (err) {
           if (errDiv) {
-            errDiv.textContent = `Cannot add ${svcName}: Time slot conflicts with ${res.conflictBooking?.name || 'another booking or salon operating hours'}.`;
+            errDiv.textContent = err?.message || 'Could not add service.';
             errDiv.style.display = 'block';
           }
-          e.currentTarget.textContent = '+ Add';
-          e.currentTarget.disabled = false;
-          return;
+          targetBtn.textContent = '➕ Add';
+          targetBtn.disabled = false;
         }
-
-        close();
-        await this.loadData();
-        this.render();
-      } catch (err) {
-        if (errDiv) {
-          errDiv.textContent = err?.message || 'Could not add service.';
-          errDiv.style.display = 'block';
-        }
-        e.currentTarget.textContent = '+ Add';
-        e.currentTarget.disabled = false;
-      }
+      });
     });
-  });
-}
+  }
 
-startLiveTimerTicks() {
-  if (this.timerInterval) clearInterval(this.timerInterval);
-  this.timerInterval = setInterval(() => {
-    // 1) Existing Reminder Badges
-    const badges = document.querySelectorAll('.qc__timer-badge[data-reminder-sent]');
-    badges.forEach((badge) => {
-      const sentAt = badge.getAttribute('data-reminder-sent');
-      if (!sentAt) return;
-      const elapsedMs = Date.now() - new Date(sentAt).getTime();
-      const remainingMs = (10 * 60 * 1000) - elapsedMs;
-      const countdownEl = badge.querySelector('.qc__timer-countdown');
-      const graceEl = badge.querySelector('.qc__grace-countdown');
+  startLiveTimerTicks() {
+    if (this.timerInterval) clearInterval(this.timerInterval);
+    this.timerInterval = setInterval(() => {
+      // 1) Existing Reminder Badges
+      const badges = document.querySelectorAll('.qc__timer-badge[data-reminder-sent]');
+      badges.forEach((badge) => {
+        const sentAt = badge.getAttribute('data-reminder-sent');
+        if (!sentAt) return;
+        const elapsedMs = Date.now() - new Date(sentAt).getTime();
+        const remainingMs = (10 * 60 * 1000) - elapsedMs;
+        const countdownEl = badge.querySelector('.qc__timer-countdown');
+        const graceEl = badge.querySelector('.qc__grace-countdown');
 
-      if (remainingMs > 0) {
-        const mins = Math.floor(remainingMs / 60000);
-        const secs = Math.floor((remainingMs % 60000) / 1000);
-        if (countdownEl) {
-          countdownEl.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
-        }
-      } else {
-        const graceMins = Math.floor(Math.abs(remainingMs) / 60000);
-        if (graceEl) {
-          graceEl.textContent = `${graceMins}m`;
-        }
-      }
-    });
-
-    // 2) Live Reverse Countdown Clocks on Cards (Normal time styling, decreasing order)
-    const clockTimers = document.querySelectorAll('.qc__clock-timer[data-countdown-target]');
-    clockTimers.forEach((timerEl) => {
-      const targetMs = Number(timerEl.getAttribute('data-countdown-target'));
-      if (!targetMs || isNaN(targetMs)) return;
-      const now = Date.now();
-      const diffMs = targetMs - now;
-
-      if (diffMs > 0) {
-        const totalSecs = Math.floor(diffMs / 1000);
-        const hours = Math.floor(totalSecs / 3600);
-        const mins = Math.floor((totalSecs % 3600) / 60);
-        const secs = totalSecs % 60;
-
-        if (hours > 0) {
-          timerEl.textContent = `⏳ ${hours} hr ${mins} min ${secs} sec`;
-        } else if (mins > 0) {
-          timerEl.textContent = `⏳ ${mins} min ${secs} sec`;
+        if (remainingMs > 0) {
+          const mins = Math.floor(remainingMs / 60000);
+          const secs = Math.floor((remainingMs % 60000) / 1000);
+          if (countdownEl) {
+            countdownEl.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+          }
         } else {
-          timerEl.textContent = `⏳ ${secs} sec`;
+          const graceMins = Math.floor(Math.abs(remainingMs) / 60000);
+          if (graceEl) {
+            graceEl.textContent = `${graceMins}m`;
+          }
         }
-      } else {
-        const timeStr = timerEl.getAttribute('data-time-str') || '';
-        timerEl.textContent = timeStr ? `⏰ ${timeStr}` : '';
-      }
-    });
+      });
 
-    // 3) Live Reschedule Proposal Cutoff Timers (Waiting Customer Approval)
-    const rescheduleTimers = document.querySelectorAll('.qc__reschedule-cutoff-timer[data-cutoff-target]');
-    rescheduleTimers.forEach((timerEl) => {
-      const targetMs = Number(timerEl.getAttribute('data-cutoff-target'));
-      if (!targetMs || isNaN(targetMs)) return;
-      const diffMs = targetMs - Date.now();
+      // 2) Live Reverse Countdown Clocks on Cards (Normal time styling, decreasing order)
+      const clockTimers = document.querySelectorAll('.qc__clock-timer[data-countdown-target]');
+      clockTimers.forEach((timerEl) => {
+        const targetMs = Number(timerEl.getAttribute('data-countdown-target'));
+        if (!targetMs || isNaN(targetMs)) return;
+        const now = Date.now();
+        const diffMs = targetMs - now;
 
-      if (diffMs > 0) {
-        const totalSecs = Math.floor(diffMs / 1000);
-        const hours = Math.floor(totalSecs / 3600);
-        const mins = Math.floor((totalSecs % 3600) / 60);
-        const secs = totalSecs % 60;
+        if (diffMs > 0) {
+          const totalSecs = Math.floor(diffMs / 1000);
+          const hours = Math.floor(totalSecs / 3600);
+          const mins = Math.floor((totalSecs % 3600) / 60);
+          const secs = totalSecs % 60;
 
-        if (hours > 0) {
-          timerEl.textContent = `⏳ ${hours}h ${mins}m ${secs}s left`;
-        } else if (mins > 0) {
-          timerEl.textContent = `⏳ ${mins}m ${secs}s left`;
+          if (hours > 0) {
+            timerEl.textContent = `⏳ ${hours} hr ${mins} min ${secs} sec`;
+          } else if (mins > 0) {
+            timerEl.textContent = `⏳ ${mins} min ${secs} sec`;
+          } else {
+            timerEl.textContent = `⏳ ${secs} sec`;
+          }
         } else {
-          timerEl.textContent = `⏳ ${secs}s left`;
+          const timeStr = timerEl.getAttribute('data-time-str') || '';
+          timerEl.textContent = timeStr ? `⏰ ${timeStr}` : '';
         }
-      } else {
-        timerEl.textContent = '⚠️ Cutoff Expired';
-        timerEl.style.color = '#fb7185';
-        timerEl.style.borderColor = 'rgba(251, 113, 133, 0.4)';
-        timerEl.style.background = 'rgba(251, 113, 133, 0.15)';
-      }
-    });
-  }, 1000);
-}
+      });
+
+      // 3) Live Reschedule Proposal Cutoff Timers (Waiting Customer Approval)
+      const rescheduleTimers = document.querySelectorAll('.qc__reschedule-cutoff-timer[data-cutoff-target]');
+      rescheduleTimers.forEach((timerEl) => {
+        const targetMs = Number(timerEl.getAttribute('data-cutoff-target'));
+        if (!targetMs || isNaN(targetMs)) return;
+        const diffMs = targetMs - Date.now();
+
+        if (diffMs > 0) {
+          const totalSecs = Math.floor(diffMs / 1000);
+          const hours = Math.floor(totalSecs / 3600);
+          const mins = Math.floor((totalSecs % 3600) / 60);
+          const secs = totalSecs % 60;
+
+          if (hours > 0) {
+            timerEl.textContent = `⏳ ${hours}h ${mins}m ${secs}s left`;
+          } else if (mins > 0) {
+            timerEl.textContent = `⏳ ${mins}m ${secs}s left`;
+          } else {
+            timerEl.textContent = `⏳ ${secs}s left`;
+          }
+        } else {
+          timerEl.textContent = '⚠️ Cutoff Expired';
+          timerEl.style.color = '#fb7185';
+          timerEl.style.borderColor = 'rgba(251, 113, 133, 0.4)';
+          timerEl.style.background = 'rgba(251, 113, 133, 0.15)';
+        }
+      });
+    }, 1000);
+  }
 
 
 
 
-showCancelModal(appointmentId, clientName) {
-  const modalContainer = document.getElementById('modal-container');
-  if (!modalContainer) return;
+  showCancelModal(appointmentId, clientName) {
+    const modalContainer = document.getElementById('modal-container');
+    if (!modalContainer) return;
 
-  modalContainer.innerHTML = `
+    modalContainer.innerHTML = `
       <div class="modal-backdrop show">
         <div class="modal-content" style="max-width: 420px; width: 100%; border-radius: 16px; padding: 20px; background: #16121e; border: 1px solid rgba(255, 255, 255, 0.1); box-shadow: 0 20px 40px rgba(0,0,0,0.6);">
           <!-- Header -->
@@ -10720,211 +10543,211 @@ showCancelModal(appointmentId, clientName) {
       </div>
     `;
 
-  document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+    document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
 
-  const reasonSelect = document.getElementById('cancel-category-select');
-  const btnNone = document.getElementById('btn-penalty-none');
-  const btnApply = document.getElementById('btn-penalty-apply');
-  let penaltyMode = 'NO_PENALTY';
+    const reasonSelect = document.getElementById('cancel-category-select');
+    const btnNone = document.getElementById('btn-penalty-none');
+    const btnApply = document.getElementById('btn-penalty-apply');
+    let penaltyMode = 'NO_PENALTY';
 
-  const setPenaltyMode = (mode) => {
-    penaltyMode = mode;
-    if (!btnNone || !btnApply) return;
-    if (mode === 'NO_PENALTY') {
-      btnNone.style.background = 'rgba(16, 185, 129, 0.18)';
-      btnNone.style.borderColor = '#10b981';
-      btnNone.style.color = '#34d399';
-      btnNone.style.fontWeight = '700';
+    const setPenaltyMode = (mode) => {
+      penaltyMode = mode;
+      if (!btnNone || !btnApply) return;
+      if (mode === 'NO_PENALTY') {
+        btnNone.style.background = 'rgba(16, 185, 129, 0.18)';
+        btnNone.style.borderColor = '#10b981';
+        btnNone.style.color = '#34d399';
+        btnNone.style.fontWeight = '700';
 
-      btnApply.style.background = 'transparent';
-      btnApply.style.borderColor = 'transparent';
-      btnApply.style.color = '#94a3b8';
-      btnApply.style.fontWeight = '600';
-    } else {
-      btnApply.style.background = 'rgba(239, 68, 68, 0.18)';
-      btnApply.style.borderColor = '#ef4444';
-      btnApply.style.color = '#f87171';
-      btnApply.style.fontWeight = '700';
-
-      btnNone.style.background = 'transparent';
-      btnNone.style.borderColor = 'transparent';
-      btnNone.style.color = '#94a3b8';
-      btnNone.style.fontWeight = '600';
-    }
-  };
-
-  btnNone?.addEventListener('click', () => setPenaltyMode('NO_PENALTY'));
-  btnApply?.addEventListener('click', () => setPenaltyMode('APPLY_PENALTY'));
-
-  // Auto-set penalty when reason changes (simple & helpful for non-tech users)
-  reasonSelect?.addEventListener('change', () => {
-    if (reasonSelect.value === 'CLIENT_UNRESPONSIVE') {
-      setPenaltyMode('APPLY_PENALTY');
-    } else {
-      setPenaltyMode('NO_PENALTY');
-    }
-  });
-
-  document.getElementById('cancel-form')?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const submitBtn = document.getElementById('btn-submit-cancel');
-    submitBtn.textContent = 'Processing Cancellation...';
-    submitBtn.setAttribute('disabled', 'true');
-
-    const reasonCategory = document.getElementById('cancel-category-select').value;
-    const reasonNote = document.getElementById('cancel-reason-note')?.value?.trim() || '';
-    const applyPenalty = penaltyMode === 'APPLY_PENALTY';
-    const noPenalty = penaltyMode === 'NO_PENALTY';
-
-    try {
-      await ApiClient.cancelBooking(appointmentId, {
-        source: 'ADMIN_DASHBOARD',
-        fault: applyPenalty ? 'CLIENT' : 'SALON',
-        applyPenalty,
-        noPenalty,
-        reason: reasonNote || reasonCategory,
-      });
-      modalContainer.innerHTML = '';
-      await this.loadData();
-      this.render();
-    } catch (err) {
-      this.showToast(`Failed to cancel: ${err.message}`, 'error');
-      submitBtn.textContent = 'Confirm Cancellation';
-      submitBtn.removeAttribute('disabled');
-    }
-  });
-}
-
-attachStaffScheduleListeners(root) {
-  if (!root) return;
-
-  // Toggle Single Staff Schedule (On-Demand)
-  root.querySelectorAll('.btn-toggle-staff-schedule').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      const id = e.currentTarget.getAttribute('data-id');
-      if (!id) return;
-      this.openStaffScheduleIds = this.openStaffScheduleIds || new Set();
-      if (this.openStaffScheduleIds.has(id)) {
-        this.openStaffScheduleIds.delete(id);
+        btnApply.style.background = 'transparent';
+        btnApply.style.borderColor = 'transparent';
+        btnApply.style.color = '#94a3b8';
+        btnApply.style.fontWeight = '600';
       } else {
-        this.openStaffScheduleIds.add(id);
+        btnApply.style.background = 'rgba(239, 68, 68, 0.18)';
+        btnApply.style.borderColor = '#ef4444';
+        btnApply.style.color = '#f87171';
+        btnApply.style.fontWeight = '700';
+
+        btnNone.style.background = 'transparent';
+        btnNone.style.borderColor = 'transparent';
+        btnNone.style.color = '#94a3b8';
+        btnNone.style.fontWeight = '600';
+      }
+    };
+
+    btnNone?.addEventListener('click', () => setPenaltyMode('NO_PENALTY'));
+    btnApply?.addEventListener('click', () => setPenaltyMode('APPLY_PENALTY'));
+
+    // Auto-set penalty when reason changes (simple & helpful for non-tech users)
+    reasonSelect?.addEventListener('change', () => {
+      if (reasonSelect.value === 'CLIENT_UNRESPONSIVE') {
+        setPenaltyMode('APPLY_PENALTY');
+      } else {
+        setPenaltyMode('NO_PENALTY');
+      }
+    });
+
+    document.getElementById('cancel-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const submitBtn = document.getElementById('btn-submit-cancel');
+      submitBtn.textContent = 'Processing Cancellation...';
+      submitBtn.setAttribute('disabled', 'true');
+
+      const reasonCategory = document.getElementById('cancel-category-select').value;
+      const reasonNote = document.getElementById('cancel-reason-note')?.value?.trim() || '';
+      const applyPenalty = penaltyMode === 'APPLY_PENALTY';
+      const noPenalty = penaltyMode === 'NO_PENALTY';
+
+      try {
+        await ApiClient.cancelBooking(appointmentId, {
+          source: 'ADMIN_DASHBOARD',
+          fault: applyPenalty ? 'CLIENT' : 'SALON',
+          applyPenalty,
+          noPenalty,
+          reason: reasonNote || reasonCategory,
+        });
+        modalContainer.innerHTML = '';
+        await this.loadData();
+        this.render();
+      } catch (err) {
+        this.showToast(`Failed to cancel: ${err.message}`, 'error');
+        submitBtn.textContent = 'Confirm Cancellation';
+        submitBtn.removeAttribute('disabled');
+      }
+    });
+  }
+
+  attachStaffScheduleListeners(root) {
+    if (!root) return;
+
+    // Toggle Single Staff Schedule (On-Demand)
+    root.querySelectorAll('.btn-toggle-staff-schedule').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        if (!id) return;
+        this.openStaffScheduleIds = this.openStaffScheduleIds || new Set();
+        if (this.openStaffScheduleIds.has(id)) {
+          this.openStaffScheduleIds.delete(id);
+        } else {
+          this.openStaffScheduleIds.add(id);
+        }
+        this.refreshActiveTab();
+      });
+    });
+
+    // Toggle All Staff Schedules (Master Toolbar Action)
+    root.querySelector('#btn-toggle-all-schedules')?.addEventListener('click', () => {
+      this.openStaffScheduleIds = this.openStaffScheduleIds || new Set();
+      const allIds = (this.staffList || []).map((s) => s.id);
+      const allOpen = allIds.length > 0 && allIds.every((id) => this.openStaffScheduleIds.has(id));
+      if (allOpen) {
+        this.openStaffScheduleIds.clear();
+      } else {
+        allIds.forEach((id) => this.openStaffScheduleIds.add(id));
       }
       this.refreshActiveTab();
     });
-  });
 
-  // Toggle All Staff Schedules (Master Toolbar Action)
-  root.querySelector('#btn-toggle-all-schedules')?.addEventListener('click', () => {
-    this.openStaffScheduleIds = this.openStaffScheduleIds || new Set();
-    const allIds = (this.staffList || []).map((s) => s.id);
-    const allOpen = allIds.length > 0 && allIds.every((id) => this.openStaffScheduleIds.has(id));
-    if (allOpen) {
-      this.openStaffScheduleIds.clear();
-    } else {
-      allIds.forEach((id) => this.openStaffScheduleIds.add(id));
-    }
-    this.refreshActiveTab();
-  });
-
-  // Switch View Mode (Timeline vs Agenda)
-  root.querySelectorAll('.btn-switch-sched-view').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      const id = e.currentTarget.getAttribute('data-id');
-      const mode = e.currentTarget.getAttribute('data-mode');
-      if (!id || !mode) return;
-      this.staffScheduleViewMode = this.staffScheduleViewMode || {};
-      this.staffScheduleViewMode[id] = mode;
-      this.refreshActiveTab();
+    // Switch View Mode (Timeline vs Agenda)
+    root.querySelectorAll('.btn-switch-sched-view').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const mode = e.currentTarget.getAttribute('data-mode');
+        if (!id || !mode) return;
+        this.staffScheduleViewMode = this.staffScheduleViewMode || {};
+        this.staffScheduleViewMode[id] = mode;
+        this.refreshActiveTab();
+      });
     });
-  });
 
-  // Horizontal Scroll: Jump to NOW
-  root.querySelectorAll('.btn-jump-now').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      const id = e.currentTarget.getAttribute('data-id');
-      const track = root.querySelector(`#timeline-track-${id}`) || document.getElementById(`timeline-track-${id}`);
-      const nowLeft = Number(e.currentTarget.getAttribute('data-now-left')) || 0;
-      if (track) {
-        track.scrollTo({ left: Math.max(0, nowLeft - 160), behavior: 'smooth' });
+    // Horizontal Scroll: Jump to NOW
+    root.querySelectorAll('.btn-jump-now').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const track = root.querySelector(`#timeline-track-${id}`) || document.getElementById(`timeline-track-${id}`);
+        const nowLeft = Number(e.currentTarget.getAttribute('data-now-left')) || 0;
+        if (track) {
+          track.scrollTo({ left: Math.max(0, nowLeft - 160), behavior: 'smooth' });
+        }
+      });
+    });
+
+    // Horizontal Scroll: Scroll Earlier
+    root.querySelectorAll('.btn-scroll-earlier').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const track = root.querySelector(`#timeline-track-${id}`) || document.getElementById(`timeline-track-${id}`);
+        if (track) {
+          track.scrollBy({ left: -220, behavior: 'smooth' });
+        }
+      });
+    });
+
+    // Horizontal Scroll: Scroll Later
+    root.querySelectorAll('.btn-scroll-later').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const track = root.querySelector(`#timeline-track-${id}`) || document.getElementById(`timeline-track-${id}`);
+        if (track) {
+          track.scrollBy({ left: 220, behavior: 'smooth' });
+        }
+      });
+    });
+
+    // Center live track initial scroll
+    root.querySelectorAll('.staff-timeline-scroll-track').forEach((track) => {
+      const initialScroll = Number(track.getAttribute('data-initial-scroll')) || 0;
+      if (initialScroll > 0) {
+        setTimeout(() => {
+          track.scrollLeft = initialScroll;
+        }, 50);
       }
     });
-  });
-
-  // Horizontal Scroll: Scroll Earlier
-  root.querySelectorAll('.btn-scroll-earlier').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      const id = e.currentTarget.getAttribute('data-id');
-      const track = root.querySelector(`#timeline-track-${id}`) || document.getElementById(`timeline-track-${id}`);
-      if (track) {
-        track.scrollBy({ left: -220, behavior: 'smooth' });
-      }
-    });
-  });
-
-  // Horizontal Scroll: Scroll Later
-  root.querySelectorAll('.btn-scroll-later').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      const id = e.currentTarget.getAttribute('data-id');
-      const track = root.querySelector(`#timeline-track-${id}`) || document.getElementById(`timeline-track-${id}`);
-      if (track) {
-        track.scrollBy({ left: 220, behavior: 'smooth' });
-      }
-    });
-  });
-
-  // Center live track initial scroll
-  root.querySelectorAll('.staff-timeline-scroll-track').forEach((track) => {
-    const initialScroll = Number(track.getAttribute('data-initial-scroll')) || 0;
-    if (initialScroll > 0) {
-      setTimeout(() => {
-        track.scrollLeft = initialScroll;
-      }, 50);
-    }
-  });
-}
+  }
 
   async handleToggleStaff(id) {
-  if (!id || this._isTogglingStaff) return;
-  this._isTogglingStaff = true;
-  this.lastLocalActionTimestamp = Date.now();
+    if (!id || this._isTogglingStaff) return;
+    this._isTogglingStaff = true;
+    this.lastLocalActionTimestamp = Date.now();
 
-  const idx = this.staffList.findIndex((s) => String(s.id) === String(id));
-  const previousStatus = idx !== -1 ? this.staffList[idx].status : null;
+    const idx = this.staffList.findIndex((s) => String(s.id) === String(id));
+    const previousStatus = idx !== -1 ? this.staffList[idx].status : null;
 
-  try {
-    if (idx !== -1) {
-      this.staffList[idx] = {
-        ...this.staffList[idx],
-        status: previousStatus === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE',
-      };
-      this.render();
+    try {
+      if (idx !== -1) {
+        this.staffList[idx] = {
+          ...this.staffList[idx],
+          status: previousStatus === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE',
+        };
+        this.render();
+      }
+      await ApiClient.toggleStaffStatus(id);
+      SalonRepository.invalidate('staff');
+      this.showToast(`Stylist is now ${this.staffList[idx]?.status === 'ACTIVE' ? 'Active' : 'Inactive'}`, 'success');
+    } catch (err) {
+      if (idx !== -1 && previousStatus) {
+        this.staffList[idx] = {
+          ...this.staffList[idx],
+          status: previousStatus,
+        };
+        this.render();
+      }
+      this.showToast(err.message, 'error');
+    } finally {
+      setTimeout(() => {
+        this._isTogglingStaff = false;
+      }, 400);
     }
-    await ApiClient.toggleStaffStatus(id);
-    SalonRepository.invalidate('staff');
-    this.showToast(`Stylist is now ${this.staffList[idx]?.status === 'ACTIVE' ? 'Active' : 'Inactive'}`, 'success');
-  } catch (err) {
-    if (idx !== -1 && previousStatus) {
-      this.staffList[idx] = {
-        ...this.staffList[idx],
-        status: previousStatus,
-      };
-      this.render();
-    }
-    this.showToast(err.message, 'error');
-  } finally {
-    setTimeout(() => {
-      this._isTogglingStaff = false;
-    }, 400);
   }
-}
 
-showAddStaffModal() {
-  const modalContainer = document.getElementById('modal-container');
-  const defaultPhone = this.salonProfile?.phone || this.currentUser?.salon?.phone || this.currentUser?.phone || '';
-  const defaultEmail = this.salonProfile?.email || this.currentUser?.salon?.email || this.currentUser?.email || '';
-  const hasServices = Array.isArray(this.servicesList) && this.servicesList.length > 0;
+  showAddStaffModal() {
+    const modalContainer = document.getElementById('modal-container');
+    const defaultPhone = this.salonProfile?.phone || this.currentUser?.salon?.phone || this.currentUser?.phone || '';
+    const defaultEmail = this.salonProfile?.email || this.currentUser?.salon?.email || this.currentUser?.email || '';
+    const hasServices = Array.isArray(this.servicesList) && this.servicesList.length > 0;
 
-  modalContainer.innerHTML = `
+    modalContainer.innerHTML = `
       <div class="modal-backdrop show">
         <div class="modal-content">
           <div class="modal-header">
@@ -10993,72 +10816,72 @@ showAddStaffModal() {
       </div>
     `;
 
-  document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+    document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
 
-  document.getElementById('btn-quick-goto-services')?.addEventListener('click', () => {
-    modalContainer.innerHTML = '';
-    this.switchTab('services');
-    setTimeout(() => this.showAddServiceModal(), 120);
-  });
-
-  document.getElementById('add-staff-form')?.addEventListener('submit', (e) => {
-    e.preventDefault();
-    const name = document.getElementById('new-staff-name').value.trim();
-    const phone = document.getElementById('new-staff-phone').value.trim();
-    const email = document.getElementById('new-staff-email')?.value?.trim() || undefined;
-    const selectedServices = Array.from(document.querySelectorAll('.staff-service-chk:checked')).map((c) => c.value);
-
-    // Instant UI response (0ms)
-    const tempId = `temp-staff-${Date.now()}`;
-    const optimisticStaff = {
-      id: tempId,
-      name,
-      phone,
-      email,
-      status: 'ACTIVE',
-      statusLabel: 'Available',
-      statusDotClass: 'status-available',
-      statusBadgeClass: 'badge-available',
-      services: selectedServices.map((id) => ({ serviceId: id })),
-      workingHours: [],
-      breaks: [],
-      _isOptimistic: true,
-    };
-
-    this.lastLocalActionTimestamp = Date.now();
-    window.lastDashboardActionTimestamp = Date.now();
-    this.staffList = [optimisticStaff, ...this.staffList];
-    modalContainer.innerHTML = '';
-    this.showToast(`Stylist "${name}" added!`, 'success');
-    this.render();
-
-    // Background network sync
-    ApiClient.createStaff({
-      name,
-      phone,
-      email,
-      serviceIds: selectedServices,
-    }).then((created) => {
-      if (created && created.id) {
-        this.staffList = this.staffList.map((s) => (s.id === tempId ? created : s));
-        this.render();
-        SalonRepository.invalidate('staff');
-      }
-    }).catch((err) => {
-      this.staffList = this.staffList.filter((s) => s.id !== tempId);
-      this.render();
-      this.showToast(`Failed to add stylist: ${err.message}`, 'error');
+    document.getElementById('btn-quick-goto-services')?.addEventListener('click', () => {
+      modalContainer.innerHTML = '';
+      this.switchTab('services');
+      setTimeout(() => this.showAddServiceModal(), 120);
     });
-  });
-}
 
-showAssignServicesModal(staffId, staffName) {
-  const modalContainer = document.getElementById('modal-container');
-  const staff = this.staffList.find((s) => s.id === staffId);
-  const assignedIds = (staff?.services || []).map((s) => s.serviceId || s.service?.id);
-  const hasServices = Array.isArray(this.servicesList) && this.servicesList.length > 0;
+    document.getElementById('add-staff-form')?.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const name = document.getElementById('new-staff-name').value.trim();
+      const phone = document.getElementById('new-staff-phone').value.trim();
+      const email = document.getElementById('new-staff-email')?.value?.trim() || undefined;
+      const selectedServices = Array.from(document.querySelectorAll('.staff-service-chk:checked')).map((c) => c.value);
 
-  modalContainer.innerHTML = `
+      // Instant UI response (0ms)
+      const tempId = `temp-staff-${Date.now()}`;
+      const optimisticStaff = {
+        id: tempId,
+        name,
+        phone,
+        email,
+        status: 'ACTIVE',
+        statusLabel: 'Available',
+        statusDotClass: 'status-available',
+        statusBadgeClass: 'badge-available',
+        services: selectedServices.map((id) => ({ serviceId: id })),
+        workingHours: [],
+        breaks: [],
+        _isOptimistic: true,
+      };
+
+      this.lastLocalActionTimestamp = Date.now();
+      window.lastDashboardActionTimestamp = Date.now();
+      this.staffList = [optimisticStaff, ...this.staffList];
+      modalContainer.innerHTML = '';
+      this.showToast(`Stylist "${name}" added!`, 'success');
+      this.render();
+
+      // Background network sync
+      ApiClient.createStaff({
+        name,
+        phone,
+        email,
+        serviceIds: selectedServices,
+      }).then((created) => {
+        if (created && created.id) {
+          this.staffList = this.staffList.map((s) => (s.id === tempId ? created : s));
+          this.render();
+          SalonRepository.invalidate('staff');
+        }
+      }).catch((err) => {
+        this.staffList = this.staffList.filter((s) => s.id !== tempId);
+        this.render();
+        this.showToast(`Failed to add stylist: ${err.message}`, 'error');
+      });
+    });
+  }
+
+  showAssignServicesModal(staffId, staffName) {
+    const modalContainer = document.getElementById('modal-container');
+    const staff = this.staffList.find((s) => s.id === staffId);
+    const assignedIds = (staff?.services || []).map((s) => s.serviceId || s.service?.id);
+    const hasServices = Array.isArray(this.servicesList) && this.servicesList.length > 0;
+
+    modalContainer.innerHTML = `
       <div class="modal-backdrop show">
         <div class="modal-content">
           <div class="modal-header">
@@ -11096,48 +10919,48 @@ showAssignServicesModal(staffId, staffName) {
       </div>
     `;
 
-  document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+    document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
 
-  document.getElementById('btn-assign-goto-services')?.addEventListener('click', () => {
-    modalContainer.innerHTML = '';
-    this.switchTab('services');
-    setTimeout(() => this.showAddServiceModal(), 120);
-  });
-
-  document.getElementById('assign-services-form')?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const selected = Array.from(document.querySelectorAll('.chk-assign-svc:checked')).map((c) => c.value);
-    try {
-      const updated = await ApiClient.assignStaffServices(staffId, selected);
-      const idx = this.staffList.findIndex((s) => String(s.id) === String(staffId));
-      if (idx !== -1 && updated) {
-        this.staffList[idx] = { ...this.staffList[idx], ...updated };
-      }
+    document.getElementById('btn-assign-goto-services')?.addEventListener('click', () => {
       modalContainer.innerHTML = '';
-      this.render();
+      this.switchTab('services');
+      setTimeout(() => this.showAddServiceModal(), 120);
+    });
 
-      this.loadData(true).then(() => {
-        this.refreshActiveTab();
-      }).catch(() => { });
-    } catch (err) {
-      this.showToast(err.message, 'error');
-    }
-  });
-}
+    document.getElementById('assign-services-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const selected = Array.from(document.querySelectorAll('.chk-assign-svc:checked')).map((c) => c.value);
+      try {
+        const updated = await ApiClient.assignStaffServices(staffId, selected);
+        const idx = this.staffList.findIndex((s) => String(s.id) === String(staffId));
+        if (idx !== -1 && updated) {
+          this.staffList[idx] = { ...this.staffList[idx], ...updated };
+        }
+        modalContainer.innerHTML = '';
+        this.render();
+
+        this.loadData(true).then(() => {
+          this.refreshActiveTab();
+        }).catch(() => { });
+      } catch (err) {
+        this.showToast(err.message, 'error');
+      }
+    });
+  }
 
   async showAddBreakModal(staffId, staffName) {
-  const modalContainer = document.getElementById('modal-container');
+    const modalContainer = document.getElementById('modal-container');
 
-  const formatTime12h = (t) => {
-    if (!t) return '';
-    const [hStr, mStr] = t.split(':');
-    let h = parseInt(hStr, 10);
-    const ampm = h >= 12 ? 'PM' : 'AM';
-    h = h % 12 || 12;
-    return `${h.toString().padStart(2, '0')}:${mStr || '00'} ${ampm}`;
-  };
+    const formatTime12h = (t) => {
+      if (!t) return '';
+      const [hStr, mStr] = t.split(':');
+      let h = parseInt(hStr, 10);
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      h = h % 12 || 12;
+      return `${h.toString().padStart(2, '0')}:${mStr || '00'} ${ampm}`;
+    };
 
-  modalContainer.innerHTML = `
+    modalContainer.innerHTML = `
       <div class="modal-backdrop show">
         <div class="modal-content modal-content-sheet" style="max-width: 520px; max-height: 90vh; overflow-y: auto;">
           <div class="sheet-grab-handle"></div>
@@ -11218,96 +11041,96 @@ showAssignServicesModal(staffId, staffName) {
       </div>
     `;
 
-  document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
-  document.getElementById('btn-cancel-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+    document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+    document.getElementById('btn-cancel-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
 
-  let staffBreaks = [];
-  try {
-    staffBreaks = await ApiClient.getStaffBreaks(staffId, true);
-  } catch (err) {
-    console.warn('[StaffBreaks] Failed to fetch breaks:', err);
-    staffBreaks = [];
-  }
+    let staffBreaks = [];
+    try {
+      staffBreaks = await ApiClient.getStaffBreaks(staffId, true);
+    } catch (err) {
+      console.warn('[StaffBreaks] Failed to fetch breaks:', err);
+      staffBreaks = [];
+    }
 
-  const loadingDiv = document.getElementById('break-modal-loading');
-  const bodyDiv = document.getElementById('break-modal-body');
-  if (loadingDiv) loadingDiv.style.display = 'none';
-  if (bodyDiv) bodyDiv.style.display = 'block';
+    const loadingDiv = document.getElementById('break-modal-loading');
+    const bodyDiv = document.getElementById('break-modal-body');
+    if (loadingDiv) loadingDiv.style.display = 'none';
+    if (bodyDiv) bodyDiv.style.display = 'block';
 
-  const daySelect = document.getElementById('break-day');
-  const dayLabel = document.getElementById('label-selected-day');
-  const breaksContainer = document.getElementById('active-day-breaks-container');
-  const countBadge = document.getElementById('day-break-count-badge');
-  const bStart = document.getElementById('break-start');
-  const bEnd = document.getElementById('break-end');
-  const preview = document.getElementById('break-duration-preview');
-  const formError = document.getElementById('break-form-error');
+    const daySelect = document.getElementById('break-day');
+    const dayLabel = document.getElementById('label-selected-day');
+    const breaksContainer = document.getElementById('active-day-breaks-container');
+    const countBadge = document.getElementById('day-break-count-badge');
+    const bStart = document.getElementById('break-start');
+    const bEnd = document.getElementById('break-end');
+    const preview = document.getElementById('break-duration-preview');
+    const formError = document.getElementById('break-form-error');
 
-  const updateDurationPreview = () => {
-    if (!bStart || !bEnd || !preview) return;
-    if (bStart.value && bEnd.value) {
-      const [sh, sm] = bStart.value.split(':').map(Number);
-      const [eh, em] = bEnd.value.split(':').map(Number);
-      const diff = (eh * 60 + em) - (sh * 60 + sm);
-      if (diff > 0) {
-        const selectedDay = daySelect.value;
-        const currentSalonBreaks = staffBreaks.filter(b => b.dayOfWeek === selectedDay && b.origin === 'SALON');
-        const overlappingSalonBreak = currentSalonBreaks.find(sb => {
-          const [sbSh, sbSm] = sb.startTime.split(':').map(Number);
-          const [sbEh, sbEm] = sb.endTime.split(':').map(Number);
-          const sbStartM = sbSh * 60 + sbSm;
-          const sbEndM = sbEh * 60 + sbEm;
-          const curStartM = sh * 60 + sm;
-          const curEndM = eh * 60 + em;
-          return curStartM < sbEndM && curEndM > sbStartM;
-        });
+    const updateDurationPreview = () => {
+      if (!bStart || !bEnd || !preview) return;
+      if (bStart.value && bEnd.value) {
+        const [sh, sm] = bStart.value.split(':').map(Number);
+        const [eh, em] = bEnd.value.split(':').map(Number);
+        const diff = (eh * 60 + em) - (sh * 60 + sm);
+        if (diff > 0) {
+          const selectedDay = daySelect.value;
+          const currentSalonBreaks = staffBreaks.filter(b => b.dayOfWeek === selectedDay && b.origin === 'SALON');
+          const overlappingSalonBreak = currentSalonBreaks.find(sb => {
+            const [sbSh, sbSm] = sb.startTime.split(':').map(Number);
+            const [sbEh, sbEm] = sb.endTime.split(':').map(Number);
+            const sbStartM = sbSh * 60 + sbSm;
+            const sbEndM = sbEh * 60 + sbEm;
+            const curStartM = sh * 60 + sm;
+            const curEndM = eh * 60 + em;
+            return curStartM < sbEndM && curEndM > sbStartM;
+          });
 
-        preview.style.display = 'block';
-        if (overlappingSalonBreak) {
-          preview.style.background = 'rgba(245, 158, 11, 0.12)';
-          preview.style.border = '1px solid rgba(245, 158, 11, 0.3)';
-          preview.style.color = '#fbbf24';
-          preview.textContent = `⏱️ ${diff} mins • ℹ️ Overlaps with Salon Break (${formatTime12h(overlappingSalonBreak.startTime)} - ${formatTime12h(overlappingSalonBreak.endTime)}). Facility downtime already protects this slot.`;
+          preview.style.display = 'block';
+          if (overlappingSalonBreak) {
+            preview.style.background = 'rgba(245, 158, 11, 0.12)';
+            preview.style.border = '1px solid rgba(245, 158, 11, 0.3)';
+            preview.style.color = '#fbbf24';
+            preview.textContent = `⏱️ ${diff} mins • ℹ️ Overlaps with Salon Break (${formatTime12h(overlappingSalonBreak.startTime)} - ${formatTime12h(overlappingSalonBreak.endTime)}). Facility downtime already protects this slot.`;
+          } else {
+            preview.style.background = 'rgba(16, 185, 129, 0.12)';
+            preview.style.border = '1px solid rgba(16, 185, 129, 0.3)';
+            preview.style.color = '#34d399';
+            preview.textContent = `⏱️ Break Duration: ${diff} minutes`;
+          }
         } else {
-          preview.style.background = 'rgba(16, 185, 129, 0.12)';
-          preview.style.border = '1px solid rgba(16, 185, 129, 0.3)';
-          preview.style.color = '#34d399';
-          preview.textContent = `⏱️ Break Duration: ${diff} minutes`;
+          preview.style.display = 'block';
+          preview.style.background = 'rgba(239, 68, 68, 0.12)';
+          preview.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+          preview.style.color = '#f87171';
+          preview.textContent = `⚠️ End time must be later than start time.`;
         }
       } else {
-        preview.style.display = 'block';
-        preview.style.background = 'rgba(239, 68, 68, 0.12)';
-        preview.style.border = '1px solid rgba(239, 68, 68, 0.3)';
-        preview.style.color = '#f87171';
-        preview.textContent = `⚠️ End time must be later than start time.`;
+        preview.style.display = 'none';
       }
-    } else {
-      preview.style.display = 'none';
-    }
-  };
+    };
 
-  bStart?.addEventListener('change', updateDurationPreview);
-  bEnd?.addEventListener('change', updateDurationPreview);
+    bStart?.addEventListener('change', updateDurationPreview);
+    bEnd?.addEventListener('change', updateDurationPreview);
 
-  const renderDayBreaks = (selectedDay) => {
-    const dayBreaks = staffBreaks.filter((b) => b.dayOfWeek === selectedDay);
-    const salonBreaks = dayBreaks.filter((b) => b.origin === 'SALON');
-    const stylistBreaks = dayBreaks.filter((b) => b.origin === 'STYLIST');
+    const renderDayBreaks = (selectedDay) => {
+      const dayBreaks = staffBreaks.filter((b) => b.dayOfWeek === selectedDay);
+      const salonBreaks = dayBreaks.filter((b) => b.origin === 'SALON');
+      const stylistBreaks = dayBreaks.filter((b) => b.origin === 'STYLIST');
 
-    if (dayLabel) {
-      dayLabel.textContent = selectedDay.charAt(0) + selectedDay.slice(1).toLowerCase();
-    }
+      if (dayLabel) {
+        dayLabel.textContent = selectedDay.charAt(0) + selectedDay.slice(1).toLowerCase();
+      }
 
-    if (countBadge) {
-      const total = salonBreaks.length + stylistBreaks.length;
-      countBadge.textContent = total > 0 ? `${total} Active Break${total === 1 ? '' : 's'}` : '0 Breaks';
-    }
+      if (countBadge) {
+        const total = salonBreaks.length + stylistBreaks.length;
+        countBadge.textContent = total > 0 ? `${total} Active Break${total === 1 ? '' : 's'}` : '0 Breaks';
+      }
 
-    let html = '';
+      let html = '';
 
-    // 1. Salon Facility Breaks Banner
-    if (salonBreaks.length > 0) {
-      html += `
+      // 1. Salon Facility Breaks Banner
+      if (salonBreaks.length > 0) {
+        html += `
           <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 10px;">
             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
               <span style="font-size: 0.78rem; font-weight: 700; color: #34d399; display: flex; align-items: center; gap: 6px;">
@@ -11333,11 +11156,11 @@ showAssignServicesModal(staffId, staffName) {
             </div>
           </div>
         `;
-    }
+      }
 
-    // 2. Stylist Personal Shift Breaks
-    if (stylistBreaks.length > 0) {
-      html += `
+      // 2. Stylist Personal Shift Breaks
+      if (stylistBreaks.length > 0) {
+        html += `
           <div style="background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.3); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 10px;">
             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
               <span style="font-size: 0.78rem; font-weight: 700; color: #c4b5fd; display: flex; align-items: center; gap: 6px;">
@@ -11363,129 +11186,129 @@ showAssignServicesModal(staffId, staffName) {
             </div>
           </div>
         `;
-    }
+      }
 
-    if (salonBreaks.length === 0 && stylistBreaks.length === 0) {
-      html += `
+      if (salonBreaks.length === 0 && stylistBreaks.length === 0) {
+        html += `
           <div style="background: rgba(255, 255, 255, 0.03); border: 1px dashed rgba(255, 255, 255, 0.1); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 10px; text-align: center;">
             <span style="color: var(--text-muted); font-size: 0.78rem;">No breaks scheduled for ${selectedDay.charAt(0) + selectedDay.slice(1).toLowerCase()}. Stylist is available throughout the operating shift.</span>
           </div>
         `;
-    }
+      }
 
-    breaksContainer.innerHTML = html;
+      breaksContainer.innerHTML = html;
 
-    // Wire delete buttons for personal breaks
-    breaksContainer.querySelectorAll('.btn-delete-staff-break').forEach((btn) => {
-      btn.addEventListener('click', async (e) => {
-        const breakId = e.currentTarget.getAttribute('data-break-id');
-        const ok = await CalendarState.confirm({
-          title: 'Remove Personal Break',
-          message: 'Are you sure you want to remove this personal break from the specialist schedule?',
-          confirmText: 'Remove Break',
-          cancelText: 'Cancel',
-          icon: '🗑️',
-          type: 'danger',
+      // Wire delete buttons for personal breaks
+      breaksContainer.querySelectorAll('.btn-delete-staff-break').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+          const breakId = e.currentTarget.getAttribute('data-break-id');
+          const ok = await CalendarState.confirm({
+            title: 'Remove Personal Break',
+            message: 'Are you sure you want to remove this personal break from the specialist schedule?',
+            confirmText: 'Remove Break',
+            cancelText: 'Cancel',
+            icon: '🗑️',
+            type: 'danger',
+          });
+          if (!ok) return;
+          try {
+            await ApiClient.deleteStaffBreak(staffId, breakId);
+            staffBreaks = await ApiClient.getStaffBreaks(staffId, true);
+            renderDayBreaks(daySelect.value);
+            this.loadData(true).then(() => {
+              this.refreshActiveTab();
+            }).catch(() => { });
+          } catch (err) {
+            this.showToast(err.message || 'Failed to delete break', 'error');
+          }
         });
-        if (!ok) return;
-        try {
-          await ApiClient.deleteStaffBreak(staffId, breakId);
-          staffBreaks = await ApiClient.getStaffBreaks(staffId, true);
-          renderDayBreaks(daySelect.value);
-          this.loadData(true).then(() => {
-            this.refreshActiveTab();
-          }).catch(() => { });
-        } catch (err) {
-          this.showToast(err.message || 'Failed to delete break', 'error');
-        }
       });
+
+      updateDurationPreview();
+    };
+
+    daySelect?.addEventListener('change', (e) => {
+      renderDayBreaks(e.target.value);
     });
 
-    updateDurationPreview();
-  };
+    // Default to MONDAY or current day
+    renderDayBreaks(daySelect.value || 'MONDAY');
 
-  daySelect?.addEventListener('change', (e) => {
-    renderDayBreaks(e.target.value);
-  });
-
-  // Default to MONDAY or current day
-  renderDayBreaks(daySelect.value || 'MONDAY');
-
-  document.getElementById('add-break-form')?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const submitBtn = document.getElementById('btn-submit-break');
-    if (formError) formError.style.display = 'none';
-    if (submitBtn) {
-      submitBtn.textContent = 'Saving Shift Break...';
-      submitBtn.setAttribute('disabled', 'true');
-    }
-
-    try {
-      await ApiClient.createStaffBreak(staffId, {
-        dayOfWeek: daySelect.value,
-        startTime: document.getElementById('break-start').value,
-        endTime: document.getElementById('break-end').value,
-        title: document.getElementById('break-title').value || 'Personal Break',
-      });
-
-      // Refetch breaks and update view
-      staffBreaks = await ApiClient.getStaffBreaks(staffId, true);
-      renderDayBreaks(daySelect.value);
-
-      // Reset form inputs
-      document.getElementById('break-start').value = '';
-      document.getElementById('break-end').value = '';
-      document.getElementById('break-title').value = '';
-      if (preview) preview.style.display = 'none';
-
+    document.getElementById('add-break-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const submitBtn = document.getElementById('btn-submit-break');
+      if (formError) formError.style.display = 'none';
       if (submitBtn) {
-        submitBtn.textContent = 'Save Personal Break →';
-        submitBtn.removeAttribute('disabled');
+        submitBtn.textContent = 'Saving Shift Break...';
+        submitBtn.setAttribute('disabled', 'true');
       }
 
-      this.loadData(true).then(() => {
-        this.refreshActiveTab();
-      }).catch(() => { });
-    } catch (err) {
-      if (formError) {
-        formError.textContent = err.message || 'Failed to save shift break';
-        formError.style.display = 'block';
-      } else {
-        this.showToast(err.message, 'error');
+      try {
+        await ApiClient.createStaffBreak(staffId, {
+          dayOfWeek: daySelect.value,
+          startTime: document.getElementById('break-start').value,
+          endTime: document.getElementById('break-end').value,
+          title: document.getElementById('break-title').value || 'Personal Break',
+        });
+
+        // Refetch breaks and update view
+        staffBreaks = await ApiClient.getStaffBreaks(staffId, true);
+        renderDayBreaks(daySelect.value);
+
+        // Reset form inputs
+        document.getElementById('break-start').value = '';
+        document.getElementById('break-end').value = '';
+        document.getElementById('break-title').value = '';
+        if (preview) preview.style.display = 'none';
+
+        if (submitBtn) {
+          submitBtn.textContent = 'Save Personal Break →';
+          submitBtn.removeAttribute('disabled');
+        }
+
+        this.loadData(true).then(() => {
+          this.refreshActiveTab();
+        }).catch(() => { });
+      } catch (err) {
+        if (formError) {
+          formError.textContent = err.message || 'Failed to save shift break';
+          formError.style.display = 'block';
+        } else {
+          this.showToast(err.message, 'error');
+        }
+        if (submitBtn) {
+          submitBtn.textContent = 'Save Personal Break →';
+          submitBtn.removeAttribute('disabled');
+        }
       }
-      if (submitBtn) {
-        submitBtn.textContent = 'Save Personal Break →';
-        submitBtn.removeAttribute('disabled');
-      }
-    }
-  });
-}
+    });
+  }
 
-showMarkAbsentModal(staffId, staffName) {
-  StaffApplyLeaveDialog.open({
-    staffId: staffId || null,
-    staffName: staffName || null,
-    showModeSwitch: !staffId,
-    salonWorkingHours: this.salonWorkingHours || [],
-    staffList: this.staffList || [],
-    onSuccess: async () => {
-      await this.loadData(true);
-    },
-  });
-}
+  showMarkAbsentModal(staffId, staffName) {
+    StaffApplyLeaveDialog.open({
+      staffId: staffId || null,
+      staffName: staffName || null,
+      showModeSwitch: !staffId,
+      salonWorkingHours: this.salonWorkingHours || [],
+      staffList: this.staffList || [],
+      onSuccess: async () => {
+        await this.loadData(true);
+      },
+    });
+  }
 
-showLeaveHistoryModal(staffId, staffName) {
-  this.leaveUI.showLeaveHistoryModal(staffId, staffName);
-}
+  showLeaveHistoryModal(staffId, staffName) {
+    this.leaveUI.showLeaveHistoryModal(staffId, staffName);
+  }
 
-showAbsenceResultModal(staffName, result) {
-  this.leaveUI.showLeaveResultModal(staffName, result);
-}
+  showAbsenceResultModal(staffName, result) {
+    this.leaveUI.showLeaveResultModal(staffName, result);
+  }
 
-showBlockTimeModal() {
-  const modalContainer = document.getElementById('modal-container');
+  showBlockTimeModal() {
+    const modalContainer = document.getElementById('modal-container');
 
-  modalContainer.innerHTML = `
+    modalContainer.innerHTML = `
       <div class="modal-backdrop show">
         <div class="modal-content">
           <div class="modal-header">
@@ -11530,164 +11353,58 @@ showBlockTimeModal() {
       </div>
     `;
 
-  document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+    document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
 
-  document.getElementById('block-time-form')?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const staffId = document.getElementById('block-target').value || undefined;
-    const date = document.getElementById('block-date').value;
-    const startTime = document.getElementById('block-start-time').value;
-    const endTime = document.getElementById('block-end-time').value;
-    const reason = document.getElementById('block-reason').value;
+    document.getElementById('block-time-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const staffId = document.getElementById('block-target').value || undefined;
+      const date = document.getElementById('block-date').value;
+      const startTime = document.getElementById('block-start-time').value;
+      const endTime = document.getElementById('block-end-time').value;
+      const reason = document.getElementById('block-reason').value;
 
-    try {
-      await ApiClient.addBlockedTime({
-        staffId,
-        startTime: `${date}T${startTime}:00.000Z`,
-        endTime: `${date}T${endTime}:00.000Z`,
-        reason,
-      });
+      try {
+        await ApiClient.addBlockedTime({
+          staffId,
+          startTime: `${date}T${startTime}:00.000Z`,
+          endTime: `${date}T${endTime}:00.000Z`,
+          reason,
+        });
 
-      modalContainer.innerHTML = '';
-      await this.loadData();
-      this.render();
-    } catch (err) {
-      this.showToast(err.message, 'error');
-    }
-  });
-}
-
-  async showManageCategoriesModal() {
-  const modalContainer = document.getElementById('modal-container');
-  try {
-    this.categoriesList = await ApiClient.getServiceCategories(true).catch(() => []);
-  } catch (e) {
-    console.warn('Failed to load categories', e);
-  }
-  const categories = Array.isArray(this.categoriesList) ? this.categoriesList : [];
-
-  modalContainer.innerHTML = `
-      <div class="modal-backdrop show">
-        <div class="modal-content modal-content-md" style="max-height: 90vh; overflow-y: auto;">
-          <div class="modal-header">
-            <h3>📂 Manage Service Categories</h3>
-            <button class="close-btn" id="btn-close-modal">&times;</button>
-          </div>
-          <div style="padding: 16px;">
-            <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 16px;">
-              Categories organize your services in the WhatsApp booking flow and customer menu.
-            </p>
-            
-            <!-- Category Create Form -->
-            <form id="add-category-form" style="display: flex; gap: 8px; margin-bottom: 20px; align-items: flex-end;">
-              <div style="flex: 2;">
-                <label style="font-size: 0.8rem;">Category Name *</label>
-                <input type="text" class="form-control" id="cat-name-input" placeholder="e.g. Hair Care, Facials" required />
-              </div>
-              <div style="flex: 1;">
-                <label style="font-size: 0.8rem;">Icon/Emoji</label>
-                <div style="position: relative;">
-                  <button type="button" id="cat-icon-btn" title="Click to choose icon" class="form-control" style="width: 100%; height: 38px; padding: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 1.2rem; cursor: pointer; background: rgba(255,255,255,0.08); border: 1px solid var(--border-subtle);" aria-label="Choose Category Icon">
-                    <span id="cat-icon-preview">✂️</span>
-                  </button>
-                  <input type="hidden" id="cat-icon-input" value="✂️" />
-                  <div id="cat-icon-picker" class="cat-icon-picker-popover" style="display: none;"></div>
-                </div>
-              </div>
-              <button type="submit" class="btn btn-primary btn-sm" style="height: 38px;">➕ Add</button>
-            </form>
-
-            <div class="category-list" style="display: flex; flex-direction: column; gap: 8px;">
-              ${categories.length === 0 ? `
-                <div style="text-align: center; padding: 20px; color: var(--text-muted); font-size: 0.85rem;">No categories created yet. Add one above!</div>
-              ` : categories.map((c) => `
-                <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.05); padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);">
-                  <div style="display: flex; align-items: center; gap: 10px;">
-                    <span style="font-size: 1.1rem;">${c.icon || '📂'}</span>
-                    <strong style="color: #fff; font-size: 0.95rem;">${c.name}</strong>
-                  </div>
-                  <div style="display: flex; gap: 6px;">
-                    <button class="btn btn-danger-outline btn-sm btn-delete-cat" data-id="${c.id}" data-name="${c.name}" style="padding: 4px 10px;" title="Delete Category">
-                      ${Icons.trash({ size: 12 })}
-                    </button>
-                  </div>
-                </div>
-              `).join('')}
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
-
-  document.getElementById('btn-close-modal')?.addEventListener('click', () => {
-    modalContainer.innerHTML = '';
-  });
-
-  setupCategoryIconPicker('cat-icon-btn', 'cat-icon-preview', 'cat-icon-input', 'cat-icon-picker');
-
-  document.getElementById('add-category-form')?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const name = document.getElementById('cat-name-input').value.trim();
-    const icon = document.getElementById('cat-icon-input').value.trim() || '✂️';
-    if (!name) return;
-    try {
-      await ApiClient.createServiceCategory({ name, icon });
-      showNotification(`Category "${name}" created!`, 'success');
-      this.categoriesList = await ApiClient.getServiceCategories(true);
-      await this.showManageCategoriesModal();
-      await this.loadData(true);
-    } catch (err) {
-      showNotification(err.message || 'Failed to create category', 'error');
-    }
-  });
-
-  document.querySelectorAll('.btn-delete-cat').forEach((btn) => {
-    btn.addEventListener('click', async (e) => {
-      const id = btn.getAttribute('data-id');
-      const ok = await CalendarState.confirm({
-        title: 'Delete Service Category',
-        message: `Are you sure you want to delete category "${name}"? Services in this category will become general uncategorized services.`,
-        confirmText: 'Delete Category',
-        cancelText: 'Cancel',
-        icon: '🗑️',
-        type: 'danger',
-      });
-      if (ok) {
-        try {
-          await ApiClient.deleteServiceCategory(id);
-          showNotification(`Category "${name}" deleted`, 'success');
-          this.categoriesList = await ApiClient.getServiceCategories(true);
-          await this.showManageCategoriesModal();
-          await this.loadData(true);
-        } catch (err) {
-          showNotification(err.message || 'Failed to delete category', 'error');
-        }
+        modalContainer.innerHTML = '';
+        await this.loadData();
+        this.render();
+      } catch (err) {
+        this.showToast(err.message, 'error');
       }
     });
-  });
-}
+  }
 
-showAddServiceModal() {
-  if (document.getElementById('add-service-form')) return;
-  const modalContainer = this.getModalContainer();
-  const activeStaff = (this.staffList || []).filter((st) => st.status === 'ACTIVE' || !st.status);
+  async showManageCategoriesModal() {
+    return ServiceCategoriesModal.show(this);
+  }
 
-  const renderCatOptions = (selected = '') => {
-    if (!this.categoriesList || this.categoriesList.length === 0) {
-      return '<option value="General" selected>✂️ General Services</option><option value="CUSTOM">➕ Other / Custom Category...</option>';
-    }
-    return this.categoriesList.map((c) => `<option value="${c.name}" data-id="${c.id}" ${c.name === selected ? 'selected' : ''}>${c.icon || '✂️'} ${c.name}</option>`).join('') + '<option value="CUSTOM">➕ Other / Custom Category...</option>';
-  };
+  showAddServiceModal() {
+    if (document.getElementById('add-service-form')) return;
+    const modalContainer = this.getModalContainer();
+    const activeStaff = (this.staffList || []).filter((st) => st.status === 'ACTIVE' || !st.status);
 
-  const catList = (this.categoriesList && this.categoriesList.length > 0)
-    ? this.categoriesList
-    : [{ id: 'cat-general', name: 'General', icon: '✂️' }];
+    const renderCatOptions = (selected = '') => {
+      if (!this.categoriesList || this.categoriesList.length === 0) {
+        return '<option value="General" selected>✂️ General Services</option><option value="CUSTOM">➕ Other / Custom Category...</option>';
+      }
+      return this.categoriesList.map((c) => `<option value="${c.name}" data-id="${c.id}" ${c.name === selected ? 'selected' : ''}>${formatCategoryIcon(c.icon)} ${c.name}</option>`).join('') + '<option value="CUSTOM">➕ Other / Custom Category...</option>';
+    };
 
-  const firstCat = catList[0];
-  const initialCatName = firstCat.name;
-  const initialCatIcon = firstCat.icon || '✂️';
+    const catList = (this.categoriesList && this.categoriesList.length > 0)
+      ? this.categoriesList
+      : [{ id: 'cat-general', name: 'General', icon: '✂️' }];
 
-  modalContainer.innerHTML = `
+    const firstCat = catList[0];
+    const initialCatName = firstCat.name;
+    const initialCatIcon = firstCat.icon || '✂️';
+
+    modalContainer.innerHTML = `
       <div class="modal-backdrop show">
         <div class="modal-content modal-content-md service-modal-form" style="max-height: 90vh; overflow-y: auto; padding: 24px; max-width: 520px; width: 100%;">
           <!-- Header (Compact, no subtitle) -->
@@ -11728,9 +11445,9 @@ showAddServiceModal() {
 
                 <div class="custom-select-menu" id="svc-cat-custom-menu">
                   ${catList.map((c) => `
-                    <div class="custom-select-option ${c.name === initialCatName ? 'selected' : ''}" data-value="${c.name}" data-icon="${c.icon || '✂️'}" data-id="${c.id || ''}">
+                    <div class="custom-select-option ${c.name === initialCatName ? 'selected' : ''}" data-value="${c.name}" data-icon="${formatCategoryIcon(c.icon)}" data-id="${c.id || ''}">
                       <div style="display: flex; align-items: center; gap: 8px;">
-                        <span>${c.icon || '✂️'}</span>
+                        <span>${formatCategoryIcon(c.icon)}</span>
                         <span>${c.name}</span>
                       </div>
                       ${c.name === initialCatName ? '<span class="custom-select-opt-check">✓</span>' : ''}
@@ -11863,8 +11580,8 @@ showAddServiceModal() {
                     ${activeStaff.length === 0 ? `
                       <div style="font-size: 0.8rem; color: var(--text-muted); padding: 12px; text-align: center;">No active stylists yet. Can be assigned later.</div>
                     ` : activeStaff.map((st) => {
-    const initials = st.name.split(' ').map((n) => n[0]).join('').substring(0, 2).toUpperCase();
-    return `
+      const initials = st.name.split(' ').map((n) => n[0]).join('').substring(0, 2).toUpperCase();
+      return `
                         <div class="svc-staff-dd-item selected" data-id="${st.id}" data-name="${st.name.toLowerCase()}">
                           <input type="checkbox" class="svc-staff-assign-chk" value="${st.id}" checked style="display: none;" />
                           <div class="svc-staff-dd-checkbox">✓</div>
@@ -11872,7 +11589,7 @@ showAddServiceModal() {
                           <span class="svc-staff-name" title="${st.name}">${st.name}</span>
                         </div>
                       `;
-  }).join('')}
+    }).join('')}
                   </div>
 
                   <div class="svc-staff-dd-footer">
@@ -11900,79 +11617,79 @@ showAddServiceModal() {
       </div>
     `;
 
-  document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+    document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
 
-  const categorySelect = document.getElementById('svc-category-select');
-  const customCatGroup = document.getElementById('svc-custom-cat-group');
-  const customCatInput = document.getElementById('svc-custom-cat-input');
-  const nameInput = document.getElementById('svc-name');
-  const priceInput = document.getElementById('svc-price');
-  const durationSelect = document.getElementById('svc-duration');
-  const descInput = document.getElementById('svc-desc');
-  const genderInput = document.getElementById('svc-gender');
+    const categorySelect = document.getElementById('svc-category-select');
+    const customCatGroup = document.getElementById('svc-custom-cat-group');
+    const customCatInput = document.getElementById('svc-custom-cat-input');
+    const nameInput = document.getElementById('svc-name');
+    const priceInput = document.getElementById('svc-price');
+    const durationSelect = document.getElementById('svc-duration');
+    const descInput = document.getElementById('svc-desc');
+    const genderInput = document.getElementById('svc-gender');
 
-  // Real-time price sanitization: disallow exponential 'e', negative '-', plus '+', and clamp > 500000
-  priceInput?.addEventListener('keydown', (e) => {
-    if (['e', 'E', '+', '-'].includes(e.key)) {
-      e.preventDefault();
-    }
-  });
-  priceInput?.addEventListener('input', () => {
-    let val = priceInput.value;
-    if (val.includes('-')) {
-      priceInput.value = val.replace(/-/g, '');
-    }
-    const num = parseFloat(priceInput.value);
-    if (!isNaN(num) && num > 500000) {
-      priceInput.value = '500000';
-    }
-  });
-
-  // Audience toggle buttons
-  document.querySelectorAll('.svc-aud-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.svc-aud-btn').forEach((b) => b.classList.remove('selected'));
-      btn.classList.add('selected');
-      if (genderInput) genderInput.value = btn.getAttribute('data-val');
+    // Real-time price sanitization: disallow exponential 'e', negative '-', plus '+', and clamp > 500000
+    priceInput?.addEventListener('keydown', (e) => {
+      if (['e', 'E', '+', '-'].includes(e.key)) {
+        e.preventDefault();
+      }
     });
-  });
+    priceInput?.addEventListener('input', () => {
+      let val = priceInput.value;
+      if (val.includes('-')) {
+        priceInput.value = val.replace(/-/g, '');
+      }
+      const num = parseFloat(priceInput.value);
+      if (!isNaN(num) && num > 500000) {
+        priceInput.value = '500000';
+      }
+    });
 
-  // Inline category toggle & creation
-  const inlineBox = document.getElementById('svc-inline-cat-box');
-  setupCategoryIconPicker('inline-cat-icon-btn', 'inline-cat-icon-preview', 'inline-cat-icon', 'inline-cat-icon-picker');
-  document.getElementById('btn-toggle-inline-cat')?.addEventListener('click', () => {
-    inlineBox.style.display = inlineBox.style.display === 'none' ? 'block' : 'none';
-    if (inlineBox.style.display === 'block') {
-      document.getElementById('inline-cat-name')?.focus();
-    }
-  });
+    // Audience toggle buttons
+    document.querySelectorAll('.svc-aud-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.svc-aud-btn').forEach((b) => b.classList.remove('selected'));
+        btn.classList.add('selected');
+        if (genderInput) genderInput.value = btn.getAttribute('data-val');
+      });
+    });
 
-  document.getElementById('btn-close-inline-cat')?.addEventListener('click', () => {
-    inlineBox.style.display = 'none';
-  });
+    // Inline category toggle & creation
+    const inlineBox = document.getElementById('svc-inline-cat-box');
+    setupCategoryIconPicker('inline-cat-icon-btn', 'inline-cat-icon-preview', 'inline-cat-icon', 'inline-cat-icon-picker');
+    document.getElementById('btn-toggle-inline-cat')?.addEventListener('click', () => {
+      inlineBox.style.display = inlineBox.style.display === 'none' ? 'block' : 'none';
+      if (inlineBox.style.display === 'block') {
+        document.getElementById('inline-cat-name')?.focus();
+      }
+    });
 
-  document.getElementById('btn-save-inline-cat')?.addEventListener('click', async () => {
-    const catName = document.getElementById('inline-cat-name')?.value.trim();
-    const catIcon = document.getElementById('inline-cat-icon')?.value.trim() || '✂️';
-    if (!catName) return;
+    document.getElementById('btn-close-inline-cat')?.addEventListener('click', () => {
+      inlineBox.style.display = 'none';
+    });
 
-    try {
-      const newCat = await ApiClient.createServiceCategory({ name: catName, icon: catIcon });
-      this.categoriesList = await ApiClient.getServiceCategories(true).catch(() => [
-        ...(this.categoriesList || []),
-        newCat || { id: `cat-${Date.now()}`, name: catName, icon: catIcon },
-      ]);
-      categorySelect.innerHTML = renderCatOptions(catName);
-      categorySelect.value = catName;
-      if (catSelectedIcon) catSelectedIcon.textContent = catIcon;
-      if (catSelectedName) catSelectedName.textContent = catName;
+    document.getElementById('btn-save-inline-cat')?.addEventListener('click', async () => {
+      const catName = document.getElementById('inline-cat-name')?.value.trim();
+      const catIcon = document.getElementById('inline-cat-icon')?.value.trim() || '✂️';
+      if (!catName) return;
 
-      if (catMenu) {
-        catMenu.innerHTML = `
+      try {
+        const newCat = await ApiClient.createServiceCategory({ name: catName, icon: catIcon });
+        this.categoriesList = await ApiClient.getServiceCategories(true).catch(() => [
+          ...(this.categoriesList || []),
+          newCat || { id: `cat-${Date.now()}`, name: catName, icon: catIcon },
+        ]);
+        categorySelect.innerHTML = renderCatOptions(catName);
+        categorySelect.value = catName;
+        if (catSelectedIcon) catSelectedIcon.textContent = catIcon;
+        if (catSelectedName) catSelectedName.textContent = catName;
+
+        if (catMenu) {
+          catMenu.innerHTML = `
             ${this.categoriesList.map((c) => `
-              <div class="custom-select-option ${c.name === catName ? 'selected' : ''}" data-value="${c.name}" data-icon="${c.icon || '✂️'}" data-id="${c.id || ''}">
+              <div class="custom-select-option ${c.name === catName ? 'selected' : ''}" data-value="${c.name}" data-icon="${formatCategoryIcon(c.icon)}" data-id="${c.id || ''}">
                 <div style="display: flex; align-items: center; gap: 8px;">
-                  <span>${c.icon || '✂️'}</span>
+                  <span>${formatCategoryIcon(c.icon)}</span>
                   <span>${c.name}</span>
                 </div>
                 ${c.name === catName ? '<span class="custom-select-opt-check">✓</span>' : ''}
@@ -11985,61 +11702,109 @@ showAddServiceModal() {
               </div>
             </div>
           `;
-        bindCatOptions();
+          bindCatOptions();
+        }
+
+        inlineBox.style.display = 'none';
+        document.getElementById('inline-cat-name').value = '';
+        const hiddenCatIcon = document.getElementById('inline-cat-icon');
+        if (hiddenCatIcon) hiddenCatIcon.value = '✂️';
+        const previewCatIcon = document.getElementById('inline-cat-icon-preview');
+        if (previewCatIcon) previewCatIcon.textContent = '✂️';
+        this.showToast(`Category "${catName}" added!`, 'success');
+      } catch (err) {
+        this.showToast(err.message || 'Failed to create category', 'error');
       }
+    });
 
-      inlineBox.style.display = 'none';
-      document.getElementById('inline-cat-name').value = '';
-      const hiddenCatIcon = document.getElementById('inline-cat-icon');
-      if (hiddenCatIcon) hiddenCatIcon.value = '✂️';
-      const previewCatIcon = document.getElementById('inline-cat-icon-preview');
-      if (previewCatIcon) previewCatIcon.textContent = '✂️';
-      this.showToast(`Category "${catName}" added!`, 'success');
-    } catch (err) {
-      this.showToast(err.message || 'Failed to create category', 'error');
-    }
-  });
+    // Custom Category Dropdown Interactions
+    const catContainer = document.getElementById('svc-cat-custom-container');
+    const catTrigger = document.getElementById('svc-cat-custom-trigger');
+    const catMenu = document.getElementById('svc-cat-custom-menu');
+    const catChevron = document.getElementById('svc-cat-custom-chevron');
+    const catSelectedIcon = document.getElementById('svc-cat-selected-icon');
+    const catSelectedName = document.getElementById('svc-cat-selected-name');
 
-  // Custom Category Dropdown Interactions
-  const catContainer = document.getElementById('svc-cat-custom-container');
-  const catTrigger = document.getElementById('svc-cat-custom-trigger');
-  const catMenu = document.getElementById('svc-cat-custom-menu');
-  const catChevron = document.getElementById('svc-cat-custom-chevron');
-  const catSelectedIcon = document.getElementById('svc-cat-selected-icon');
-  const catSelectedName = document.getElementById('svc-cat-selected-name');
+    const toggleCatMenu = (forceOpen) => {
+      if (!catMenu) return;
+      const isOpen = forceOpen !== undefined ? forceOpen : !catMenu.classList.contains('open');
+      catMenu.classList.toggle('open', isOpen);
+      catTrigger?.classList.toggle('active', isOpen);
+      catChevron?.classList.toggle('open', isOpen);
+    };
 
-  const toggleCatMenu = (forceOpen) => {
-    if (!catMenu) return;
-    const isOpen = forceOpen !== undefined ? forceOpen : !catMenu.classList.contains('open');
-    catMenu.classList.toggle('open', isOpen);
-    catTrigger?.classList.toggle('active', isOpen);
-    catChevron?.classList.toggle('open', isOpen);
-  };
+    catTrigger?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleDdMenu?.(false);
+      toggleDurMenu?.(false);
+      toggleCatMenu();
+    });
 
-  catTrigger?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    toggleDdMenu?.(false);
-    toggleDurMenu?.(false);
-    toggleCatMenu();
-  });
+    const bindCatOptions = () => {
+      catMenu?.querySelectorAll('.custom-select-option').forEach((opt) => {
+        opt.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const val = opt.getAttribute('data-value');
+          const icon = opt.getAttribute('data-icon') || '✂️';
+          const name = opt.querySelector('span:nth-child(2)')?.textContent || val;
 
-  const bindCatOptions = () => {
-    catMenu?.querySelectorAll('.custom-select-option').forEach((opt) => {
+          if (categorySelect) {
+            categorySelect.value = val;
+            categorySelect.dispatchEvent(new Event('change'));
+          }
+
+          if (catSelectedIcon) catSelectedIcon.textContent = icon;
+          if (catSelectedName) catSelectedName.textContent = val === 'CUSTOM' ? 'Custom Category' : name;
+
+          catMenu.querySelectorAll('.custom-select-option').forEach((o) => {
+            o.classList.toggle('selected', o === opt);
+            const check = o.querySelector('.custom-select-opt-check');
+            if (check) check.remove();
+            if (o === opt) {
+              const checkSpan = document.createElement('span');
+              checkSpan.className = 'custom-select-opt-check';
+              checkSpan.textContent = '✓';
+              o.appendChild(checkSpan);
+            }
+          });
+
+          toggleCatMenu(false);
+        });
+      });
+    };
+    bindCatOptions();
+
+    // Custom Duration Dropdown Interactions
+    const durContainer = document.getElementById('svc-dur-custom-container');
+    const durTrigger = document.getElementById('svc-dur-custom-trigger');
+    const durMenu = document.getElementById('svc-dur-custom-menu');
+    const durChevron = document.getElementById('svc-dur-custom-chevron');
+    const durLabel = document.getElementById('svc-dur-selected-label');
+
+    const toggleDurMenu = (forceOpen) => {
+      if (!durMenu) return;
+      const isOpen = forceOpen !== undefined ? forceOpen : !durMenu.classList.contains('open');
+      durMenu.classList.toggle('open', isOpen);
+      durTrigger?.classList.toggle('active', isOpen);
+      durChevron?.classList.toggle('open', isOpen);
+    };
+
+    durTrigger?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleDdMenu?.(false);
+      toggleCatMenu?.(false);
+      toggleDurMenu();
+    });
+
+    durMenu?.querySelectorAll('.custom-select-option').forEach((opt) => {
       opt.addEventListener('click', (e) => {
         e.stopPropagation();
         const val = opt.getAttribute('data-value');
-        const icon = opt.getAttribute('data-icon') || '✂️';
-        const name = opt.querySelector('span:nth-child(2)')?.textContent || val;
+        const text = opt.querySelector('span')?.textContent || `${val} mins`;
+        if (durationSelect) durationSelect.value = val;
+        if (durLabel) durLabel.textContent = text;
 
-        if (categorySelect) {
-          categorySelect.value = val;
-          categorySelect.dispatchEvent(new Event('change'));
-        }
-
-        if (catSelectedIcon) catSelectedIcon.textContent = icon;
-        if (catSelectedName) catSelectedName.textContent = val === 'CUSTOM' ? 'Custom Category' : name;
-
-        catMenu.querySelectorAll('.custom-select-option').forEach((o) => {
+        durMenu.querySelectorAll('.custom-select-option').forEach((o) => {
           o.classList.toggle('selected', o === opt);
           const check = o.querySelector('.custom-select-opt-check');
           if (check) check.remove();
@@ -12050,383 +11815,335 @@ showAddServiceModal() {
             o.appendChild(checkSpan);
           }
         });
-
-        toggleCatMenu(false);
+        toggleDurMenu(false);
       });
     });
-  };
-  bindCatOptions();
 
-  // Custom Duration Dropdown Interactions
-  const durContainer = document.getElementById('svc-dur-custom-container');
-  const durTrigger = document.getElementById('svc-dur-custom-trigger');
-  const durMenu = document.getElementById('svc-dur-custom-menu');
-  const durChevron = document.getElementById('svc-dur-custom-chevron');
-  const durLabel = document.getElementById('svc-dur-selected-label');
+    document.addEventListener('click', (e) => {
+      if (catContainer && !catContainer.contains(e.target)) toggleCatMenu(false);
+      if (durContainer && !durContainer.contains(e.target)) toggleDurMenu(false);
+    });
 
-  const toggleDurMenu = (forceOpen) => {
-    if (!durMenu) return;
-    const isOpen = forceOpen !== undefined ? forceOpen : !durMenu.classList.contains('open');
-    durMenu.classList.toggle('open', isOpen);
-    durTrigger?.classList.toggle('active', isOpen);
-    durChevron?.classList.toggle('open', isOpen);
-  };
+    // Multi-Select Stylist Dropdown Interactions
+    const ddWrapper = document.getElementById('svc-staff-dd-wrapper');
+    const ddTrigger = document.getElementById('svc-staff-dd-trigger');
+    const ddMenu = document.getElementById('svc-staff-dd-menu');
+    const ddChevron = document.getElementById('svc-staff-dd-chevron');
+    const ddSearch = document.getElementById('svc-staff-search');
+    const ddLabelText = document.getElementById('svc-staff-dd-label-text');
+    const ddBadge = document.getElementById('svc-staff-dd-badge');
+    const ddHint = document.getElementById('svc-staff-hint');
+    const ddFooterCount = document.getElementById('svc-staff-dd-footer-count');
+    const ddDoneBtn = document.getElementById('svc-staff-dd-done-btn');
+    const ddSelectAll = document.getElementById('svc-staff-select-all');
+    const ddClearAll = document.getElementById('svc-staff-clear-all');
 
-  durTrigger?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    toggleDdMenu?.(false);
-    toggleCatMenu?.(false);
-    toggleDurMenu();
-  });
-
-  durMenu?.querySelectorAll('.custom-select-option').forEach((opt) => {
-    opt.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const val = opt.getAttribute('data-value');
-      const text = opt.querySelector('span')?.textContent || `${val} mins`;
-      if (durationSelect) durationSelect.value = val;
-      if (durLabel) durLabel.textContent = text;
-
-      durMenu.querySelectorAll('.custom-select-option').forEach((o) => {
-        o.classList.toggle('selected', o === opt);
-        const check = o.querySelector('.custom-select-opt-check');
-        if (check) check.remove();
-        if (o === opt) {
-          const checkSpan = document.createElement('span');
-          checkSpan.className = 'custom-select-opt-check';
-          checkSpan.textContent = '✓';
-          o.appendChild(checkSpan);
-        }
+    const updateStaffDropdownState = () => {
+      const items = Array.from(document.querySelectorAll('#svc-staff-dd-list .svc-staff-dd-item'));
+      const total = items.length;
+      if (total === 0) return;
+      const checkedItems = items.filter((it) => {
+        const chk = it.querySelector('.svc-staff-assign-chk');
+        return chk && chk.checked;
       });
-      toggleDurMenu(false);
-    });
-  });
+      const checkedCount = checkedItems.length;
 
-  document.addEventListener('click', (e) => {
-    if (catContainer && !catContainer.contains(e.target)) toggleCatMenu(false);
-    if (durContainer && !durContainer.contains(e.target)) toggleDurMenu(false);
-  });
+      if (ddBadge) ddBadge.textContent = `${checkedCount}/${total}`;
+      const countText = document.getElementById('svc-staff-dd-count-text');
+      if (countText) countText.textContent = `${checkedCount} of ${total} selected`;
 
-  // Multi-Select Stylist Dropdown Interactions
-  const ddWrapper = document.getElementById('svc-staff-dd-wrapper');
-  const ddTrigger = document.getElementById('svc-staff-dd-trigger');
-  const ddMenu = document.getElementById('svc-staff-dd-menu');
-  const ddChevron = document.getElementById('svc-staff-dd-chevron');
-  const ddSearch = document.getElementById('svc-staff-search');
-  const ddLabelText = document.getElementById('svc-staff-dd-label-text');
-  const ddBadge = document.getElementById('svc-staff-dd-badge');
-  const ddHint = document.getElementById('svc-staff-hint');
-  const ddFooterCount = document.getElementById('svc-staff-dd-footer-count');
-  const ddDoneBtn = document.getElementById('svc-staff-dd-done-btn');
-  const ddSelectAll = document.getElementById('svc-staff-select-all');
-  const ddClearAll = document.getElementById('svc-staff-clear-all');
+      if (checkedCount === total) {
+        if (ddLabelText) ddLabelText.textContent = `All Stylists Assigned (${total})`;
+        if (ddHint) ddHint.textContent = `All ${total} Stylists Selected`;
+      } else if (checkedCount === 0) {
+        if (ddLabelText) ddLabelText.textContent = `No Stylists Selected`;
+        if (ddHint) ddHint.textContent = `0 Selected`;
+      } else if (checkedCount === 1) {
+        const name = checkedItems[0].querySelector('.svc-staff-name')?.textContent || '1 Stylist';
+        if (ddLabelText) ddLabelText.textContent = name;
+        if (ddHint) ddHint.textContent = `1 of ${total} Selected`;
+      } else if (checkedCount === 2) {
+        const names = checkedItems.map((it) => it.querySelector('.svc-staff-name')?.textContent || '').filter(Boolean).join(', ');
+        if (ddLabelText) ddLabelText.textContent = names;
+        if (ddHint) ddHint.textContent = `2 of ${total} Selected`;
+      } else {
+        if (ddLabelText) ddLabelText.textContent = `${checkedCount} Stylists Selected`;
+        if (ddHint) ddHint.textContent = `${checkedCount} of ${total} Selected`;
+      }
+    };
 
-  const updateStaffDropdownState = () => {
-    const items = Array.from(document.querySelectorAll('#svc-staff-dd-list .svc-staff-dd-item'));
-    const total = items.length;
-    if (total === 0) return;
-    const checkedItems = items.filter((it) => {
-      const chk = it.querySelector('.svc-staff-assign-chk');
-      return chk && chk.checked;
-    });
-    const checkedCount = checkedItems.length;
+    const toggleDdMenu = (forceOpen) => {
+      if (!ddMenu) return;
+      const isOpen = forceOpen !== undefined ? forceOpen : !ddMenu.classList.contains('open');
+      ddMenu.classList.toggle('open', isOpen);
+      ddTrigger?.classList.toggle('active', isOpen);
+      ddChevron?.classList.toggle('open', isOpen);
+      if (isOpen && ddSearch) {
+        ddSearch.value = '';
+        ddSearch.focus({ preventScroll: true });
+        document.querySelectorAll('#svc-staff-dd-list .svc-staff-dd-item').forEach((it) => (it.style.display = 'flex'));
+      }
+    };
 
-    if (ddBadge) ddBadge.textContent = `${checkedCount}/${total}`;
-    const countText = document.getElementById('svc-staff-dd-count-text');
-    if (countText) countText.textContent = `${checkedCount} of ${total} selected`;
-
-    if (checkedCount === total) {
-      if (ddLabelText) ddLabelText.textContent = `All Stylists Assigned (${total})`;
-      if (ddHint) ddHint.textContent = `All ${total} Stylists Selected`;
-    } else if (checkedCount === 0) {
-      if (ddLabelText) ddLabelText.textContent = `No Stylists Selected`;
-      if (ddHint) ddHint.textContent = `0 Selected`;
-    } else if (checkedCount === 1) {
-      const name = checkedItems[0].querySelector('.svc-staff-name')?.textContent || '1 Stylist';
-      if (ddLabelText) ddLabelText.textContent = name;
-      if (ddHint) ddHint.textContent = `1 of ${total} Selected`;
-    } else if (checkedCount === 2) {
-      const names = checkedItems.map((it) => it.querySelector('.svc-staff-name')?.textContent || '').filter(Boolean).join(', ');
-      if (ddLabelText) ddLabelText.textContent = names;
-      if (ddHint) ddHint.textContent = `2 of ${total} Selected`;
-    } else {
-      if (ddLabelText) ddLabelText.textContent = `${checkedCount} Stylists Selected`;
-      if (ddHint) ddHint.textContent = `${checkedCount} of ${total} Selected`;
-    }
-  };
-
-  const toggleDdMenu = (forceOpen) => {
-    if (!ddMenu) return;
-    const isOpen = forceOpen !== undefined ? forceOpen : !ddMenu.classList.contains('open');
-    ddMenu.classList.toggle('open', isOpen);
-    ddTrigger?.classList.toggle('active', isOpen);
-    ddChevron?.classList.toggle('open', isOpen);
-    if (isOpen && ddSearch) {
-      ddSearch.value = '';
-      ddSearch.focus({ preventScroll: true });
-      document.querySelectorAll('#svc-staff-dd-list .svc-staff-dd-item').forEach((it) => (it.style.display = 'flex'));
-    }
-  };
-
-  ddTrigger?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    toggleDdMenu();
-  });
-
-  ddDoneBtn?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    toggleDdMenu(false);
-  });
-
-  ddSearch?.addEventListener('input', (e) => {
-    const q = (e.target.value || '').toLowerCase().trim();
-    document.querySelectorAll('#svc-staff-dd-list .svc-staff-dd-item').forEach((it) => {
-      const name = (it.getAttribute('data-name') || '').toLowerCase();
-      it.style.display = name.includes(q) ? 'flex' : 'none';
-    });
-  });
-
-  ddSearch?.addEventListener('click', (e) => e.stopPropagation());
-
-  document.querySelectorAll('#svc-staff-dd-list .svc-staff-dd-item').forEach((item) => {
-    item.addEventListener('click', (e) => {
+    ddTrigger?.addEventListener('click', (e) => {
       e.stopPropagation();
-      const chk = item.querySelector('.svc-staff-assign-chk');
-      if (!chk) return;
-      chk.checked = !chk.checked;
-      item.classList.toggle('selected', chk.checked);
+      toggleDdMenu();
+    });
+
+    ddDoneBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleDdMenu(false);
+    });
+
+    ddSearch?.addEventListener('input', (e) => {
+      const q = (e.target.value || '').toLowerCase().trim();
+      document.querySelectorAll('#svc-staff-dd-list .svc-staff-dd-item').forEach((it) => {
+        const name = (it.getAttribute('data-name') || '').toLowerCase();
+        it.style.display = name.includes(q) ? 'flex' : 'none';
+      });
+    });
+
+    ddSearch?.addEventListener('click', (e) => e.stopPropagation());
+
+    document.querySelectorAll('#svc-staff-dd-list .svc-staff-dd-item').forEach((item) => {
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const chk = item.querySelector('.svc-staff-assign-chk');
+        if (!chk) return;
+        chk.checked = !chk.checked;
+        item.classList.toggle('selected', chk.checked);
+        updateStaffDropdownState();
+      });
+    });
+
+    ddSelectAll?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.querySelectorAll('#svc-staff-dd-list .svc-staff-dd-item').forEach((it) => {
+        const chk = it.querySelector('.svc-staff-assign-chk');
+        if (chk) chk.checked = true;
+        it.classList.add('selected');
+      });
       updateStaffDropdownState();
     });
-  });
 
-  ddSelectAll?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    document.querySelectorAll('#svc-staff-dd-list .svc-staff-dd-item').forEach((it) => {
-      const chk = it.querySelector('.svc-staff-assign-chk');
-      if (chk) chk.checked = true;
-      it.classList.add('selected');
+    ddClearAll?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.querySelectorAll('#svc-staff-dd-list .svc-staff-dd-item').forEach((it) => {
+        const chk = it.querySelector('.svc-staff-assign-chk');
+        if (chk) chk.checked = false;
+        it.classList.remove('selected');
+      });
+      updateStaffDropdownState();
     });
-    updateStaffDropdownState();
-  });
 
-  ddClearAll?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    document.querySelectorAll('#svc-staff-dd-list .svc-staff-dd-item').forEach((it) => {
-      const chk = it.querySelector('.svc-staff-assign-chk');
-      if (chk) chk.checked = false;
-      it.classList.remove('selected');
+    const onAddModalClickOutside = (e) => {
+      if (ddWrapper && !ddWrapper.contains(e.target)) {
+        toggleDdMenu(false);
+      }
+    };
+    document.addEventListener('click', onAddModalClickOutside);
+
+    categorySelect?.addEventListener('change', (e) => {
+      if (e.target.value === 'CUSTOM') {
+        customCatGroup.style.display = 'block';
+      } else {
+        customCatGroup.style.display = 'none';
+      }
     });
-    updateStaffDropdownState();
-  });
 
-  const onAddModalClickOutside = (e) => {
-    if (ddWrapper && !ddWrapper.contains(e.target)) {
-      toggleDdMenu(false);
-    }
-  };
-  document.addEventListener('click', onAddModalClickOutside);
+    document.getElementById('add-service-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
 
-  categorySelect?.addEventListener('change', (e) => {
-    if (e.target.value === 'CUSTOM') {
-      customCatGroup.style.display = 'block';
-    } else {
-      customCatGroup.style.display = 'none';
-    }
-  });
-
-  document.getElementById('add-service-form')?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-
-    // 1. Service Name Validation
-    const name = nameInput.value.trim();
-    if (!name) {
-      this.showToast('Please enter a service name.', 'warning');
-      nameInput.focus();
-      return;
-    }
-    if (name.length < 2) {
-      this.showToast('Service name must be at least 2 characters long.', 'warning');
-      nameInput.focus();
-      return;
-    }
-    if (name.length > 100) {
-      this.showToast('Service name cannot exceed 100 characters.', 'warning');
-      nameInput.focus();
-      return;
-    }
-
-    // 2. Category Validation
-    const rawCat = categorySelect.value;
-    if (!rawCat) {
-      this.showToast('Please select a service category.', 'warning');
-      return;
-    }
-    if (rawCat === 'CUSTOM') {
-      const customVal = customCatInput.value.trim();
-      if (!customVal) {
-        this.showToast('Please enter a custom category name.', 'warning');
-        customCatInput.focus();
+      // 1. Service Name Validation
+      const name = nameInput.value.trim();
+      if (!name) {
+        this.showToast('Please enter a service name.', 'warning');
+        nameInput.focus();
         return;
       }
-      if (customVal.length < 2) {
-        this.showToast('Custom category name must be at least 2 characters long.', 'warning');
-        customCatInput.focus();
+      if (name.length < 2) {
+        this.showToast('Service name must be at least 2 characters long.', 'warning');
+        nameInput.focus();
         return;
       }
-      if (customVal.length > 50) {
-        this.showToast('Custom category name cannot exceed 50 characters.', 'warning');
-        customCatInput.focus();
+      if (name.length > 100) {
+        this.showToast('Service name cannot exceed 100 characters.', 'warning');
+        nameInput.focus();
         return;
       }
-    }
-    const finalCategory = rawCat === 'CUSTOM' ? customCatInput.value.trim() : rawCat;
-    const selectedOpt = categorySelect.options[categorySelect.selectedIndex];
-    const categoryId = selectedOpt ? selectedOpt.getAttribute('data-id') : null;
-    const matchedCat = categoryId ? null : (this.categoriesList || []).find((c) => c.name === finalCategory);
-    const finalCategoryId = categoryId || (matchedCat ? matchedCat.id : undefined);
 
-    // 3. Price Validation (Disallow ₹0, negative, NaN, infinite, > 5,00,000)
-    const rawPriceStr = priceInput.value.trim();
-    if (rawPriceStr === '') {
-      this.showToast('Please enter a price for this service.', 'warning');
-      priceInput.focus();
-      return;
-    }
-    const price = Number(rawPriceStr);
-    if (isNaN(price) || !Number.isFinite(price)) {
-      this.showToast('Please enter a valid numeric price.', 'warning');
-      priceInput.focus();
-      return;
-    }
-    if (price < 1) {
-      this.showToast('Service price must be at least ₹1. Free or ₹0 services are not allowed.', 'warning');
-      priceInput.focus();
-      return;
-    }
-    if (price > 500000) {
-      this.showToast('Service price cannot exceed ₹5,00,000.', 'warning');
-      priceInput.focus();
-      return;
-    }
-    if (rawPriceStr.includes('.') && rawPriceStr.split('.')[1].length > 2) {
-      this.showToast('Price can have at most 2 decimal places.', 'warning');
-      priceInput.focus();
-      return;
-    }
-
-    // 4. Duration Validation
-    const dur = parseInt(durationSelect.value, 10);
-    if (isNaN(dur) || dur < 15 || dur > 480 || dur % 15 !== 0) {
-      this.showToast('Service duration must be at least 15 minutes and a multiple of 15 (e.g. 30, 45, 60, 75, 90 mins).', 'warning');
-      return;
-    }
-
-    // 5. Target Audience Validation
-    const targetGender = genderInput?.value || 'UNISEX';
-    if (!['UNISEX', 'MALE', 'FEMALE', 'KIDS'].includes(targetGender)) {
-      this.showToast('Please select a valid target audience.', 'warning');
-      return;
-    }
-
-    // 6. Description Validation
-    const description = descInput.value.trim();
-    if (description.length > 500) {
-      this.showToast('Service description cannot exceed 500 characters.', 'warning');
-      descInput.focus();
-      return;
-    }
-
-    const selectedStylistIds = Array.from(document.querySelectorAll('.svc-staff-assign-chk:checked')).map((c) => c.value);
-
-    const payload = {
-      name,
-      price: Math.round(price * 100) / 100,
-      durationMinutes: dur,
-      category: finalCategory,
-      categoryId: finalCategoryId,
-      targetGender,
-      description,
-      stylistIds: selectedStylistIds,
-    };
-
-    // Instant UI response (0ms)
-    const tempId = `temp-svc-${Date.now()}`;
-    const optimisticService = {
-      id: tempId,
-      ...payload,
-      status: 'ACTIVE',
-      stylists: selectedStylistIds.map((id) => ({ stylistId: id })),
-      _isOptimistic: true,
-    };
-
-    this.servicesList = [optimisticService, ...this.servicesList];
-    modalContainer.innerHTML = '';
-    this.showToast(`Service "${payload.name}" created!`, 'success');
-    this.render();
-
-    // Background network sync
-    ApiClient.createService(payload).then((created) => {
-      if (created && created.id) {
-        this.servicesList = this.servicesList.map((s) => (s.id === tempId ? created : s));
-        this.render();
-        SalonRepository.invalidate('services');
+      // 2. Category Validation
+      const rawCat = categorySelect.value;
+      if (!rawCat) {
+        this.showToast('Please select a service category.', 'warning');
+        return;
       }
-    }).catch((err) => {
-      this.servicesList = this.servicesList.filter((s) => s.id !== tempId);
+      if (rawCat === 'CUSTOM') {
+        const customVal = customCatInput.value.trim();
+        if (!customVal) {
+          this.showToast('Please enter a custom category name.', 'warning');
+          customCatInput.focus();
+          return;
+        }
+        if (customVal.length < 2) {
+          this.showToast('Custom category name must be at least 2 characters long.', 'warning');
+          customCatInput.focus();
+          return;
+        }
+        if (customVal.length > 50) {
+          this.showToast('Custom category name cannot exceed 50 characters.', 'warning');
+          customCatInput.focus();
+          return;
+        }
+      }
+      const finalCategory = rawCat === 'CUSTOM' ? customCatInput.value.trim() : rawCat;
+      const selectedOpt = categorySelect.options[categorySelect.selectedIndex];
+      const categoryId = selectedOpt ? selectedOpt.getAttribute('data-id') : null;
+      const matchedCat = categoryId ? null : (this.categoriesList || []).find((c) => c.name === finalCategory);
+      const finalCategoryId = categoryId || (matchedCat ? matchedCat.id : undefined);
+
+      // 3. Price Validation (Disallow ₹0, negative, NaN, infinite, > 5,00,000)
+      const rawPriceStr = priceInput.value.trim();
+      if (rawPriceStr === '') {
+        this.showToast('Please enter a price for this service.', 'warning');
+        priceInput.focus();
+        return;
+      }
+      const price = Number(rawPriceStr);
+      if (isNaN(price) || !Number.isFinite(price)) {
+        this.showToast('Please enter a valid numeric price.', 'warning');
+        priceInput.focus();
+        return;
+      }
+      if (price < 1) {
+        this.showToast('Service price must be at least ₹1. Free or ₹0 services are not allowed.', 'warning');
+        priceInput.focus();
+        return;
+      }
+      if (price > 500000) {
+        this.showToast('Service price cannot exceed ₹5,00,000.', 'warning');
+        priceInput.focus();
+        return;
+      }
+      if (rawPriceStr.includes('.') && rawPriceStr.split('.')[1].length > 2) {
+        this.showToast('Price can have at most 2 decimal places.', 'warning');
+        priceInput.focus();
+        return;
+      }
+
+      // 4. Duration Validation
+      const dur = parseInt(durationSelect.value, 10);
+      if (isNaN(dur) || dur < 15 || dur > 480 || dur % 15 !== 0) {
+        this.showToast('Service duration must be at least 15 minutes and a multiple of 15 (e.g. 30, 45, 60, 75, 90 mins).', 'warning');
+        return;
+      }
+
+      // 5. Target Audience Validation
+      const targetGender = genderInput?.value || 'UNISEX';
+      if (!['UNISEX', 'MALE', 'FEMALE', 'KIDS'].includes(targetGender)) {
+        this.showToast('Please select a valid target audience.', 'warning');
+        return;
+      }
+
+      // 6. Description Validation
+      const description = descInput.value.trim();
+      if (description.length > 500) {
+        this.showToast('Service description cannot exceed 500 characters.', 'warning');
+        descInput.focus();
+        return;
+      }
+
+      const selectedStylistIds = Array.from(document.querySelectorAll('.svc-staff-assign-chk:checked')).map((c) => c.value);
+
+      const payload = {
+        name,
+        price: Math.round(price * 100) / 100,
+        durationMinutes: dur,
+        category: finalCategory,
+        categoryId: finalCategoryId,
+        targetGender,
+        description,
+        stylistIds: selectedStylistIds,
+      };
+
+      // Instant UI response (0ms)
+      const tempId = `temp-svc-${Date.now()}`;
+      const optimisticService = {
+        id: tempId,
+        ...payload,
+        status: 'ACTIVE',
+        stylists: selectedStylistIds.map((id) => ({ stylistId: id })),
+        _isOptimistic: true,
+      };
+
+      this.servicesList = [optimisticService, ...this.servicesList];
+      modalContainer.innerHTML = '';
+      this.showToast(`Service "${payload.name}" created!`, 'success');
       this.render();
-      this.showToast(`Failed to create service: ${err.message}`, 'error');
+
+      // Background network sync
+      ApiClient.createService(payload).then((created) => {
+        if (created && created.id) {
+          this.servicesList = this.servicesList.map((s) => (s.id === tempId ? created : s));
+          this.render();
+          SalonRepository.invalidate('services');
+        }
+      }).catch((err) => {
+        this.servicesList = this.servicesList.filter((s) => s.id !== tempId);
+        this.render();
+        this.showToast(`Failed to create service: ${err.message}`, 'error');
+      });
     });
-  });
-}
-
-showEditServiceModal(service) {
-  if (service?.id && String(service.id).startsWith('temp-')) {
-    this.showToast('Please wait a moment while this service finishes saving to the cloud...', 'info');
-    return;
   }
-  const modalContainer = this.getModalContainer();
-  const matchedCat = (this.categoriesList || []).find((c) => c.name === service.category);
-  const initialCatValue = matchedCat ? service.category : 'CUSTOM';
-  const activeStaff = (this.staffList || []).filter((st) => st.status === 'ACTIVE' || !st.status);
-  const currentAudience = (service.targetGender || 'UNISEX').toUpperCase();
-  const currentDuration = service.durationMinutes || 30;
 
-  const renderCatOptions = (selected = '') => {
-    if (!this.categoriesList || this.categoriesList.length === 0) {
-      return '<option value="General" selected>✂️ General Services</option><option value="CUSTOM">➕ Other / Custom Category...</option>';
+  showEditServiceModal(service) {
+    if (service?.id && String(service.id).startsWith('temp-')) {
+      this.showToast('Please wait a moment while this service finishes saving to the cloud...', 'info');
+      return;
     }
-    return this.categoriesList.map((c) => `<option value="${c.name}" data-id="${c.id}" ${c.name === selected ? 'selected' : ''}>${c.icon || '✂️'} ${c.name}</option>`).join('') + '<option value="CUSTOM">➕ Other / Custom Category...</option>';
-  };
+    const modalContainer = this.getModalContainer();
+    const matchedCat = (this.categoriesList || []).find((c) => c.name === service.category);
+    const initialCatValue = matchedCat ? service.category : 'CUSTOM';
+    const activeStaff = (this.staffList || []).filter((st) => st.status === 'ACTIVE' || !st.status);
+    const currentAudience = (service.targetGender || 'UNISEX').toUpperCase();
+    const currentDuration = service.durationMinutes || 30;
 
-  const initialAssignedCount = activeStaff.filter((st) =>
-    (service.stylists || []).some((s) => String(s.stylistId || s.stylist?.id || s.id) === String(st.id))
-  ).length;
+    const renderCatOptions = (selected = '') => {
+      if (!this.categoriesList || this.categoriesList.length === 0) {
+        return '<option value="General" selected>✂️ General Services</option><option value="CUSTOM">➕ Other / Custom Category...</option>';
+      }
+      return this.categoriesList.map((c) => `<option value="${c.name}" data-id="${c.id}" ${c.name === selected ? 'selected' : ''}>${formatCategoryIcon(c.icon)} ${c.name}</option>`).join('') + '<option value="CUSTOM">➕ Other / Custom Category...</option>';
+    };
 
-  let initialStaffLabel = 'No Stylists Assigned';
-  if (initialAssignedCount === activeStaff.length && activeStaff.length > 0) {
-    initialStaffLabel = `All Stylists Assigned (${activeStaff.length})`;
-  } else if (initialAssignedCount === 1) {
-    const oneSt = activeStaff.find((st) => (service.stylists || []).some((s) => String(s.stylistId || s.stylist?.id || s.id) === String(st.id)));
-    initialStaffLabel = oneSt ? oneSt.name : '1 Stylist Assigned';
-  } else if (initialAssignedCount > 0) {
-    initialStaffLabel = `${initialAssignedCount} Stylists Assigned`;
-  }
+    const initialAssignedCount = activeStaff.filter((st) =>
+      (service.stylists || []).some((s) => String(s.stylistId || s.stylist?.id || s.id) === String(st.id))
+    ).length;
 
-  const catList = (this.categoriesList && this.categoriesList.length > 0)
-    ? this.categoriesList
-    : [{ id: 'cat-general', name: 'General', icon: '✂️' }];
+    let initialStaffLabel = 'No Stylists Assigned';
+    if (initialAssignedCount === activeStaff.length && activeStaff.length > 0) {
+      initialStaffLabel = `All Stylists Assigned (${activeStaff.length})`;
+    } else if (initialAssignedCount === 1) {
+      const oneSt = activeStaff.find((st) => (service.stylists || []).some((s) => String(s.stylistId || s.stylist?.id || s.id) === String(st.id)));
+      initialStaffLabel = oneSt ? oneSt.name : '1 Stylist Assigned';
+    } else if (initialAssignedCount > 0) {
+      initialStaffLabel = `${initialAssignedCount} Stylists Assigned`;
+    }
 
-  let editSelectedCatName = matchedCat ? service.category : (service.category || 'General');
-  let editSelectedCatIcon = matchedCat?.icon || '✂️';
-  if (!matchedCat && service.category) {
-    editSelectedCatName = 'CUSTOM';
-    editSelectedCatIcon = '➕';
-  }
+    const catList = (this.categoriesList && this.categoriesList.length > 0)
+      ? this.categoriesList
+      : [{ id: 'cat-general', name: 'General', icon: '✂️' }];
 
-  const matchedDur = SERVICE_DURATION_OPTIONS.find((opt) => opt.value === currentDuration);
-  const initialDurLabel = matchedDur ? matchedDur.label : `${currentDuration} mins`;
+    let editSelectedCatName = matchedCat ? service.category : (service.category || 'General');
+    let editSelectedCatIcon = matchedCat?.icon || '✂️';
+    if (!matchedCat && service.category) {
+      editSelectedCatName = 'CUSTOM';
+      editSelectedCatIcon = '➕';
+    }
 
-  modalContainer.innerHTML = `
+    const matchedDur = SERVICE_DURATION_OPTIONS.find((opt) => opt.value === currentDuration);
+    const initialDurLabel = matchedDur ? matchedDur.label : `${currentDuration} mins`;
+
+    modalContainer.innerHTML = `
       <div class="modal-backdrop show">
         <div class="modal-content modal-content-md service-modal-form" style="max-height: 90vh; overflow-y: auto; padding: 24px; max-width: 520px; width: 100%;">
           <!-- Header (Compact, no subtitle) -->
@@ -12467,9 +12184,9 @@ showEditServiceModal(service) {
 
                 <div class="custom-select-menu" id="edit-svc-cat-custom-menu">
                   ${catList.map((c) => `
-                    <div class="custom-select-option ${c.name === editSelectedCatName ? 'selected' : ''}" data-value="${c.name}" data-icon="${c.icon || '✂️'}" data-id="${c.id || ''}">
+                    <div class="custom-select-option ${c.name === editSelectedCatName ? 'selected' : ''}" data-value="${c.name}" data-icon="${formatCategoryIcon(c.icon)}" data-id="${c.id || ''}">
                       <div style="display: flex; align-items: center; gap: 8px;">
-                        <span>${c.icon || '✂️'}</span>
+                        <span>${formatCategoryIcon(c.icon)}</span>
                         <span>${c.name}</span>
                       </div>
                       ${c.name === editSelectedCatName ? '<span class="custom-select-opt-check">✓</span>' : ''}
@@ -12600,9 +12317,9 @@ showEditServiceModal(service) {
                     ${activeStaff.length === 0 ? `
                       <div style="font-size: 0.8rem; color: var(--text-muted); padding: 12px; text-align: center;">No active stylists in salon yet.</div>
                     ` : activeStaff.map((st) => {
-    const isAssigned = (service.stylists || []).some((s) => String(s.stylistId || s.stylist?.id || s.id) === String(st.id));
-    const initials = st.name.split(' ').map((n) => n[0]).join('').substring(0, 2).toUpperCase();
-    return `
+      const isAssigned = (service.stylists || []).some((s) => String(s.stylistId || s.stylist?.id || s.id) === String(st.id));
+      const initials = st.name.split(' ').map((n) => n[0]).join('').substring(0, 2).toUpperCase();
+      return `
                         <div class="svc-staff-dd-item ${isAssigned ? 'selected' : ''}" data-id="${st.id}" data-name="${st.name.toLowerCase()}">
                           <input type="checkbox" class="edit-svc-staff-assign-chk" value="${st.id}" ${isAssigned ? 'checked' : ''} style="display: none;" />
                           <div class="svc-staff-dd-checkbox">✓</div>
@@ -12610,7 +12327,7 @@ showEditServiceModal(service) {
                           <span class="svc-staff-name" title="${st.name}">${st.name}</span>
                         </div>
                       `;
-  }).join('')}
+    }).join('')}
                   </div>
 
                   <div class="svc-staff-dd-footer">
@@ -12638,196 +12355,196 @@ showEditServiceModal(service) {
       </div>
     `;
 
-  document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+    document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
 
-  const categorySelect = document.getElementById('edit-svc-category-select');
-  const customCatGroup = document.getElementById('edit-svc-custom-cat-group');
-  const customCatInput = document.getElementById('edit-svc-custom-cat-input');
-  const durationSelect = document.getElementById('edit-svc-duration');
-  const genderInput = document.getElementById('edit-svc-gender');
-  const editPriceInput = document.getElementById('edit-svc-price');
+    const categorySelect = document.getElementById('edit-svc-category-select');
+    const customCatGroup = document.getElementById('edit-svc-custom-cat-group');
+    const customCatInput = document.getElementById('edit-svc-custom-cat-input');
+    const durationSelect = document.getElementById('edit-svc-duration');
+    const genderInput = document.getElementById('edit-svc-gender');
+    const editPriceInput = document.getElementById('edit-svc-price');
 
-  // Real-time price sanitization: disallow exponential 'e', negative '-', plus '+', and clamp > 500000
-  editPriceInput?.addEventListener('keydown', (e) => {
-    if (['e', 'E', '+', '-'].includes(e.key)) {
-      e.preventDefault();
-    }
-  });
-  editPriceInput?.addEventListener('input', () => {
-    let val = editPriceInput.value;
-    if (val.includes('-')) {
-      editPriceInput.value = val.replace(/-/g, '');
-    }
-    const num = parseFloat(editPriceInput.value);
-    if (!isNaN(num) && num > 500000) {
-      editPriceInput.value = '500000';
-    }
-  });
-
-  // Audience toggle buttons
-  document.querySelectorAll('.edit-svc-aud-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.edit-svc-aud-btn').forEach((b) => b.classList.remove('selected'));
-      btn.classList.add('selected');
-      if (genderInput) genderInput.value = btn.getAttribute('data-val');
+    // Real-time price sanitization: disallow exponential 'e', negative '-', plus '+', and clamp > 500000
+    editPriceInput?.addEventListener('keydown', (e) => {
+      if (['e', 'E', '+', '-'].includes(e.key)) {
+        e.preventDefault();
+      }
     });
-  });
-
-  // Multi-Select Stylist Dropdown Interactions (Edit Modal)
-  const editDdWrapper = document.getElementById('edit-svc-staff-dd-wrapper');
-  const editDdTrigger = document.getElementById('edit-svc-staff-dd-trigger');
-  const editDdMenu = document.getElementById('edit-svc-staff-dd-menu');
-  const editDdChevron = document.getElementById('edit-svc-staff-dd-chevron');
-  const editDdSearch = document.getElementById('edit-svc-staff-search');
-  const editDdLabelText = document.getElementById('edit-svc-staff-dd-label-text');
-  const editDdBadge = document.getElementById('edit-svc-staff-dd-badge');
-  const editDdHint = document.getElementById('edit-svc-staff-hint');
-  const editDdFooterCount = document.getElementById('edit-svc-staff-dd-footer-count');
-  const editDdDoneBtn = document.getElementById('edit-svc-staff-dd-done-btn');
-  const editDdSelectAll = document.getElementById('edit-svc-staff-select-all');
-  const editDdClearAll = document.getElementById('edit-svc-staff-clear-all');
-
-  const updateEditStaffDropdownState = () => {
-    const items = Array.from(document.querySelectorAll('#edit-svc-staff-dd-list .svc-staff-dd-item'));
-    const total = items.length;
-    if (total === 0) return;
-    const checkedItems = items.filter((it) => {
-      const chk = it.querySelector('.edit-svc-staff-assign-chk');
-      return chk && chk.checked;
+    editPriceInput?.addEventListener('input', () => {
+      let val = editPriceInput.value;
+      if (val.includes('-')) {
+        editPriceInput.value = val.replace(/-/g, '');
+      }
+      const num = parseFloat(editPriceInput.value);
+      if (!isNaN(num) && num > 500000) {
+        editPriceInput.value = '500000';
+      }
     });
-    const checkedCount = checkedItems.length;
 
-    if (editDdBadge) editDdBadge.textContent = `${checkedCount}/${total}`;
-    const editCountText = document.getElementById('edit-svc-staff-dd-count-text');
-    if (editCountText) editCountText.textContent = `${checkedCount} of ${total} selected`;
-
-    if (checkedCount === total) {
-      if (editDdLabelText) editDdLabelText.textContent = `All Stylists Assigned (${total})`;
-      if (editDdHint) editDdHint.textContent = `All ${total} Stylists Assigned`;
-    } else if (checkedCount === 0) {
-      if (editDdLabelText) editDdLabelText.textContent = `No Stylists Assigned`;
-      if (editDdHint) editDdHint.textContent = `0 Selected`;
-    } else if (checkedCount === 1) {
-      const name = checkedItems[0].querySelector('.svc-staff-name')?.textContent || '1 Stylist';
-      if (editDdLabelText) editDdLabelText.textContent = name;
-      if (editDdHint) editDdHint.textContent = `1 of ${total} Selected`;
-    } else if (checkedCount === 2) {
-      const names = checkedItems.map((it) => it.querySelector('.svc-staff-name')?.textContent || '').filter(Boolean).join(', ');
-      if (editDdLabelText) editDdLabelText.textContent = names;
-      if (editDdHint) editDdHint.textContent = `2 of ${total} Selected`;
-    } else {
-      if (editDdLabelText) editDdLabelText.textContent = `${checkedCount} Stylists Assigned`;
-      if (editDdHint) editDdHint.textContent = `${checkedCount} of ${total} Selected`;
-    }
-  };
-
-  const toggleEditDdMenu = (forceOpen) => {
-    if (!editDdMenu) return;
-    const isOpen = forceOpen !== undefined ? forceOpen : !editDdMenu.classList.contains('open');
-    editDdMenu.classList.toggle('open', isOpen);
-    editDdTrigger?.classList.toggle('active', isOpen);
-    editDdChevron?.classList.toggle('open', isOpen);
-    if (isOpen && editDdSearch) {
-      editDdSearch.value = '';
-      editDdSearch.focus({ preventScroll: true });
-      document.querySelectorAll('#edit-svc-staff-dd-list .svc-staff-dd-item').forEach((it) => (it.style.display = 'flex'));
-    }
-  };
-
-  editDdTrigger?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    toggleEditDdMenu();
-  });
-
-  editDdDoneBtn?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    toggleEditDdMenu(false);
-  });
-
-  editDdSearch?.addEventListener('input', (e) => {
-    const q = (e.target.value || '').toLowerCase().trim();
-    document.querySelectorAll('#edit-svc-staff-dd-list .svc-staff-dd-item').forEach((it) => {
-      const name = (it.getAttribute('data-name') || '').toLowerCase();
-      it.style.display = name.includes(q) ? 'flex' : 'none';
+    // Audience toggle buttons
+    document.querySelectorAll('.edit-svc-aud-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.edit-svc-aud-btn').forEach((b) => b.classList.remove('selected'));
+        btn.classList.add('selected');
+        if (genderInput) genderInput.value = btn.getAttribute('data-val');
+      });
     });
-  });
 
-  editDdSearch?.addEventListener('click', (e) => e.stopPropagation());
+    // Multi-Select Stylist Dropdown Interactions (Edit Modal)
+    const editDdWrapper = document.getElementById('edit-svc-staff-dd-wrapper');
+    const editDdTrigger = document.getElementById('edit-svc-staff-dd-trigger');
+    const editDdMenu = document.getElementById('edit-svc-staff-dd-menu');
+    const editDdChevron = document.getElementById('edit-svc-staff-dd-chevron');
+    const editDdSearch = document.getElementById('edit-svc-staff-search');
+    const editDdLabelText = document.getElementById('edit-svc-staff-dd-label-text');
+    const editDdBadge = document.getElementById('edit-svc-staff-dd-badge');
+    const editDdHint = document.getElementById('edit-svc-staff-hint');
+    const editDdFooterCount = document.getElementById('edit-svc-staff-dd-footer-count');
+    const editDdDoneBtn = document.getElementById('edit-svc-staff-dd-done-btn');
+    const editDdSelectAll = document.getElementById('edit-svc-staff-select-all');
+    const editDdClearAll = document.getElementById('edit-svc-staff-clear-all');
 
-  document.querySelectorAll('#edit-svc-staff-dd-list .svc-staff-dd-item').forEach((item) => {
-    item.addEventListener('click', (e) => {
+    const updateEditStaffDropdownState = () => {
+      const items = Array.from(document.querySelectorAll('#edit-svc-staff-dd-list .svc-staff-dd-item'));
+      const total = items.length;
+      if (total === 0) return;
+      const checkedItems = items.filter((it) => {
+        const chk = it.querySelector('.edit-svc-staff-assign-chk');
+        return chk && chk.checked;
+      });
+      const checkedCount = checkedItems.length;
+
+      if (editDdBadge) editDdBadge.textContent = `${checkedCount}/${total}`;
+      const editCountText = document.getElementById('edit-svc-staff-dd-count-text');
+      if (editCountText) editCountText.textContent = `${checkedCount} of ${total} selected`;
+
+      if (checkedCount === total) {
+        if (editDdLabelText) editDdLabelText.textContent = `All Stylists Assigned (${total})`;
+        if (editDdHint) editDdHint.textContent = `All ${total} Stylists Assigned`;
+      } else if (checkedCount === 0) {
+        if (editDdLabelText) editDdLabelText.textContent = `No Stylists Assigned`;
+        if (editDdHint) editDdHint.textContent = `0 Selected`;
+      } else if (checkedCount === 1) {
+        const name = checkedItems[0].querySelector('.svc-staff-name')?.textContent || '1 Stylist';
+        if (editDdLabelText) editDdLabelText.textContent = name;
+        if (editDdHint) editDdHint.textContent = `1 of ${total} Selected`;
+      } else if (checkedCount === 2) {
+        const names = checkedItems.map((it) => it.querySelector('.svc-staff-name')?.textContent || '').filter(Boolean).join(', ');
+        if (editDdLabelText) editDdLabelText.textContent = names;
+        if (editDdHint) editDdHint.textContent = `2 of ${total} Selected`;
+      } else {
+        if (editDdLabelText) editDdLabelText.textContent = `${checkedCount} Stylists Assigned`;
+        if (editDdHint) editDdHint.textContent = `${checkedCount} of ${total} Selected`;
+      }
+    };
+
+    const toggleEditDdMenu = (forceOpen) => {
+      if (!editDdMenu) return;
+      const isOpen = forceOpen !== undefined ? forceOpen : !editDdMenu.classList.contains('open');
+      editDdMenu.classList.toggle('open', isOpen);
+      editDdTrigger?.classList.toggle('active', isOpen);
+      editDdChevron?.classList.toggle('open', isOpen);
+      if (isOpen && editDdSearch) {
+        editDdSearch.value = '';
+        editDdSearch.focus({ preventScroll: true });
+        document.querySelectorAll('#edit-svc-staff-dd-list .svc-staff-dd-item').forEach((it) => (it.style.display = 'flex'));
+      }
+    };
+
+    editDdTrigger?.addEventListener('click', (e) => {
       e.stopPropagation();
-      const chk = item.querySelector('.edit-svc-staff-assign-chk');
-      if (!chk) return;
-      chk.checked = !chk.checked;
-      item.classList.toggle('selected', chk.checked);
+      toggleEditDdMenu();
+    });
+
+    editDdDoneBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleEditDdMenu(false);
+    });
+
+    editDdSearch?.addEventListener('input', (e) => {
+      const q = (e.target.value || '').toLowerCase().trim();
+      document.querySelectorAll('#edit-svc-staff-dd-list .svc-staff-dd-item').forEach((it) => {
+        const name = (it.getAttribute('data-name') || '').toLowerCase();
+        it.style.display = name.includes(q) ? 'flex' : 'none';
+      });
+    });
+
+    editDdSearch?.addEventListener('click', (e) => e.stopPropagation());
+
+    document.querySelectorAll('#edit-svc-staff-dd-list .svc-staff-dd-item').forEach((item) => {
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const chk = item.querySelector('.edit-svc-staff-assign-chk');
+        if (!chk) return;
+        chk.checked = !chk.checked;
+        item.classList.toggle('selected', chk.checked);
+        updateEditStaffDropdownState();
+      });
+    });
+
+    editDdSelectAll?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.querySelectorAll('#edit-svc-staff-dd-list .svc-staff-dd-item').forEach((it) => {
+        const chk = it.querySelector('.edit-svc-staff-assign-chk');
+        if (chk) chk.checked = true;
+        it.classList.add('selected');
+      });
       updateEditStaffDropdownState();
     });
-  });
 
-  editDdSelectAll?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    document.querySelectorAll('#edit-svc-staff-dd-list .svc-staff-dd-item').forEach((it) => {
-      const chk = it.querySelector('.edit-svc-staff-assign-chk');
-      if (chk) chk.checked = true;
-      it.classList.add('selected');
+    editDdClearAll?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.querySelectorAll('#edit-svc-staff-dd-list .svc-staff-dd-item').forEach((it) => {
+        const chk = it.querySelector('.edit-svc-staff-assign-chk');
+        if (chk) chk.checked = false;
+        it.classList.remove('selected');
+      });
+      updateEditStaffDropdownState();
     });
-    updateEditStaffDropdownState();
-  });
 
-  editDdClearAll?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    document.querySelectorAll('#edit-svc-staff-dd-list .svc-staff-dd-item').forEach((it) => {
-      const chk = it.querySelector('.edit-svc-staff-assign-chk');
-      if (chk) chk.checked = false;
-      it.classList.remove('selected');
+    const onEditModalClickOutside = (e) => {
+      if (editDdWrapper && !editDdWrapper.contains(e.target)) {
+        toggleEditDdMenu(false);
+      }
+    };
+    document.addEventListener('click', onEditModalClickOutside);
+
+    // Inline category toggle & creation
+    const inlineBox = document.getElementById('edit-svc-inline-cat-box');
+    setupCategoryIconPicker('edit-inline-cat-icon-btn', 'edit-inline-cat-icon-preview', 'edit-inline-cat-icon', 'edit-inline-cat-icon-picker');
+    document.getElementById('edit-btn-toggle-inline-cat')?.addEventListener('click', () => {
+      inlineBox.style.display = inlineBox.style.display === 'none' ? 'block' : 'none';
+      if (inlineBox.style.display === 'block') {
+        document.getElementById('edit-inline-cat-name')?.focus();
+      }
     });
-    updateEditStaffDropdownState();
-  });
 
-  const onEditModalClickOutside = (e) => {
-    if (editDdWrapper && !editDdWrapper.contains(e.target)) {
-      toggleEditDdMenu(false);
-    }
-  };
-  document.addEventListener('click', onEditModalClickOutside);
+    document.getElementById('edit-btn-close-inline-cat')?.addEventListener('click', () => {
+      inlineBox.style.display = 'none';
+    });
 
-  // Inline category toggle & creation
-  const inlineBox = document.getElementById('edit-svc-inline-cat-box');
-  setupCategoryIconPicker('edit-inline-cat-icon-btn', 'edit-inline-cat-icon-preview', 'edit-inline-cat-icon', 'edit-inline-cat-icon-picker');
-  document.getElementById('edit-btn-toggle-inline-cat')?.addEventListener('click', () => {
-    inlineBox.style.display = inlineBox.style.display === 'none' ? 'block' : 'none';
-    if (inlineBox.style.display === 'block') {
-      document.getElementById('edit-inline-cat-name')?.focus();
-    }
-  });
+    document.getElementById('edit-btn-save-inline-cat')?.addEventListener('click', async () => {
+      const catName = document.getElementById('edit-inline-cat-name')?.value.trim();
+      const catIcon = document.getElementById('edit-inline-cat-icon')?.value.trim() || '✂️';
+      if (!catName) return;
 
-  document.getElementById('edit-btn-close-inline-cat')?.addEventListener('click', () => {
-    inlineBox.style.display = 'none';
-  });
+      try {
+        const newCat = await ApiClient.createServiceCategory({ name: catName, icon: catIcon });
+        this.categoriesList = await ApiClient.getServiceCategories(true).catch(() => [
+          ...(this.categoriesList || []),
+          newCat || { id: `cat-${Date.now()}`, name: catName, icon: catIcon },
+        ]);
+        categorySelect.innerHTML = renderCatOptions(catName);
+        categorySelect.value = catName;
+        if (editCatSelectedIcon) editCatSelectedIcon.textContent = catIcon;
+        if (editCatSelectedName) editCatSelectedName.textContent = catName;
 
-  document.getElementById('edit-btn-save-inline-cat')?.addEventListener('click', async () => {
-    const catName = document.getElementById('edit-inline-cat-name')?.value.trim();
-    const catIcon = document.getElementById('edit-inline-cat-icon')?.value.trim() || '✂️';
-    if (!catName) return;
-
-    try {
-      const newCat = await ApiClient.createServiceCategory({ name: catName, icon: catIcon });
-      this.categoriesList = await ApiClient.getServiceCategories(true).catch(() => [
-        ...(this.categoriesList || []),
-        newCat || { id: `cat-${Date.now()}`, name: catName, icon: catIcon },
-      ]);
-      categorySelect.innerHTML = renderCatOptions(catName);
-      categorySelect.value = catName;
-      if (editCatSelectedIcon) editCatSelectedIcon.textContent = catIcon;
-      if (editCatSelectedName) editCatSelectedName.textContent = catName;
-
-      if (editCatMenu) {
-        editCatMenu.innerHTML = `
+        if (editCatMenu) {
+          editCatMenu.innerHTML = `
             ${this.categoriesList.map((c) => `
-              <div class="custom-select-option ${c.name === catName ? 'selected' : ''}" data-value="${c.name}" data-icon="${c.icon || '✂️'}" data-id="${c.id || ''}">
+              <div class="custom-select-option ${c.name === catName ? 'selected' : ''}" data-value="${c.name}" data-icon="${formatCategoryIcon(c.icon)}" data-id="${c.id || ''}">
                 <div style="display: flex; align-items: center; gap: 8px;">
-                  <span>${c.icon || '✂️'}</span>
+                  <span>${formatCategoryIcon(c.icon)}</span>
                   <span>${c.name}</span>
                 </div>
                 ${c.name === catName ? '<span class="custom-select-opt-check">✓</span>' : ''}
@@ -12840,61 +12557,110 @@ showEditServiceModal(service) {
               </div>
             </div>
           `;
-        bindEditCatOptions();
+          bindEditCatOptions();
+        }
+
+        inlineBox.style.display = 'none';
+        document.getElementById('edit-inline-cat-name').value = '';
+        const hiddenCatIcon = document.getElementById('edit-inline-cat-icon');
+        if (hiddenCatIcon) hiddenCatIcon.value = '✂️';
+        const previewCatIcon = document.getElementById('edit-inline-cat-icon-preview');
+        if (previewCatIcon) previewCatIcon.textContent = '✂️';
+        this.showToast(`Category "${catName}" added!`, 'success');
+      } catch (err) {
+        this.showToast(err.message || 'Failed to create category', 'error');
       }
+    });
 
-      inlineBox.style.display = 'none';
-      document.getElementById('edit-inline-cat-name').value = '';
-      const hiddenCatIcon = document.getElementById('edit-inline-cat-icon');
-      if (hiddenCatIcon) hiddenCatIcon.value = '✂️';
-      const previewCatIcon = document.getElementById('edit-inline-cat-icon-preview');
-      if (previewCatIcon) previewCatIcon.textContent = '✂️';
-      this.showToast(`Category "${catName}" added!`, 'success');
-    } catch (err) {
-      this.showToast(err.message || 'Failed to create category', 'error');
-    }
-  });
+    // Custom Category Dropdown Interactions (Edit Modal)
+    const editCatContainer = document.getElementById('edit-svc-cat-custom-container');
+    const editCatTrigger = document.getElementById('edit-svc-cat-custom-trigger');
+    const editCatMenu = document.getElementById('edit-svc-cat-custom-menu');
+    const editCatChevron = document.getElementById('edit-svc-cat-custom-chevron');
+    const editCatSelectedIcon = document.getElementById('edit-svc-cat-selected-icon');
+    const editCatSelectedName = document.getElementById('edit-svc-cat-selected-name');
 
-  // Custom Category Dropdown Interactions (Edit Modal)
-  const editCatContainer = document.getElementById('edit-svc-cat-custom-container');
-  const editCatTrigger = document.getElementById('edit-svc-cat-custom-trigger');
-  const editCatMenu = document.getElementById('edit-svc-cat-custom-menu');
-  const editCatChevron = document.getElementById('edit-svc-cat-custom-chevron');
-  const editCatSelectedIcon = document.getElementById('edit-svc-cat-selected-icon');
-  const editCatSelectedName = document.getElementById('edit-svc-cat-selected-name');
+    const toggleEditCatMenu = (forceOpen) => {
+      if (!editCatMenu) return;
+      const isOpen = forceOpen !== undefined ? forceOpen : !editCatMenu.classList.contains('open');
+      editCatMenu.classList.toggle('open', isOpen);
+      editCatTrigger?.classList.toggle('active', isOpen);
+      editCatChevron?.classList.toggle('open', isOpen);
+    };
 
-  const toggleEditCatMenu = (forceOpen) => {
-    if (!editCatMenu) return;
-    const isOpen = forceOpen !== undefined ? forceOpen : !editCatMenu.classList.contains('open');
-    editCatMenu.classList.toggle('open', isOpen);
-    editCatTrigger?.classList.toggle('active', isOpen);
-    editCatChevron?.classList.toggle('open', isOpen);
-  };
+    editCatTrigger?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleEditDdMenu?.(false);
+      toggleEditDurMenu?.(false);
+      toggleEditCatMenu();
+    });
 
-  editCatTrigger?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    toggleEditDdMenu?.(false);
-    toggleEditDurMenu?.(false);
-    toggleEditCatMenu();
-  });
+    const bindEditCatOptions = () => {
+      editCatMenu?.querySelectorAll('.custom-select-option').forEach((opt) => {
+        opt.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const val = opt.getAttribute('data-value');
+          const icon = opt.getAttribute('data-icon') || '✂️';
+          const name = opt.querySelector('span:nth-child(2)')?.textContent || val;
 
-  const bindEditCatOptions = () => {
-    editCatMenu?.querySelectorAll('.custom-select-option').forEach((opt) => {
+          if (categorySelect) {
+            categorySelect.value = val;
+            categorySelect.dispatchEvent(new Event('change'));
+          }
+
+          if (editCatSelectedIcon) editCatSelectedIcon.textContent = icon;
+          if (editCatSelectedName) editCatSelectedName.textContent = val === 'CUSTOM' ? 'Custom Category' : name;
+
+          editCatMenu.querySelectorAll('.custom-select-option').forEach((o) => {
+            o.classList.toggle('selected', o === opt);
+            const check = o.querySelector('.custom-select-opt-check');
+            if (check) check.remove();
+            if (o === opt) {
+              const checkSpan = document.createElement('span');
+              checkSpan.className = 'custom-select-opt-check';
+              checkSpan.textContent = '✓';
+              o.appendChild(checkSpan);
+            }
+          });
+
+          toggleEditCatMenu(false);
+        });
+      });
+    };
+    bindEditCatOptions();
+
+    // Custom Duration Dropdown Interactions (Edit Modal)
+    const editDurContainer = document.getElementById('edit-svc-dur-custom-container');
+    const editDurTrigger = document.getElementById('edit-svc-dur-custom-trigger');
+    const editDurMenu = document.getElementById('edit-svc-dur-custom-menu');
+    const editDurChevron = document.getElementById('edit-svc-dur-custom-chevron');
+    const editDurLabel = document.getElementById('edit-svc-dur-selected-label');
+    const editDurSelect = document.getElementById('edit-svc-duration');
+
+    const toggleEditDurMenu = (forceOpen) => {
+      if (!editDurMenu) return;
+      const isOpen = forceOpen !== undefined ? forceOpen : !editDurMenu.classList.contains('open');
+      editDurMenu.classList.toggle('open', isOpen);
+      editDurTrigger?.classList.toggle('active', isOpen);
+      editDurChevron?.classList.toggle('open', isOpen);
+    };
+
+    editDurTrigger?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleEditDdMenu?.(false);
+      toggleEditCatMenu?.(false);
+      toggleEditDurMenu();
+    });
+
+    editDurMenu?.querySelectorAll('.custom-select-option').forEach((opt) => {
       opt.addEventListener('click', (e) => {
         e.stopPropagation();
         const val = opt.getAttribute('data-value');
-        const icon = opt.getAttribute('data-icon') || '✂️';
-        const name = opt.querySelector('span:nth-child(2)')?.textContent || val;
+        const text = opt.querySelector('span')?.textContent || `${val} mins`;
+        if (editDurSelect) editDurSelect.value = val;
+        if (editDurLabel) editDurLabel.textContent = text;
 
-        if (categorySelect) {
-          categorySelect.value = val;
-          categorySelect.dispatchEvent(new Event('change'));
-        }
-
-        if (editCatSelectedIcon) editCatSelectedIcon.textContent = icon;
-        if (editCatSelectedName) editCatSelectedName.textContent = val === 'CUSTOM' ? 'Custom Category' : name;
-
-        editCatMenu.querySelectorAll('.custom-select-option').forEach((o) => {
+        editDurMenu.querySelectorAll('.custom-select-option').forEach((o) => {
           o.classList.toggle('selected', o === opt);
           const check = o.querySelector('.custom-select-opt-check');
           if (check) check.remove();
@@ -12905,226 +12671,177 @@ showEditServiceModal(service) {
             o.appendChild(checkSpan);
           }
         });
-
-        toggleEditCatMenu(false);
+        toggleEditDurMenu(false);
       });
     });
-  };
-  bindEditCatOptions();
 
-  // Custom Duration Dropdown Interactions (Edit Modal)
-  const editDurContainer = document.getElementById('edit-svc-dur-custom-container');
-  const editDurTrigger = document.getElementById('edit-svc-dur-custom-trigger');
-  const editDurMenu = document.getElementById('edit-svc-dur-custom-menu');
-  const editDurChevron = document.getElementById('edit-svc-dur-custom-chevron');
-  const editDurLabel = document.getElementById('edit-svc-dur-selected-label');
-  const editDurSelect = document.getElementById('edit-svc-duration');
+    document.addEventListener('click', (e) => {
+      if (editCatContainer && !editCatContainer.contains(e.target)) toggleEditCatMenu(false);
+      if (editDurContainer && !editDurContainer.contains(e.target)) toggleEditDurMenu(false);
+    });
 
-  const toggleEditDurMenu = (forceOpen) => {
-    if (!editDurMenu) return;
-    const isOpen = forceOpen !== undefined ? forceOpen : !editDurMenu.classList.contains('open');
-    editDurMenu.classList.toggle('open', isOpen);
-    editDurTrigger?.classList.toggle('active', isOpen);
-    editDurChevron?.classList.toggle('open', isOpen);
-  };
+    categorySelect?.addEventListener('change', (e) => {
+      if (e.target.value === 'CUSTOM') {
+        customCatGroup.style.display = 'block';
+      } else {
+        customCatGroup.style.display = 'none';
+      }
+    });
 
-  editDurTrigger?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    toggleEditDdMenu?.(false);
-    toggleEditCatMenu?.(false);
-    toggleEditDurMenu();
-  });
+    document.getElementById('edit-service-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const submitBtn = document.getElementById('btn-submit-edit-svc') || e.target.querySelector('button[type="submit"]');
 
-  editDurMenu?.querySelectorAll('.custom-select-option').forEach((opt) => {
-    opt.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const val = opt.getAttribute('data-value');
-      const text = opt.querySelector('span')?.textContent || `${val} mins`;
-      if (editDurSelect) editDurSelect.value = val;
-      if (editDurLabel) editDurLabel.textContent = text;
+      const nameInput = document.getElementById('edit-svc-name');
+      const priceInput = document.getElementById('edit-svc-price');
+      const durInput = document.getElementById('edit-svc-duration');
+      const descInput = document.getElementById('edit-svc-desc');
 
-      editDurMenu.querySelectorAll('.custom-select-option').forEach((o) => {
-        o.classList.toggle('selected', o === opt);
-        const check = o.querySelector('.custom-select-opt-check');
-        if (check) check.remove();
-        if (o === opt) {
-          const checkSpan = document.createElement('span');
-          checkSpan.className = 'custom-select-opt-check';
-          checkSpan.textContent = '✓';
-          o.appendChild(checkSpan);
+      // 1. Service Name Validation
+      const name = (nameInput?.value || '').trim();
+      if (!name) {
+        this.showToast('Please enter a service name.', 'warning');
+        nameInput?.focus();
+        return;
+      }
+      if (name.length < 2) {
+        this.showToast('Service name must be at least 2 characters long.', 'warning');
+        nameInput?.focus();
+        return;
+      }
+      if (name.length > 100) {
+        this.showToast('Service name cannot exceed 100 characters.', 'warning');
+        nameInput?.focus();
+        return;
+      }
+
+      // 2. Category Validation
+      const rawCat = categorySelect.value;
+      if (!rawCat) {
+        this.showToast('Please select a service category.', 'warning');
+        return;
+      }
+      if (rawCat === 'CUSTOM') {
+        const customVal = customCatInput.value.trim();
+        if (!customVal) {
+          this.showToast('Please enter a custom category name.', 'warning');
+          customCatInput.focus();
+          return;
         }
-      });
-      toggleEditDurMenu(false);
-    });
-  });
+        if (customVal.length < 2) {
+          this.showToast('Custom category name must be at least 2 characters long.', 'warning');
+          customCatInput.focus();
+          return;
+        }
+        if (customVal.length > 50) {
+          this.showToast('Custom category name cannot exceed 50 characters.', 'warning');
+          customCatInput.focus();
+          return;
+        }
+      }
+      const finalCategory = rawCat === 'CUSTOM' ? (customCatInput.value.trim() || 'General') : rawCat;
 
-  document.addEventListener('click', (e) => {
-    if (editCatContainer && !editCatContainer.contains(e.target)) toggleEditCatMenu(false);
-    if (editDurContainer && !editDurContainer.contains(e.target)) toggleEditDurMenu(false);
-  });
-
-  categorySelect?.addEventListener('change', (e) => {
-    if (e.target.value === 'CUSTOM') {
-      customCatGroup.style.display = 'block';
-    } else {
-      customCatGroup.style.display = 'none';
-    }
-  });
-
-  document.getElementById('edit-service-form')?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const submitBtn = document.getElementById('btn-submit-edit-svc') || e.target.querySelector('button[type="submit"]');
-
-    const nameInput = document.getElementById('edit-svc-name');
-    const priceInput = document.getElementById('edit-svc-price');
-    const durInput = document.getElementById('edit-svc-duration');
-    const descInput = document.getElementById('edit-svc-desc');
-
-    // 1. Service Name Validation
-    const name = (nameInput?.value || '').trim();
-    if (!name) {
-      this.showToast('Please enter a service name.', 'warning');
-      nameInput?.focus();
-      return;
-    }
-    if (name.length < 2) {
-      this.showToast('Service name must be at least 2 characters long.', 'warning');
-      nameInput?.focus();
-      return;
-    }
-    if (name.length > 100) {
-      this.showToast('Service name cannot exceed 100 characters.', 'warning');
-      nameInput?.focus();
-      return;
-    }
-
-    // 2. Category Validation
-    const rawCat = categorySelect.value;
-    if (!rawCat) {
-      this.showToast('Please select a service category.', 'warning');
-      return;
-    }
-    if (rawCat === 'CUSTOM') {
-      const customVal = customCatInput.value.trim();
-      if (!customVal) {
-        this.showToast('Please enter a custom category name.', 'warning');
-        customCatInput.focus();
+      // 3. Price Validation (Disallow ₹0, negative, NaN, infinite, > 5,00,000)
+      const rawPriceStr = (priceInput?.value || '').trim();
+      if (rawPriceStr === '') {
+        this.showToast('Please enter a price for this service.', 'warning');
+        priceInput?.focus();
         return;
       }
-      if (customVal.length < 2) {
-        this.showToast('Custom category name must be at least 2 characters long.', 'warning');
-        customCatInput.focus();
+      const price = Number(rawPriceStr);
+      if (isNaN(price) || !Number.isFinite(price)) {
+        this.showToast('Please enter a valid numeric price.', 'warning');
+        priceInput?.focus();
         return;
       }
-      if (customVal.length > 50) {
-        this.showToast('Custom category name cannot exceed 50 characters.', 'warning');
-        customCatInput.focus();
+      if (price < 1) {
+        this.showToast('Service price must be at least ₹1. Free or ₹0 services are not allowed.', 'warning');
+        priceInput?.focus();
         return;
       }
-    }
-    const finalCategory = rawCat === 'CUSTOM' ? (customCatInput.value.trim() || 'General') : rawCat;
-
-    // 3. Price Validation (Disallow ₹0, negative, NaN, infinite, > 5,00,000)
-    const rawPriceStr = (priceInput?.value || '').trim();
-    if (rawPriceStr === '') {
-      this.showToast('Please enter a price for this service.', 'warning');
-      priceInput?.focus();
-      return;
-    }
-    const price = Number(rawPriceStr);
-    if (isNaN(price) || !Number.isFinite(price)) {
-      this.showToast('Please enter a valid numeric price.', 'warning');
-      priceInput?.focus();
-      return;
-    }
-    if (price < 1) {
-      this.showToast('Service price must be at least ₹1. Free or ₹0 services are not allowed.', 'warning');
-      priceInput?.focus();
-      return;
-    }
-    if (price > 500000) {
-      this.showToast('Service price cannot exceed ₹5,00,000.', 'warning');
-      priceInput?.focus();
-      return;
-    }
-    if (rawPriceStr.includes('.') && rawPriceStr.split('.')[1].length > 2) {
-      this.showToast('Price can have at most 2 decimal places.', 'warning');
-      priceInput?.focus();
-      return;
-    }
-
-    // 4. Duration Validation
-    const dur = parseInt(durInput?.value, 10);
-    if (isNaN(dur) || dur < 15 || dur > 480 || dur % 15 !== 0) {
-      this.showToast('Service duration must be at least 15 minutes and a multiple of 15 (e.g. 30, 45, 60, 75, 90 mins).', 'warning');
-      return;
-    }
-
-    // 5. Target Audience Validation
-    const targetGender = genderInput?.value || 'UNISEX';
-    if (!['UNISEX', 'MALE', 'FEMALE', 'KIDS'].includes(targetGender)) {
-      this.showToast('Please select a valid target audience.', 'warning');
-      return;
-    }
-
-    // 6. Description Validation
-    const description = (descInput?.value || '').trim();
-    if (description.length > 500) {
-      this.showToast('Service description cannot exceed 500 characters.', 'warning');
-      descInput?.focus();
-      return;
-    }
-
-    if (submitBtn) {
-      if (submitBtn.disabled) return;
-      submitBtn.disabled = true;
-      submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving changes...';
-    }
-
-    const selectedStylistIds = Array.from(document.querySelectorAll('.edit-svc-staff-assign-chk:checked')).map((c) => c.value);
-
-    const payload = {
-      name,
-      price: Math.round(price * 100) / 100,
-      durationMinutes: dur,
-      category: finalCategory,
-      targetGender,
-      description,
-      stylistIds: selectedStylistIds,
-    };
-
-    try {
-      this.lastLocalActionTimestamp = Date.now();
-      const updated = await ApiClient.updateService(service.id, payload);
-
-      // Immediate in-memory state update for 0ms reactivity
-      const idx = this.servicesList.findIndex((s) => String(s.id) === String(service.id));
-      if (idx !== -1) {
-        this.servicesList[idx] = {
-          ...this.servicesList[idx],
-          ...payload,
-          ...(updated && typeof updated === 'object' ? updated : {}),
-        };
+      if (price > 500000) {
+        this.showToast('Service price cannot exceed ₹5,00,000.', 'warning');
+        priceInput?.focus();
+        return;
+      }
+      if (rawPriceStr.includes('.') && rawPriceStr.split('.')[1].length > 2) {
+        this.showToast('Price can have at most 2 decimal places.', 'warning');
+        priceInput?.focus();
+        return;
       }
 
-      modalContainer.innerHTML = '';
-      this.showToast(`Service "${payload.name}" updated!`, 'success');
-      this.render();
-      SalonRepository.invalidate('services');
-    } catch (err) {
+      // 4. Duration Validation
+      const dur = parseInt(durInput?.value, 10);
+      if (isNaN(dur) || dur < 15 || dur > 480 || dur % 15 !== 0) {
+        this.showToast('Service duration must be at least 15 minutes and a multiple of 15 (e.g. 30, 45, 60, 75, 90 mins).', 'warning');
+        return;
+      }
+
+      // 5. Target Audience Validation
+      const targetGender = genderInput?.value || 'UNISEX';
+      if (!['UNISEX', 'MALE', 'FEMALE', 'KIDS'].includes(targetGender)) {
+        this.showToast('Please select a valid target audience.', 'warning');
+        return;
+      }
+
+      // 6. Description Validation
+      const description = (descInput?.value || '').trim();
+      if (description.length > 500) {
+        this.showToast('Service description cannot exceed 500 characters.', 'warning');
+        descInput?.focus();
+        return;
+      }
+
       if (submitBtn) {
-        submitBtn.disabled = false;
-        submitBtn.innerHTML = 'Save Changes to Menu →';
+        if (submitBtn.disabled) return;
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving changes...';
       }
-      this.showToast(err.message, 'error');
-    }
-  });
-}
 
-showEditStaffModal(staff) {
-  const modalContainer = document.getElementById('modal-container');
+      const selectedStylistIds = Array.from(document.querySelectorAll('.edit-svc-staff-assign-chk:checked')).map((c) => c.value);
 
-  modalContainer.innerHTML = `
+      const payload = {
+        name,
+        price: Math.round(price * 100) / 100,
+        durationMinutes: dur,
+        category: finalCategory,
+        targetGender,
+        description,
+        stylistIds: selectedStylistIds,
+      };
+
+      try {
+        this.lastLocalActionTimestamp = Date.now();
+        const updated = await ApiClient.updateService(service.id, payload);
+
+        // Immediate in-memory state update for 0ms reactivity
+        const idx = this.servicesList.findIndex((s) => String(s.id) === String(service.id));
+        if (idx !== -1) {
+          this.servicesList[idx] = {
+            ...this.servicesList[idx],
+            ...payload,
+            ...(updated && typeof updated === 'object' ? updated : {}),
+          };
+        }
+
+        modalContainer.innerHTML = '';
+        this.showToast(`Service "${payload.name}" updated!`, 'success');
+        this.render();
+        SalonRepository.invalidate('services');
+      } catch (err) {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = 'Save Changes to Menu →';
+        }
+        this.showToast(err.message, 'error');
+      }
+    });
+  }
+
+  showEditStaffModal(staff) {
+    const modalContainer = document.getElementById('modal-container');
+
+    modalContainer.innerHTML = `
       <div class="modal-backdrop show">
         <div class="modal-content">
           <div class="modal-header">
@@ -13159,51 +12876,51 @@ showEditStaffModal(staff) {
       </div>
     `;
 
-  document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+    document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
 
-  document.getElementById('edit-staff-form')?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const submitBtn = e.target.querySelector('button[type="submit"]');
-    if (submitBtn) {
-      if (submitBtn.disabled) return;
-      submitBtn.disabled = true;
-      submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving...';
-    }
-
-    const payload = {
-      name: document.getElementById('edit-staff-name').value.trim(),
-      phone: document.getElementById('edit-staff-phone').value.trim(),
-      email: document.getElementById('edit-staff-email').value.trim() || undefined,
-      profileImageUrl: document.getElementById('edit-staff-img').value.trim() || undefined,
-    };
-
-    try {
-      this.lastLocalActionTimestamp = Date.now();
-      const updated = await ApiClient.updateStaff(staff.id, payload);
-
-      // Immediate in-memory state update for 0ms reactivity
-      const idx = this.staffList.findIndex((s) => String(s.id) === String(staff.id));
-      if (idx !== -1) {
-        this.staffList[idx] = {
-          ...this.staffList[idx],
-          ...payload,
-          ...(updated && typeof updated === 'object' ? updated : {}),
-        };
-      }
-
-      modalContainer.innerHTML = '';
-      this.showToast('Stylist details saved!', 'success');
-      this.render();
-      SalonRepository.invalidate('staff');
-    } catch (err) {
+    document.getElementById('edit-staff-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const submitBtn = e.target.querySelector('button[type="submit"]');
       if (submitBtn) {
-        submitBtn.disabled = false;
-        submitBtn.innerHTML = 'Save Stylist Details →';
+        if (submitBtn.disabled) return;
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving...';
       }
-      this.showToast(`Failed: ${err.message}`, 'error');
-    }
-  });
-}
+
+      const payload = {
+        name: document.getElementById('edit-staff-name').value.trim(),
+        phone: document.getElementById('edit-staff-phone').value.trim(),
+        email: document.getElementById('edit-staff-email').value.trim() || undefined,
+        profileImageUrl: document.getElementById('edit-staff-img').value.trim() || undefined,
+      };
+
+      try {
+        this.lastLocalActionTimestamp = Date.now();
+        const updated = await ApiClient.updateStaff(staff.id, payload);
+
+        // Immediate in-memory state update for 0ms reactivity
+        const idx = this.staffList.findIndex((s) => String(s.id) === String(staff.id));
+        if (idx !== -1) {
+          this.staffList[idx] = {
+            ...this.staffList[idx],
+            ...payload,
+            ...(updated && typeof updated === 'object' ? updated : {}),
+          };
+        }
+
+        modalContainer.innerHTML = '';
+        this.showToast('Stylist details saved!', 'success');
+        this.render();
+        SalonRepository.invalidate('staff');
+      } catch (err) {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = 'Save Stylist Details →';
+        }
+        this.showToast(`Failed: ${err.message}`, 'error');
+      }
+    });
+  }
 
   async showDeleteStaffModal(staffId, staffName) {
     const modalContainer = document.getElementById('modal-container');
@@ -13360,59 +13077,59 @@ showEditStaffModal(staff) {
 
     if (hasActiveAppts) return;
 
-  document.getElementById('btn-confirm-delete-staff')?.addEventListener('click', async (e) => {
-    const confirmBtn = e.currentTarget;
-    const originalStaffList = [...this.staffList];
+    document.getElementById('btn-confirm-delete-staff')?.addEventListener('click', async (e) => {
+      const confirmBtn = e.currentTarget;
+      const originalStaffList = [...this.staffList];
 
-    // Loading state on button
-    confirmBtn.disabled = true;
-    confirmBtn.innerHTML = `
+      // Loading state on button
+      confirmBtn.disabled = true;
+      confirmBtn.innerHTML = `
         <span style="display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 6px; vertical-align: middle;"></span>
         Deleting...
       `;
 
-    // Mark local action timestamp to suppress SSE self-echo notification
-    this.lastLocalActionTimestamp = Date.now();
-    window.lastDashboardActionTimestamp = Date.now();
-
-    // 1. Optimistic removal from in-memory state
-    this.staffList = this.staffList.filter((s) => String(s.id) !== String(staffId));
-    if (this.staffManager) {
-      this.staffManager.staffList = this.staffList;
-    }
-    closeModal();
-    this.render();
-
-    try {
-      await ApiClient.deleteStaff(staffId);
+      // Mark local action timestamp to suppress SSE self-echo notification
       this.lastLocalActionTimestamp = Date.now();
       window.lastDashboardActionTimestamp = Date.now();
-      this.showToast(`Stylist "${targetStaff?.name || staffName}" deleted successfully`, 'success');
 
-      // Invalidate both staff & services caches so counts update across tabs
-      SalonRepository.invalidate('staff');
-      SalonRepository.invalidate('services');
-
-      // Re-fetch fresh staff & services silently
-      ApiClient.getStaff(true).catch(() => { });
-      ApiClient.getServices(true).then((fresh) => {
-        if (Array.isArray(fresh)) this.servicesList = fresh;
-      }).catch(() => { });
-    } catch (err) {
-      // Rollback state on error
-      this.staffList = originalStaffList;
+      // 1. Optimistic removal from in-memory state
+      this.staffList = this.staffList.filter((s) => String(s.id) !== String(staffId));
       if (this.staffManager) {
-        this.staffManager.staffList = originalStaffList;
+        this.staffManager.staffList = this.staffList;
       }
+      closeModal();
       this.render();
-      this.showToast(err.message || 'Failed to delete stylist. Please try again.', 'error');
-    }
-  });
-}
+
+      try {
+        await ApiClient.deleteStaff(staffId);
+        this.lastLocalActionTimestamp = Date.now();
+        window.lastDashboardActionTimestamp = Date.now();
+        this.showToast(`Stylist "${targetStaff?.name || staffName}" deleted successfully`, 'success');
+
+        // Invalidate both staff & services caches so counts update across tabs
+        SalonRepository.invalidate('staff');
+        SalonRepository.invalidate('services');
+
+        // Re-fetch fresh staff & services silently
+        ApiClient.getStaff(true).catch(() => { });
+        ApiClient.getServices(true).then((fresh) => {
+          if (Array.isArray(fresh)) this.servicesList = fresh;
+        }).catch(() => { });
+      } catch (err) {
+        // Rollback state on error
+        this.staffList = originalStaffList;
+        if (this.staffManager) {
+          this.staffManager.staffList = originalStaffList;
+        }
+        this.render();
+        this.showToast(err.message || 'Failed to delete stylist. Please try again.', 'error');
+      }
+    });
+  }
 
   async showSalonScheduleModal() {
-  const modalContainer = document.getElementById('modal-container');
-  modalContainer.innerHTML = `
+    const modalContainer = document.getElementById('modal-container');
+    modalContainer.innerHTML = `
       <div class="modal-backdrop show">
         <div class="modal-content modal-content-sheet" style="max-width: 580px;">
           <div class="sheet-grab-handle"></div>
@@ -13456,61 +13173,61 @@ showEditStaffModal(staff) {
       </div>
     `;
 
-  document.getElementById('btn-close-salon-sched')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
-  document.getElementById('btn-cancel-salon-sched')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+    document.getElementById('btn-close-salon-sched')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+    document.getElementById('btn-cancel-salon-sched')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
 
-  try {
-    const existingHours = await ApiClient.getSalonWorkingHours(true);
-    const loadingDiv = document.getElementById('salon-sched-loading');
-    const form = document.getElementById('form-salon-schedule');
-    if (loadingDiv) loadingDiv.style.display = 'none';
-    if (form) form.style.display = 'block';
+    try {
+      const existingHours = await ApiClient.getSalonWorkingHours(true);
+      const loadingDiv = document.getElementById('salon-sched-loading');
+      const form = document.getElementById('form-salon-schedule');
+      if (loadingDiv) loadingDiv.style.display = 'none';
+      if (form) form.style.display = 'block';
 
-    const days = [
-      { key: 'MONDAY', label: 'Monday' },
-      { key: 'TUESDAY', label: 'Tuesday' },
-      { key: 'WEDNESDAY', label: 'Wednesday' },
-      { key: 'THURSDAY', label: 'Thursday' },
-      { key: 'FRIDAY', label: 'Friday' },
-      { key: 'SATURDAY', label: 'Saturday' },
-      { key: 'SUNDAY', label: 'Sunday' },
-    ];
+      const days = [
+        { key: 'MONDAY', label: 'Monday' },
+        { key: 'TUESDAY', label: 'Tuesday' },
+        { key: 'WEDNESDAY', label: 'Wednesday' },
+        { key: 'THURSDAY', label: 'Thursday' },
+        { key: 'FRIDAY', label: 'Friday' },
+        { key: 'SATURDAY', label: 'Saturday' },
+        { key: 'SUNDAY', label: 'Sunday' },
+      ];
 
-    // Strict Schedule State Hydration Invariant:
-    // If found.breaks is an array (even []), PRESERVE IT VERBATIM as Continuous Operations.
-    let salonSchedState = days.map((d) => {
-      const found = (existingHours || []).find((h) => h.dayOfWeek === d.key) || {};
-      const isClosed = found.isClosed !== undefined ? found.isClosed : false;
-      let breaks = [];
-      if (Array.isArray(found.breaks)) {
-        breaks = found.breaks.map((b) => ({
-          id: b.id || `brk-${d.key}-${Math.random().toString(36).substring(2, 7)}`,
-          startTime: b.startTime || '13:00',
-          endTime: b.endTime || '14:00',
-          title: b.title || 'Lunch Break',
-        }));
-      } else if (found.breakStartTime && found.breakEndTime) {
-        breaks = [{ id: `brk-${d.key}-legacy`, startTime: found.breakStartTime, endTime: found.breakEndTime, title: 'Lunch Break' }];
-      } else {
-        // Zero breaks: default to Continuous Operations mode
-        breaks = [];
-      }
+      // Strict Schedule State Hydration Invariant:
+      // If found.breaks is an array (even []), PRESERVE IT VERBATIM as Continuous Operations.
+      let salonSchedState = days.map((d) => {
+        const found = (existingHours || []).find((h) => h.dayOfWeek === d.key) || {};
+        const isClosed = found.isClosed !== undefined ? found.isClosed : false;
+        let breaks = [];
+        if (Array.isArray(found.breaks)) {
+          breaks = found.breaks.map((b) => ({
+            id: b.id || `brk-${d.key}-${Math.random().toString(36).substring(2, 7)}`,
+            startTime: b.startTime || '13:00',
+            endTime: b.endTime || '14:00',
+            title: b.title || 'Lunch Break',
+          }));
+        } else if (found.breakStartTime && found.breakEndTime) {
+          breaks = [{ id: `brk-${d.key}-legacy`, startTime: found.breakStartTime, endTime: found.breakEndTime, title: 'Lunch Break' }];
+        } else {
+          // Zero breaks: default to Continuous Operations mode
+          breaks = [];
+        }
 
-      return {
-        dayOfWeek: d.key,
-        label: d.label,
-        isClosed,
-        startTime: found.startTime || '09:00',
-        endTime: found.endTime || '19:00',
-        breaks,
-      };
-    });
+        return {
+          dayOfWeek: d.key,
+          label: d.label,
+          isClosed,
+          startTime: found.startTime || '09:00',
+          endTime: found.endTime || '19:00',
+          breaks,
+        };
+      });
 
-    const renderDays = () => {
-      const container = document.getElementById('salon-sched-days-container');
-      if (!container) return;
+      const renderDays = () => {
+        const container = document.getElementById('salon-sched-days-container');
+        if (!container) return;
 
-      container.innerHTML = salonSchedState.map((day, idx) => `
+        container.innerHTML = salonSchedState.map((day, idx) => `
           <div class="day-sched-card ${day.isClosed ? 'is-closed' : ''}">
             <div class="day-sched-header">
               <div class="day-sched-title-wrap">
@@ -13578,268 +13295,268 @@ showEditStaffModal(staff) {
           </div>
         `).join('');
 
-      // Handlers
-      container.querySelectorAll('.btn-toggle-salon-day').forEach((b) => {
-        b.addEventListener('click', (e) => {
-          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-          salonSchedState[idx].isClosed = !salonSchedState[idx].isClosed;
-          renderDays();
-        });
-      });
-
-      container.querySelectorAll('.salon-day-start').forEach((inp) => {
-        inp.addEventListener('change', (e) => {
-          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-          salonSchedState[idx].startTime = e.currentTarget.value;
-        });
-      });
-
-      container.querySelectorAll('.salon-day-end').forEach((inp) => {
-        inp.addEventListener('change', (e) => {
-          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-          salonSchedState[idx].endTime = e.currentTarget.value;
-        });
-      });
-
-      container.querySelectorAll('.btn-add-salon-break').forEach((b) => {
-        b.addEventListener('click', (e) => {
-          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-          salonSchedState[idx].breaks.push({
-            id: `brk-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-            startTime: '13:00',
-            endTime: '14:00',
-            title: 'Lunch Break',
+        // Handlers
+        container.querySelectorAll('.btn-toggle-salon-day').forEach((b) => {
+          b.addEventListener('click', (e) => {
+            const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+            salonSchedState[idx].isClosed = !salonSchedState[idx].isClosed;
+            renderDays();
           });
-          renderDays();
         });
-      });
 
-      container.querySelectorAll('.btn-quick-lunch-break').forEach((b) => {
-        b.addEventListener('click', (e) => {
-          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-          const day = salonSchedState[idx];
-          if (day) {
-            const alreadyHas = day.breaks.some(br => br.startTime === '13:00' && br.endTime === '14:00');
-            if (!alreadyHas) {
-              day.breaks.push({
-                id: `brk-${day.dayOfWeek}-${Math.random().toString(36).substring(2, 7)}`,
-                startTime: '13:00',
-                endTime: '14:00',
-                title: 'Lunch Break',
-              });
-              renderDays();
+        container.querySelectorAll('.salon-day-start').forEach((inp) => {
+          inp.addEventListener('change', (e) => {
+            const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+            salonSchedState[idx].startTime = e.currentTarget.value;
+          });
+        });
+
+        container.querySelectorAll('.salon-day-end').forEach((inp) => {
+          inp.addEventListener('change', (e) => {
+            const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+            salonSchedState[idx].endTime = e.currentTarget.value;
+          });
+        });
+
+        container.querySelectorAll('.btn-add-salon-break').forEach((b) => {
+          b.addEventListener('click', (e) => {
+            const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+            salonSchedState[idx].breaks.push({
+              id: `brk-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+              startTime: '13:00',
+              endTime: '14:00',
+              title: 'Lunch Break',
+            });
+            renderDays();
+          });
+        });
+
+        container.querySelectorAll('.btn-quick-lunch-break').forEach((b) => {
+          b.addEventListener('click', (e) => {
+            const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+            const day = salonSchedState[idx];
+            if (day) {
+              const alreadyHas = day.breaks.some(br => br.startTime === '13:00' && br.endTime === '14:00');
+              if (!alreadyHas) {
+                day.breaks.push({
+                  id: `brk-${day.dayOfWeek}-${Math.random().toString(36).substring(2, 7)}`,
+                  startTime: '13:00',
+                  endTime: '14:00',
+                  title: 'Lunch Break',
+                });
+                renderDays();
+              }
             }
-          }
+          });
         });
-      });
 
-      container.querySelectorAll('.btn-del-salon-break').forEach((b) => {
-        b.addEventListener('click', (e) => {
-          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-          const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
-          salonSchedState[idx].breaks.splice(bIdx, 1);
-          renderDays();
+        container.querySelectorAll('.btn-del-salon-break').forEach((b) => {
+          b.addEventListener('click', (e) => {
+            const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+            const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
+            salonSchedState[idx].breaks.splice(bIdx, 1);
+            renderDays();
+          });
         });
-      });
 
-      container.querySelectorAll('.salon-brk-title').forEach((inp) => {
-        inp.addEventListener('change', (e) => {
-          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-          const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
-          salonSchedState[idx].breaks[bIdx].title = e.currentTarget.value;
+        container.querySelectorAll('.salon-brk-title').forEach((inp) => {
+          inp.addEventListener('change', (e) => {
+            const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+            const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
+            salonSchedState[idx].breaks[bIdx].title = e.currentTarget.value;
+          });
         });
-      });
 
-      container.querySelectorAll('.salon-brk-start').forEach((inp) => {
-        inp.addEventListener('change', (e) => {
-          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-          const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
-          salonSchedState[idx].breaks[bIdx].startTime = e.currentTarget.value;
+        container.querySelectorAll('.salon-brk-start').forEach((inp) => {
+          inp.addEventListener('change', (e) => {
+            const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+            const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
+            salonSchedState[idx].breaks[bIdx].startTime = e.currentTarget.value;
+          });
         });
-      });
 
-      container.querySelectorAll('.salon-brk-end').forEach((inp) => {
-        inp.addEventListener('change', (e) => {
-          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-          const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
-          salonSchedState[idx].breaks[bIdx].endTime = e.currentTarget.value;
+        container.querySelectorAll('.salon-brk-end').forEach((inp) => {
+          inp.addEventListener('change', (e) => {
+            const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+            const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
+            salonSchedState[idx].breaks[bIdx].endTime = e.currentTarget.value;
+          });
         });
-      });
-    };
-
-    renderDays();
-
-    document.getElementById('btn-apply-mon-to-all')?.addEventListener('click', () => {
-      const mon = salonSchedState[0];
-      if (!mon) return;
-
-      for (let i = 1; i < salonSchedState.length; i++) {
-        if (!salonSchedState[i].isClosed) {
-          salonSchedState[i].startTime = mon.startTime;
-          salonSchedState[i].endTime = mon.endTime;
-          salonSchedState[i].breaks = (mon.breaks || []).map((b) => ({
-            id: `brk-${salonSchedState[i].dayOfWeek}-${Math.random().toString(36).substring(2, 7)}`,
-            startTime: b.startTime,
-            endTime: b.endTime,
-            title: b.title || 'Lunch Break',
-          }));
-        }
-      }
+      };
 
       renderDays();
-      const notice = document.getElementById('salon-sched-error');
-      if (notice) {
-        notice.style.background = 'rgba(16,185,129,0.15)';
-        notice.style.borderColor = 'rgba(16,185,129,0.3)';
-        notice.style.color = '#34d399';
-        notice.textContent = '✨ Copied Monday shift hours and breaks to all open days! Review and click "Save Weekly Schedule" to confirm.';
-        notice.style.display = 'block';
-      }
-    });
 
-    document.getElementById('form-salon-schedule')?.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const submitBtn = document.getElementById('btn-save-salon-sched');
-      const errorDiv = document.getElementById('salon-sched-error');
-      submitBtn.textContent = 'Saving Schedule...';
-      submitBtn.setAttribute('disabled', 'true');
-      errorDiv.style.display = 'none';
+      document.getElementById('btn-apply-mon-to-all')?.addEventListener('click', () => {
+        const mon = salonSchedState[0];
+        if (!mon) return;
 
-      // Client-side validation
-      for (const d of salonSchedState) {
-        if (!d.isClosed) {
-          if (d.startTime >= d.endTime) {
-            errorDiv.textContent = `Opening time (${d.startTime}) must be earlier than closing time (${d.endTime}) for ${d.label}.`;
-            errorDiv.style.display = 'block';
-            submitBtn.textContent = '💾 Save Weekly Schedule →';
-            submitBtn.removeAttribute('disabled');
-            return;
+        for (let i = 1; i < salonSchedState.length; i++) {
+          if (!salonSchedState[i].isClosed) {
+            salonSchedState[i].startTime = mon.startTime;
+            salonSchedState[i].endTime = mon.endTime;
+            salonSchedState[i].breaks = (mon.breaks || []).map((b) => ({
+              id: `brk-${salonSchedState[i].dayOfWeek}-${Math.random().toString(36).substring(2, 7)}`,
+              startTime: b.startTime,
+              endTime: b.endTime,
+              title: b.title || 'Lunch Break',
+            }));
           }
-          for (const b of d.breaks) {
-            if (b.startTime >= b.endTime) {
-              errorDiv.textContent = `Break start time (${b.startTime}) must be earlier than break end time (${b.endTime}) on ${d.label}.`;
+        }
+
+        renderDays();
+        const notice = document.getElementById('salon-sched-error');
+        if (notice) {
+          notice.style.background = 'rgba(16,185,129,0.15)';
+          notice.style.borderColor = 'rgba(16,185,129,0.3)';
+          notice.style.color = '#34d399';
+          notice.textContent = '✨ Copied Monday shift hours and breaks to all open days! Review and click "Save Weekly Schedule" to confirm.';
+          notice.style.display = 'block';
+        }
+      });
+
+      document.getElementById('form-salon-schedule')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const submitBtn = document.getElementById('btn-save-salon-sched');
+        const errorDiv = document.getElementById('salon-sched-error');
+        submitBtn.textContent = 'Saving Schedule...';
+        submitBtn.setAttribute('disabled', 'true');
+        errorDiv.style.display = 'none';
+
+        // Client-side validation
+        for (const d of salonSchedState) {
+          if (!d.isClosed) {
+            if (d.startTime >= d.endTime) {
+              errorDiv.textContent = `Opening time (${d.startTime}) must be earlier than closing time (${d.endTime}) for ${d.label}.`;
               errorDiv.style.display = 'block';
               submitBtn.textContent = '💾 Save Weekly Schedule →';
               submitBtn.removeAttribute('disabled');
               return;
             }
-            if (b.startTime < d.startTime || b.endTime > d.endTime) {
-              errorDiv.textContent = `Break ${b.startTime}-${b.endTime} must fall inside operating hours (${d.startTime}-${d.endTime}) on ${d.label}.`;
-              errorDiv.style.display = 'block';
-              submitBtn.textContent = '💾 Save Weekly Schedule →';
-              submitBtn.removeAttribute('disabled');
-              return;
+            for (const b of d.breaks) {
+              if (b.startTime >= b.endTime) {
+                errorDiv.textContent = `Break start time (${b.startTime}) must be earlier than break end time (${b.endTime}) on ${d.label}.`;
+                errorDiv.style.display = 'block';
+                submitBtn.textContent = '💾 Save Weekly Schedule →';
+                submitBtn.removeAttribute('disabled');
+                return;
+              }
+              if (b.startTime < d.startTime || b.endTime > d.endTime) {
+                errorDiv.textContent = `Break ${b.startTime}-${b.endTime} must fall inside operating hours (${d.startTime}-${d.endTime}) on ${d.label}.`;
+                errorDiv.style.display = 'block';
+                submitBtn.textContent = '💾 Save Weekly Schedule →';
+                submitBtn.removeAttribute('disabled');
+                return;
+              }
             }
           }
         }
-      }
 
-      const hoursPayload = salonSchedState.map((d) => ({
-        dayOfWeek: d.dayOfWeek,
-        isClosed: d.isClosed,
-        startTime: d.startTime,
-        endTime: d.endTime,
-        breaks: d.isClosed ? [] : d.breaks.map((b) => ({
-          id: b.id,
-          startTime: b.startTime,
-          endTime: b.endTime,
-          title: b.title || 'Break',
-        })),
-      }));
+        const hoursPayload = salonSchedState.map((d) => ({
+          dayOfWeek: d.dayOfWeek,
+          isClosed: d.isClosed,
+          startTime: d.startTime,
+          endTime: d.endTime,
+          breaks: d.isClosed ? [] : d.breaks.map((b) => ({
+            id: b.id,
+            startTime: b.startTime,
+            endTime: b.endTime,
+            title: b.title || 'Break',
+          })),
+        }));
 
-      try {
-        await ApiClient.updateSalonWorkingHours(hoursPayload);
-        modalContainer.innerHTML = '';
-        this.loadData(true).then(() => {
-          this.refreshActiveTab();
-        }).catch(() => { });
-      } catch (err) {
-        errorDiv.textContent = err.message || 'Failed to update salon schedule. Please check for conflicting appointments.';
-        errorDiv.style.display = 'block';
-        submitBtn.textContent = '💾 Save Weekly Schedule →';
-        submitBtn.removeAttribute('disabled');
-      }
-    });
-  } catch (err) {
-    this.showToast(`Error loading salon operating schedule: ${err.message}`, 'error');
+        try {
+          await ApiClient.updateSalonWorkingHours(hoursPayload);
+          modalContainer.innerHTML = '';
+          this.loadData(true).then(() => {
+            this.refreshActiveTab();
+          }).catch(() => { });
+        } catch (err) {
+          errorDiv.textContent = err.message || 'Failed to update salon schedule. Please check for conflicting appointments.';
+          errorDiv.style.display = 'block';
+          submitBtn.textContent = '💾 Save Weekly Schedule →';
+          submitBtn.removeAttribute('disabled');
+        }
+      });
+    } catch (err) {
+      this.showToast(`Error loading salon operating schedule: ${err.message}`, 'error');
+    }
   }
-}
 
-openSalonClosuresModal(dateStr = null) {
-  SalonClosuresModal.open({
-    initialDate: dateStr || this.getLocalDateString(),
-    salonWorkingHours: this.salonWorkingHours || [],
-    existingClosures: this.closuresList || [],
-    staffList: this.staffList || [],
-    onSuccess: async () => {
-      await this.loadData(true);
-      const container = document.getElementById('profile-subtab-container');
-      if (container) {
-        container.innerHTML = this.renderProfileSubtabContent();
-        this.attachProfileSubtabListeners();
-      }
-    },
-  });
-}
+  openSalonClosuresModal(dateStr = null) {
+    SalonClosuresModal.open({
+      initialDate: dateStr || this.getLocalDateString(),
+      salonWorkingHours: this.salonWorkingHours || [],
+      existingClosures: this.closuresList || [],
+      staffList: this.staffList || [],
+      onSuccess: async () => {
+        await this.loadData(true);
+        const container = document.getElementById('profile-subtab-container');
+        if (container) {
+          container.innerHTML = this.renderProfileSubtabContent();
+          this.attachProfileSubtabListeners();
+        }
+      },
+    });
+  }
 
   async showEditStaffHoursModal(staffId, staffName) {
-  const modalContainer = document.getElementById('modal-container');
-  const staff = this.staffList.find((s) => s.id === staffId);
-  const existingHours = staff?.workingHours || [];
-  let followsSalonSchedule = staff?.followsSalonSchedule ?? true;
+    const modalContainer = document.getElementById('modal-container');
+    const staff = this.staffList.find((s) => s.id === staffId);
+    const existingHours = staff?.workingHours || [];
+    let followsSalonSchedule = staff?.followsSalonSchedule ?? true;
 
-  // Fetch salon working hours to show as reference
-  let salonHours = [];
-  try {
-    salonHours = await ApiClient.getSalonWorkingHours();
-  } catch (e) {
-    salonHours = [];
-  }
-
-  const days = [
-    { key: 'MONDAY', label: 'Monday' },
-    { key: 'TUESDAY', label: 'Tuesday' },
-    { key: 'WEDNESDAY', label: 'Wednesday' },
-    { key: 'THURSDAY', label: 'Thursday' },
-    { key: 'FRIDAY', label: 'Friday' },
-    { key: 'SATURDAY', label: 'Saturday' },
-    { key: 'SUNDAY', label: 'Sunday' },
-  ];
-
-  let staffState = days.map((d) => {
-    const sDay = (salonHours || []).find((sh) => sh.dayOfWeek === d.key) || { isClosed: false, startTime: '09:00', endTime: '19:00' };
-    const wh = (existingHours || []).find((h) => h.dayOfWeek === d.key) || {};
-
-    let hasBreakOverride = wh.hasBreakOverride === true;
-    let breaks = [];
-    if (Array.isArray(wh.breaks) && wh.breaks.length > 0) {
-      breaks = wh.breaks.map((b) => ({
-        id: b.id || `st-brk-${d.key}-${Math.random()}`,
-        startTime: b.startTime || '13:00',
-        endTime: b.endTime || '14:00',
-        title: b.title || 'Lunch Break',
-      }));
-    } else if (wh.breakStartTime && wh.breakEndTime) {
-      breaks = [{ id: `st-brk-${d.key}-legacy`, startTime: wh.breakStartTime, endTime: wh.breakEndTime, title: 'Lunch Break' }];
+    // Fetch salon working hours to show as reference
+    let salonHours = [];
+    try {
+      salonHours = await ApiClient.getSalonWorkingHours();
+    } catch (e) {
+      salonHours = [];
     }
 
-    return {
-      dayOfWeek: d.key,
-      label: d.label,
-      isWorking: wh.isWorking !== undefined ? wh.isWorking : !sDay.isClosed,
-      startTime: wh.startTime || sDay.startTime || '09:00',
-      endTime: wh.endTime || sDay.endTime || '19:00',
-      hasBreakOverride,
-      breaks,
-      salonOpen: sDay.startTime || '09:00',
-      salonClose: sDay.endTime || '19:00',
-      salonClosed: sDay.isClosed || false,
-      salonBreaks: sDay.breaks || (sDay.breakStartTime ? [{ startTime: sDay.breakStartTime, endTime: sDay.breakEndTime, title: 'Lunch Break' }] : []),
-    };
-  });
+    const days = [
+      { key: 'MONDAY', label: 'Monday' },
+      { key: 'TUESDAY', label: 'Tuesday' },
+      { key: 'WEDNESDAY', label: 'Wednesday' },
+      { key: 'THURSDAY', label: 'Thursday' },
+      { key: 'FRIDAY', label: 'Friday' },
+      { key: 'SATURDAY', label: 'Saturday' },
+      { key: 'SUNDAY', label: 'Sunday' },
+    ];
 
-  const renderStaffModal = () => {
-    modalContainer.innerHTML = `
+    let staffState = days.map((d) => {
+      const sDay = (salonHours || []).find((sh) => sh.dayOfWeek === d.key) || { isClosed: false, startTime: '09:00', endTime: '19:00' };
+      const wh = (existingHours || []).find((h) => h.dayOfWeek === d.key) || {};
+
+      let hasBreakOverride = wh.hasBreakOverride === true;
+      let breaks = [];
+      if (Array.isArray(wh.breaks) && wh.breaks.length > 0) {
+        breaks = wh.breaks.map((b) => ({
+          id: b.id || `st-brk-${d.key}-${Math.random()}`,
+          startTime: b.startTime || '13:00',
+          endTime: b.endTime || '14:00',
+          title: b.title || 'Lunch Break',
+        }));
+      } else if (wh.breakStartTime && wh.breakEndTime) {
+        breaks = [{ id: `st-brk-${d.key}-legacy`, startTime: wh.breakStartTime, endTime: wh.breakEndTime, title: 'Lunch Break' }];
+      }
+
+      return {
+        dayOfWeek: d.key,
+        label: d.label,
+        isWorking: wh.isWorking !== undefined ? wh.isWorking : !sDay.isClosed,
+        startTime: wh.startTime || sDay.startTime || '09:00',
+        endTime: wh.endTime || sDay.endTime || '19:00',
+        hasBreakOverride,
+        breaks,
+        salonOpen: sDay.startTime || '09:00',
+        salonClose: sDay.endTime || '19:00',
+        salonClosed: sDay.isClosed || false,
+        salonBreaks: sDay.breaks || (sDay.breakStartTime ? [{ startTime: sDay.breakStartTime, endTime: sDay.breakEndTime, title: 'Lunch Break' }] : []),
+      };
+    });
+
+    const renderStaffModal = () => {
+      modalContainer.innerHTML = `
         <div class="modal-backdrop show">
           <div class="modal-content modal-content-lg" style="max-height: 90vh; overflow-y: auto; padding: 24px;">
             <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
@@ -13871,8 +13588,8 @@ openSalonClosuresModal(dateStr = null) {
             <form id="edit-hours-form">
               <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
                 ${staffState.map((d, idx) => {
-      const isDayActive = d.isWorking && !d.salonClosed;
-      return `
+        const isDayActive = d.isWorking && !d.salonClosed;
+        return `
                     <div class="schedule-day-row ${!isDayActive ? 'off-day' : ''}" style="padding: 9px 12px; border-radius: 9px; gap: 6px;">
                       <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
                         <div style="display: flex; align-items: center; gap: 10px;">
@@ -13943,8 +13660,8 @@ openSalonClosuresModal(dateStr = null) {
                             ${d.breaks.length === 0 ? `
                               <div style="font-size: 0.7rem; color: var(--text-muted); font-style: italic;">No personal breaks added.</div>
                             ` : d.breaks.map((b, bIdx) => {
-        const hasOverlap = (d.salonBreaks || []).some(sb => b.startTime < sb.endTime && b.endTime > sb.startTime);
-        return `
+          const hasOverlap = (d.salonBreaks || []).some(sb => b.startTime < sb.endTime && b.endTime > sb.startTime);
+          return `
                                 <div class="day-sched-break-box" style="margin-bottom: 5px;">
                                   <div class="day-sched-break-row1">
                                     <input type="text" class="day-sched-break-name-inp st-brk-title" data-idx="${idx}" data-bidx="${bIdx}" value="${b.title || 'Personal Break'}" placeholder="Break Title" />
@@ -13964,13 +13681,13 @@ openSalonClosuresModal(dateStr = null) {
                                   ` : ''}
                                 </div>
                               `;
-      }).join('')}
+        }).join('')}
                           </div>
                         </div>
                       ` : ''}
                     </div>
                   `;
-    }).join('')}
+      }).join('')}
               </div>
 
               <!-- Error Banner -->
@@ -13985,200 +13702,200 @@ openSalonClosuresModal(dateStr = null) {
         </div>
       `;
 
-    // Event Listeners inside Staff Modal
-    document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
-    document.getElementById('btn-cancel-st-hours')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+      // Event Listeners inside Staff Modal
+      document.getElementById('btn-close-modal')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+      document.getElementById('btn-cancel-st-hours')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
 
-    document.getElementById('chk-follow-salon')?.addEventListener('change', (e) => {
-      followsSalonSchedule = e.target.checked;
-      renderStaffModal();
-    });
-
-    modalContainer.querySelectorAll('.st-day-chk').forEach((chk) => {
-      chk.addEventListener('change', (e) => {
-        const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-        staffState[idx].isWorking = e.currentTarget.checked;
+      document.getElementById('chk-follow-salon')?.addEventListener('change', (e) => {
+        followsSalonSchedule = e.target.checked;
         renderStaffModal();
       });
-    });
 
-    modalContainer.querySelectorAll('.st-shift-start').forEach((inp) => {
-      inp.addEventListener('change', (e) => {
-        const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-        staffState[idx].startTime = e.currentTarget.value;
-      });
-    });
-
-    modalContainer.querySelectorAll('.st-shift-end').forEach((inp) => {
-      inp.addEventListener('change', (e) => {
-        const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-        staffState[idx].endTime = e.currentTarget.value;
-      });
-    });
-
-    modalContainer.querySelectorAll('.st-break-rad').forEach((rad) => {
-      rad.addEventListener('change', (e) => {
-        const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-        staffState[idx].hasBreakOverride = e.currentTarget.value === 'custom';
-        renderStaffModal();
-      });
-    });
-
-    modalContainer.querySelectorAll('.btn-st-add-break').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-        staffState[idx].breaks.push({
-          id: `st-brk-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-          startTime: '14:00',
-          endTime: '15:00',
-          title: 'Lunch Break',
+      modalContainer.querySelectorAll('.st-day-chk').forEach((chk) => {
+        chk.addEventListener('change', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          staffState[idx].isWorking = e.currentTarget.checked;
+          renderStaffModal();
         });
-        renderStaffModal();
       });
-    });
 
-    modalContainer.querySelectorAll('.btn-st-del-break').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-        const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
-        staffState[idx].breaks.splice(bIdx, 1);
-        renderStaffModal();
+      modalContainer.querySelectorAll('.st-shift-start').forEach((inp) => {
+        inp.addEventListener('change', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          staffState[idx].startTime = e.currentTarget.value;
+        });
       });
-    });
 
-    modalContainer.querySelectorAll('.st-brk-title').forEach((inp) => {
-      inp.addEventListener('change', (e) => {
-        const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-        const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
-        staffState[idx].breaks[bIdx].title = e.currentTarget.value;
+      modalContainer.querySelectorAll('.st-shift-end').forEach((inp) => {
+        inp.addEventListener('change', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          staffState[idx].endTime = e.currentTarget.value;
+        });
       });
-    });
 
-    modalContainer.querySelectorAll('.st-brk-start').forEach((inp) => {
-      inp.addEventListener('change', (e) => {
-        const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-        const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
-        staffState[idx].breaks[bIdx].startTime = e.currentTarget.value;
+      modalContainer.querySelectorAll('.st-break-rad').forEach((rad) => {
+        rad.addEventListener('change', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          staffState[idx].hasBreakOverride = e.currentTarget.value === 'custom';
+          renderStaffModal();
+        });
       });
-    });
 
-    modalContainer.querySelectorAll('.st-brk-end').forEach((inp) => {
-      inp.addEventListener('change', (e) => {
-        const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
-        const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
-        staffState[idx].breaks[bIdx].endTime = e.currentTarget.value;
+      modalContainer.querySelectorAll('.btn-st-add-break').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          staffState[idx].breaks.push({
+            id: `st-brk-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+            startTime: '14:00',
+            endTime: '15:00',
+            title: 'Lunch Break',
+          });
+          renderStaffModal();
+        });
       });
-    });
 
-    document.getElementById('edit-hours-form')?.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const submitBtn = document.getElementById('btn-save-st-hours');
-      const errorDiv = document.getElementById('st-hours-error');
-      submitBtn.textContent = 'Saving Stylist Schedule...';
-      submitBtn.setAttribute('disabled', 'true');
-      errorDiv.style.display = 'none';
+      modalContainer.querySelectorAll('.btn-st-del-break').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
+          staffState[idx].breaks.splice(bIdx, 1);
+          renderStaffModal();
+        });
+      });
 
-      // Update followsSalonSchedule property on staff member first
-      try {
-        await ApiClient.updateStaff(staffId, { followsSalonSchedule });
-      } catch (err) {
-        errorDiv.textContent = `Failed updating schedule inheritance: ${err.message}`;
-        errorDiv.style.display = 'block';
-        submitBtn.textContent = 'Save Stylist Schedule & Breaks →';
-        submitBtn.removeAttribute('disabled');
-        return;
-      }
+      modalContainer.querySelectorAll('.st-brk-title').forEach((inp) => {
+        inp.addEventListener('change', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
+          staffState[idx].breaks[bIdx].title = e.currentTarget.value;
+        });
+      });
 
-      // Validate client boundary rules
-      if (!followsSalonSchedule) {
-        for (const d of staffState) {
-          if (d.isWorking && !d.salonClosed) {
-            if (d.startTime < d.salonOpen || d.endTime > d.salonClose) {
-              errorDiv.textContent = `Stylist shift (${d.startTime}-${d.endTime}) on ${d.label} must fall within salon operating bounds (${d.salonOpen}-${d.salonClose}).`;
-              errorDiv.style.display = 'block';
-              submitBtn.textContent = 'Save Stylist Schedule & Breaks →';
-              submitBtn.removeAttribute('disabled');
-              return;
-            }
-            if (d.startTime >= d.endTime) {
-              errorDiv.textContent = `Shift start time (${d.startTime}) must be earlier than shift end time (${d.endTime}) on ${d.label}.`;
-              errorDiv.style.display = 'block';
-              submitBtn.textContent = 'Save Stylist Schedule & Breaks →';
-              submitBtn.removeAttribute('disabled');
-              return;
-            }
-            if (d.hasBreakOverride) {
-              for (const b of d.breaks) {
-                if (b.startTime >= b.endTime) {
-                  errorDiv.textContent = `Break start (${b.startTime}) must be earlier than break end (${b.endTime}) on ${d.label}.`;
-                  errorDiv.style.display = 'block';
-                  submitBtn.textContent = 'Save Stylist Schedule & Breaks →';
-                  submitBtn.removeAttribute('disabled');
-                  return;
-                }
-                if (b.startTime < d.startTime || b.endTime > d.endTime) {
-                  errorDiv.textContent = `Break ${b.startTime}-${b.endTime} must fall within stylist working shift (${d.startTime}-${d.endTime}) on ${d.label}.`;
-                  errorDiv.style.display = 'block';
-                  submitBtn.textContent = 'Save Stylist Schedule & Breaks →';
-                  submitBtn.removeAttribute('disabled');
-                  return;
+      modalContainer.querySelectorAll('.st-brk-start').forEach((inp) => {
+        inp.addEventListener('change', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
+          staffState[idx].breaks[bIdx].startTime = e.currentTarget.value;
+        });
+      });
+
+      modalContainer.querySelectorAll('.st-brk-end').forEach((inp) => {
+        inp.addEventListener('change', (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          const bIdx = parseInt(e.currentTarget.getAttribute('data-bidx'), 10);
+          staffState[idx].breaks[bIdx].endTime = e.currentTarget.value;
+        });
+      });
+
+      document.getElementById('edit-hours-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const submitBtn = document.getElementById('btn-save-st-hours');
+        const errorDiv = document.getElementById('st-hours-error');
+        submitBtn.textContent = 'Saving Stylist Schedule...';
+        submitBtn.setAttribute('disabled', 'true');
+        errorDiv.style.display = 'none';
+
+        // Update followsSalonSchedule property on staff member first
+        try {
+          await ApiClient.updateStaff(staffId, { followsSalonSchedule });
+        } catch (err) {
+          errorDiv.textContent = `Failed updating schedule inheritance: ${err.message}`;
+          errorDiv.style.display = 'block';
+          submitBtn.textContent = 'Save Stylist Schedule & Breaks →';
+          submitBtn.removeAttribute('disabled');
+          return;
+        }
+
+        // Validate client boundary rules
+        if (!followsSalonSchedule) {
+          for (const d of staffState) {
+            if (d.isWorking && !d.salonClosed) {
+              if (d.startTime < d.salonOpen || d.endTime > d.salonClose) {
+                errorDiv.textContent = `Stylist shift (${d.startTime}-${d.endTime}) on ${d.label} must fall within salon operating bounds (${d.salonOpen}-${d.salonClose}).`;
+                errorDiv.style.display = 'block';
+                submitBtn.textContent = 'Save Stylist Schedule & Breaks →';
+                submitBtn.removeAttribute('disabled');
+                return;
+              }
+              if (d.startTime >= d.endTime) {
+                errorDiv.textContent = `Shift start time (${d.startTime}) must be earlier than shift end time (${d.endTime}) on ${d.label}.`;
+                errorDiv.style.display = 'block';
+                submitBtn.textContent = 'Save Stylist Schedule & Breaks →';
+                submitBtn.removeAttribute('disabled');
+                return;
+              }
+              if (d.hasBreakOverride) {
+                for (const b of d.breaks) {
+                  if (b.startTime >= b.endTime) {
+                    errorDiv.textContent = `Break start (${b.startTime}) must be earlier than break end (${b.endTime}) on ${d.label}.`;
+                    errorDiv.style.display = 'block';
+                    submitBtn.textContent = 'Save Stylist Schedule & Breaks →';
+                    submitBtn.removeAttribute('disabled');
+                    return;
+                  }
+                  if (b.startTime < d.startTime || b.endTime > d.endTime) {
+                    errorDiv.textContent = `Break ${b.startTime}-${b.endTime} must fall within stylist working shift (${d.startTime}-${d.endTime}) on ${d.label}.`;
+                    errorDiv.style.display = 'block';
+                    submitBtn.textContent = 'Save Stylist Schedule & Breaks →';
+                    submitBtn.removeAttribute('disabled');
+                    return;
+                  }
                 }
               }
             }
           }
         }
-      }
 
-      const hoursPayload = staffState.map((d) => ({
-        dayOfWeek: d.dayOfWeek,
-        isWorking: followsSalonSchedule ? !d.salonClosed : d.isWorking,
-        startTime: followsSalonSchedule ? d.salonOpen : d.startTime,
-        endTime: followsSalonSchedule ? d.salonClose : d.endTime,
-        hasBreakOverride: d.breaks.length > 0,
-        breaks: d.breaks.map((b) => ({
-          id: b.id,
-          startTime: b.startTime,
-          endTime: b.endTime,
-          title: b.title || 'Personal Break',
-        })),
-      }));
+        const hoursPayload = staffState.map((d) => ({
+          dayOfWeek: d.dayOfWeek,
+          isWorking: followsSalonSchedule ? !d.salonClosed : d.isWorking,
+          startTime: followsSalonSchedule ? d.salonOpen : d.startTime,
+          endTime: followsSalonSchedule ? d.salonClose : d.endTime,
+          hasBreakOverride: d.breaks.length > 0,
+          breaks: d.breaks.map((b) => ({
+            id: b.id,
+            startTime: b.startTime,
+            endTime: b.endTime,
+            title: b.title || 'Personal Break',
+          })),
+        }));
 
-      try {
-        await ApiClient.updateStaffWorkingHours(staffId, hoursPayload, followsSalonSchedule);
-        const idx = this.staffList.findIndex((s) => String(s.id) === String(staffId));
-        if (idx !== -1) {
-          this.staffList[idx] = {
-            ...this.staffList[idx],
-            followsSalonSchedule,
-            workingHours: hoursPayload,
-          };
+        try {
+          await ApiClient.updateStaffWorkingHours(staffId, hoursPayload, followsSalonSchedule);
+          const idx = this.staffList.findIndex((s) => String(s.id) === String(staffId));
+          if (idx !== -1) {
+            this.staffList[idx] = {
+              ...this.staffList[idx],
+              followsSalonSchedule,
+              workingHours: hoursPayload,
+            };
+          }
+          modalContainer.innerHTML = '';
+          this.render();
+
+          this.loadData(true).then(() => {
+            this.refreshActiveTab();
+          }).catch(() => { });
+        } catch (err) {
+          errorDiv.textContent = err.message || 'Failed to update stylist schedule. Please verify input hours.';
+          errorDiv.style.display = 'block';
+          submitBtn.textContent = 'Save Stylist Schedule & Breaks →';
+          submitBtn.removeAttribute('disabled');
         }
-        modalContainer.innerHTML = '';
-        this.render();
+      });
+    };
 
-        this.loadData(true).then(() => {
-          this.refreshActiveTab();
-        }).catch(() => { });
-      } catch (err) {
-        errorDiv.textContent = err.message || 'Failed to update stylist schedule. Please verify input hours.';
-        errorDiv.style.display = 'block';
-        submitBtn.textContent = 'Save Stylist Schedule & Breaks →';
-        submitBtn.removeAttribute('disabled');
-      }
-    });
-  };
-
-  renderStaffModal();
-}
-
-showDeleteServiceModal(serviceId, serviceName) {
-  if (serviceId && String(serviceId).startsWith('temp-')) {
-    this.showToast('Please wait a moment while this service finishes saving to the cloud...', 'info');
-    return;
+    renderStaffModal();
   }
-  const modalContainer = document.getElementById('modal-container');
 
-  modalContainer.innerHTML = `
+  showDeleteServiceModal(serviceId, serviceName) {
+    if (serviceId && String(serviceId).startsWith('temp-')) {
+      this.showToast('Please wait a moment while this service finishes saving to the cloud...', 'info');
+      return;
+    }
+    const modalContainer = document.getElementById('modal-container');
+
+    modalContainer.innerHTML = `
       <div class="modal-backdrop show">
         <div class="modal-content" style="text-align: center;">
           <div style="font-size: 3rem; margin-bottom: 8px;">🗑️</div>
@@ -14197,438 +13914,62 @@ showDeleteServiceModal(serviceId, serviceName) {
       </div>
     `;
 
-  document.getElementById('btn-cancel-delete-svc')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
+    document.getElementById('btn-cancel-delete-svc')?.addEventListener('click', () => (modalContainer.innerHTML = ''));
 
-  document.getElementById('btn-confirm-delete-svc')?.addEventListener('click', async (e) => {
-    const confirmBtn = e.currentTarget;
-    if (confirmBtn.disabled) return;
-    confirmBtn.disabled = true;
+    document.getElementById('btn-confirm-delete-svc')?.addEventListener('click', async (e) => {
+      const confirmBtn = e.currentTarget;
+      if (confirmBtn.disabled) return;
+      confirmBtn.disabled = true;
 
-    // 1. Snapshot previous state for rollback safety
-    const previousServices = [...(this.servicesList || [])];
+      // 1. Snapshot previous state for rollback safety
+      const previousServices = [...(this.servicesList || [])];
 
-    // 2. Optimistic Update (Frame 1: 0ms delay)
-    this.servicesList = this.servicesList.filter((s) => s.id !== serviceId);
-    modalContainer.innerHTML = '';
-    this.render();
-    this.showToast('Service deleted.', 'info');
-
-    try {
-      // 3. Background Sync (Zero re-fetch!)
-      this.lastLocalActionTimestamp = Date.now();
-      await ApiClient.deleteService(serviceId);
-      SalonRepository.invalidate('services');
-    } catch (err) {
-      // 4. Safe Rollback on rejection (e.g. active bookings guard)
-      this.servicesList = previousServices;
+      // 2. Optimistic Update (Frame 1: 0ms delay)
+      this.servicesList = this.servicesList.filter((s) => s.id !== serviceId);
+      modalContainer.innerHTML = '';
       this.render();
-      this.showToast(`Failed to delete service: ${err.message}`, 'error');
-    }
-  });
-}
+      this.showToast('Service deleted.', 'info');
 
-showQRCodeModal() {
-  BookingQrView.showQuickQrModal(this);
-}
-
-showStandeePrintModal() {
-  BookingQrView.showStandeeModal(this);
-}
-
-getBookingShareUrl() {
-  const rawPhone = this.salonProfile?.phone || this.currentUser?.phone || '';
-  let digits = (rawPhone || '').replace(/[^\d]/g, '');
-  if (digits.length === 10) digits = '91' + digits;
-  if (digits.length >= 10) {
-    return `https://wa.me/${digits}?text=Hi`;
+      try {
+        // 3. Background Sync (Zero re-fetch!)
+        this.lastLocalActionTimestamp = Date.now();
+        await ApiClient.deleteService(serviceId);
+        SalonRepository.invalidate('services');
+      } catch (err) {
+        // 4. Safe Rollback on rejection (e.g. active bookings guard)
+        this.servicesList = previousServices;
+        this.render();
+        this.showToast(`Failed to delete service: ${err.message}`, 'error');
+      }
+    });
   }
-  const slug = this.salonProfile?.slug || 'salon';
-  return `${window.location.origin}/#book/${slug}`;
-}
+
+  showQRCodeModal() {
+    BookingQrView.showQuickQrModal(this);
+  }
+
+  showStandeePrintModal() {
+    BookingQrView.showStandeeModal(this);
+  }
+
+  getBookingShareUrl() {
+    const rawPhone = this.salonProfile?.phone || this.currentUser?.phone || '';
+    let digits = (rawPhone || '').replace(/[^\d]/g, '');
+    if (digits.length === 10) digits = '91' + digits;
+    if (digits.length >= 10) {
+      return `https://wa.me/${digits}?text=Hi`;
+    }
+    const slug = this.salonProfile?.slug || 'salon';
+    return `${window.location.origin}/#book/${slug}`;
+  }
 
   async showCustomerHistoryModal(customerId, customerName) {
-  const modalContainer = document.getElementById('modal-container');
-
-  modalContainer.innerHTML = `
-      <div class="modal-backdrop show">
-        <div class="modal-content modal-content-lg" style="max-width: 680px;">
-          <!-- Sleek, Perfectly-Aligned Header -->
-          <div class="modal-header" style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; padding-bottom: 10px;">
-            <div style="display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1;">
-              <button class="close-btn" id="btn-back-to-customers" title="Back to Customers" style="width: 28px; height: 28px; border-radius: 6px; flex-shrink: 0; font-size: 0.85rem;">
-                ←
-              </button>
-              <h3 style="font-size: 1.02rem; font-family: var(--font-heading); font-weight: 700; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                Customer Profile & History
-              </h3>
-            </div>
-            <button class="close-btn" id="btn-close-modal" style="width: 28px; height: 28px; font-size: 1.1rem; flex-shrink: 0;">&times;</button>
-          </div>
-          <div id="cust-history-body" style="padding: 4px 0; text-align: center; color: var(--text-muted);">
-            Loading customer details & booking history...
-          </div>
-        </div>
-      </div>
-    `;
-
-  const closeModal = () => (modalContainer.innerHTML = '');
-  document.getElementById('btn-close-modal')?.addEventListener('click', closeModal);
-  document.getElementById('btn-back-to-customers')?.addEventListener('click', closeModal);
-
-  try {
-    const customer = await ApiClient.getCustomerById(customerId);
-    const historyBody = document.getElementById('cust-history-body');
-    if (!historyBody) return;
-
-    const appts = customer.appointments || [];
-    const strikes = customer.yearlyNoShowCount || 0;
-    const isBlocked = customer.isBookingBlocked || strikes >= 3;
-    const totalSpend = appts.reduce((acc, a) => acc + (Number(a.price) || 0), 0);
-
-    historyBody.style.textAlign = 'left';
-    historyBody.innerHTML = `
-        <!-- Customer Summary Header Card (Ultra-Clean 2-Row Identity & Metrics) -->
-        <div style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; padding: 10px 12px; margin-bottom: 12px;">
-          <!-- Row 1: Identity & Strike Badge -->
-          <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px;">
-            <div style="display: flex; align-items: center; gap: 9px; min-width: 0;">
-              <div class="customer-avatar">${(customer.name || customerName || 'C').charAt(0).toUpperCase()}</div>
-              <div style="min-width: 0;">
-                <div style="font-size: 0.92rem; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${customer.name || customerName}</div>
-                <div style="font-size: 0.73rem; color: #94a3b8; font-family: monospace; line-height: 1.2;">${customer.phone || 'No phone'}</div>
-              </div>
-            </div>
-            <div style="flex-shrink: 0;">${this.renderStrikeBadge(customer)}</div>
-          </div>
-
-          <!-- Row 2: 2-Column Compact Metric Strip -->
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.05);">
-            <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.04); border-radius: 8px; padding: 6px 10px;">
-              <div style="font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Total Bookings</div>
-              <div style="font-size: 0.88rem; font-weight: 700; color: #f1f5f9;">${appts.length} Bookings</div>
-            </div>
-            <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.04); border-radius: 8px; padding: 6px 10px;">
-              <div style="font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Total Spend</div>
-              <div style="font-size: 0.88rem; font-weight: 800; color: #34d399;">₹${totalSpend.toLocaleString()}</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Penalty Strike & Booking Access Control Panel -->
-        <div style="background: rgba(139, 61, 255, 0.05); border: 1px solid rgba(139, 61, 255, 0.2); border-radius: 12px; padding: 10px 12px; margin-bottom: 12px;">
-          <!-- Section Title & Strikes Ratio -->
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-            <div style="display: flex; align-items: center; gap: 6px;">
-              <span style="font-size: 0.72rem; font-weight: 800; color: #a5b4fc; text-transform: uppercase; letter-spacing: 0.04em;">⚡ Strike Level:</span>
-              <span style="font-size: 0.88rem; font-weight: 800; color: #fff;">${strikes} / 3 Strikes</span>
-            </div>
-            <span style="font-size: 0.7rem; color: #94a3b8;">Click tier to set</span>
-          </div>
-
-          <!-- Direct 4-Segment Strike Level Selector (100% Full-Width, ZERO-Wrap) -->
-          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin-bottom: 8px;">
-            <button class="btn btn-strike-set" data-count="0" style="min-height: 28px; padding: 4px 2px; font-size: 0.72rem; font-weight: 700; border-radius: 6px; border: 1px solid ${strikes === 0 ? 'rgba(16, 185, 129, 0.6)' : 'rgba(255,255,255,0.08)'}; background: ${strikes === 0 ? 'rgba(16, 185, 129, 0.25)' : 'rgba(255,255,255,0.03)'}; color: ${strikes === 0 ? '#34d399' : '#94a3b8'};">
-              0 Clean
-            </button>
-            <button class="btn btn-strike-set" data-count="1" style="min-height: 28px; padding: 4px 2px; font-size: 0.72rem; font-weight: 700; border-radius: 6px; border: 1px solid ${strikes === 1 ? 'rgba(245, 158, 11, 0.6)' : 'rgba(255,255,255,0.08)'}; background: ${strikes === 1 ? 'rgba(245, 158, 11, 0.25)' : 'rgba(255,255,255,0.03)'}; color: ${strikes === 1 ? '#fbbf24' : '#94a3b8'};">
-              1 Warn
-            </button>
-            <button class="btn btn-strike-set" data-count="2" style="min-height: 28px; padding: 4px 2px; font-size: 0.72rem; font-weight: 700; border-radius: 6px; border: 1px solid ${strikes === 2 ? 'rgba(249, 115, 22, 0.6)' : 'rgba(255,255,255,0.08)'}; background: ${strikes === 2 ? 'rgba(249, 115, 22, 0.25)' : 'rgba(255,255,255,0.03)'}; color: ${strikes === 2 ? '#fb923c' : '#94a3b8'};">
-              2 Critical
-            </button>
-            <button class="btn btn-strike-set" data-count="3" style="min-height: 28px; padding: 4px 2px; font-size: 0.72rem; font-weight: 700; border-radius: 6px; border: 1px solid ${strikes >= 3 ? 'rgba(239, 68, 68, 0.6)' : 'rgba(255,255,255,0.08)'}; background: ${strikes >= 3 ? 'rgba(239, 68, 68, 0.25)' : 'rgba(255,255,255,0.03)'}; color: ${strikes >= 3 ? '#fca5a5' : '#94a3b8'};">
-              3 Blocked
-            </button>
-          </div>
-
-          <!-- Quick Action Buttons: 2-Column Balanced Grid -->
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-            <button class="btn btn-sm" id="btn-modal-unblock" style="min-height: 30px; font-weight: 700; font-size: 0.74rem; padding: 0 8px; border-radius: 6px; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); color: #34d399; justify-content: center; gap: 4px;">
-              🔓 Reset (0/3)
-            </button>
-            <button class="btn btn-sm" id="btn-modal-block" style="min-height: 30px; font-weight: 700; font-size: 0.74rem; padding: 0 8px; border-radius: 6px; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.35); color: #fca5a5; justify-content: center; gap: 4px;">
-              🔒 Block (3/3)
-            </button>
-          </div>
-        </div>
-
-        <!-- Booking History Timeline -->
-        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-          <h4 style="font-size: 0.88rem; font-weight: 700; color: #fff; margin: 0; font-family: var(--font-heading); display: flex; align-items: center; gap: 6px;">
-            <span>📜</span>
-            <span>Booking History</span>
-          </h4>
-          <span style="font-size: 0.72rem; color: #94a3b8;">${appts.length} appointments</span>
-        </div>
-
-        ${appts.length === 0 ? `
-          <div style="text-align: center; padding: 20px 14px; color: var(--text-muted); background: rgba(0,0,0,0.2); border-radius: 10px; border: 1px solid rgba(255,255,255,0.04); font-size: 0.8rem;">
-            No past appointment records found for this customer.
-          </div>
-        ` : `
-          <div style="max-height: 240px; overflow-y: auto; overflow-x: auto; border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; background: rgba(0,0,0,0.15);">
-            <table class="cust-history-table">
-              <thead>
-                <tr>
-                  <th>Date & Time</th>
-                  <th>Service</th>
-                  <th>Stylist</th>
-                  <th>Price</th>
-                  <th style="text-align: right;">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${appts.map((a) => {
-      const dateStr = a.startAt ? new Date(a.startAt).toLocaleDateString() : 'N/A';
-      const timeStr = a.startAt ? new Date(a.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-      const statusColors = {
-        CONFIRMED: 'rgba(139, 61, 255,0.2); color: #A855F7',
-        COMPLETED: 'rgba(16,185,129,0.2); color: #34d399',
-        CANCELLED: 'rgba(239,68,68,0.2); color: #f87171',
-        IN_SERVICE: 'rgba(168,85,247,0.2); color: #c084fc',
-        SEATED_IN_CHAIR: 'rgba(168,85,247,0.2); color: #c084fc',
-      };
-      const badgeStyle = statusColors[a.status] || 'rgba(255,255,255,0.1); color: #fff';
-      return `
-                    <tr>
-                      <td>
-                        <div style="font-weight: 700; color: #fff;">${dateStr}</div>
-                        <div style="font-size: 0.72rem; color: #94a3b8;">${timeStr}</div>
-                      </td>
-                      <td style="font-weight: 600; color: #c7d2fe;">${getApptServices(a).map((s) => s.name).join(' + ') || a.serviceNameSnapshot || a.service?.name || 'Service'}</td>
-                      <td style="color: #94a3b8;">${a.stylist?.name || 'Any Staff'}</td>
-                      <td style="font-weight: 700; color: #34d399;">₹${a.price || 0}</td>
-                      <td style="text-align: right;">
-                        <span class="badge" style="background: ${badgeStyle}; font-weight: 700; font-size: 0.7rem; padding: 2px 7px; border-radius: 5px;">${a.status}</span>
-                      </td>
-                    </tr>
-                  `;
-    }).join('')}
-              </tbody>
-            </table>
-          </div>
-        `}
-      `;
-
-    // Event Listener: Unblock (Reset to 0)
-    document.getElementById('btn-modal-unblock')?.addEventListener('click', async () => {
-      const ok = await CalendarState.confirm({
-        title: 'Unblock Customer Access',
-        message: `Reset strikes to 0 and restore WhatsApp booking access for ${customer.name || customerName}?`,
-        confirmText: 'Unblock Customer',
-        cancelText: 'Cancel',
-        icon: '🎉',
-        type: 'warning',
-      });
-      if (ok) {
-        try {
-          await ApiClient.unblockCustomer(customerId);
-          this.showToast(`🎉 Successfully reset strikes to 0. Customer unblocked!`, 'success');
-          this.showCustomerHistoryModal(customerId, customerName);
-          this.loadCustomersTable(this.searchQuery);
-        } catch (err) {
-          this.showToast(`Error resetting strikes: ${err.message}`, 'error');
-        }
-      }
-    });
-
-    // Event Listener: Block (Set to 3)
-    document.getElementById('btn-modal-block')?.addEventListener('click', async () => {
-      const ok = await CalendarState.confirm({
-        title: 'Block Customer',
-        message: `Are you sure you want to block ${customer.name || customerName} from booking appointments?`,
-        confirmText: 'Block Customer',
-        cancelText: 'Cancel',
-        icon: '🔒',
-        type: 'danger',
-      });
-      if (ok) {
-        try {
-          await ApiClient.updateCustomerStrikes(customerId, 3, true);
-          this.showToast(`🔒 Customer has been blocked.`, 'warning');
-          this.showCustomerHistoryModal(customerId, customerName);
-          this.loadCustomersTable(this.searchQuery);
-        } catch (err) {
-          this.showToast(`Error blocking customer: ${err.message}`, 'error');
-        }
-      }
-    });
-
-    // Event Listener: Manual Strike Adjuster Pills (0, 1, 2, 3)
-    historyBody.querySelectorAll('.btn-strike-set').forEach((btn) => {
-      btn.addEventListener('click', async (e) => {
-        const count = parseInt(e.currentTarget.getAttribute('data-count'), 10);
-        const blockState = count >= 3;
-        try {
-          if (count === 0) {
-            await ApiClient.unblockCustomer(customerId);
-          } else {
-            await ApiClient.updateCustomerStrikes(customerId, count, blockState);
-          }
-          this.showCustomerHistoryModal(customerId, customerName);
-          this.loadCustomersTable(this.searchQuery);
-        } catch (err) {
-          this.showToast(`Error updating strikes: ${err.message}`, 'error');
-        }
-      });
-    });
-
-  } catch (err) {
-    const historyBody = document.getElementById('cust-history-body');
-    if (historyBody) {
-      historyBody.innerHTML = `<div style="color: var(--danger); padding: 20px;">Failed to load customer details: ${err.message}</div>`;
-    }
+    return CustomerCrmView.showCustomerHistoryModal(customerId, customerName, this);
   }
-}
 
-showAdjustStrikesModal(customer) {
-  const modalContainer = document.getElementById('modal-container');
-  const currentStrikes = customer.yearlyNoShowCount || 0;
-
-  modalContainer.innerHTML = `
-      <div class="modal-backdrop show">
-        <div class="modal-content" style="max-width: 440px;">
-          <div class="modal-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding-bottom: 10px;">
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <span style="font-size: 1.1rem;">⚙️</span>
-              <h3 style="font-size: 1.02rem; font-family: var(--font-heading); font-weight: 700; margin: 0;">Adjust Penalty Strikes</h3>
-            </div>
-            <button class="close-btn" id="btn-close-modal" style="width: 28px; height: 28px; font-size: 1.1rem;">&times;</button>
-          </div>
-
-          <div style="padding: 2px 0 0 0;">
-            <!-- Customer Identity & Current Status Strip -->
-            <div style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.06); padding: 10px 12px; border-radius: 10px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; gap: 10px;">
-              <div style="min-width: 0;">
-                <div style="font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700; letter-spacing: 0.04em;">Customer</div>
-                <div style="font-size: 0.95rem; font-weight: 700; color: #fff; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                  ${customer.name || 'Customer'}
-                </div>
-                <div style="font-size: 0.74rem; color: #94a3b8; font-family: monospace;">${customer.phone || 'No phone'}</div>
-              </div>
-              <div style="flex-shrink: 0;">${this.renderStrikeBadge(customer)}</div>
-            </div>
-
-            <div style="font-size: 0.74rem; color: var(--text-muted); margin-bottom: 8px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.04em;">
-              Set Strike Level Directly:
-            </div>
-
-            <!-- Direct 4-Tier Strike Grid -->
-            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 14px;">
-              <button class="btn btn-strike-tier" data-count="0" style="padding: 6px 4px; font-size: 0.72rem; font-weight: 700; border-radius: 8px; border: 1px solid ${currentStrikes === 0 ? 'rgba(16, 185, 129, 0.5)' : 'rgba(255,255,255,0.08)'}; background: ${currentStrikes === 0 ? 'rgba(16, 185, 129, 0.25)' : 'rgba(255,255,255,0.04)'}; color: ${currentStrikes === 0 ? '#34d399' : '#cbd5e1'};">
-                ✓ 0 Clean
-              </button>
-              <button class="btn btn-strike-tier" data-count="1" style="padding: 6px 4px; font-size: 0.72rem; font-weight: 700; border-radius: 8px; border: 1px solid ${currentStrikes === 1 ? 'rgba(245, 158, 11, 0.5)' : 'rgba(255,255,255,0.08)'}; background: ${currentStrikes === 1 ? 'rgba(245, 158, 11, 0.25)' : 'rgba(255,255,255,0.04)'}; color: ${currentStrikes === 1 ? '#fbbf24' : '#cbd5e1'};">
-                ⚡ 1 Warn
-              </button>
-              <button class="btn btn-strike-tier" data-count="2" style="padding: 6px 4px; font-size: 0.72rem; font-weight: 700; border-radius: 8px; border: 1px solid ${currentStrikes === 2 ? 'rgba(249, 115, 22, 0.5)' : 'rgba(255,255,255,0.08)'}; background: ${currentStrikes === 2 ? 'rgba(249, 115, 22, 0.25)' : 'rgba(255,255,255,0.04)'}; color: ${currentStrikes === 2 ? '#fb923c' : '#cbd5e1'};">
-                ⚠️ 2 Alert
-              </button>
-              <button class="btn btn-strike-tier" data-count="3" style="padding: 6px 4px; font-size: 0.72rem; font-weight: 700; border-radius: 8px; border: 1px solid ${currentStrikes >= 3 ? 'rgba(239, 68, 68, 0.5)' : 'rgba(255,255,255,0.08)'}; background: ${currentStrikes >= 3 ? 'rgba(239, 68, 68, 0.25)' : 'rgba(255,255,255,0.04)'}; color: ${currentStrikes >= 3 ? '#fca5a5' : '#cbd5e1'};">
-                🔴 3 Block
-              </button>
-            </div>
-
-            <div style="font-size: 0.74rem; color: var(--text-muted); margin-bottom: 8px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.04em;">
-              Quick Operations:
-            </div>
-
-            <!-- Sleek, Compact Action Rows (Height ~38px, Dark Luxury Styling) -->
-            <div style="display: flex; flex-direction: column; gap: 6px;">
-              <!-- Option 1: Reset All to 0 -->
-              <button class="btn" id="btn-opt-reset-all" style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; font-size: 0.8rem; font-weight: 600; border-radius: 8px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25); color: #34d399; transition: all 0.15s ease;">
-                <span style="display: flex; align-items: center; gap: 6px;">
-                  <span>🧹</span>
-                  <span>Reset All Strikes (Set to 0/3)</span>
-                </span>
-                <span style="font-size: 0.68rem; font-weight: 700; background: rgba(16, 185, 129, 0.2); padding: 2px 7px; border-radius: 6px; color: #6ee7b7;">Clear 100%</span>
-              </button>
-
-              ${currentStrikes > 0 ? `
-                <!-- Option 2: Remove 1 Strike -->
-                <button class="btn" id="btn-opt-remove-1" style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; font-size: 0.8rem; font-weight: 600; border-radius: 8px; background: rgba(139, 61, 255, 0.1); border: 1px solid rgba(139, 61, 255, 0.25); color: #c7d2fe; transition: all 0.15s ease;">
-                  <span style="display: flex; align-items: center; gap: 6px;">
-                    <span>➖</span>
-                    <span>Remove 1 Strike (Set to ${Math.max(0, currentStrikes - 1)}/3)</span>
-                  </span>
-                  <span style="font-size: 0.68rem; font-weight: 700; background: rgba(139, 61, 255, 0.25); padding: 2px 7px; border-radius: 6px; color: #e0e7ff;">-1 Strike</span>
-                </button>
-              ` : ''}
-
-              <!-- Option: Block / Unblock Customer -->
-              <button class="btn" id="btn-opt-block" style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; font-size: 0.8rem; font-weight: 600; border-radius: 8px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.25); color: #fca5a5; transition: all 0.15s ease;">
-                <span style="display: flex; align-items: center; gap: 6px;">
-                  <span>🔒</span>
-                  <span>Block Customer (Set to 3/3 Blocked)</span>
-                </span>
-                <span style="font-size: 0.68rem; font-weight: 700; background: rgba(239, 68, 68, 0.2); padding: 2px 7px; border-radius: 6px; color: #fecdd3;">3 Strikes</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
-
-  const closeModal = () => (modalContainer.innerHTML = '');
-  document.getElementById('btn-close-modal')?.addEventListener('click', closeModal);
-
-  // Direct Strike Tier Handler
-  modalContainer.querySelectorAll('.btn-strike-tier').forEach((btn) => {
-    btn.addEventListener('click', async (e) => {
-      const count = parseInt(e.currentTarget.getAttribute('data-count'), 10);
-      const blockState = count >= 3;
-      try {
-        if (count === 0) {
-          await ApiClient.unblockCustomer(customer.id);
-        } else {
-          await ApiClient.updateCustomerStrikes(customer.id, count, blockState);
-        }
-        this.showToast(`⚡ Updated penalty strikes to ${count}/3 for ${customer.name || 'Customer'}.`, 'info');
-        closeModal();
-        this.loadCustomersTable(this.searchQuery);
-      } catch (err) {
-        this.showToast(`Error updating strikes: ${err.message}`, 'error');
-      }
-    });
-  });
-
-  // Handler: Reset All (Set to 0)
-  document.getElementById('btn-opt-reset-all')?.addEventListener('click', async () => {
-    try {
-      await ApiClient.unblockCustomer(customer.id);
-      this.showToast(`🎉 Reset all strikes to 0 for ${customer.name || 'Customer'}. Account unblocked & WhatsApp notification sent!`, 'success');
-      closeModal();
-      this.loadCustomersTable(this.searchQuery);
-    } catch (err) {
-      this.showToast(`Error resetting strikes: ${err.message}`, 'error');
-    }
-  });
-
-  // Handler: Remove 1 Strike
-  document.getElementById('btn-opt-remove-1')?.addEventListener('click', async () => {
-    const newCount = Math.max(0, currentStrikes - 1);
-    try {
-      await ApiClient.updateCustomerStrikes(customer.id, newCount, newCount >= 3);
-      this.showToast(`⚡ Reduced penalty strikes to ${newCount}/3 for ${customer.name || 'Customer'}.`, 'info');
-      closeModal();
-      this.loadCustomersTable(this.searchQuery);
-    } catch (err) {
-      this.showToast(`Error updating strikes: ${err.message}`, 'error');
-    }
-  });
-
-  // Handler: Block Customer (Set to 3)
-  document.getElementById('btn-opt-block')?.addEventListener('click', async () => {
-    try {
-      await ApiClient.updateCustomerStrikes(customer.id, 3, true);
-      this.showToast(`🔒 ${customer.name || 'Customer'} has been blocked (3/3 strikes).`, 'warning');
-      closeModal();
-      this.loadCustomersTable(this.searchQuery);
-    } catch (err) {
-      this.showToast(`Error blocking customer: ${err.message}`, 'error');
-    }
-  });
-}
+  showAdjustStrikesModal(customer) {
+    return CustomerCrmView.showCustomerHistoryModal(customer?.id, customer?.name, this);
+  }
 }
 
 
