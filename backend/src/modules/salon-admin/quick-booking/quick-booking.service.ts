@@ -402,17 +402,34 @@ export class QuickBookingService {
         });
 
     // 2. Auto-cancel colliding requests synchronously so database & queue are immediately consistent
-    if (updated.stylistId && this.cancellationService) {
+    if (this.cancellationService) {
       try {
+        const competingWhere: any = {
+          salonId,
+          status: AppointmentStatus.PENDING_ACCEPTANCE,
+          id: { not: updated.id },
+          OR: [
+            { startAt: { lt: updated.endAt }, endAt: { gt: updated.startAt } },
+            {
+              proposedStartAt: { not: null, lt: updated.endAt },
+              proposedEndAt: { not: null, gt: updated.startAt },
+            },
+          ],
+        };
+
+        if (updated.stylistId) {
+          competingWhere.AND = [
+            {
+              OR: [
+                { stylistId: updated.stylistId },
+                { proposedStylistId: updated.stylistId },
+              ],
+            },
+          ];
+        }
+
         const competing = await this.prisma.appointment.findMany({
-          where: {
-            salonId,
-            stylistId: updated.stylistId,
-            status: AppointmentStatus.PENDING_ACCEPTANCE,
-            id: { not: updated.id },
-            startAt: { lt: updated.endAt },
-            endAt: { gt: updated.startAt },
-          },
+          where: competingWhere,
         });
 
         for (const comp of competing) {

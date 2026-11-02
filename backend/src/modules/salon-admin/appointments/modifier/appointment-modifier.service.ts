@@ -17,6 +17,7 @@ import {
   formatAppointment,
   VALID_STATUS_TRANSITIONS,
 } from '../utils/appointment-helpers';
+import { mapToQueueItem } from '../queue/mappers/queue-appointment.mapper';
 
 /**
  * AppointmentModifierService (The Sole Appointment Table Writer / Gateway)
@@ -190,7 +191,12 @@ export class AppointmentModifierService {
       }
     }
 
-    const formatted = formatAppointment(updated);
+    let formatted: any = formatAppointment(updated);
+    try {
+      const queueItem = mapToQueueItem(updated);
+      formatted = { ...formatted, ...queueItem };
+    } catch (_) { }
+
     this.eventsService?.emitSalonEvent(salonId, 'STATUS_UPDATED', formatted);
 
     return formatted;

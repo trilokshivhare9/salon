@@ -326,15 +326,32 @@ export class SalonsService {
           });
 
           for (const b of breaksToSave) {
-            await tx.salonBreak.create({
-              data: {
+            const existingBreak = await tx.salonBreak.findFirst({
+              where: {
                 salonId: salon.id,
-                dayOfWeek: item.dayOfWeek,
                 title: b.title || 'Salon Break',
                 startTime: b.startTime,
                 endTime: b.endTime,
               },
             });
+            if (existingBreak) {
+              if (!existingBreak.days.includes(item.dayOfWeek)) {
+                await tx.salonBreak.update({
+                  where: { id: existingBreak.id },
+                  data: { days: [...existingBreak.days, item.dayOfWeek] },
+                });
+              }
+            } else {
+              await tx.salonBreak.create({
+                data: {
+                  salonId: salon.id,
+                  days: [item.dayOfWeek],
+                  title: b.title || 'Salon Break',
+                  startTime: b.startTime,
+                  endTime: b.endTime,
+                },
+              });
+            }
           }
         }
       } else {
@@ -712,14 +729,14 @@ Here are your salon owner login credentials:
       }),
       this.prisma.salonBreak.findMany({
         where: { salonId },
-        orderBy: [{ dayOfWeek: 'asc' }, { startTime: 'asc' }],
+        orderBy: { startTime: 'asc' },
       }),
     ]);
 
     return hours.map((h) => ({
       ...h,
       breaks: breaks
-        .filter((b) => b.dayOfWeek === h.dayOfWeek)
+        .filter((b) => b.days.includes(h.dayOfWeek))
         .map((b) => ({
           id: b.id,
           title: b.title,
@@ -852,7 +869,7 @@ Here are your salon owner login credentials:
         // Sync to first-class SalonBreak table and propagate to stylists
         if (item.breaks !== undefined) {
           const existingSalonBreaks = await tx.salonBreak.findMany({
-            where: { salonId, dayOfWeek: item.dayOfWeek },
+            where: { salonId, days: { has: item.dayOfWeek } },
           });
 
           // Delete breaks that are no longer in breaksToSave
@@ -861,14 +878,25 @@ Here are your salon owner login credentials:
               (b) => b.startTime === ex.startTime && b.endTime === ex.endTime,
             );
             if (!stillExists) {
-              await tx.stylistBreak.deleteMany({
-                where: { salonBreakId: ex.id, isCustomized: false },
-              });
-              await tx.stylistBreak.updateMany({
-                where: { salonBreakId: ex.id, isCustomized: true },
-                data: { salonBreakId: null },
-              });
-              await tx.salonBreak.delete({ where: { id: ex.id } });
+              if (ex.days.length <= 1) {
+                await tx.stylistBreak.deleteMany({
+                  where: { salonBreakId: ex.id, isCustomized: false },
+                });
+                await tx.stylistBreak.updateMany({
+                  where: { salonBreakId: ex.id, isCustomized: true },
+                  data: { salonBreakId: null },
+                });
+                await tx.salonBreak.delete({ where: { id: ex.id } });
+              } else {
+                await tx.salonBreak.update({
+                  where: { id: ex.id },
+                  data: { days: ex.days.filter((d) => d !== item.dayOfWeek) },
+                });
+                await tx.stylistBreak.updateMany({
+                  where: { salonBreakId: ex.id, isCustomized: false },
+                  data: { days: ex.days.filter((d) => d !== item.dayOfWeek) },
+                });
+              }
             }
           }
 
@@ -879,36 +907,63 @@ Here are your salon owner login credentials:
               (ex) => ex.startTime === b.startTime && ex.endTime === b.endTime,
             );
             if (!alreadyExists) {
-              const newSb = await tx.salonBreak.create({
-                data: {
-                  salonId,
-                  dayOfWeek: item.dayOfWeek,
-                  title: b.title || 'Salon Break',
-                  startTime: b.startTime,
-                  endTime: b.endTime,
-                },
+              const routineBreak = await tx.salonBreak.findFirst({
+                where: { salonId, startTime: b.startTime, endTime: b.endTime },
               });
+              let targetSalonBreakId: string;
+              if (routineBreak) {
+                targetSalonBreakId = routineBreak.id;
+                if (!routineBreak.days.includes(item.dayOfWeek)) {
+                  await tx.salonBreak.update({
+                    where: { id: routineBreak.id },
+                    data: { days: [...routineBreak.days, item.dayOfWeek] },
+                  });
+                }
+              } else {
+                const newSb = await tx.salonBreak.create({
+                  data: {
+                    salonId,
+                    days: [item.dayOfWeek],
+                    title: b.title || 'Salon Break',
+                    startTime: b.startTime,
+                    endTime: b.endTime,
+                  },
+                });
+                targetSalonBreakId = newSb.id;
+              }
 
               for (const st of stylists) {
                 const stBreaks = await tx.stylistBreak.findMany({
-                  where: { stylistId: st.id, dayOfWeek: item.dayOfWeek },
+                  where: { stylistId: st.id, days: { has: item.dayOfWeek } },
                 });
                 const hasOverlap = stBreaks.some(
                   (sb) => sb.startTime < b.endTime && sb.endTime > b.startTime,
                 );
                 if (!hasOverlap) {
-                  await tx.stylistBreak.create({
-                    data: {
-                      salonId,
-                      stylistId: st.id,
-                      salonBreakId: newSb.id,
-                      dayOfWeek: item.dayOfWeek,
-                      title: b.title || 'Salon Break',
-                      startTime: b.startTime,
-                      endTime: b.endTime,
-                      isCustomized: false,
-                    },
+                  const existingStBreak = await tx.stylistBreak.findFirst({
+                    where: { salonBreakId: targetSalonBreakId, stylistId: st.id },
                   });
+                  if (existingStBreak) {
+                    if (!existingStBreak.days.includes(item.dayOfWeek)) {
+                      await tx.stylistBreak.update({
+                        where: { id: existingStBreak.id },
+                        data: { days: [...existingStBreak.days, item.dayOfWeek] },
+                      });
+                    }
+                  } else {
+                    await tx.stylistBreak.create({
+                      data: {
+                        salonId,
+                        stylistId: st.id,
+                        salonBreakId: targetSalonBreakId,
+                        days: [item.dayOfWeek],
+                        title: b.title || 'Salon Break',
+                        startTime: b.startTime,
+                        endTime: b.endTime,
+                        isCustomized: false,
+                      },
+                    });
+                  }
                 }
               }
             }
@@ -923,14 +978,14 @@ Here are your salon owner login credentials:
         }),
         tx.salonBreak.findMany({
           where: { salonId },
-          orderBy: [{ dayOfWeek: 'asc' }, { startTime: 'asc' }],
+          orderBy: { startTime: 'asc' },
         }),
       ]);
 
       return finalHours.map((h) => ({
         ...h,
         breaks: finalBreaks
-          .filter((b) => b.dayOfWeek === h.dayOfWeek)
+          .filter((b) => b.days.includes(h.dayOfWeek))
           .map((b) => ({
             id: b.id,
             title: b.title,
@@ -947,7 +1002,7 @@ Here are your salon owner login credentials:
   async getSalonBreaks(salonId: string) {
     return this.prisma.salonBreak.findMany({
       where: { salonId },
-      orderBy: [{ dayOfWeek: 'asc' }, { startTime: 'asc' }],
+      orderBy: { startTime: 'asc' },
     });
   }
 
@@ -966,11 +1021,15 @@ Here are your salon owner login credentials:
       throw new BadRequestException('Break duration must be at least 15 minutes and divisible by 15.');
     }
 
+    const targetDays: DayOfWeek[] = dto.days && dto.days.length > 0
+      ? dto.days
+      : (dto.dayOfWeek ? [dto.dayOfWeek] : Object.values(DayOfWeek));
+
     // 1. Check if an identical break already exists at salon level
     const existing = await this.prisma.salonBreak.findFirst({
       where: {
         salonId,
-        dayOfWeek: dto.dayOfWeek,
+        days: { hasSome: targetDays },
         startTime: dto.startTime,
         endTime: dto.endTime,
       },
@@ -983,7 +1042,7 @@ Here are your salon owner login credentials:
     const salonBreak = await this.prisma.salonBreak.create({
       data: {
         salonId,
-        dayOfWeek: dto.dayOfWeek,
+        days: targetDays,
         title: dto.title || 'Salon Break',
         startTime: dto.startTime,
         endTime: dto.endTime,
@@ -995,9 +1054,9 @@ Here are your salon owner login credentials:
     const skippedStylists: string[] = [];
 
     for (const st of stylists) {
-      // Check if this stylist already has an overlapping break on this dayOfWeek
+      // Check if this stylist already has an overlapping break on these days
       const existingBreaks = await this.prisma.stylistBreak.findMany({
-        where: { stylistId: st.id, dayOfWeek: dto.dayOfWeek },
+        where: { stylistId: st.id, days: { hasSome: targetDays } },
       });
 
       const hasOverlap = existingBreaks.some(
@@ -1014,7 +1073,7 @@ Here are your salon owner login credentials:
           salonId,
           stylistId: st.id,
           salonBreakId: salonBreak.id,
-          dayOfWeek: dto.dayOfWeek,
+          days: targetDays,
           title: dto.title || 'Salon Break',
           startTime: dto.startTime,
           endTime: dto.endTime,

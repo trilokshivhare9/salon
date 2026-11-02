@@ -56,4 +56,33 @@ export class DeleteRoutineBreakDto {
   @IsEnum(DayOfWeek, { each: true })
   @IsOptional()
   days?: DayOfWeek[];
+
+  @IsOptional()
+  breakIds?: Record<string, string>;
+
+  @IsString()
+  @IsOptional()
+  salonBreakId?: string;
 }
+
+export class ResetRoutineBreakDto {
+  @IsString()
+  @IsOptional()
+  salonBreakId?: string;
+
+  @IsString()
+  @IsOptional()
+  title?: string;
+
+  @IsString()
+  @IsOptional()
+  startTime?: string;
+
+  @IsString()
+  @IsOptional()
+  endTime?: string;
+
+  @IsOptional()
+  breakIds?: Record<string, string>;
+}
+

@@ -364,6 +364,9 @@ export class SalonDashboard {
     this.summaryData = {
       statusCounts: { total: 0, confirmed: 0, checkedIn: 0, inService: 0, completed: 0, cancelled: 0, noShow: 0 },
       todayAppointments: [],
+      quickRequests: [],
+      quickRequestsByStylist: [],
+      upcomingQueue: [],
       todayRevenue: 0,
       timezone: 'Asia/Kolkata',
       whatsappQuota: { limit: 1000, used: 0, remaining: 1000, percentUsed: 0, resetsOn: '1st of next month' },
@@ -382,11 +385,17 @@ export class SalonDashboard {
       selectedDate: this.selectedDate,
       statusFilter: this.queueFilter,
       onStateChange: ({ items, summary }) => {
-        if (this.summaryData && items) {
-          this.summaryData.todayAppointments = items;
-          this.summaryData.quickRequests = items.filter((a) => a.status === 'PENDING_ACCEPTANCE');
+        if (this.summaryData) {
+          if (items) {
+            this.summaryData.todayAppointments = items;
+            this.summaryData.quickRequests = items.filter((a) => a.status === 'PENDING_ACCEPTANCE');
+          }
+          const pendingCount = (this.summaryData.todayAppointments || []).filter((a) => a.status === 'PENDING_ACCEPTANCE').length;
           if (this.summaryData.pulse) {
-            this.summaryData.pulse.pendingRequestsCount = this.summaryData.quickRequests.length;
+            this.summaryData.pulse.pendingRequestsCount = pendingCount;
+          }
+          if (this.summaryData.statusCounts) {
+            this.summaryData.statusCounts.total = (this.summaryData.todayAppointments || []).length;
           }
         }
         if (summary) {
@@ -396,6 +405,9 @@ export class SalonDashboard {
           this.refreshActiveTab();
         }
         this.updateQuickRequestsBadge();
+        if (document.getElementById('modal-quick-requests')) {
+          this.openQuickRequestsModal();
+        }
       },
     });
     this.staffList = [];
@@ -1064,6 +1076,9 @@ export class SalonDashboard {
           const isStaffOrService = payload?.type === 'STAFF_UPDATED' || payload?.type === 'SERVICE_UPDATED';
           if (isStaffOrService) {
             if (payload?.type === 'STAFF_UPDATED') {
+              if (payload.data?.salonStatus && this.salonProfile) {
+                this.salonProfile.status = payload.data.salonStatus;
+              }
               this.staffList = await ApiClient.getStaff(true).catch(() => this.staffList);
             }
             if (payload?.type === 'SERVICE_UPDATED') {
@@ -1313,7 +1328,7 @@ export class SalonDashboard {
         this.queueSync.setDate(this.selectedDate);
         const bypass = !!fullReload;
         // Stage 1: Critical Core Data (Immediate display — fast path without cache-busting penalty)
-        const [summary, staff, services, profile, queueRes, recentApptsRes] = await Promise.all([
+        const [summary, staff, services, profile, queueRes, recentApptsRes, workingHours, salonBreaks] = await Promise.all([
           ApiClient.getDashboardSummary(this.selectedDate, bypass).catch((err) => {
             console.warn('[Dashboard] Summary fetch error:', err);
             return fallbackSummary;
@@ -1335,6 +1350,8 @@ export class SalonDashboard {
             return null;
           }),
           ApiClient.getAppointments({ limit: 10 }).catch(() => []),
+          ApiClient.getSalonWorkingHours(bypass).catch(() => this.salonWorkingHours || []),
+          ApiClient.getSalonBreaks(bypass).catch(() => this.salonBreaks || []),
         ]);
 
         this.summaryData = summary || fallbackSummary;
@@ -1347,34 +1364,32 @@ export class SalonDashboard {
         this.staffList = Array.isArray(staff) ? staff : [];
         this.servicesList = Array.isArray(services) ? services : [];
         this.salonProfile = profile || {};
+        this.salonWorkingHours = Array.isArray(workingHours) ? workingHours : (this.salonProfile?.workingHours || []);
+        if (salonBreaks && typeof salonBreaks === 'object') {
+          if (Array.isArray(salonBreaks)) {
+            this.salonBreaks = salonBreaks;
+            this.salonRoutineBreaks = [];
+            this.salonBreaksByDay = {};
+          } else {
+            this.salonRoutineBreaks = Array.isArray(salonBreaks.routineBreaks) ? salonBreaks.routineBreaks : [];
+            this.salonBreaksByDay = salonBreaks.byDay || {};
+            this.salonBreaks = Object.entries(this.salonBreaksByDay).flatMap(([day, bList]) =>
+              (bList || []).map((b) => ({ ...b, dayOfWeek: day }))
+            );
+          }
+        }
 
-        // Stage 2: Background Non-Blocking Enrichment (Hydrates categories, calendar, hours, breaks asynchronously)
+        // Stage 2: Background Non-Blocking Enrichment (Hydrates categories, calendar asynchronously)
         Promise.all([
           ApiClient.getServiceCategories(bypass).catch(() => this.categoriesList || []),
           ApiClient.getCalendarSchedule({
             month: `${this.calYear}-${String(this.calMonth + 1).padStart(2, '0')}`,
           }, bypass).catch(() => null),
-          ApiClient.getSalonWorkingHours(bypass).catch(() => this.salonWorkingHours || []),
-          ApiClient.getSalonBreaks(bypass).catch(() => this.salonBreaks || []),
-        ]).then(([categories, calendarScheduleRes, workingHours, salonBreaks]) => {
+        ]).then(([categories, calendarScheduleRes]) => {
           this.categoriesList = Array.isArray(categories) ? categories : [];
           const calData = calendarScheduleRes?.data || calendarScheduleRes;
           this.calendarSchedule = calData || null;
           this.closuresList = this.calendarSchedule?.salonSchedule?.closures || [];
-          this.salonWorkingHours = this.calendarSchedule?.salonSchedule?.weeklyHours || (Array.isArray(workingHours) ? workingHours : (this.salonProfile?.workingHours || []));
-          if (salonBreaks && typeof salonBreaks === 'object') {
-            if (Array.isArray(salonBreaks)) {
-              this.salonBreaks = salonBreaks;
-              this.salonRoutineBreaks = [];
-              this.salonBreaksByDay = {};
-            } else {
-              this.salonRoutineBreaks = Array.isArray(salonBreaks.routineBreaks) ? salonBreaks.routineBreaks : [];
-              this.salonBreaksByDay = salonBreaks.byDay || {};
-              this.salonBreaks = Object.entries(this.salonBreaksByDay).flatMap(([day, bList]) =>
-                (bList || []).map((b) => ({ ...b, dayOfWeek: day }))
-              );
-            }
-          }
         }).catch((err) => console.warn('[Dashboard] Background enrichment error:', err));
 
       } catch (err) {
@@ -3408,8 +3423,8 @@ export class SalonDashboard {
         : (this.salonProfile?.workingHours || []);
       const salonWh = salonHoursList.find((h) => h.dayOfWeek === day);
 
-      const isSalonStatusClosed = this.salonProfile?.status === 'INACTIVE' || this.salonProfile?.status === 'DEACTIVATED';
-      const isSalonClosed = isSalonStatusClosed || (salonWh ? (Boolean(salonWh.isClosed) || Boolean(salonWh.is_closed)) : false);
+      // Facility Schedule Domain: A day is only closed if that specific weekday is physically marked closed by the facility
+      const isSalonClosed = salonWh ? (Boolean(salonWh.isClosed) || Boolean(salonWh.is_closed)) : false;
       const salonStart = salonWh?.startTime || salonMinStart || defaultSalonStart;
       const salonEnd = salonWh?.endTime || salonMaxEnd || defaultSalonEnd;
 
@@ -3422,14 +3437,15 @@ export class SalonDashboard {
       let endTime = salonEnd;
       let breaks = [];
 
-      if (Array.isArray(st.breaks) && st.breaks.length > 0) {
-        const dayBreaks = st.breaks.filter((b) => b.dayOfWeek === day);
+      if (Array.isArray(st.breaks)) {
+        const dayBreaks = st.breaks.filter((b) => (Array.isArray(b.days) ? b.days.includes(day) : b.dayOfWeek === day));
         breaks = dayBreaks.map((b) => ({
           id: b.id,
           salonBreakId: b.salonBreakId || null,
           title: (b.title || 'Break').trim(),
           startTime: b.startTime,
           endTime: b.endTime,
+          days: Array.isArray(b.days) ? b.days : (b.dayOfWeek ? [b.dayOfWeek] : []),
           isCustomized: b.isCustomized === true,
         }));
       } else if (customWh && Array.isArray(customWh.breaks)) {
@@ -3443,15 +3459,6 @@ export class SalonDashboard {
         }));
       } else if (customWh && customWh.breakStartTime && customWh.breakEndTime) {
         breaks = [{ id: null, salonBreakId: null, title: 'Lunch Break', startTime: customWh.breakStartTime, endTime: customWh.breakEndTime, isCustomized: true }];
-      } else if (salonWh && Array.isArray(salonWh.breaks)) {
-        breaks = salonWh.breaks.map((b) => ({
-          id: b.id,
-          salonBreakId: b.id,
-          title: (b.title || 'Break').trim(),
-          startTime: b.startTime,
-          endTime: b.endTime,
-          isCustomized: false,
-        }));
       }
 
       // Schedule evaluation:
@@ -3521,18 +3528,24 @@ export class SalonDashboard {
     if (allBreaksFound.length > 0) {
       const grouped = {};
       allBreaksFound.forEach((b) => {
-        const key = `${b.title || 'Break'}_${b.startTime}_${b.endTime}_${Boolean(b.isCustomized)}`;
+        const key = `${(b.title || 'Break').trim()}_${b.startTime}_${b.endTime}`;
         if (!grouped[key]) {
           grouped[key] = {
             id: b.id || `rb-${Math.random().toString(36).substr(2, 6)}`,
             salonBreakId: b.salonBreakId || null,
-            title: b.title || 'Break',
+            title: (b.title || 'Break').trim(),
             startTime: b.startTime,
             endTime: b.endTime,
             isCustomized: Boolean(b.isCustomized),
             days: [],
             breakIds: {},
           };
+        }
+        if (b.isCustomized) {
+          grouped[key].isCustomized = true;
+        }
+        if (b.salonBreakId && !grouped[key].salonBreakId) {
+          grouped[key].salonBreakId = b.salonBreakId;
         }
         if (!grouped[key].days.includes(b.day)) {
           grouped[key].days.push(b.day);
@@ -3546,29 +3559,58 @@ export class SalonDashboard {
       detectedRoutineBreaks = [];
     }
 
+    // Single Source of Truth: Hydrate authoritative routine and inheritable breaks from server
+    ApiClient.getStaffBreaks(st.id, true).then((freshBreaks) => {
+      if (freshBreaks && this.currentStaffHoursState?.staffId === st.id) {
+        if (Array.isArray(freshBreaks.routineBreaks)) {
+          this.currentStaffHoursState.routineBreaks = freshBreaks.routineBreaks;
+        }
+        if (Array.isArray(freshBreaks.inheritableSalonBreaks)) {
+          this.currentStaffHoursState.inheritableSalonBreaks = freshBreaks.inheritableSalonBreaks;
+        }
+        this.syncRoutineBreaksToDays?.();
+        this.updateStaffHoursTableUI?.();
+      }
+    }).catch(() => {});
+
     // Detect inheritable master salon facility breaks for this specialist
+    if (!this.salonRoutineBreaks || this.salonRoutineBreaks.length === 0) {
+      ApiClient.getSalonBreaks().then((sb) => {
+        if (sb && typeof sb === 'object') {
+          this.salonRoutineBreaks = Array.isArray(sb.routineBreaks) ? sb.routineBreaks : [];
+          this.updateStaffHoursTableUI?.();
+        }
+      }).catch(() => {});
+    }
+
     const inheritableSalonBreaks = [];
     const salonRoutines = Array.isArray(this.salonRoutineBreaks) ? this.salonRoutineBreaks : [];
 
     salonRoutines.forEach((mb) => {
       const mbSalonBreakId = mb.salonBreakId || (mb.breakIds && Object.values(mb.breakIds)[0]) || null;
+      const mbIdSet = new Set(Object.values(mb.breakIds || {}));
+      if (mbSalonBreakId) mbIdSet.add(mbSalonBreakId);
+
+      // Check if stylist already has this routine matching salon break hours across days
       const existingRoutine = detectedRoutineBreaks.find(
-        (r) => (mbSalonBreakId && r.salonBreakId === mbSalonBreakId) ||
-          (r.title === mb.title && r.startTime === mb.startTime && r.endTime === mb.endTime && !r.isCustomized)
+        (r) =>
+          r.startTime === mb.startTime &&
+          r.endTime === mb.endTime &&
+          !r.isCustomized &&
+          (r.title === mb.title || (r.salonBreakId && mbIdSet.has(r.salonBreakId)))
       );
 
       const missingDays = existingRoutine
         ? (mb.days || []).filter((d) => !existingRoutine.days.includes(d))
         : [...(mb.days || [])];
 
-      if (missingDays.length === 0) return; // Already fully inherited across all master days
+      if (missingDays.length === 0) return; // Already fully matching salon break hours across all master days
 
-      const mbIdSet = new Set(Object.values(mb.breakIds || {}));
       const conflicts = allBreaksFound.filter(
         (b) => missingDays.includes(b.day) &&
           b.startTime < mb.endTime &&
           b.endTime > mb.startTime &&
-          !mbIdSet.has(b.salonBreakId)
+          (!mbIdSet.has(b.salonBreakId) || b.isCustomized || b.startTime !== mb.startTime || b.endTime !== mb.endTime)
       );
 
       const hasConflict = conflicts.length > 0;
@@ -3576,13 +3618,21 @@ export class SalonDashboard {
         ? `Overlaps on ${[...new Set(conflicts.map((c) => c.day.slice(0, 3)))].join(', ')} with "${conflicts[0].title || 'Break'}" (${conflicts[0].startTime}–${conflicts[0].endTime})`
         : null;
 
+      const isAlreadyInherited = Boolean(
+        detectedRoutineBreaks.find(
+          (r) => (r.salonBreakId && mbIdSet.has(r.salonBreakId)) ||
+            (mbSalonBreakId && r.salonBreakId === mbSalonBreakId) ||
+            (r.breakIds && Object.values(r.breakIds).some((id) => mbIdSet.has(id)))
+        )
+      );
+
       inheritableSalonBreaks.push({
         salonBreakId: mbSalonBreakId,
         title: mb.title,
         startTime: mb.startTime,
         endTime: mb.endTime,
         days: missingDays,
-        isAlreadyInherited: Boolean(existingRoutine),
+        isAlreadyInherited,
         conflictReason,
         conflictingBreakIds: conflicts.map((c) => c.id).filter(Boolean),
       });
@@ -4269,7 +4319,8 @@ export class SalonDashboard {
     const cardsHtml = routineBreaks.map((b, idx) => {
       const activeDays = Array.isArray(b.days) ? b.days : [];
       const isCustomized = Boolean(b.isCustomized);
-      const canReset = isCustomized && Boolean(b.salonBreakId);
+      const isLinkedToSalon = Boolean(b.salonBreakId);
+      const canReset = isCustomized && isLinkedToSalon;
 
       return `
         <div class="routine-break-row-card" data-idx="${idx}" title="Tap to edit ${b.title || 'Break'}">
@@ -4280,10 +4331,12 @@ export class SalonDashboard {
               </div>
               <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                 <span class="routine-break-row-title">${b.title || 'Routine Break'}</span>
-                ${isCustomized
-          ? `<span class="break-badge-custom" style="font-size: 0.65rem; padding: 2px 7px; border-radius: 999px; background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); font-weight: 600;">Customized</span>`
-          : `<span class="break-badge-salon" style="font-size: 0.65rem; padding: 2px 7px; border-radius: 999px; background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); font-weight: 600;">Given by Salon</span>`
-        }
+                ${!isLinkedToSalon
+                  ? `<span class="break-badge-personal" style="font-size: 0.65rem; padding: 2px 7px; border-radius: 999px; background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3); font-weight: 600;">Personal Break</span>`
+                  : isCustomized
+                    ? `<span class="break-badge-custom" style="font-size: 0.65rem; padding: 2px 7px; border-radius: 999px; background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); font-weight: 600;">Customized</span>`
+                    : `<span class="break-badge-salon" style="font-size: 0.65rem; padding: 2px 7px; border-radius: 999px; background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); font-weight: 600;">Given by Salon</span>`
+                }
               </div>
             </div>
             <div class="routine-break-row-actions">
@@ -4448,21 +4501,34 @@ export class SalonDashboard {
         const idx = parseInt(btn.getAttribute('data-idx'), 10);
         const b = this.currentStaffHoursState?.routineBreaks?.[idx];
         const staffId = this.currentStaffHoursState?.staffId;
-        if (!b || !staffId) return;
+        if (!b || !staffId || !b.salonBreakId) return;
 
         try {
           btn.disabled = true;
           btn.textContent = 'Resetting...';
-          const breakIds = Object.values(b.breakIds || {}).filter(Boolean);
-          if (breakIds.length > 0) {
-            for (const bId of breakIds) {
-              await ApiClient.resetStaffBreak(staffId, bId);
-            }
-          }
+
+          await ApiClient.resetStaffRoutineBreak(staffId, {
+            salonBreakId: b.salonBreakId || null,
+            title: b.title,
+            startTime: b.startTime,
+            endTime: b.endTime,
+            breakIds: b.breakIds || {},
+          });
+
           this.showToast(`Reset "${b.title || 'Break'}" to salon timing!`, 'success');
-          const freshStaff = await ApiClient.getStaff(true);
+          const [freshStaff, freshBreaks] = await Promise.all([
+            ApiClient.getStaff(true),
+            ApiClient.getStaffBreaks(staffId, true),
+          ]);
           this.staffList = freshStaff;
-          this.staffManager.navigateTo('schedule');
+          if (this.currentStaffHoursState && this.currentStaffHoursState.staffId === staffId) {
+            if (Array.isArray(freshBreaks?.routineBreaks)) {
+              this.currentStaffHoursState.routineBreaks = freshBreaks.routineBreaks;
+            }
+            this.currentStaffHoursState.inheritableSalonBreaks = freshBreaks?.inheritableSalonBreaks || [];
+            this.syncRoutineBreaksToDays();
+            this.updateStaffHoursTableUI();
+          }
         } catch (err) {
           console.error('Failed to reset break:', err);
           this.showToast(err.message || 'Failed to reset break', 'warning');
@@ -4543,10 +4609,18 @@ export class SalonDashboard {
               title: targetBreak.title,
               startTime: targetBreak.startTime,
               endTime: targetBreak.endTime,
-              days: targetBreak.days,
+              ...(Array.isArray(targetBreak.days) && targetBreak.days.length > 0 ? { days: targetBreak.days } : {}),
+              ...(targetBreak.breakIds && Object.keys(targetBreak.breakIds).length > 0 ? { breakIds: targetBreak.breakIds } : {}),
+              ...(targetBreak.salonBreakId ? { salonBreakId: targetBreak.salonBreakId } : {}),
             });
 
-            this.currentStaffHoursState.routineBreaks.splice(idx, 1);
+            const fresh = await ApiClient.getStaffBreaks(staffId, true).catch(() => null);
+            if (fresh && this.currentStaffHoursState?.staffId === staffId) {
+              if (Array.isArray(fresh.routineBreaks)) this.currentStaffHoursState.routineBreaks = fresh.routineBreaks;
+              if (Array.isArray(fresh.inheritableSalonBreaks)) this.currentStaffHoursState.inheritableSalonBreaks = fresh.inheritableSalonBreaks;
+            } else {
+              this.currentStaffHoursState.routineBreaks.splice(idx, 1);
+            }
             this.syncRoutineBreaksToDays();
             this.updateStaffHoursTableUI();
             this.updateStaffSyncBannerState();
@@ -4574,7 +4648,17 @@ export class SalonDashboard {
     let currentTitle = breakData ? (breakData.title || 'Lunch Break') : (this.currentStaffHoursState.routineBreaks?.length === 0 ? 'Lunch Break' : 'Evening Tea Break');
     let currentStart = breakData ? (breakData.startTime || '13:00') : (this.currentStaffHoursState.routineBreaks?.length === 0 ? '13:00' : '16:30');
     let currentEnd = breakData ? (breakData.endTime || '14:00') : (this.currentStaffHoursState.routineBreaks?.length === 0 ? '14:00' : '17:00');
-    let selectedDays = breakData && Array.isArray(breakData.days) ? [...breakData.days] : ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
+    let selectedDays = breakData && Array.isArray(breakData.days) && breakData.days.length > 0
+      ? [...breakData.days]
+      : ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+
+    // If editing a salon-linked break that was not explicitly customized by day, ensure all master days are available
+    if (breakData?.salonBreakId && Array.isArray(this.salonRoutineBreaks)) {
+      const mb = this.salonRoutineBreaks.find((r) => r.salonBreakId === breakData.salonBreakId || r.title === breakData.title);
+      if (mb && Array.isArray(mb.days) && mb.days.length > selectedDays.length && !breakData.isCustomized) {
+        selectedDays = [...mb.days];
+      }
+    }
 
     let sheetContainer = document.getElementById('routine-break-sheet-modal');
     if (!sheetContainer) {
@@ -4930,10 +5014,18 @@ export class SalonDashboard {
             title: breakData.title,
             startTime: breakData.startTime,
             endTime: breakData.endTime,
-            days: breakData.days,
+            ...(Array.isArray(breakData.days) && breakData.days.length > 0 ? { days: breakData.days } : {}),
+            ...(breakData.breakIds && Object.keys(breakData.breakIds).length > 0 ? { breakIds: breakData.breakIds } : {}),
+            ...(breakData.salonBreakId ? { salonBreakId: breakData.salonBreakId } : {}),
           });
 
-          this.currentStaffHoursState.routineBreaks.splice(editIndex, 1);
+          const fresh = await ApiClient.getStaffBreaks(staffId, true).catch(() => null);
+          if (fresh && this.currentStaffHoursState?.staffId === staffId) {
+            if (Array.isArray(fresh.routineBreaks)) this.currentStaffHoursState.routineBreaks = fresh.routineBreaks;
+            if (Array.isArray(fresh.inheritableSalonBreaks)) this.currentStaffHoursState.inheritableSalonBreaks = fresh.inheritableSalonBreaks;
+          } else {
+            this.currentStaffHoursState.routineBreaks.splice(editIndex, 1);
+          }
           this.syncRoutineBreaksToDays();
           this.updateStaffHoursTableUI();
           this.updateStaffSyncBannerState();
@@ -4981,22 +5073,22 @@ export class SalonDashboard {
     // Render loading frame first
     sheetContainer.innerHTML = `
       <div class="routine-break-sheet-backdrop" id="inherit-break-backdrop">
-        <div class="routine-break-sheet-container" id="inherit-break-container" style="max-width: 540px;">
-          <div class="sheet-drag-handle"></div>
-          <div class="sheet-header">
+        <div class="routine-break-sheet-container inherit-break-sheet-container" id="inherit-break-container" style="max-width: 500px; padding-top: 10px;">
+          <div class="sheet-drag-handle" style="margin: 0 auto 6px;"></div>
+          <div class="sheet-header" style="padding-bottom: 8px; margin-bottom: 8px;">
             <div class="sheet-title-group">
-              <div class="sheet-icon-badge" style="background: rgba(56, 189, 248, 0.15); border-color: rgba(56, 189, 248, 0.3);">
+              <div class="sheet-icon-badge" style="background: rgba(56, 189, 248, 0.15); border-color: rgba(56, 189, 248, 0.3); width: 34px; height: 34px;">
                 <span>🏢</span>
               </div>
               <div>
-                <h3 class="sheet-title">Apply Salon Standard Breaks</h3>
-                <p class="sheet-subtitle">Add official salon break timings to this specialist</p>
+                <h3 class="sheet-title" style="font-size: 0.95rem;">Apply Salon Standard Breaks</h3>
+                <p class="sheet-subtitle" style="font-size: 0.72rem; margin: 1px 0 0 0;">Add official salon break timings to this specialist</p>
               </div>
             </div>
             <button type="button" class="sheet-close-btn" id="btn-close-inherit-sheet">&times;</button>
           </div>
-          <div class="sheet-body" id="inherit-break-modal-body" style="padding: 16px 0; display: flex; flex-direction: column; gap: 12px;">
-            <div style="text-align: center; padding: 30px 16px; color: #94a3b8; font-size: 0.85rem;">
+          <div class="sheet-body" id="inherit-break-modal-body" style="padding: 0; display: flex; flex-direction: column; gap: 10px;">
+            <div style="text-align: center; padding: 20px 16px; color: #94a3b8; font-size: 0.85rem;">
               <span class="spinner-border spinner-border-sm" role="status" style="margin-right: 8px;"></span> Checking salon standard breaks...
             </div>
           </div>
@@ -5045,9 +5137,6 @@ export class SalonDashboard {
     const daysLetters = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
     bodyEl.innerHTML = `
-      <div style="font-size: 0.76rem; color: #cbd5e1; margin-bottom: 4px; line-height: 1.4;">
-        Below are official standard breaks configured for your salon. Tap to apply any of them to this specialist's schedule with 1-click.
-      </div>
       <div style="display: flex; flex-direction: column; gap: 10px;">
         ${inheritableBreaks.map((b, idx) => {
       const activeDays = Array.isArray(b.days) ? b.days : [];
@@ -5055,71 +5144,55 @@ export class SalonDashboard {
 
       return `
             <div class="inheritable-break-card ${hasConflict ? 'has-conflict' : ''}">
-              <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;">
-                <div style="display: flex; align-items: center; gap: 8px;">
-                  <div class="routine-break-icon-wrap" style="background: rgba(59, 130, 246, 0.12); color: #60a5fa;">
-                    ${Icons.coffee ? Icons.coffee({ size: 13, color: '#60a5fa' }) : '☕'}
-                  </div>
-                  <div>
-                    <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                      <span style="font-size: 0.88rem; font-weight: 700; color: #fff;">${b.title || 'Salon Break'}</span>
-                      <span style="font-size: 0.65rem; padding: 2px 7px; border-radius: 999px; background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); font-weight: 600;">🏢 Salon Standard</span>
-                    </div>
-                    <div style="display: flex; align-items: center; gap: 6px; margin-top: 3px; font-size: 0.74rem; color: #94a3b8;">
-                      <span>⏰ ${formatTime12h(b.startTime)} – ${formatTime12h(b.endTime)}</span>
-                    </div>
-                  </div>
+              <div class="ih-card-header">
+                <div class="ih-icon-wrap">
+                  ${Icons.coffee ? Icons.coffee({ size: 16, color: hasConflict ? '#f59e0b' : '#38bdf8' }) : '☕'}
                 </div>
+                <div class="ih-title-group">
+                  <span class="ih-break-title">${b.title || 'Salon Break'}</span>
+                  <span class="ih-badge-salon">Salon Standard</span>
+                </div>
+              </div>
 
+              <div class="ih-meta-strip">
+                <div class="ih-time-chip">
+                  ${Icons.clock ? Icons.clock({ size: 11, color: '#a78bfa' }) : '🕒'}
+                  <span>${formatTime12h(b.startTime)}&nbsp;–&nbsp;${formatTime12h(b.endTime)}</span>
+                </div>
+                <div class="ih-days-matrix" title="Days: ${activeDays.map((d) => d.slice(0, 3)).join(', ')}">
+                  ${daysLetters.map((letter, dayIdx) => {
+                    const dKey = daysKeys[dayIdx];
+                    const isActive = activeDays.includes(dKey);
+                    return `<span class="ih-matrix-day ${isActive ? 'active' : ''}">${letter}</span>`;
+                  }).join('')}
+                </div>
+              </div>
+
+              ${!hasConflict ? `
                 <button type="button" 
-                  class="btn-inherit-break-action" 
+                  class="btn-inherit-break-action btn-apply-standard" 
                   data-idx="${idx}" 
                   data-salon-break-id="${b.salonBreakId}" 
-                  data-has-conflict="${hasConflict}"
-                  style="
-                    display: inline-flex;
-                    align-items: center;
-                    gap: 5px;
-                    padding: 6px 12px;
-                    font-size: 0.72rem;
-                    font-weight: 700;
-                    border-radius: 8px;
-                    cursor: pointer;
-                    white-space: nowrap;
-                    border: none;
-                    ${hasConflict
-          ? 'background: linear-gradient(135deg, #d97706, #b45309); color: #fff; box-shadow: 0 2px 6px rgba(217, 119, 6, 0.3);'
-          : 'background: linear-gradient(135deg, #2563eb, #3b82f6); color: #fff; box-shadow: 0 2px 6px rgba(37, 99, 235, 0.3);'}
-                  "
+                  data-has-conflict="false"
                 >
-                  <span>${hasConflict ? '⚠️ Replace with Salon Timing' : '+ Apply to Stylist'}</span>
+                  <span>+ Apply Salon Break</span>
                 </button>
-              </div>
-
-              <!-- Days Matrix Display -->
-              <div style="display: flex; align-items: center; justify-content: space-between; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 8px;">
-                <span style="font-size: 0.7rem; color: #94a3b8;">Days:</span>
-                <div class="routine-break-days-matrix" title="Days: ${activeDays.map((d) => d.slice(0, 3)).join(', ')}">
-                  ${daysLetters.map((letter, dayIdx) => {
-            const dKey = daysKeys[dayIdx];
-            const isActive = activeDays.includes(dKey);
-            return `<span class="break-matrix-day ${isActive ? 'active' : ''}">${letter}</span>`;
-          }).join('')}
-                </div>
-              </div>
-
-              ${hasConflict ? `
-                <div class="conflict-warning-box">
-                  <span style="font-size: 1rem; line-height: 1;">⚠️</span>
-                  <div>
-                    <span style="font-weight: 700;">Timing Conflict Detected:</span>
-                    <div>This specialist already has a custom break (${b.conflictReason}).</div>
-                    <div style="font-size: 0.68rem; color: #fef08a; margin-top: 2px;">
-                      Tapping "Replace with Salon Timing" will update this day to match the salon's standard break timing.
-                    </div>
+              ` : `
+                <div class="ih-conflict-box">
+                  <span class="conflict-alert-icon">⚠️</span>
+                  <div class="conflict-alert-text">
+                    <strong>Conflict:</strong> ${b.conflictReason}
                   </div>
                 </div>
-              ` : ''}
+                <button type="button" 
+                  class="btn-inherit-break-action btn-replace-conflict" 
+                  data-idx="${idx}" 
+                  data-salon-break-id="${b.salonBreakId}" 
+                  data-has-conflict="true"
+                >
+                  <span>⚠️ Replace with Salon Timing</span>
+                </button>
+              `}
             </div>
           `;
     }).join('')}
@@ -5703,7 +5776,7 @@ export class SalonDashboard {
         const startTime = found?.startTime || defaultSalonStart;
         const endTime = found?.endTime || defaultSalonEnd;
         const salonBreaksList = Array.isArray(this.salonBreaks) ? this.salonBreaks : [];
-        const salonBreaksForDay = salonBreaksList.filter((b) => b.dayOfWeek === day);
+        const salonBreaksForDay = salonBreaksList.filter((b) => (Array.isArray(b.days) ? b.days.includes(day) : b.dayOfWeek === day));
         let breaks = [];
         if (salonBreaksForDay.length > 0) {
           breaks = salonBreaksForDay.map((b) => ({
@@ -10833,6 +10906,19 @@ export class SalonDashboard {
 
       // Instant UI response (0ms)
       const tempId = `temp-staff-${Date.now()}`;
+      const daysArr = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+      const optimisticWorkingHours = daysArr.map((day) => {
+        const swh = (this.salonWorkingHours || []).find((h) => h.dayOfWeek === day);
+        const isClosed = swh ? Boolean(swh.isClosed) : false;
+        return {
+          dayOfWeek: day,
+          isWorking: !isClosed,
+          isCustomized: false,
+          startTime: swh?.startTime || this.salonProfile?.defaultStartTime || '09:00',
+          endTime: swh?.endTime || this.salonProfile?.defaultEndTime || '19:00',
+        };
+      });
+
       const optimisticStaff = {
         id: tempId,
         name,
@@ -10843,7 +10929,7 @@ export class SalonDashboard {
         statusDotClass: 'status-available',
         statusBadgeClass: 'badge-available',
         services: selectedServices.map((id) => ({ serviceId: id })),
-        workingHours: [],
+        workingHours: optimisticWorkingHours,
         breaks: [],
         _isOptimistic: true,
       };
@@ -10864,8 +10950,12 @@ export class SalonDashboard {
       }).then((created) => {
         if (created && created.id) {
           this.staffList = this.staffList.map((s) => (s.id === tempId ? created : s));
-          this.render();
+          if (created.salonStatus && this.salonProfile) {
+            this.salonProfile.status = created.salonStatus;
+          }
           SalonRepository.invalidate('staff');
+          SalonRepository.invalidate('profile');
+          this.render();
         }
       }).catch((err) => {
         this.staffList = this.staffList.filter((s) => s.id !== tempId);
@@ -11074,7 +11164,7 @@ export class SalonDashboard {
         const diff = (eh * 60 + em) - (sh * 60 + sm);
         if (diff > 0) {
           const selectedDay = daySelect.value;
-          const currentSalonBreaks = staffBreaks.filter(b => b.dayOfWeek === selectedDay && b.origin === 'SALON');
+          const currentSalonBreaks = staffBreaks.filter(b => (Array.isArray(b.days) ? b.days.includes(selectedDay) : b.dayOfWeek === selectedDay) && b.origin === 'SALON');
           const overlappingSalonBreak = currentSalonBreaks.find(sb => {
             const [sbSh, sbSm] = sb.startTime.split(':').map(Number);
             const [sbEh, sbEm] = sb.endTime.split(':').map(Number);
@@ -11113,7 +11203,7 @@ export class SalonDashboard {
     bEnd?.addEventListener('change', updateDurationPreview);
 
     const renderDayBreaks = (selectedDay) => {
-      const dayBreaks = staffBreaks.filter((b) => b.dayOfWeek === selectedDay);
+      const dayBreaks = staffBreaks.filter((b) => (Array.isArray(b.days) ? b.days.includes(selectedDay) : b.dayOfWeek === selectedDay));
       const salonBreaks = dayBreaks.filter((b) => b.origin === 'SALON');
       const stylistBreaks = dayBreaks.filter((b) => b.origin === 'STYLIST');
 

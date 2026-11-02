@@ -16,6 +16,16 @@ import { BreakPropagationEngine } from './break-propagation.engine';
 import { AppointmentsService } from '../../appointments/appointments.service';
 import { SalonBreaksListResponse, RoutineBreakSummary } from '../interfaces/break.interface';
 
+const ALL_DAYS: DayOfWeek[] = [
+  'MONDAY',
+  'TUESDAY',
+  'WEDNESDAY',
+  'THURSDAY',
+  'FRIDAY',
+  'SATURDAY',
+  'SUNDAY',
+];
+
 @Injectable()
 export class SalonBreaksService {
   private readonly logger = new Logger(SalonBreaksService.name);
@@ -34,9 +44,9 @@ export class SalonBreaksService {
     const rawBreaks = await this.prisma.salonBreak.findMany({
       where: {
         salonId,
-        ...(dayOfWeek ? { dayOfWeek } : {}),
+        ...(dayOfWeek ? { days: { has: dayOfWeek } } : {}),
       },
-      orderBy: [{ dayOfWeek: 'asc' }, { startTime: 'asc' }],
+      orderBy: { startTime: 'asc' },
     });
 
     const byDay: Record<string, any[]> = {
@@ -49,42 +59,36 @@ export class SalonBreaksService {
       SUNDAY: [],
     };
 
-    const groupedMap = new Map<string, RoutineBreakSummary>();
+    const routineBreaks: RoutineBreakSummary[] = [];
 
     for (const b of rawBreaks) {
-      if (byDay[b.dayOfWeek]) {
-        byDay[b.dayOfWeek].push({
-          id: b.id,
-          title: b.title,
-          startTime: b.startTime,
-          endTime: b.endTime,
-          createdAt: b.createdAt,
-          updatedAt: b.updatedAt,
-        });
+      for (const d of b.days) {
+        if (byDay[d]) {
+          byDay[d].push({
+            id: b.id,
+            title: b.title,
+            startTime: b.startTime,
+            endTime: b.endTime,
+            createdAt: b.createdAt,
+            updatedAt: b.updatedAt,
+          });
+        }
       }
 
-      const routineKey = `${b.title}_${b.startTime}_${b.endTime}`;
-      if (!groupedMap.has(routineKey)) {
-        groupedMap.set(routineKey, {
-          routineKey,
-          title: b.title,
-          startTime: b.startTime,
-          endTime: b.endTime,
-          days: [],
-          breakIds: {},
-        });
-      }
-
-      const summary = groupedMap.get(routineKey)!;
-      if (!summary.days.includes(b.dayOfWeek)) {
-        summary.days.push(b.dayOfWeek);
-      }
-      summary.breakIds[b.dayOfWeek] = b.id;
+      routineBreaks.push({
+        routineKey: `${b.title}_${b.startTime}_${b.endTime}`,
+        salonBreakId: b.id,
+        title: b.title,
+        startTime: b.startTime,
+        endTime: b.endTime,
+        days: b.days,
+        breakIds: Object.fromEntries(b.days.map((d) => [d, b.id])),
+      });
     }
 
     return {
       totalBreaks: rawBreaks.length,
-      routineBreaks: Array.from(groupedMap.values()),
+      routineBreaks,
       byDay,
     };
   }
@@ -108,17 +112,13 @@ export class SalonBreaksService {
       throw new BadRequestException('Break duration must be at least 15 minutes.');
     }
 
-    // Resolve target days (multi-day priority, fallback to single dayOfWeek)
     const targetDays: DayOfWeek[] = dto.days && dto.days.length > 0
       ? dto.days
-      : (dto.dayOfWeek ? [dto.dayOfWeek] : ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY']);
+      : (dto.dayOfWeek ? [dto.dayOfWeek] : ALL_DAYS);
 
     const result = await this.prisma.$transaction(async (tx) => {
-      const createdBreaks: any[] = [];
-      let totalPropagated = 0;
-
+      // 1. Harmonize operating schedule for target days if needed
       for (const day of targetDays) {
-        // 1. Harmonize salon operating schedule for this day to comfortably cover the break
         const salonHours = await tx.salonWorkingHours.findUnique({
           where: { salonId_dayOfWeek: { salonId, dayOfWeek: day } },
         });
@@ -147,52 +147,45 @@ export class SalonBreaksService {
             });
           }
         }
-
-        // 2. Check if identical break already exists for this day
-        const existing = await tx.salonBreak.findFirst({
-          where: { salonId, dayOfWeek: day, startTime, endTime },
-        });
-
-        let salonBreak = existing;
-        if (!existing) {
-          salonBreak = await tx.salonBreak.create({
-            data: {
-              salonId,
-              dayOfWeek: day,
-              title,
-              startTime,
-              endTime,
-            },
-          });
-        } else {
-          salonBreak = await tx.salonBreak.update({
-            where: { id: existing.id },
-            data: { title },
-          });
-        }
-
-        createdBreaks.push(salonBreak);
-
-        // 3. Propagate to non-customized stylists
-        const { propagatedCount } = await this.propagationEngine.propagateSalonBreak(tx, {
-          salonId,
-          salonBreakId: salonBreak.id,
-          dayOfWeek: day,
-          title,
-          startTime,
-          endTime,
-        });
-        totalPropagated += propagatedCount;
       }
 
-      return {
+      // 2. Check if a break with exact title, startTime, endTime already exists
+      const existing = await tx.salonBreak.findFirst({
+        where: { salonId, startTime, endTime, title },
+      });
+
+      let salonBreak;
+      if (existing) {
+        const combinedDays = Array.from(new Set([...existing.days, ...targetDays]));
+        salonBreak = await tx.salonBreak.update({
+          where: { id: existing.id },
+          data: { days: combinedDays },
+        });
+      } else {
+        salonBreak = await tx.salonBreak.create({
+          data: {
+            salonId,
+            title,
+            startTime,
+            endTime,
+            days: targetDays,
+          },
+        });
+      }
+
+      // 3. Propagate to non-customized stylists
+      const { propagatedCount } = await this.propagationEngine.propagateSalonBreak(tx, {
+        salonId,
+        salonBreakId: salonBreak.id,
+        days: salonBreak.days,
         title,
         startTime,
         endTime,
-        days: targetDays,
-        createdCount: createdBreaks.length,
-        propagatedStylistsCount: totalPropagated,
-        breaks: createdBreaks,
+      });
+
+      return {
+        salonBreak,
+        propagatedStylistsCount: propagatedCount,
       };
     });
 
@@ -214,7 +207,15 @@ export class SalonBreaksService {
       });
     }
 
-    return result;
+    return {
+      title,
+      startTime,
+      endTime,
+      days: targetDays,
+      breakId: result.salonBreak.id,
+      propagatedStylistsCount: result.propagatedStylistsCount,
+      breaks: [result.salonBreak],
+    };
   }
 
   /**
@@ -235,10 +236,7 @@ export class SalonBreaksService {
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      // 1. Clean up old propagated stylist breaks
-      await this.propagationEngine.cleanupPropagatedBreaks(tx, breakId);
-
-      // 2. Update break
+      // 1. Update master salon facility break
       const sb = await tx.salonBreak.update({
         where: { id: breakId },
         data: {
@@ -248,14 +246,20 @@ export class SalonBreaksService {
         },
       });
 
-      // 3. Re-propagate to stylists
-      await this.propagationEngine.propagateSalonBreak(tx, {
-        salonId,
-        salonBreakId: sb.id,
-        dayOfWeek: sb.dayOfWeek,
-        title: sb.title,
-        startTime: sb.startTime,
-        endTime: sb.endTime,
+      // 2. In-place sync for stylists who currently inherit this break (uncustomized).
+      // Opted-out stylists have no row with salonBreakId and stay opted out.
+      // Customized stylists (isCustomized === true) have their custom hours preserved.
+      await tx.stylistBreak.updateMany({
+        where: {
+          salonBreakId: sb.id,
+          isCustomized: false,
+        },
+        data: {
+          title: sb.title,
+          startTime: sb.startTime,
+          endTime: sb.endTime,
+          days: sb.days,
+        },
       });
 
       return sb;
@@ -266,15 +270,16 @@ export class SalonBreaksService {
       breakId,
     });
 
-    // Resolve any conflicting bookings across salon facility and send WhatsApp reschedule proposal
-    await this.appointmentsService.resolveScheduleConflicts({
-      salonId,
-      scope: 'SALON',
-      dayOfWeek: updated.dayOfWeek,
-      breakHours: { startTime: newStart, endTime: newEnd },
-      isClosedOrOff: false,
-      reason: `Salon facility break updated (${newTitle}) on ${updated.dayOfWeek} (${newStart}–${newEnd})`,
-    });
+    for (const day of updated.days) {
+      await this.appointmentsService.resolveScheduleConflicts({
+        salonId,
+        scope: 'SALON',
+        dayOfWeek: day,
+        breakHours: { startTime: newStart, endTime: newEnd },
+        isClosedOrOff: false,
+        reason: `Salon facility break updated (${newTitle}) on ${day} (${newStart}–${newEnd})`,
+      });
+    }
 
     return updated;
   }
@@ -283,9 +288,70 @@ export class SalonBreaksService {
    * Updates a routine break pattern across its active days.
    */
   async updateRoutineBreak(salonId: string, dto: UpdateRoutineBreakDto) {
-    const { title, startTime, endTime, days } = dto;
+    const { title, startTime, endTime, days, salonBreakId, breakIds } = dto;
     if (startTime >= endTime) {
       throw new BadRequestException('Break start time must be earlier than break end time.');
+    }
+
+    const targetId = salonBreakId || (breakIds ? Object.values(breakIds)[0] : null);
+
+    let existingBreak = targetId
+      ? await this.prisma.salonBreak.findFirst({ where: { id: targetId, salonId } })
+      : null;
+
+    if (!existingBreak) {
+      existingBreak = await this.prisma.salonBreak.findFirst({
+        where: {
+          salonId,
+          OR: [
+            { title, startTime, endTime },
+            ...(dto.originalStartTime && dto.originalEndTime
+              ? [{ startTime: dto.originalStartTime, endTime: dto.originalEndTime }]
+              : []),
+          ],
+        },
+      });
+    }
+
+    if (existingBreak) {
+      const updated = await this.prisma.$transaction(async (tx) => {
+        const sb = await tx.salonBreak.update({
+          where: { id: existingBreak.id },
+          data: {
+            title,
+            startTime,
+            endTime,
+            ...(days && days.length > 0 ? { days } : {}),
+          },
+        });
+
+        // In-place sync for stylists who currently inherit this break (uncustomized).
+        // Opted-out stylists have no row with salonBreakId and stay opted-out.
+        // Customized stylists (isCustomized === true) have their custom hours preserved.
+        await tx.stylistBreak.updateMany({
+          where: {
+            salonBreakId: sb.id,
+            isCustomized: false,
+          },
+          data: {
+            title: sb.title,
+            startTime: sb.startTime,
+            endTime: sb.endTime,
+            days: sb.days,
+          },
+        });
+
+        return sb;
+      });
+
+      return {
+        success: true,
+        title: updated.title,
+        startTime: updated.startTime,
+        endTime: updated.endTime,
+        days: updated.days,
+        breaks: [updated],
+      };
     }
 
     return this.createFacilityBreak(salonId, {
@@ -319,18 +385,24 @@ export class SalonBreaksService {
   }
 
   /**
-   * Deletes a routine break across days matching the title & time window.
+   * Deletes a routine break matching ID, title, or time window.
    */
   async deleteRoutineBreak(salonId: string, dto: DeleteRoutineBreakDto) {
-    const { title, startTime, endTime, days } = dto;
+    const { title, startTime, endTime, salonBreakId, breakIds } = dto;
+
+    const targetId = salonBreakId || (breakIds ? Object.values(breakIds)[0] : null);
 
     const matchingBreaks = await this.prisma.salonBreak.findMany({
       where: {
         salonId,
-        startTime,
-        endTime,
-        ...(title ? { title } : {}),
-        ...(days && days.length > 0 ? { dayOfWeek: { in: days } } : {}),
+        OR: [
+          ...(targetId ? [{ id: targetId }] : []),
+          {
+            startTime,
+            endTime,
+            ...(title ? { title } : {}),
+          },
+        ],
       },
     });
 

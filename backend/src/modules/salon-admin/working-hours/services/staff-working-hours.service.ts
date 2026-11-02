@@ -59,7 +59,7 @@ export class StaffWorkingHoursService {
       }),
       this.prisma.stylistBreak.findMany({
         where: { stylistId: staffId, salonId },
-        orderBy: [{ dayOfWeek: 'asc' }, { startTime: 'asc' }],
+        orderBy: [{ startTime: 'asc' }],
       }),
     ]);
 
@@ -87,7 +87,7 @@ export class StaffWorkingHoursService {
         salonIsClosed,
         canWork,
         breaks: stylistBreaks
-          .filter((b) => b.dayOfWeek === sh.dayOfWeek)
+          .filter((b) => b.days.includes(sh.dayOfWeek))
           .map((b) => ({
             id: b.id,
             title: b.title,

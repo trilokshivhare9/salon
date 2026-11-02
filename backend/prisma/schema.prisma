@@ -466,7 +466,7 @@ model StylistWorkingHours {
 model SalonBreak {
   id           String         @id @default(uuid())
   salonId      String         @map("salon_id")
-  dayOfWeek    DayOfWeek      @map("day_of_week")
+  days         DayOfWeek[]    @map("days")
   title        String         @db.VarChar(100)
   startTime    String         @map("start_time") @db.VarChar(5) // "13:00"
   endTime      String         @map("end_time") @db.VarChar(5)   // "14:00"
@@ -476,8 +476,7 @@ model SalonBreak {
   salon        Salon          @relation(fields: [salonId], references: [id], onDelete: Cascade)
   stylistBreaks StylistBreak[]
 
-  @@unique([salonId, dayOfWeek, startTime, endTime])
-  @@index([salonId, dayOfWeek])
+  @@index([salonId])
   @@map("salon_breaks")
 }
 
@@ -486,7 +485,7 @@ model StylistBreak {
   salonId      String         @map("salon_id")
   stylistId    String         @map("stylist_id")
   salonBreakId String?        @map("salon_break_id")
-  dayOfWeek    DayOfWeek      @map("day_of_week")
+  days         DayOfWeek[]    @map("days")
   title        String         @db.VarChar(100)
   startTime    String         @map("start_time") @db.VarChar(5) // "12:30"
   endTime      String         @map("end_time") @db.VarChar(5)   // "13:30"
@@ -498,7 +497,7 @@ model StylistBreak {
   stylist      Stylist        @relation(fields: [stylistId], references: [id], onDelete: Cascade)
   salonBreak   SalonBreak?    @relation(fields: [salonBreakId], references: [id], onDelete: SetNull)
 
-  @@index([salonId, stylistId, dayOfWeek])
+  @@index([salonId, stylistId])
   @@index([salonBreakId])
   @@map("stylist_breaks")
 }

@@ -119,7 +119,12 @@ export class UpdateStaffWorkingHoursDto {
 
 export class CreateStaffBreakDto {
   @IsEnum(DayOfWeek)
-  dayOfWeek: DayOfWeek;
+  @IsOptional()
+  dayOfWeek?: DayOfWeek;
+
+  @IsArray()
+  @IsOptional()
+  days?: DayOfWeek[];
 
   @IsString()
   @IsNotEmpty()

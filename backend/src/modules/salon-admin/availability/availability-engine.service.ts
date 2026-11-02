@@ -187,8 +187,14 @@ export class AvailabilityEngineService {
     // Reads directly from StylistBreak first-class entity
     let rawBreaksToUse: MinuteInterval[] = [];
 
-    if (stylist?.breaks && Array.isArray(stylist.breaks) && stylist.breaks.length > 0) {
-      rawBreaksToUse = this.extractBreaks(stylist.breaks);
+    if (Array.isArray(stylist?.breaks)) {
+      const dayOfWeek = salonWorkingHours?.dayOfWeek;
+      const dayBreaks = stylist.breaks.filter((b: any) =>
+        Array.isArray(b.days)
+          ? b.days.includes(dayOfWeek)
+          : b.dayOfWeek === dayOfWeek || !b.dayOfWeek,
+      );
+      rawBreaksToUse = this.extractBreaks(dayBreaks);
     } else if (followsSalon) {
       rawBreaksToUse = salonBreaks;
     }
