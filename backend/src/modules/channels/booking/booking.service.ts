@@ -90,6 +90,7 @@ export class BookingService {
     serviceId: string,
     date: string,
     staffId?: string,
+    minLeadTimeMinutes?: number,
   ) {
     const salon = await this.getSalonBySlug(slug);
     return this.availabilityService.getAvailableSlots(
@@ -97,6 +98,9 @@ export class BookingService {
       serviceId,
       date,
       staffId,
+      undefined,
+      undefined,
+      minLeadTimeMinutes,
     );
   }
 

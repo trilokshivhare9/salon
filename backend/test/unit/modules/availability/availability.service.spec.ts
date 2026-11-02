@@ -6,6 +6,7 @@ import { StylistStatusEngine } from '../../../../src/modules/salon-admin/staff/e
 import { PrismaService } from '../../../../src/database/prisma.service';
 import { DayOfWeek } from '@prisma/client';
 import { DateTime } from 'luxon';
+import { BOOKING_POLICY } from '../../../../src/common/constants/booking-policy.constants';
 
 describe('AvailabilityService (Unit Tests)', () => {
   let service: AvailabilityService;
@@ -406,6 +407,37 @@ describe('AvailabilityService (Unit Tests)', () => {
       expect(result[0].customerStatusText).toBeDefined();
       expect(result[0].customerStatusText).toContain('Available');
       expect(result[0].isAvailableToday).toBe(true);
+    });
+
+    it('should respect minLeadTimeMinutes when booking for today at root engine level', async () => {
+      const todayIso = DateTime.now().setZone('Asia/Kolkata').toISODate()!;
+      jest.spyOn(prisma.salon, 'findUnique').mockResolvedValue(mockSalon as any);
+      jest.spyOn(prisma.service, 'findMany').mockResolvedValue([mockService1] as any);
+      jest.spyOn(prisma.salonWorkingHours, 'findUnique').mockResolvedValue(mockSalonWorkingHours as any);
+      jest.spyOn(prisma.stylist, 'findMany').mockResolvedValue([mockStylists[0]] as any);
+      jest.spyOn(prisma.stylistAbsence, 'findMany').mockResolvedValue([]);
+      jest.spyOn(prisma.appointment, 'findMany').mockResolvedValue([]);
+
+      const nowInZone = DateTime.now().setZone('Asia/Kolkata');
+      const minLeadTime = BOOKING_POLICY.MIN_RESCHEDULE_LEAD_MINUTES; // 120
+      const thresholdMinutes = nowInZone.hour * 60 + nowInZone.minute + minLeadTime;
+
+      const result = await service.getAvailableSlots(
+        mockSalonId,
+        mockService1.id,
+        todayIso,
+        undefined,
+        undefined,
+        undefined,
+        minLeadTime,
+      );
+
+      // Verify that every returned slot has a start time >= now + 120 minutes
+      for (const slot of result.availableSlots) {
+        const [h, m] = slot.startTime.split(':').map(Number);
+        const slotMins = h * 60 + m;
+        expect(slotMins).toBeGreaterThanOrEqual(thresholdMinutes);
+      }
     });
   });
 });

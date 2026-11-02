@@ -156,6 +156,7 @@ export class AvailabilityService {
     preferredStylistId?: string,
     excludeAppointmentId?: string,
     candidateStepMinutes?: number,
+    minLeadTimeMinutes?: number,
   ): Promise<AvailabilityResult> {
     const serviceIds = Array.isArray(serviceIdOrIds) ? serviceIdOrIds : [serviceIdOrIds];
     if (serviceIds.length === 0) {
@@ -385,18 +386,24 @@ export class AvailabilityService {
     // 5. Continuous Free-Interval Calculation per Stylist via AvailabilityEngineService
     const slotsMap = new Map<string, { startTime: string; endTime: string; eligibleStylistIds: Set<string> }>();
 
-    // Advance notice check if booking for today: zero artificial buffer, with 15-minute checkout grace period
+    // Advance notice check if booking for today
     let earliestAllowedMinutes = 0;
     let nowMinuteOfDay = 0;
     if (requestedDate.hasSame(todayInSalonZone, 'day')) {
       nowMinuteOfDay = nowInSalonZone.hour * 60 + nowInSalonZone.minute;
-      // 15-minute checkout grace window so in-flight slots don't expire mid-tap
-      const graceMinuteOfDay = Math.max(0, nowMinuteOfDay - 15);
-      if (candidateStepMinutes !== undefined && candidateStepMinutes > 0) {
-        const rem = graceMinuteOfDay % stepMinutes;
-        earliestAllowedMinutes = rem === 0 ? graceMinuteOfDay : graceMinuteOfDay + (stepMinutes - rem);
+
+      if (minLeadTimeMinutes !== undefined && minLeadTimeMinutes > 0) {
+        // Enforce policy-defined minimum advance lead time (e.g. 120 mins for reschedule)
+        earliestAllowedMinutes = nowMinuteOfDay + minLeadTimeMinutes;
       } else {
-        earliestAllowedMinutes = graceMinuteOfDay;
+        // Standard booking: zero artificial buffer, with 15-minute checkout grace period
+        const graceMinuteOfDay = Math.max(0, nowMinuteOfDay - 15);
+        if (candidateStepMinutes !== undefined && candidateStepMinutes > 0) {
+          const rem = graceMinuteOfDay % stepMinutes;
+          earliestAllowedMinutes = rem === 0 ? graceMinuteOfDay : graceMinuteOfDay + (stepMinutes - rem);
+        } else {
+          earliestAllowedMinutes = graceMinuteOfDay;
+        }
       }
     }
 
@@ -469,12 +476,22 @@ export class AvailabilityService {
       for (const interval of validFreeIntervals) {
         let candidateStart = interval.start;
 
-        // If checking for TODAY and this interval started before or at current time:
-        // Snap candidateStart to the nearest upcoming 5-minute mark from now (with a 1-minute lead buffer)
-        if (requestedDate.hasSame(todayInSalonZone, 'day') && candidateStart <= nowMinuteOfDay) {
-          const targetMinute = nowMinuteOfDay + 1;
-          const next5MinMark = Math.ceil(targetMinute / 5) * 5;
-          candidateStart = Math.max(interval.start, next5MinMark);
+        // If checking for TODAY:
+        // Advance candidateStart if interval starts before allowed boundary
+        if (requestedDate.hasSame(todayInSalonZone, 'day')) {
+          if (minLeadTimeMinutes !== undefined && minLeadTimeMinutes > 0) {
+            if (candidateStart < earliestAllowedMinutes) {
+              candidateStart = earliestAllowedMinutes;
+              const rem = candidateStart % stepMinutes;
+              if (rem !== 0) {
+                candidateStart += stepMinutes - rem;
+              }
+            }
+          } else if (candidateStart <= nowMinuteOfDay) {
+            const targetMinute = nowMinuteOfDay + 1;
+            const next5MinMark = Math.ceil(targetMinute / 5) * 5;
+            candidateStart = Math.max(interval.start, next5MinMark);
+          }
         } else if (candidateStepMinutes !== undefined && candidateStepMinutes > 0) {
           const remainder = candidateStart % stepMinutes;
           if (remainder !== 0) {
@@ -624,6 +641,7 @@ export class AvailabilityService {
     staffId?: string | null,
     limit: number = BOOKING_POLICY.MAX_ADVANCE_BOOKING_DAYS,
     excludeApptId?: string,
+    minLeadTimeMinutes?: number,
   ): Promise<{ dateStr: string; displayLabel: string }[]> {
     const salon = await this.prisma.salon.findUnique({
       where: { id: salonId },
@@ -653,6 +671,8 @@ export class AvailabilityService {
             dateStr,
             staffId || undefined,
             excludeApptId,
+            undefined,
+            dayIdx === 0 ? minLeadTimeMinutes : undefined,
           );
           if (avail.availableSlots && avail.availableSlots.length > 0) {
             return {

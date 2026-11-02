@@ -169,7 +169,7 @@ export async function createWhatsAppHarness(opts: HarnessOptions = {}) {
           appointmentNumber: `APT-${prisma.tables.appointment.length + 1}`,
           salonId: SALON_ID,
           salonUserId: SALON_USER_ID,
-          serviceId: dto?.serviceId ?? null,
+          serviceId: dto?.serviceId ?? (Array.isArray(dto?.serviceIds) ? dto.serviceIds[0] : null),
           stylistId: dto?.stylistId ?? STYLIST_ALICE,
           status: AppointmentStatus.BOOKED,
           startAt: new Date(Date.now() + 24 * 3600 * 1000),
