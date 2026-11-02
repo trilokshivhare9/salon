@@ -3,7 +3,7 @@ import { AppointmentsService, VALID_STATUS_TRANSITIONS } from '../../../../src/m
 import { PrismaService } from '../../../../src/database/prisma.service';
 import { AvailabilityService } from '../../../../src/modules/salon-admin/availability/availability.service';
 import { AvailabilityEngineService } from '../../../../src/modules/salon-admin/availability/availability-engine.service';
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { AppointmentStatus, BookingSource } from '@prisma/client';
 import { WhatsAppService } from '../../../../src/modules/channels/whatsapp/whatsapp.service';
 import { DateTime } from 'luxon';
@@ -33,7 +33,12 @@ describe('AppointmentsService (Unit Tests)', () => {
             appointment: { findFirst: jest.fn(), findMany: jest.fn(), create: jest.fn(), update: jest.fn(), count: jest.fn() },
             appointmentService: { createMany: jest.fn(), create: jest.fn(), count: jest.fn() },
             user: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
-            salonUser: { upsert: jest.fn(), findFirst: jest.fn() },
+            salonUser: {
+              upsert: jest.fn(),
+              findFirst: jest.fn(),
+              findUnique: jest.fn().mockResolvedValue({ id: 'su-1', yearlyNoShowCount: 0, isBookingBlocked: false }),
+              update: jest.fn().mockResolvedValue({ id: 'su-1', yearlyNoShowCount: 0, isBookingBlocked: false }),
+            },
             notification: { create: jest.fn() },
             stylistAbsence: { findFirst: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]) },
             $transaction: jest.fn(async (cb) => {
@@ -72,11 +77,13 @@ describe('AppointmentsService (Unit Tests)', () => {
 
   describe('Status State Transitions', () => {
     it('should reject invalid status transition: COMPLETED -> CANCELLED', async () => {
-      jest.spyOn(service, 'getAppointmentById').mockResolvedValue({
+      const compAppt = {
         id: mockApptId,
         salonId: mockSalonId,
         status: AppointmentStatus.COMPLETED,
-      } as any);
+      };
+      jest.spyOn(service, 'getAppointmentById').mockResolvedValue(compAppt as any);
+      jest.spyOn(prisma.appointment, 'findFirst').mockResolvedValue(compAppt as any);
 
       await expect(
         service.updateStatus(mockSalonId, mockApptId, {
@@ -120,12 +127,14 @@ describe('AppointmentsService (Unit Tests)', () => {
     });
 
     it('should allow valid status transition: CHECKED_IN -> CANCELLED (counter cancellation)', async () => {
-      jest.spyOn(service, 'getAppointmentById').mockResolvedValue({
+      const checkInAppt = {
         id: mockApptId,
         salonId: mockSalonId,
         status: AppointmentStatus.CHECKED_IN,
         salonUserId: 'su-1',
-      } as any);
+      };
+      jest.spyOn(service, 'getAppointmentById').mockResolvedValue(checkInAppt as any);
+      jest.spyOn(prisma.appointment, 'findFirst').mockResolvedValue(checkInAppt as any);
 
       jest.spyOn(prisma.appointment, 'update').mockResolvedValue({
         id: mockApptId,
@@ -308,6 +317,37 @@ describe('AppointmentsService (Unit Tests)', () => {
           source: BookingSource.WEB,
         }),
       ).rejects.toThrow(ConflictException);
+    });
+
+    it('should reject customer-initiated booking with ForbiddenException if customer is marked blocked or has 3 strikes', async () => {
+      jest.spyOn(prisma.salon, 'findUnique').mockResolvedValue({
+        id: mockSalonId,
+        status: 'ACTIVE',
+        timezone: 'Asia/Kolkata',
+      } as any);
+
+      jest.spyOn(prisma.service, 'findMany').mockResolvedValue([
+        { id: 'srv-1', salonId: mockSalonId, name: 'Haircut', durationMinutes: 30, price: 300, status: 'ACTIVE' },
+      ] as any);
+
+      jest.spyOn(prisma.user, 'findUnique').mockResolvedValue({ id: 'u-1', phone: '+919876543210' } as any);
+      jest.spyOn(prisma.salonUser, 'upsert').mockResolvedValue({
+        id: 'su-1',
+        salonId: mockSalonId,
+        userId: 'u-1',
+        isBookingBlocked: true,
+        yearlyNoShowCount: 3,
+      } as any);
+
+      await expect(
+        service.createAppointment(mockSalonId, {
+          serviceId: 'srv-1',
+          date: '2026-09-08',
+          startTime: '11:00',
+          customerPhone: '+919876543210',
+          source: BookingSource.WEB,
+        }),
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 });

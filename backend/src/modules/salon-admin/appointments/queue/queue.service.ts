@@ -82,8 +82,23 @@ export class AppointmentQueueService {
     let filtered = allAppointments;
     if (query.status && query.status.toUpperCase() !== 'ALL') {
       const filterKey = query.status.toUpperCase();
-      if (filterKey === 'IN_PROGRESS' || filterKey === 'SEATED_IN_CHAIR') {
+      if (
+        filterKey === 'IN_PROGRESS' ||
+        filterKey === 'SEATED_IN_CHAIR' ||
+        filterKey === 'IN_CHAIR' ||
+        filterKey === 'IN_SERVICE'
+      ) {
         filtered = filtered.filter((a) => a.status === AppointmentStatus.SEATED_IN_CHAIR);
+      } else if (filterKey === 'WAITING') {
+        filtered = filtered.filter(
+          (a) =>
+            a.status === AppointmentStatus.BOOKED ||
+            a.status === AppointmentStatus.CONFIRMED ||
+            a.status === AppointmentStatus.CHECKED_IN ||
+            a.status === AppointmentStatus.ON_THE_WAY ||
+            a.status === AppointmentStatus.PENDING_ACCEPTANCE ||
+            a.status === AppointmentStatus.PENDING_RESCHEDULE,
+        );
       } else if (filterKey === 'CHECKED_IN') {
         filtered = filtered.filter(
           (a) => a.status === AppointmentStatus.CHECKED_IN || a.status === AppointmentStatus.ON_THE_WAY,

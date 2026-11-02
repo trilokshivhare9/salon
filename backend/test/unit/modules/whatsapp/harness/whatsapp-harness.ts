@@ -88,6 +88,8 @@ export interface HarnessOptions {
   appointments?: Array<Record<string, any>>;
   /** Override salon fixture fields. */
   salon?: Record<string, any>;
+  /** Override salonUser fixture fields. */
+  salonUser?: Record<string, any>;
 }
 
 export interface SentMessage {
@@ -110,7 +112,7 @@ export async function createWhatsAppHarness(opts: HarnessOptions = {}) {
   const prisma = new InMemoryPrisma({
     salons: [salon],
     users: [{ id: USER_ID, phone: `+${CUSTOMER_PHONE}`, name: 'Harness Customer' }],
-    salonUsers: [{ id: SALON_USER_ID, salonId: SALON_ID, userId: USER_ID, isBookingBlocked: false }],
+    salonUsers: [{ id: SALON_USER_ID, salonId: SALON_ID, userId: USER_ID, isBookingBlocked: false, ...(opts.salonUser || {}) }],
     conversations: opts.conversation ? [{ salonId: SALON_ID, customerPhone: CUSTOMER_PHONE, ...opts.conversation }] : [],
     appointments: (opts.appointments || []).map((a) => ({ salonId: SALON_ID, salonUserId: SALON_USER_ID, ...a })),
   });
@@ -303,6 +305,9 @@ export async function createWhatsAppHarness(opts: HarnessOptions = {}) {
     },
     clearSent() {
       sent.length = 0;
+    },
+    invalidateUserCache() {
+      whatsAppService.invalidateUserCache();
     },
   };
 }

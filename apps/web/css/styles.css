@@ -16971,6 +16971,86 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   margin-left: 2px;
 }
 
+/* Active Queue Filters Banner */
+.q-active-filters-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  background: rgba(168, 85, 247, 0.08);
+  border: 1px solid rgba(168, 85, 247, 0.22);
+  border-radius: 10px;
+  font-size: 0.78rem;
+  color: #cbd5e1;
+  animation: fadeInFilterBar 0.2s ease;
+}
+
+@keyframes fadeInFilterBar {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.q-active-filters-label {
+  font-weight: 700;
+  color: #c084fc;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-right: 2px;
+}
+
+.q-active-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(168, 85, 247, 0.16);
+  border: 1px solid rgba(168, 85, 247, 0.38);
+  color: #f1f5f9;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  user-select: none;
+}
+
+.q-active-chip:hover {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.45);
+  color: #fca5a5;
+  transform: translateY(-1px);
+}
+
+.q-chip-x {
+  font-size: 0.7rem;
+  color: #c084fc;
+  font-weight: 800;
+}
+
+.q-active-chip:hover .q-chip-x {
+  color: #f87171;
+}
+
+.q-clear-all-link {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 4px 8px;
+  margin-left: auto;
+  transition: color 0.15s ease;
+}
+
+.q-clear-all-link:hover {
+  color: #f87171;
+}
+
 /* Right-Side Filter Drawer Backdrop */
 .queue-drawer-backdrop {
   position: fixed;
