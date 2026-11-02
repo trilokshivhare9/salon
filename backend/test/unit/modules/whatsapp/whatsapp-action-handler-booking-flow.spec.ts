@@ -14,6 +14,7 @@ import { AppointmentStatus, ConversationState } from '@prisma/client';
 import { DateTime } from 'luxon';
 import { WhatsAppButtonId } from '../../../../src/modules/channels/whatsapp/services/whatsapp-sender.service';
 import { BookingSource } from '@prisma/client';
+import { BOOKING_POLICY } from '../../../../src/common/constants/booking-policy.constants';
 import {
   createWhatsAppHarness,
   buildSalonFixture,
@@ -215,6 +216,59 @@ describe('WhatsApp Action Handler - Real Availability & Booking Journey', () => 
       expect.objectContaining({ newDate: rdate!.replace('rdate_', ''), newStartTime: '11:00' }),
       ...anyTrailingArgs(h.mocks.reschedule.rescheduleAppointment, 3),
     );
+  });
+
+  // ---------------------------------------------------------------------------
+  // 7B. Reschedule 2-Hour Lead Time Filter Verification
+  // ---------------------------------------------------------------------------
+  it('TC-FLOW-007B: When customer selects today for reschedule, only slots >= 2 hours from current time are offered', async () => {
+    const activeAppt = {
+      id: 'appt-exist-2h-test',
+      appointmentNumber: 'APT-EXIST-2H',
+      serviceId: SVC_HAIRCUT,
+      stylistId: STYLIST_ALICE,
+      startAt: new Date(Date.now() + 5 * 3600 * 1000),
+      createdAt: new Date(Date.now() - 3600 * 1000),
+      status: AppointmentStatus.CONFIRMED,
+      price: 500,
+    };
+    const h = await createWhatsAppHarness({
+      conversation: fresh(ConversationState.SELECT_RESCHEDULE_DATE, { activeAppointmentId: activeAppt.id }),
+      appointments: [activeAppt],
+    });
+
+    const now = new Date();
+    const currentMins = now.getHours() * 60 + now.getMinutes();
+
+    // Mock slots: one slot 30 mins from now (too early), one slot 3 hours from now (valid)
+    const earlySlotH = String(Math.floor((currentMins + 30) / 60) % 24).padStart(2, '0');
+    const earlySlotM = String((currentMins + 30) % 60).padStart(2, '0');
+    const earlyTime = `${earlySlotH}:${earlySlotM}`;
+
+    const validSlotH = String(Math.floor((currentMins + 180) / 60) % 24).padStart(2, '0');
+    const validSlotM = String((currentMins + 180) % 60).padStart(2, '0');
+    const validTime = `${validSlotH}:${validSlotM}`;
+
+    h.mocks.availability.getAvailableSlots = jest.fn().mockResolvedValue({
+      date: 'today',
+      availableSlots: [
+        { startTime: validTime, endTime: '99:99' },
+      ],
+    });
+
+    const step = await h.tap('rdate_today');
+    expect(step.result.state).toBe(ConversationState.SELECT_RESCHEDULE_TIME);
+    expect(h.mocks.availability.getAvailableSlots).toHaveBeenCalledWith(
+      SALON_ID,
+      SVC_HAIRCUT,
+      expect.any(String),
+      STYLIST_ALICE,
+      activeAppt.id,
+      undefined,
+      BOOKING_POLICY.MIN_RESCHEDULE_LEAD_MINUTES,
+    );
+    const options = h.optionIds(step.messages[0]);
+    expect(options).toContain(`rslot_${validTime}`);
   });
 
   // ---------------------------------------------------------------------------

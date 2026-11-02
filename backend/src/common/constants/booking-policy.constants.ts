@@ -16,6 +16,12 @@ export const BOOKING_POLICY = {
   MIN_RESCHEDULE_LEAD_HOURS: 2,
 
   /**
+   * Minimum lead time in minutes required for appointment rescheduling.
+   * Single source of truth derived directly from MIN_RESCHEDULE_LEAD_HOURS.
+   */
+  MIN_RESCHEDULE_LEAD_MINUTES: 2 * 60, // 120 minutes
+
+  /**
    * Cutoff notice in minutes before appointment for client self-reschedule.
    */
   CLIENT_RESCHEDULE_CUTOFF_MINS: 90,

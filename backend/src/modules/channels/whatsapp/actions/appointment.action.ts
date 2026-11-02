@@ -211,6 +211,7 @@ export class AppointmentAction {
         apptToReschedule.stylistId,
         horizon,
         apptToReschedule.id,
+        BOOKING_POLICY.MIN_RESCHEDULE_LEAD_MINUTES,
       );
 
       if (openDates.length === 0) {
@@ -269,16 +270,25 @@ export class AppointmentAction {
         dateStr,
         appt.stylistId || undefined,
         appt.id,
+        undefined,
+        BOOKING_POLICY.MIN_RESCHEDULE_LEAD_MINUTES,
       );
 
-      if (!availability.availableSlots || availability.availableSlots.length === 0) {
-        const reply = `⚠️ No slots available on *${dateStr}*. Please select another date:`;
+      const availableSlots = availability.availableSlots || [];
+
+      if (availableSlots.length === 0) {
+        const nowDt = TimeUtility.now(tz);
+        const isToday = dateStr === nowDt.toISODate();
+        const reply = isToday
+          ? `⚠️ No slots available today with at least ${BOOKING_POLICY.MIN_RESCHEDULE_LEAD_HOURS} hours advance notice. Please select another date:`
+          : `⚠️ No slots available on *${dateStr}*. Please select another date:`;
         const altDates = await this.availabilityService.findAvailableDates(
           salonId,
           appt.serviceId,
           appt.stylistId,
           2,
           appt.id,
+          BOOKING_POLICY.MIN_RESCHEDULE_LEAD_MINUTES,
         );
         const dateMenu = this.templates.buildDateSelectionMenu(altDates, true);
         dateMenu.bodyText = reply;
@@ -293,7 +303,7 @@ export class AppointmentAction {
         { selectedDate: TimeUtility.toDbDate(dateStr) },
       );
 
-      const slotRows = availability.availableSlots.map((s) => ({
+      const slotRows = availableSlots.map((s) => ({
         timeStr: s.startTime,
         displayTime: ActionUtils.formatTime12h(s.startTime),
       }));
@@ -340,6 +350,8 @@ export class AppointmentAction {
         dateStr,
         staffId,
         appt.id,
+        undefined,
+        BOOKING_POLICY.MIN_RESCHEDULE_LEAD_MINUTES,
       );
 
       const slotRows = (availability.availableSlots || []).map((s) => ({
@@ -412,6 +424,8 @@ export class AppointmentAction {
           dateStr,
           appt.stylistId || undefined,
           appt.id,
+          undefined,
+          BOOKING_POLICY.MIN_RESCHEDULE_LEAD_MINUTES,
         );
 
         if (availability.availableSlots && availability.availableSlots.length > 0) {
@@ -437,9 +451,10 @@ export class AppointmentAction {
             appt.stylistId,
             2,
             appt.id,
+            BOOKING_POLICY.MIN_RESCHEDULE_LEAD_MINUTES,
           );
           const dateMenu = this.templates.buildDateSelectionMenu(altDates, true);
-          dateMenu.bodyText = `⚠️ No more slots available on *${dateStr}*. Please select another date for your reschedule:`;
+          dateMenu.bodyText = `⚠️ No more slots available on *${dateStr}* (at least ${BOOKING_POLICY.MIN_RESCHEDULE_LEAD_HOURS} hours ahead). Please select another date for your reschedule:`;
           await this.sendMessage(cleanNumber, dateMenu, phoneNumberId, salonId);
           return { replyMessage: dateMenu.bodyText, state: ConversationState.SELECT_RESCHEDULE_DATE };
         }

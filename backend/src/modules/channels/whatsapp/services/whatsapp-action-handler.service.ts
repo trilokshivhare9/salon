@@ -75,9 +75,11 @@ export class WhatsAppActionHandlerService {
     const trace: { conversationId?: string; loadedState?: ConversationState } = {};
     const scope = { writtenConversationIds: new Set<string>() };
 
-    const result = await this.session.runWithWriteTracking(scope, () =>
-      this.routeIncomingAction(salonId, customerPhone, messageText, interactiveId, phoneNumberId, senderName, trace),
-    );
+    const result = typeof this.session?.runWithWriteTracking === 'function'
+      ? await this.session.runWithWriteTracking(scope, () =>
+          this.routeIncomingAction(salonId, customerPhone, messageText, interactiveId, phoneNumberId, senderName, trace),
+        )
+      : await this.routeIncomingAction(salonId, customerPhone, messageText, interactiveId, phoneNumberId, senderName, trace);
 
     await this.persistReturnedState(trace, scope.writtenConversationIds, result?.state);
     return result;
@@ -520,7 +522,8 @@ export class WhatsAppActionHandlerService {
       input === WhatsAppButtonId.RESCHEDULE ||
       input === WhatsAppButtonId.REMIND_RESCHEDULE ||
       input.startsWith('rdate_') ||
-      input.startsWith('rslot_')
+      input.startsWith('rslot_') ||
+      input.startsWith('rwindow_')
     ) {
       if (!activeAppointment && pendingAppointment) {
         const blockedReply = this.templates.buildPendingModificationBlockedReply();

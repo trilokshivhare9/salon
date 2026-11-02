@@ -26,12 +26,14 @@ export class BookingController {
     @Query('serviceId') serviceId: string,
     @Query('date') date: string,
     @Query('staffId') staffId?: string,
+    @Query('minLeadTimeMinutes') minLeadTimeMinutes?: string,
   ) {
     return this.bookingService.getAvailability(
       salonSlug,
       serviceId,
       date,
       staffId,
+      minLeadTimeMinutes ? parseInt(minLeadTimeMinutes, 10) : undefined,
     );
   }
 

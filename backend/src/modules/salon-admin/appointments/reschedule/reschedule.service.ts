@@ -23,6 +23,7 @@ import {
   DayOfWeek,
 } from '@prisma/client';
 import { DateTime } from 'luxon';
+import { BOOKING_POLICY } from '../../../../common/constants/booking-policy.constants';
 import { TimeUtility } from '../../../../common/utils/time.utility';
 import { AppointmentModifierService } from '../modifier/appointment-modifier.service';
 import {
@@ -193,14 +194,15 @@ export class RescheduleService {
     const nowLuxon = DateTime.now().setZone(timezone);
     const proposedLeadTimeMinutes = (startDt.toMillis() - nowLuxon.toMillis()) / (1000 * 60);
 
-    if (adminId) {
-      if (proposedLeadTimeMinutes < 120) {
-        throw new BadRequestException(
-          'Proposed reschedule slot must be at least 2 hours in the future to allow client sufficient time to respond and travel.',
-        );
-      }
-    } else if (proposedLeadTimeMinutes < 0) {
-      throw new BadRequestException('Cannot reschedule to a time in the past.');
+    const minLeadTimeMins = BOOKING_POLICY.MIN_RESCHEDULE_LEAD_MINUTES;
+    const leadHours = BOOKING_POLICY.MIN_RESCHEDULE_LEAD_HOURS;
+
+    if (proposedLeadTimeMinutes < minLeadTimeMins) {
+      throw new BadRequestException(
+        adminId
+          ? `Proposed reschedule slot must be at least ${leadHours} hours in the future to allow client sufficient time to respond and travel.`
+          : `Rescheduling requires at least ${leadHours} hours advance notice from the current time.`,
+      );
     }
 
     const newDateStr = dto.newDate.includes('T') ? dto.newDate.split('T')[0] : dto.newDate;
@@ -421,7 +423,7 @@ export class RescheduleService {
           }
 
           const leadTimeMinutes = (startDt.toMillis() - DateTime.now().setZone(timezone).toMillis()) / (1000 * 60);
-          const newStatus = leadTimeMinutes > 120 ? AppointmentStatus.BOOKED : AppointmentStatus.CONFIRMED;
+          const newStatus = leadTimeMinutes > BOOKING_POLICY.MIN_RESCHEDULE_LEAD_MINUTES ? AppointmentStatus.BOOKED : AppointmentStatus.CONFIRMED;
 
           // In-place mutation of the appointment for customer self-reschedule via centralized modifier engine
           const reschedulePayload = {
