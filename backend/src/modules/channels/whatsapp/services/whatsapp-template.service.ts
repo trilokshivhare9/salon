@@ -147,7 +147,7 @@ export class WhatsAppTemplateService {
   }
 
   // 2. Salon Info Template
-  buildSalonInfoMessage(salon: any, hasActiveAppointment = false) {
+  buildSalonInfoMessage(salon: any, hasActiveAppointment = false, isBlocked = false) {
     const name = salon?.name || 'Salon';
     const address = salon?.address
       ? `${salon.address}${salon.city ? ', ' + salon.city : ''}`
@@ -164,7 +164,9 @@ export class WhatsAppTemplateService {
       mapsLine = `\n🗺️ *Directions:* https://maps.google.com/?q=${encodeURIComponent(salon.address + (salon.city ? ' ' + salon.city : ''))}`;
     }
 
-    const buttons = hasActiveAppointment
+    const buttons = isBlocked
+      ? [{ id: WhatsAppButtonId.INFO, title: '📍 Salon Info' }]
+      : hasActiveAppointment
       ? [
         { id: WhatsAppButtonId.CHECK_LAST_BOOKING, title: '📋 Check Booking' },
         { id: WhatsAppButtonId.START, title: '🏠 Main Menu' },

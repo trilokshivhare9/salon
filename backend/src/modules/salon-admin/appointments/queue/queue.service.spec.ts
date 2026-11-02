@@ -168,5 +168,71 @@ describe('AppointmentQueueService & Queue Mappers', () => {
       expect(result.data.pagination.totalItems).toBe(4);
       expect(result.data.pagination.totalPages).toBe(1);
     });
+
+    it('should correctly filter appointments when status is IN_CHAIR', async () => {
+      const apptChair = {
+        ...sampleDbAppointment,
+        id: 'appt-chair',
+        status: AppointmentStatus.SEATED_IN_CHAIR,
+        startAt: new Date('2026-10-22T10:00:00Z'),
+      };
+      const apptWaiting = {
+        ...sampleDbAppointment,
+        id: 'appt-waiting',
+        status: AppointmentStatus.CHECKED_IN,
+        startAt: new Date('2026-10-22T10:15:00Z'),
+      };
+
+      mockPrisma.appointment.findMany.mockResolvedValue([apptWaiting, apptChair]);
+
+      const result = await service.getQueue(mockSalonId, {
+        date: '2026-10-22',
+        status: 'IN_CHAIR',
+        page: 1,
+        limit: 10,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.data.items.length).toBe(1);
+      expect(result.data.items[0].id).toBe('appt-chair');
+      // Queue summary counters still reflect all appointments on that date
+      expect(result.data.queueSummary.inChair).toBe(1);
+      expect(result.data.queueSummary.checkedIn).toBe(1);
+    });
+
+    it('should correctly filter appointments when status is WAITING', async () => {
+      const apptChair = {
+        ...sampleDbAppointment,
+        id: 'appt-chair',
+        status: AppointmentStatus.SEATED_IN_CHAIR,
+        startAt: new Date('2026-10-22T10:00:00Z'),
+      };
+      const apptWaiting1 = {
+        ...sampleDbAppointment,
+        id: 'appt-waiting-1',
+        status: AppointmentStatus.CHECKED_IN,
+        startAt: new Date('2026-10-22T10:15:00Z'),
+      };
+      const apptWaiting2 = {
+        ...sampleDbAppointment,
+        id: 'appt-waiting-2',
+        status: AppointmentStatus.CONFIRMED,
+        startAt: new Date('2026-10-22T11:00:00Z'),
+      };
+
+      mockPrisma.appointment.findMany.mockResolvedValue([apptChair, apptWaiting1, apptWaiting2]);
+
+      const result = await service.getQueue(mockSalonId, {
+        date: '2026-10-22',
+        status: 'WAITING',
+        page: 1,
+        limit: 10,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.data.items.length).toBe(2);
+      expect(result.data.items.map((i) => i.id)).toEqual(['appt-waiting-1', 'appt-waiting-2']);
+    });
   });
 });
+

@@ -430,7 +430,10 @@ export class SalonDashboard {
       onOpenQrModal: () => this.showQRCodeModal(),
       onOpenQuickRequests: () => this.openQuickRequestsModal(),
       onSeatWalkIn: (stylistId) => this.showWalkInModal(stylistId),
-      onViewFullQueue: () => this.switchTab('queue'),
+      onViewFullQueue: () => {
+        this.resetQueueFilters(false);
+        this.switchTab('queue');
+      },
       onOpenWalkIn: () => this.showWalkInModal(),
       onOpenClosures: () => {
         this.switchTab('profile');
@@ -444,7 +447,7 @@ export class SalonDashboard {
         this.showToast('💬 WhatsApp booking link copied to clipboard!', 'success');
       },
       onFilterQueue: (filter) => {
-        this.queueFilter = filter;
+        this.setQueueFilter(filter, false);
         this.switchTab('queue');
       },
       onUpdateStatus: async (id, status) => {
@@ -471,6 +474,145 @@ export class SalonDashboard {
     });
 
   }
+
+  /**
+   * CANONICAL QUEUE FILTER ENGINE (Architecture Level)
+   * Single source of truth for queue filters across Home dashboard, Queue tab, and Drawer filters.
+   * @param {string|Object} filterOrObj Filter status string (e.g. 'IN_CHAIR', 'WAITING') or filter dictionary
+   * @param {boolean} shouldRender Whether to trigger re-rendering (default: true)
+   */
+  setQueueFilter(filterOrObj, shouldRender = true) {
+    if (typeof filterOrObj === 'string') {
+      const norm = (!filterOrObj || filterOrObj.toUpperCase() === 'ALL') ? '' : filterOrObj;
+      this.queueDrawerFilters = { ...(this.queueDrawerFilters || {}), status: norm };
+      this.queueFilter = norm || 'ALL';
+    } else if (filterOrObj && typeof filterOrObj === 'object') {
+      const normStatus = (!filterOrObj.status || filterOrObj.status.toUpperCase() === 'ALL') ? '' : filterOrObj.status;
+      this.queueDrawerFilters = {
+        stylistId: filterOrObj.stylistId || '',
+        bookingType: filterOrObj.bookingType || '',
+        status: normStatus,
+        categoryId: filterOrObj.categoryId || '',
+      };
+      this.queueFilter = normStatus || 'ALL';
+    }
+
+    if (this.queueSync?.setFilters) {
+      this.queueSync.setFilters({
+        status: this.queueFilter,
+        stylistId: this.queueDrawerFilters?.stylistId || null,
+      });
+    }
+
+    if (shouldRender) {
+      this.render();
+    }
+  }
+
+  /**
+   * Clears a specific queue filter criterion and re-syncs state.
+   * @param {string} filterKey 'status' | 'stylistId' | 'bookingType' | 'categoryId'
+   * @param {boolean} shouldRender Whether to trigger re-rendering (default: true)
+   */
+  clearQueueFilter(filterKey, shouldRender = true) {
+    if (!this.queueDrawerFilters) {
+      this.queueDrawerFilters = { stylistId: '', bookingType: '', status: '', categoryId: '' };
+    }
+    if (filterKey === 'status') {
+      this.queueDrawerFilters.status = '';
+      this.queueFilter = 'ALL';
+    } else if (filterKey in this.queueDrawerFilters) {
+      this.queueDrawerFilters[filterKey] = '';
+    }
+
+    if (this.queueSync?.setFilters) {
+      this.queueSync.setFilters({
+        status: this.queueFilter,
+        stylistId: this.queueDrawerFilters?.stylistId || null,
+      });
+    }
+
+    if (shouldRender) {
+      this.render();
+    }
+  }
+
+  /**
+   * Resets all queue filters to canonical empty state.
+   * @param {boolean} shouldRender Whether to trigger re-rendering (default: true)
+   */
+  resetQueueFilters(shouldRender = true) {
+    this.queueDrawerFilters = {
+      stylistId: '',
+      bookingType: '',
+      status: '',
+      categoryId: '',
+    };
+    this.queueFilter = 'ALL';
+
+    if (this.queueSync?.setFilters) {
+      this.queueSync.setFilters({
+        status: 'ALL',
+        stylistId: null,
+      });
+    }
+
+    if (shouldRender) {
+      this.render();
+    }
+  }
+
+  /**
+   * Returns a structured list of currently active queue filters for chips and badge counts.
+   * @returns {Array<{ key: string, label: string, value: string, displayValue: string }>}
+   */
+  getQueueActiveFilters() {
+    const active = [];
+    const qd = this.queueDrawerFilters || {};
+    const statusVal = qd.status || (this.queueFilter !== 'ALL' ? this.queueFilter : '');
+
+    if (statusVal) {
+      let displayStatus = statusVal;
+      if (statusVal === 'WAITING') displayStatus = 'In Queue';
+      else if (statusVal === 'IN_CHAIR' || statusVal === 'IN_SERVICE') displayStatus = 'In Chair';
+      else if (statusVal === 'PENDING_ACCEPTANCE') displayStatus = 'Pending Approval';
+      else if (statusVal === 'ON_THE_WAY') displayStatus = 'On The Way';
+      else if (statusVal === 'CHECKED_IN') displayStatus = 'Checked In';
+      else if (statusVal === 'CONFIRMED') displayStatus = 'Confirmed';
+      else if (statusVal === 'BOOKED') displayStatus = 'Booked';
+      else if (statusVal === 'COMPLETED') displayStatus = 'Completed';
+      else if (statusVal === 'CANCELLED') displayStatus = 'Cancelled';
+      active.push({ key: 'status', label: 'Status', value: statusVal, displayValue: displayStatus });
+    }
+
+    if (qd.stylistId) {
+      const stylist = (this.staffList || []).find((s) => s.id === qd.stylistId);
+      const stylistName = stylist ? stylist.name : 'Specialist';
+      active.push({ key: 'stylistId', label: 'Specialist', value: qd.stylistId, displayValue: stylistName });
+    }
+
+    if (qd.bookingType) {
+      const typeLabel = qd.bookingType === 'QUICK' ? 'Quick Booking' : 'Normal Booking';
+      active.push({ key: 'bookingType', label: 'Type', value: qd.bookingType, displayValue: typeLabel });
+    }
+
+    if (qd.categoryId) {
+      const cat = (this.categoriesList || []).find((c) => c.id === qd.categoryId);
+      const catName = cat ? cat.name : 'Category';
+      active.push({ key: 'categoryId', label: 'Category', value: qd.categoryId, displayValue: catName });
+    }
+
+    return active;
+  }
+
+  /**
+   * Returns count of active queue filters.
+   * @returns {number}
+   */
+  getQueueActiveFilterCount() {
+    return this.getQueueActiveFilters().length;
+  }
+
 
   /**
    * Retrieves authentic Indian festivals from official @aryanjsx/indian-festivals dependency
@@ -1910,13 +2052,15 @@ export class SalonDashboard {
 
   renderQueueDrawerContent(activeCount) {
     const filters = this.queueDrawerFilters || {};
+    const effectiveStatus = filters.status || (this.queueFilter !== 'ALL' ? this.queueFilter : '');
+    const count = typeof activeCount === 'number' ? activeCount : this.getQueueActiveFilterCount();
     return `
       <div class="queue-drawer-header">
         <div class="queue-drawer-title-row">
           <span class="queue-drawer-icon">${Icons.sliders({ size: 16 })}</span>
           <div>
             <div class="queue-drawer-title">Filter Queue</div>
-            <div class="queue-drawer-subtitle">${activeCount > 0 ? `${activeCount} filter(s) active` : 'Showing all appointments'}</div>
+            <div class="queue-drawer-subtitle">${count > 0 ? `${count} filter(s) active` : 'Showing all appointments'}</div>
           </div>
         </div>
         <button class="queue-drawer-close" id="btn-close-queue-drawer" title="Close Drawer">
@@ -1971,42 +2115,46 @@ export class SalonDashboard {
         <div class="qd-section">
           <div class="qd-section-label">
             <span>Appointment Status</span>
-            ${filters.status ? `<span class="qd-section-badge">Active</span>` : ''}
+            ${effectiveStatus ? `<span class="qd-section-badge">Active</span>` : ''}
           </div>
           <div class="qd-chips" data-filter-group="status">
-            <div class="qd-chip ${!filters.status ? 'active' : ''}" data-val="">
+            <div class="qd-chip ${!effectiveStatus ? 'active' : ''}" data-val="">
               <span class="qd-status-dot all"></span>
               <span>All Statuses</span>
             </div>
-            <div class="qd-chip ${filters.status === 'PENDING_ACCEPTANCE' ? 'active' : ''}" data-val="PENDING_ACCEPTANCE">
+            <div class="qd-chip ${effectiveStatus === 'WAITING' ? 'active' : ''}" data-val="WAITING">
               <span class="qd-status-dot pending"></span>
-              <span>Pending Approval</span>
+              <span>In Queue (Waiting)</span>
             </div>
-            <div class="qd-chip ${filters.status === 'CONFIRMED' ? 'active' : ''}" data-val="CONFIRMED">
-              <span class="qd-status-dot confirmed"></span>
-              <span>Confirmed</span>
-            </div>
-            <div class="qd-chip ${filters.status === 'BOOKED' ? 'active' : ''}" data-val="BOOKED">
-              <span class="qd-status-dot booked"></span>
-              <span>Booked</span>
-            </div>
-            <div class="qd-chip ${filters.status === 'ON_THE_WAY' ? 'active' : ''}" data-val="ON_THE_WAY">
-              <span class="qd-status-dot ontheway"></span>
-              <span>On The Way</span>
-            </div>
-            <div class="qd-chip ${filters.status === 'CHECKED_IN' ? 'active' : ''}" data-val="CHECKED_IN">
-              <span class="qd-status-dot checkedin"></span>
-              <span>Checked In</span>
-            </div>
-            <div class="qd-chip ${filters.status === 'IN_SERVICE' ? 'active' : ''}" data-val="IN_SERVICE">
+            <div class="qd-chip ${effectiveStatus === 'IN_CHAIR' || effectiveStatus === 'IN_SERVICE' ? 'active' : ''}" data-val="IN_CHAIR">
               <span class="qd-status-dot inchair"></span>
               <span>In Chair</span>
             </div>
-            <div class="qd-chip ${filters.status === 'COMPLETED' ? 'active' : ''}" data-val="COMPLETED">
+            <div class="qd-chip ${effectiveStatus === 'PENDING_ACCEPTANCE' ? 'active' : ''}" data-val="PENDING_ACCEPTANCE">
+              <span class="qd-status-dot pending"></span>
+              <span>Pending Approval</span>
+            </div>
+            <div class="qd-chip ${effectiveStatus === 'CONFIRMED' ? 'active' : ''}" data-val="CONFIRMED">
+              <span class="qd-status-dot confirmed"></span>
+              <span>Confirmed</span>
+            </div>
+            <div class="qd-chip ${effectiveStatus === 'BOOKED' ? 'active' : ''}" data-val="BOOKED">
+              <span class="qd-status-dot booked"></span>
+              <span>Booked</span>
+            </div>
+            <div class="qd-chip ${effectiveStatus === 'ON_THE_WAY' ? 'active' : ''}" data-val="ON_THE_WAY">
+              <span class="qd-status-dot ontheway"></span>
+              <span>On The Way</span>
+            </div>
+            <div class="qd-chip ${effectiveStatus === 'CHECKED_IN' ? 'active' : ''}" data-val="CHECKED_IN">
+              <span class="qd-status-dot checkedin"></span>
+              <span>Checked In</span>
+            </div>
+            <div class="qd-chip ${effectiveStatus === 'COMPLETED' ? 'active' : ''}" data-val="COMPLETED">
               <span class="qd-status-dot completed"></span>
               <span>Completed</span>
             </div>
-            <div class="qd-chip ${filters.status === 'CANCELLED' ? 'active' : ''}" data-val="CANCELLED">
+            <div class="qd-chip ${effectiveStatus === 'CANCELLED' ? 'active' : ''}" data-val="CANCELLED">
               <span class="qd-status-dot cancelled"></span>
               <span>Cancelled</span>
             </div>
@@ -2228,22 +2376,34 @@ export class SalonDashboard {
         : (Array.isArray(summary.todayAppointments) ? summary.todayAppointments : []);
       const todayAppointments = queueItems.filter(isApptOnSelectedDate);
 
-      // Filter appointments based on operator selection & side drawer
+      // Unified Filter Evaluation across Home Cards, Drawer, and Chips
+      const activeFilters = this.getQueueActiveFilters();
+      const activeFilterCount = activeFilters.length;
+      const qd = this.queueDrawerFilters || {};
+      const activeStatus = (qd.status || (this.queueFilter !== 'ALL' ? this.queueFilter : '')).toUpperCase();
+
       let filteredAppointments = todayAppointments;
-      if (this.queueFilter === 'WAITING') {
-        filteredAppointments = todayAppointments.filter((a) =>
-          ['BOOKED', 'CONFIRMED', 'CHECKED_IN', 'ON_THE_WAY', 'PENDING_ACCEPTANCE', 'PENDING_RESCHEDULE'].includes(a.status)
-        );
-      } else if (this.queueFilter === 'IN_CHAIR') {
-        filteredAppointments = todayAppointments.filter((a) => a.status === 'IN_SERVICE' || a.status === 'SEATED_IN_CHAIR');
-      } else if (this.queueFilter === 'COMPLETED') {
-        filteredAppointments = todayAppointments.filter((a) => a.status === 'COMPLETED');
-      } else if (this.queueFilter === 'CANCELLED') {
-        filteredAppointments = todayAppointments.filter((a) => ['CANCELLED', 'REJECTED'].includes(a.status));
+
+      if (activeStatus) {
+        if (activeStatus === 'WAITING') {
+          filteredAppointments = filteredAppointments.filter((a) =>
+            ['BOOKED', 'CONFIRMED', 'CHECKED_IN', 'ON_THE_WAY', 'PENDING_ACCEPTANCE', 'PENDING_RESCHEDULE'].includes(a.status)
+          );
+        } else if (activeStatus === 'IN_CHAIR' || activeStatus === 'IN_SERVICE') {
+          filteredAppointments = filteredAppointments.filter((a) =>
+            a.status === 'IN_SERVICE' || a.status === 'SEATED_IN_CHAIR'
+          );
+        } else if (activeStatus === 'COMPLETED') {
+          filteredAppointments = filteredAppointments.filter((a) => a.status === 'COMPLETED');
+        } else if (activeStatus === 'CANCELLED') {
+          filteredAppointments = filteredAppointments.filter((a) =>
+            ['CANCELLED', 'REJECTED', 'NO_SHOW'].includes(a.status)
+          );
+        } else {
+          filteredAppointments = filteredAppointments.filter((a) => a.status === activeStatus);
+        }
       }
 
-      // Drawer Filter Refinements
-      const qd = this.queueDrawerFilters || {};
       if (qd.stylistId) {
         filteredAppointments = filteredAppointments.filter((a) =>
           (a.stylistId === qd.stylistId || a.staffId === qd.stylistId)
@@ -2254,18 +2414,12 @@ export class SalonDashboard {
           (a.bookingType === qd.bookingType)
         );
       }
-      if (qd.status) {
-        filteredAppointments = filteredAppointments.filter((a) =>
-          (a.status === qd.status)
-        );
-      }
       if (qd.categoryId) {
         filteredAppointments = filteredAppointments.filter((a) => {
           const svcs = getApptServices(a);
           return svcs.some((s) => s.categoryId === qd.categoryId) || a.service?.categoryId === qd.categoryId;
         });
       }
-      const activeFilterCount = Object.values(qd).filter(Boolean).length;
 
       // Summary counts strictly computed for selected date
       const waitingCount = todayAppointments.filter((a) =>
@@ -2809,29 +2963,63 @@ export class SalonDashboard {
           </div>
         </div>
 
+        <!-- Active Filter Notification Bar (Visible Indicator & 1-Click Clear) -->
+        ${activeFilterCount > 0 ? `
+          <div class="q-active-filters-bar" id="q-active-filters-bar">
+            <span class="q-active-filters-label">Active Filter${activeFilterCount > 1 ? 's' : ''}:</span>
+            ${activeFilters.map((f) => `
+              <span class="q-active-chip" data-clear-key="${f.key}" title="Click to clear ${f.label} filter">
+                <span>${f.label}: <strong>${f.displayValue}</strong></span>
+                <span class="q-chip-x">✕</span>
+              </span>
+            `).join('')}
+            <button type="button" class="q-clear-all-link" id="btn-clear-all-queue-filters" title="Reset all queue filters to show entire queue">
+              Clear all
+            </button>
+          </div>
+        ` : ''}
+
         <!-- Queue Cards Stream -->
         <div class="q-stream">
-          ${filteredAppointments.length === 0 ? `
-            <div class="q-empty">
-              <div class="q-empty-orb">
-                ${Icons.armchair({ size: 30, color: '#A855F7' })}
+          ${filteredAppointments.length === 0 ? (
+            activeFilterCount > 0 && todayAppointments.length > 0 ? `
+              <div class="q-empty">
+                <div class="q-empty-orb" style="background: rgba(168, 85, 247, 0.12); border-color: rgba(168, 85, 247, 0.3);">
+                  ${Icons.sliders({ size: 30, color: '#A855F7' })}
+                </div>
+                <div class="q-empty-title">No Matching Appointments</div>
+                <div class="q-empty-sub">
+                  No appointments match the active filter criteria for this date. There are <strong>${todayAppointments.length}</strong> total appointment${todayAppointments.length > 1 ? 's' : ''} on this day.
+                </div>
+                <div class="q-empty-actions">
+                  <button class="btn btn-primary btn-sm" id="btn-empty-clear-filters" style="gap: 6px; padding: 9px 18px; font-weight: 700; border-radius: 10px;">
+                    ${Icons.x({ size: 14, color: '#fff' })}
+                    <span>Clear Filter & Show All (${todayAppointments.length})</span>
+                  </button>
+                </div>
               </div>
-              <div class="q-empty-title">Queue is Clear & Ready</div>
-              <div class="q-empty-sub">
-                No ${this.queueFilter === 'ALL' ? '' : this.queueFilter.toLowerCase() + ' '}appointments currently waiting. Walk-in arrivals or WhatsApp bookings appear here in real-time.
+            ` : `
+              <div class="q-empty">
+                <div class="q-empty-orb">
+                  ${Icons.armchair({ size: 30, color: '#A855F7' })}
+                </div>
+                <div class="q-empty-title">Queue is Clear & Ready</div>
+                <div class="q-empty-sub">
+                  No appointments currently waiting for this date. Walk-in arrivals or WhatsApp bookings appear here in real-time.
+                </div>
+                <div class="q-empty-actions">
+                  <button class="btn btn-primary btn-sm btn-fast-walkin" id="btn-fast-walkin" style="gap: 6px; padding: 9px 18px; font-weight: 700; border-radius: 10px;">
+                    ${Icons.zap({ size: 14, color: '#fff' })}
+                    <span>Fast Walk-In Client</span>
+                  </button>
+                  <button class="btn btn-secondary btn-sm" id="btn-empty-sync" style="gap: 6px; padding: 9px 16px; border-radius: 10px;">
+                    ${Icons.refreshCw({ size: 13, color: '#A855F7' })}
+                    <span>Sync Queue</span>
+                  </button>
+                </div>
               </div>
-              <div class="q-empty-actions">
-                <button class="btn btn-primary btn-sm btn-fast-walkin" id="btn-fast-walkin" style="gap: 6px; padding: 9px 18px; font-weight: 700; border-radius: 10px;">
-                  ${Icons.zap({ size: 14, color: '#fff' })}
-                  <span>Fast Walk-In Client</span>
-                </button>
-                <button class="btn btn-secondary btn-sm" id="btn-empty-sync" style="gap: 6px; padding: 9px 16px; border-radius: 10px;">
-                  ${Icons.refreshCw({ size: 13, color: '#A855F7' })}
-                  <span>Sync Queue</span>
-                </button>
-              </div>
-            </div>
-          ` : filteredAppointments.map((appt) => {
+            `
+          ) : filteredAppointments.map((appt) => {
         const customer = appt.customer || appt.user || (appt.salonUser ? appt.salonUser.user : {}) || {};
         const staff = appt.staff || appt.stylist || {};
         const service = appt.service || {};
@@ -9151,6 +9339,10 @@ export class SalonDashboard {
         const targetBtn = e.target.closest('[data-tab]');
         const targetTab = targetBtn ? targetBtn.getAttribute('data-tab') : null;
         if (targetTab) {
+          if (targetTab === 'queue' && (this.activeTab !== 'queue' || this.getQueueActiveFilterCount() > 0)) {
+            // When navigating directly to queue from navbar, reset to show full queue
+            this.resetQueueFilters(false);
+          }
           this.switchTab(targetTab);
         }
       };
@@ -9601,15 +9793,26 @@ export class SalonDashboard {
   setupQueueTabListeners(tabContent) {
     if (!tabContent) return;
 
-    // Queue Filter Pills (All, Waiting, In Chair, Done, Cancelled)
-    tabContent.querySelectorAll('.q-chip').forEach((pill) => {
-      pill.addEventListener('click', (e) => {
-        const filter = e.currentTarget.getAttribute('data-filter');
-        if (filter) {
-          this.queueFilter = filter;
-          this.render();
+    // Active Filters Bar: individual chip clearing & clear-all
+    tabContent.querySelectorAll('.q-active-chip').forEach((chip) => {
+      chip.addEventListener('click', (e) => {
+        e.preventDefault();
+        const key = chip.getAttribute('data-clear-key');
+        if (key) {
+          this.clearQueueFilter(key);
         }
       });
+    });
+
+    tabContent.querySelector('#btn-clear-all-queue-filters')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      this.resetQueueFilters();
+    });
+
+    // Empty State: Clear Filter & Show All
+    tabContent.querySelector('#btn-empty-clear-filters')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      this.resetQueueFilters();
     });
 
     // Date Navigation Controls (Prev, Next, Today)
@@ -9696,16 +9899,14 @@ export class SalonDashboard {
           newFilters[groupKey] = activeChip.getAttribute('data-val') || '';
         }
       });
-      this.queueDrawerFilters = newFilters;
       closeQueueDrawer();
-      this.render();
+      this.setQueueFilter(newFilters, true);
     });
 
     // Reset Drawer Filters
     filterDrawer?.querySelector('#btn-reset-queue-filters')?.addEventListener('click', () => {
-      this.queueDrawerFilters = { stylistId: '', bookingType: '', status: '', categoryId: '' };
       closeQueueDrawer();
-      this.render();
+      this.resetQueueFilters(true);
     });
   }
 

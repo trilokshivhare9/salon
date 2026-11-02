@@ -47,8 +47,36 @@ export class BookingAction {
    * Main Dispatcher for Booking Funnel actions
    */
   async handle(ctx: ActionContext): Promise<ActionResult> {
-    const { input, normalizedInput, cleanNumber, conversation } = ctx;
+    const { input, normalizedInput, cleanNumber, conversation, salonUser, salon, phoneNumberId, salonId } = ctx;
     this.logger.log(`[BookingAction] Handling input="${input}" in state="${conversation.state}" for user=${cleanNumber}`);
+
+    const isCustomerBlocked = salonUser?.isBookingBlocked || (salonUser?.yearlyNoShowCount ?? 0) >= 3;
+    if (isCustomerBlocked) {
+      await this.session.updateConversationState(
+        conversation.id,
+        ConversationState.START,
+        null,
+        ActionUtils.getClearDraftData(),
+      );
+      const blockMessage =
+        `⚠️ *ACCOUNT BLOCKED*\n\n` +
+        `Your account is currently blocked from booking appointments due to *3 penalty strikes* for missed appointments.\n\n` +
+        `📞 *Please contact the salon directly to unblock:*\n` +
+        `Salon: *${salon?.name || 'Salon'}*\n` +
+        `Desk: *${salon?.phone || 'Front Desk'}*\n\n` +
+        `_The salon manager can review and restore your booking access from their salon dashboard._`;
+      await this.sendMessage(
+        cleanNumber,
+        {
+          bodyText: blockMessage,
+          interactiveType: 'button',
+          buttons: [{ id: WhatsAppButtonId.INFO, title: '📍 Salon Info' }],
+        },
+        phoneNumberId,
+        salonId,
+      );
+      return { replyMessage: blockMessage, state: ConversationState.START };
+    }
 
     // 1. Add-on Service Action & Handlers
     if (input === WhatsAppButtonId.ADD_SERVICE || input === 'btn_add_service') {

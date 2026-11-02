@@ -592,4 +592,11 @@ export class WhatsAppService {
       botPausedUntil: conversation?.botPausedUntil || null,
     };
   }
+
+  invalidateUserCache(salonId?: string, customerPhone?: string): void {
+    if (this.whatsAppSessionService) {
+      const clean = customerPhone && this.whatsAppSenderService ? this.whatsAppSenderService.cleanPhone(customerPhone) : customerPhone;
+      this.whatsAppSessionService.invalidateUserCache(salonId, clean);
+    }
+  }
 }

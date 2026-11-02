@@ -136,22 +136,49 @@ export class WhatsAppActionHandlerService {
     trace.conversationId = conversation.id;
     trace.loadedState = conversation.state as ConversationState;
 
-    // 3. Blocked User Check (3 Penalty Strikes)
-    if (salonUser?.isBookingBlocked) {
-      const isBookingAttempt =
-        [WhatsAppButtonId.BOOK, WhatsAppButtonId.SERVICES, WhatsAppButtonId.BOOK_NOW].includes(input as any) ||
-        input.startsWith('svc_') ||
-        input.startsWith('slot_') ||
-        input.startsWith('date_');
+    // 3. Blocked User Gatekeeper (3 Penalty Strikes) - Front-Door Invariant
+    const isCustomerBlocked = salonUser?.isBookingBlocked || (salonUser?.yearlyNoShowCount ?? 0) >= 3;
+    if (isCustomerBlocked) {
+      // Allow only non-booking actions: Salon info inquiry or existing appointment ETA updates / cancellations
+      const isAllowedNonBookingAction =
+        input === WhatsAppButtonId.INFO ||
+        input === 'btn_info' ||
+        normalizedInput === 'info' ||
+        input.startsWith('eta_') ||
+        input.startsWith('btn_eta_') ||
+        input.startsWith('late_') ||
+        input === 'btn_running_late' ||
+        input === WhatsAppButtonId.ETA_ARRIVED ||
+        input === WhatsAppButtonId.ETA_ON_THE_WAY ||
+        input === WhatsAppButtonId.ETA_LATE_15 ||
+        input === WhatsAppButtonId.CANCEL_APPT ||
+        input === WhatsAppButtonId.REMIND_CANCEL ||
+        normalizedInput === 'cancel' ||
+        normalizedInput === 'cancel appointment';
 
-      if (isBookingAttempt) {
-        const blockMessage = `⚠️ *BOOKING RESTRICTED*\n\nYou have accumulated *3 penalty strikes* this year for missed appointments. Automatic slot booking is currently locked for your account.\n\n📞 *Please contact the Salon Owner* directly at *${salon.phone || 'the salon desk'}* to request access unblock.`;
+      if (!isAllowedNonBookingAction) {
+        // Reset any existing draft data cleanly so state stays in START
+        await this.session.updateConversationState(
+          conversation.id,
+          ConversationState.START,
+          null,
+          ActionUtils.getClearDraftData(),
+        );
+
+        const blockMessage =
+          `⚠️ *ACCOUNT BLOCKED*\n\n` +
+          `Your account is currently blocked from booking appointments due to *3 penalty strikes* for missed appointments.\n\n` +
+          `📞 *Please contact the salon directly to unblock:*\n` +
+          `Salon: *${salon.name}*\n` +
+          `Desk: *${salon.phone || 'Front Desk'}*\n\n` +
+          `_The salon manager can review and restore your booking access from their salon dashboard._`;
+
         await this.sendMessage(
           cleanNumber,
           {
             bodyText: blockMessage,
             interactiveType: 'button',
-            buttons: [{ id: WhatsAppButtonId.START, title: '🏠 Main Menu' }],
+            buttons: [{ id: WhatsAppButtonId.INFO, title: '📍 Salon Info' }],
           },
           phoneNumberId,
           salonId,
@@ -318,9 +345,10 @@ export class WhatsAppActionHandlerService {
       return { replyMessage: welcome.bodyText, state: ConversationState.START };
     }
 
-    if (input === WhatsAppButtonId.INFO) {
+    if (input === WhatsAppButtonId.INFO || input === 'btn_info' || normalizedInput === 'info') {
       const hasActive = Boolean(activeAppointment);
-      const infoMsg = this.templates.buildSalonInfoMessage(salon, hasActive);
+      const isBlocked = salonUser?.isBookingBlocked || (salonUser?.yearlyNoShowCount ?? 0) >= 3;
+      const infoMsg = this.templates.buildSalonInfoMessage(salon, hasActive, isBlocked);
       await this.sendMessage(cleanNumber, infoMsg, phoneNumberId, salonId);
       return { replyMessage: infoMsg.bodyText, state: conversation.state };
     }

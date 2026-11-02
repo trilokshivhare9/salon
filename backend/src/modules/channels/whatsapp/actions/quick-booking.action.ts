@@ -43,8 +43,30 @@ export class QuickBookingAction {
    * Quick Book Entry (Direct Bypass) with Per-User Concurrency Guard
    */
   async startQuickBook(ctx: ActionContext): Promise<ActionResult> {
-    const { cleanNumber, phoneNumberId, salonId, salon, conversation, tz } = ctx;
+    const { cleanNumber, phoneNumberId, salonId, salon, conversation, tz, salonUser } = ctx;
     this.logger.log(`[QuickBookingAction] Starting quick booking check for user=${cleanNumber}`);
+
+    const isCustomerBlocked = salonUser?.isBookingBlocked || (salonUser?.yearlyNoShowCount ?? 0) >= 3;
+    if (isCustomerBlocked) {
+      await this.session.updateConversationState(
+        conversation.id,
+        ConversationState.START,
+        null,
+        ActionUtils.getClearDraftData(),
+      );
+      const blockMessage = `⚠️ *ACCOUNT BLOCKED*\n\nYour account is currently blocked from booking appointments due to *3 penalty strikes* for missed appointments.\n\n📞 *Please contact the salon directly to unblock:*\nSalon: *${salon.name}*\nDesk: *${salon.phone || 'Front Desk'}*\n\n_The salon manager can review and restore your booking access from their salon dashboard._`;
+      await this.sendMessage(
+        cleanNumber,
+        {
+          bodyText: blockMessage,
+          interactiveType: 'button',
+          buttons: [{ id: WhatsAppButtonId.INFO, title: '📍 Salon Info' }],
+        },
+        phoneNumberId,
+        salonId,
+      );
+      return { replyMessage: blockMessage, state: ConversationState.START };
+    }
 
     // Check if user already has an active pending quick booking request
     const existingPending = await this.prisma.appointment.findFirst({
@@ -224,8 +246,30 @@ export class QuickBookingAction {
    * updates the user's session, and sends the interactive WhatsApp reply.
    */
   async confirmQuickBook(ctx: ActionContext): Promise<ActionResult> {
-    const { cleanNumber, phoneNumberId, salonId, user, conversation, tz } = ctx;
+    const { cleanNumber, phoneNumberId, salonId, user, conversation, tz, salonUser, salon } = ctx;
     this.logger.log(`[QuickBookingAction] Confirming quick booking for user=${cleanNumber}`);
+
+    const isCustomerBlocked = salonUser?.isBookingBlocked || (salonUser?.yearlyNoShowCount ?? 0) >= 3;
+    if (isCustomerBlocked) {
+      await this.session.updateConversationState(
+        conversation.id,
+        ConversationState.START,
+        null,
+        ActionUtils.getClearDraftData(),
+      );
+      const blockMessage = `⚠️ *ACCOUNT BLOCKED*\n\nYour account is currently blocked from booking appointments due to *3 penalty strikes* for missed appointments.\n\n📞 *Please contact the salon directly to unblock:*\nSalon: *${salon?.name || 'Salon'}*\nDesk: *${salon?.phone || 'Front Desk'}*\n\n_The salon manager can review and restore your booking access from their salon dashboard._`;
+      await this.sendMessage(
+        cleanNumber,
+        {
+          bodyText: blockMessage,
+          interactiveType: 'button',
+          buttons: [{ id: WhatsAppButtonId.INFO, title: '📍 Salon Info' }],
+        },
+        phoneNumberId,
+        salonId,
+      );
+      return { replyMessage: blockMessage, state: ConversationState.START };
+    }
 
     if (conversation.quickCodeVerifiedAt) {
       const minsDiff = (Date.now() - new Date(conversation.quickCodeVerifiedAt).getTime()) / (1000 * 60);

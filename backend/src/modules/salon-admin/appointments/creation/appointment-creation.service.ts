@@ -4,6 +4,7 @@ import {
   ConflictException,
   BadRequestException,
   NotFoundException,
+  ForbiddenException,
   Inject,
   Optional,
   forwardRef,
@@ -176,7 +177,47 @@ export class AppointmentCreationService {
     const primaryService = orderedServices[0];
     const serviceNameSnapshot = orderedServices.map((s) => s.name).join(', ');
 
-    // 2. Verify availability
+    // 2. Resolve Customer & SalonUser Identity and Enforce Blocked Customer Policy
+    const cleanPhone = sanitizePhone(dto.customerPhone);
+    let user = await this.prisma.user.findUnique({
+      where: { phone: cleanPhone },
+    });
+
+    if (!user) {
+      user = await this.prisma.user.create({
+        data: {
+          phone: cleanPhone,
+          name: dto.customerName || null,
+          email: dto.customerEmail || null,
+        },
+      });
+    } else if (dto.customerName && !user.name) {
+      user = await this.prisma.user.update({
+        where: { id: user.id },
+        data: { name: dto.customerName },
+      });
+    }
+
+    const salonUser = await this.prisma.salonUser.upsert({
+      where: {
+        salonId_userId: { salonId, userId: user.id },
+      },
+      update: {},
+      create: {
+        salonId,
+        userId: user.id,
+      },
+    });
+
+    // Root-Level Policy Guard: Blocked Customer Check (3 Penalty Strikes)
+    const isCustomerBlocked = salonUser.isBookingBlocked || (salonUser.yearlyNoShowCount ?? 0) >= 3;
+    if (isCustomerBlocked && !createdByAdminId) {
+      throw new ForbiddenException(
+        'Booking is restricted for this customer due to 3 penalty strikes for missed appointments. Please contact the salon directly to restore access.',
+      );
+    }
+
+    // 3. Verify availability
     const availability = await this.availabilityService.getAvailableSlots(
       salonId,
       serviceIds,
@@ -228,39 +269,6 @@ export class AppointmentCreationService {
     if (startDt < nowInSalonZone.minus({ minutes: 5 })) {
       throw new ConflictException('The selected appointment time has already passed. Please select a fresh slot.');
     }
-
-    const cleanPhone = sanitizePhone(dto.customerPhone);
-
-    // 3. Resolve Customer & SalonUser Identity
-    let user = await this.prisma.user.findUnique({
-      where: { phone: cleanPhone },
-    });
-
-    if (!user) {
-      user = await this.prisma.user.create({
-        data: {
-          phone: cleanPhone,
-          name: dto.customerName || null,
-          email: dto.customerEmail || null,
-        },
-      });
-    } else if (dto.customerName && !user.name) {
-      user = await this.prisma.user.update({
-        where: { id: user.id },
-        data: { name: dto.customerName },
-      });
-    }
-
-    const salonUser = await this.prisma.salonUser.upsert({
-      where: {
-        salonId_userId: { salonId, userId: user.id },
-      },
-      update: {},
-      create: {
-        salonId,
-        userId: user.id,
-      },
-    });
 
     // Canonical ISO date string for lock identity & date queries
     const dateStr = dto.date.includes('T') ? dto.date.split('T')[0] : dto.date;

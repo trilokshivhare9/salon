@@ -205,6 +205,11 @@ You can now book appointment slots again anytime via WhatsApp.`;
       },
     });
 
+    // Invalidate WhatsApp session cache so gateway reflects blocked/unblocked status immediately
+    if (salonUser.user?.phone) {
+      this.whatsAppService.invalidateUserCache(salonId, salonUser.user.phone);
+    }
+
     // Notify customer via WhatsApp if they were previously blocked and are now unblocked
     if (
       salonUser.isBookingBlocked &&
