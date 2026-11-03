@@ -12,6 +12,7 @@ export interface SalonProfileInfo {
   id: string;
   name: string;
   slug: string;
+  salonCode?: string | null;
   phone: string;
   email: string;
   address: string | null;
@@ -23,6 +24,8 @@ export interface SalonProfileInfo {
   googleMapsUrl: string | null;
   locationType: string | null;
   status: string;
+  whatsappAccount?: any;
+  whatsappBookingUrl?: string;
   createdAt: Date;
   updatedAt: Date;
 }

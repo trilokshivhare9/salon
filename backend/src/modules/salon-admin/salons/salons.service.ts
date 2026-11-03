@@ -16,7 +16,7 @@ import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { DateTime } from 'luxon';
 import { TimeUtility } from '../../../common/utils/time.utility';
-import { AdminRole, SalonStatus, StylistStatus, ServiceStatus, DayOfWeek, AppointmentStatus } from '@prisma/client';
+import { AdminRole, SalonStatus, StylistStatus, ServiceStatus, DayOfWeek, AppointmentStatus, WhatsAppMode } from '@prisma/client';
 import { WhatsAppService } from '../../channels/whatsapp/whatsapp.service';
 import { AppointmentsService } from '../appointments/appointments.service';
 
@@ -43,7 +43,7 @@ export class SalonsService {
           select: { id: true, name: true, email: true, phone: true },
         },
         whatsappAccount: {
-          select: { id: true, phoneNumberId: true, isActive: true },
+          select: { id: true, phoneNumberId: true, displayPhoneNumber: true, mode: true, isActive: true },
         },
         _count: {
           select: {
@@ -212,6 +212,195 @@ export class SalonsService {
     );
   }
 
+  // -------------------------------------------------------------
+  // DUAL-MODE WHATSAPP: SALON CODE & REAL-TIME VALIDATION
+  // -------------------------------------------------------------
+  async generateUniqueSalonCode(salonName: string): Promise<string> {
+    const clean = (salonName || '')
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '');
+
+    const prefix = (clean.slice(0, 5) || 'SLON').padEnd(3, 'X');
+    let index = 1;
+    let code = `${prefix}${String(index).padStart(2, '0')}`;
+
+    while (await this.prisma.salon.findUnique({ where: { salonCode: code } })) {
+      index++;
+      code = `${prefix}${String(index).padStart(2, '0')}`;
+    }
+
+    return code;
+  }
+
+  async suggestSalonCode(name: string) {
+    if (!name || name.trim().length < 2) {
+      throw new BadRequestException('Salon name must be at least 2 characters.');
+    }
+    const suggestedCode = await this.generateUniqueSalonCode(name);
+    return {
+      suggestedCode,
+      available: true,
+    };
+  }
+
+  async checkSalonCodeAvailability(code: string) {
+    if (!code) {
+      throw new BadRequestException('Salon code is required.');
+    }
+    const cleanCode = code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (cleanCode.length < 3 || cleanCode.length > 12) {
+      return {
+        code: cleanCode,
+        available: false,
+        reason: 'Code must be between 3 and 12 alphanumeric characters.',
+      };
+    }
+    const existing = await this.prisma.salon.findUnique({
+      where: { salonCode: cleanCode },
+    });
+    return {
+      code: cleanCode,
+      available: !existing,
+      reason: existing ? 'This salon code is already taken by another salon.' : undefined,
+    };
+  }
+
+  // -------------------------------------------------------------
+  // DUAL-MODE WHATSAPP: DEDICATED META OTP VERIFICATION
+  // -------------------------------------------------------------
+  async requestMetaOtp(rawPhone: string, verifiedName: string) {
+    if (!rawPhone) throw new BadRequestException('Phone number is required.');
+    if (!verifiedName) throw new BadRequestException('Verified business name is required.');
+
+    const token =
+      this.configService.get<string>('whatsapp.accessToken') ||
+      process.env.WHATSAPP_ACCESS_TOKEN;
+    const wabaId =
+      this.configService.get<string>('whatsapp.wabaId') ||
+      process.env.WHATSAPP_WABA_ID ||
+      '1033500188719216';
+
+    if (!token) {
+      throw new BadRequestException('WHATSAPP_ACCESS_TOKEN is not configured on server.');
+    }
+
+    const cleanPhone = rawPhone.replace(/\D/g, '');
+    let cc = '91';
+    let nationalNumber = cleanPhone;
+    if (cleanPhone.startsWith('91') && cleanPhone.length === 12) {
+      nationalNumber = cleanPhone.slice(2);
+    } else if (cleanPhone.length > 10) {
+      cc = cleanPhone.slice(0, cleanPhone.length - 10);
+      nationalNumber = cleanPhone.slice(-10);
+    }
+
+    this.logger.log(`[Meta OTP] Adding phone number +${cc} ${nationalNumber} to WABA ${wabaId}...`);
+
+    // 1. Add Phone Number to Meta WABA
+    const addRes = await fetch(`https://graph.facebook.com/v20.0/${wabaId}/phone_numbers`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        cc,
+        phone_number: nationalNumber,
+        verified_name: verifiedName.trim(),
+      }),
+    });
+
+    const addData = await addRes.json();
+    if (addData.error) {
+      this.logger.error(`[Meta OTP] Add phone error: ${JSON.stringify(addData.error)}`);
+      throw new BadRequestException(addData.error.message || 'Failed to add phone number to Meta WABA.');
+    }
+
+    const phoneNumberId = addData.id;
+
+    // 2. Request OTP Code via SMS
+    this.logger.log(`[Meta OTP] Requesting SMS code for Phone ID ${phoneNumberId}...`);
+    const codeRes = await fetch(`https://graph.facebook.com/v20.0/${phoneNumberId}/request_code`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        code_method: 'SMS',
+        language: 'en_US',
+      }),
+    });
+
+    const codeData = await codeRes.json();
+    if (codeData.error) {
+      this.logger.error(`[Meta OTP] Request code error: ${JSON.stringify(codeData.error)}`);
+      throw new BadRequestException(codeData.error.message || 'Failed to request OTP code from Meta.');
+    }
+
+    return {
+      success: true,
+      phoneNumberId,
+      displayPhoneNumber: `+${cc} ${nationalNumber}`,
+      message: `6-digit verification code sent via SMS to +${cc} ${nationalNumber}.`,
+    };
+  }
+
+  async verifyMetaOtp(phoneNumberId: string, code: string, pin = '123456') {
+    if (!phoneNumberId) throw new BadRequestException('Phone Number ID is required.');
+    if (!code) throw new BadRequestException('Verification code is required.');
+
+    const token =
+      this.configService.get<string>('whatsapp.accessToken') ||
+      process.env.WHATSAPP_ACCESS_TOKEN;
+
+    if (!token) {
+      throw new BadRequestException('WHATSAPP_ACCESS_TOKEN is not configured on server.');
+    }
+
+    // 1. Verify code
+    const verifyRes = await fetch(`https://graph.facebook.com/v20.0/${phoneNumberId}/verify_code`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ code: code.trim() }),
+    });
+
+    const verifyData = await verifyRes.json();
+    if (verifyData.error) {
+      this.logger.error(`[Meta OTP] Verify code error: ${JSON.stringify(verifyData.error)}`);
+      throw new BadRequestException(verifyData.error.message || 'Invalid or expired verification code.');
+    }
+
+    // 2. Register for Cloud API
+    const regRes = await fetch(`https://graph.facebook.com/v20.0/${phoneNumberId}/register`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        pin: pin.trim(),
+      }),
+    });
+
+    const regData = await regRes.json();
+    if (regData.error) {
+      this.logger.warn(`[Meta OTP] Register warning: ${JSON.stringify(regData.error)}`);
+    }
+
+    return {
+      success: true,
+      phoneNumberId,
+      verified: true,
+      message: 'Phone number verified and registered successfully with Meta Cloud API!',
+    };
+  }
+
   async createSalonBySuperAdmin(superAdminId: string, dto: CreateSalonPlatformDto) {
     const email = dto.email.toLowerCase().trim();
     const phone = this.normalizePhoneNumber(dto.phone);
@@ -228,16 +417,18 @@ export class SalonsService {
 
     // 2. Uniqueness check & Live Meta Verification: WhatsApp Phone ID (if provided)
     let waId = dto.whatsappPhoneNumberId?.trim() || null;
-    if (waId) {
+    const waMode = dto.whatsappMode || (waId ? WhatsAppMode.DEDICATED : WhatsAppMode.SHARED);
+
+    if (waMode === WhatsAppMode.DEDICATED && waId) {
       // Verify against Meta Graph API in real-time
       await this.verifyMetaPhoneNumberId(waId);
 
-      const existingWa = await this.prisma.whatsAppAccount.findUnique({
-        where: { phoneNumberId: waId },
+      const existingWa = await this.prisma.whatsAppAccount.findFirst({
+        where: { phoneNumberId: waId, mode: WhatsAppMode.DEDICATED },
       });
       if (existingWa) {
         throw new ConflictException(
-          `Meta WhatsApp Phone Number ID '${waId}' is already linked to another salon.`,
+          `Meta WhatsApp Phone Number ID '${waId}' is already linked to another dedicated salon.`,
         );
       }
     }
@@ -263,6 +454,17 @@ export class SalonsService {
       slugIndex++;
     }
 
+    // 5. Resolve unique salon code (e.g. LUXE01)
+    let salonCode = dto.salonCode ? dto.salonCode.trim().toUpperCase() : null;
+    if (salonCode) {
+      const existingCode = await this.prisma.salon.findUnique({ where: { salonCode } });
+      if (existingCode) {
+        throw new ConflictException(`Salon code '${salonCode}' is already taken by another salon.`);
+      }
+    } else {
+      salonCode = await this.generateUniqueSalonCode(dto.name);
+    }
+
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(dto.password, salt);
 
@@ -273,6 +475,7 @@ export class SalonsService {
           createdByAdminId: superAdminId,
           name: dto.name.trim(),
           slug,
+          salonCode,
           phone,
           email,
           address: dto.address?.trim() || null,
@@ -378,12 +581,35 @@ export class SalonsService {
         }
       }
 
-      // 4. Configure WhatsApp Meta Account if waId is present
-      if (waId) {
+      // 4. Configure WhatsApp Account (SHARED vs DEDICATED)
+      const masterPhoneId =
+        this.configService.get<string>('whatsapp.phoneNumberId') ||
+        process.env.WHATSAPP_PHONE_NUMBER_ID ||
+        '1344691785393273';
+      const masterDisplayPhone =
+        this.configService.get<string>('whatsapp.displayPhone') ||
+        process.env.WHATSAPP_DISPLAY_PHONE ||
+        '917999817743';
+
+      if (waMode === WhatsAppMode.DEDICATED && waId) {
         await tx.whatsAppAccount.create({
           data: {
             salonId: salon.id,
+            mode: WhatsAppMode.DEDICATED,
             phoneNumberId: waId,
+            displayPhoneNumber: dto.whatsappDisplayPhoneNumber || null,
+            accessTokenEncrypted: 'system_managed',
+            webhookVerifyToken: 'salon_webhook_verify_token_mvp',
+            isActive: true,
+          },
+        });
+      } else {
+        await tx.whatsAppAccount.create({
+          data: {
+            salonId: salon.id,
+            mode: WhatsAppMode.SHARED,
+            phoneNumberId: masterPhoneId,
+            displayPhoneNumber: masterDisplayPhone,
             accessTokenEncrypted: 'system_managed',
             webhookVerifyToken: 'salon_webhook_verify_token_mvp',
             isActive: true,
@@ -407,15 +633,27 @@ export class SalonsService {
         });
       }
 
+      const activeDisplayPhone = waMode === WhatsAppMode.DEDICATED
+        ? (dto.whatsappDisplayPhoneNumber || waId)
+        : masterDisplayPhone;
+
+      let formattedQrPhone = waMode === WhatsAppMode.SHARED
+        ? (activeDisplayPhone || '').replace(/\D/g, '')
+        : (activeDisplayPhone || salon.phone || '').replace(/\D/g, '');
+      if (formattedQrPhone.length === 10) formattedQrPhone = `91${formattedQrPhone}`;
+
       return {
         id: salon.id,
         name: salon.name,
         slug: salon.slug,
+        salonCode: salon.salonCode,
         ownerName: dto.ownerName,
         email,
         phone,
         address: salon.address,
         city: salon.city,
+        state: salon.state,
+        country: salon.country,
         latitude: salon.latitude,
         longitude: salon.longitude,
         googleMapsUrl: salon.googleMapsUrl,
@@ -425,9 +663,14 @@ export class SalonsService {
         closeTime,
         status: salon.status,
         bookingUrl: `/#book/${salon.slug}`,
+        whatsappMode: waMode,
+        whatsappPhoneNumberId: waMode === WhatsAppMode.DEDICATED ? waId : masterPhoneId,
+        whatsappDisplayPhoneNumber: activeDisplayPhone,
+        whatsappQrUrl: waMode === WhatsAppMode.SHARED
+          ? `https://wa.me/${formattedQrPhone}?text=Hi_${salon.salonCode}`
+          : `https://wa.me/${formattedQrPhone}?text=Hi`,
         stylistsCount: 0,
         servicesCount: 0,
-        whatsappPhoneNumberId: waId,
       };
     }, { maxWait: 15000, timeout: 35000 });
 
@@ -476,26 +719,30 @@ Here are your salon owner login credentials:
     const metaCheck = await this.verifyMetaPhoneNumberId(phoneNumberId);
     const waId = phoneNumberId.trim();
 
-    // 2. Check if another salon is already using this phone ID
-    const existingWa = await this.prisma.whatsAppAccount.findUnique({
-      where: { phoneNumberId: waId },
+    // 2. Check if another dedicated salon is already using this phone ID
+    const existingWa = await this.prisma.whatsAppAccount.findFirst({
+      where: { phoneNumberId: waId, mode: WhatsAppMode.DEDICATED },
     });
     if (existingWa && existingWa.salonId !== salonId) {
       throw new ConflictException(`Meta WhatsApp Phone Number ID '${waId}' is already linked to another salon.`);
     }
 
-    // 3. Upsert WhatsAppAccount
+    // 3. Upsert WhatsAppAccount with DEDICATED mode
     const account = await this.prisma.whatsAppAccount.upsert({
       where: { salonId },
       update: {
+        mode: WhatsAppMode.DEDICATED,
         phoneNumberId: waId,
+        displayPhoneNumber: metaCheck.displayPhoneNumber || null,
         accessTokenEncrypted: 'system_managed',
         webhookVerifyToken: 'salon_webhook_verify_token_mvp',
         isActive: true,
       },
       create: {
         salonId,
+        mode: WhatsAppMode.DEDICATED,
         phoneNumberId: waId,
+        displayPhoneNumber: metaCheck.displayPhoneNumber || null,
         accessTokenEncrypted: 'system_managed',
         webhookVerifyToken: 'salon_webhook_verify_token_mvp',
         isActive: true,
@@ -696,6 +943,15 @@ Here are your salon owner login credentials:
       where: { id: salonId },
       include: {
         workingHours: { orderBy: { dayOfWeek: 'asc' } },
+        whatsappAccount: {
+          select: {
+            id: true,
+            mode: true,
+            phoneNumberId: true,
+            displayPhoneNumber: true,
+            isActive: true,
+          },
+        },
         _count: {
           select: {
             stylists: true,
@@ -711,7 +967,27 @@ Here are your salon owner login credentials:
       throw new NotFoundException('Salon not found.');
     }
 
-    return salon;
+    const masterPhone =
+      this.configService.get<string>('whatsapp.displayPhone') ||
+      process.env.WHATSAPP_DISPLAY_PHONE ||
+      '917999817743';
+
+    const isShared = salon.whatsappAccount?.mode === WhatsAppMode.SHARED || (!salon.whatsappAccount && Boolean(salon.salonCode));
+    let activeDisplayPhone = isShared
+      ? (salon.whatsappAccount?.displayPhoneNumber || masterPhone).replace(/\D/g, '')
+      : (salon.whatsappAccount?.displayPhoneNumber || salon.phone || '').replace(/\D/g, '');
+    if (activeDisplayPhone.length === 10) {
+      activeDisplayPhone = `91${activeDisplayPhone}`;
+    }
+
+    const whatsappBookingUrl = isShared
+      ? `https://wa.me/${activeDisplayPhone}?text=Hi_${salon.salonCode || ''}`
+      : `https://wa.me/${activeDisplayPhone}?text=Hi`;
+
+    return {
+      ...salon,
+      whatsappBookingUrl,
+    };
   }
 
   async updateSalonProfile(salonId: string, dto: UpdateSalonDto) {

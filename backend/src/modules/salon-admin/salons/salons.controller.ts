@@ -59,6 +59,30 @@ export class SalonsController {
   }
 
   @Roles(AdminRole.SUPER_ADMIN)
+  @Get('platform/suggest-code')
+  async suggestSalonCode(@Query('name') name: string) {
+    return this.salonsService.suggestSalonCode(name);
+  }
+
+  @Roles(AdminRole.SUPER_ADMIN)
+  @Get('platform/check-code')
+  async checkSalonCode(@Query('code') code: string) {
+    return this.salonsService.checkSalonCodeAvailability(code);
+  }
+
+  @Roles(AdminRole.SUPER_ADMIN)
+  @Post('platform/whatsapp/request-otp')
+  async requestMetaOtp(@Body() body: { phone: string; verifiedName: string }) {
+    return this.salonsService.requestMetaOtp(body.phone, body.verifiedName);
+  }
+
+  @Roles(AdminRole.SUPER_ADMIN)
+  @Post('platform/whatsapp/verify-otp')
+  async verifyMetaOtp(@Body() body: { phoneNumberId: string; code: string; pin?: string }) {
+    return this.salonsService.verifyMetaOtp(body.phoneNumberId, body.code, body.pin);
+  }
+
+  @Roles(AdminRole.SUPER_ADMIN)
   @Post('platform/verify-phone-number')
   async verifyPhoneNumber(@Body() body: { phone: string; usePlatformBot?: boolean }) {
     return this.salonsService.verifyPhoneNumberWithMeta(body.phone, body.usePlatformBot);

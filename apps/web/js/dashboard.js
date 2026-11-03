@@ -14244,14 +14244,8 @@ export class SalonDashboard {
   }
 
   getBookingShareUrl() {
-    const rawPhone = this.salonProfile?.phone || this.currentUser?.phone || '';
-    let digits = (rawPhone || '').replace(/[^\d]/g, '');
-    if (digits.length === 10) digits = '91' + digits;
-    if (digits.length >= 10) {
-      return `https://wa.me/${digits}?text=Hi`;
-    }
-    const slug = this.salonProfile?.slug || 'salon';
-    return `${window.location.origin}/#book/${slug}`;
+    const waData = BookingQrView.getWhatsAppBookingData(this.salonProfile, this);
+    return waData.targetUrl;
   }
 
   async showCustomerHistoryModal(customerId, customerName) {

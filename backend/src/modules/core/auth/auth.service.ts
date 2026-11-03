@@ -44,7 +44,21 @@ export class AuthService {
     if (isEmail) {
       admin = await this.prisma.admin.findUnique({
         where: { email: rawInput.toLowerCase() },
-        include: { salon: true },
+        include: {
+          salon: {
+            include: {
+              whatsappAccount: {
+                select: {
+                  id: true,
+                  mode: true,
+                  phoneNumberId: true,
+                  displayPhoneNumber: true,
+                  isActive: true,
+                },
+              },
+            },
+          },
+        },
       });
     } else {
       // Lookup by Mobile / WhatsApp Number with Indian formatting candidates
@@ -76,7 +90,21 @@ export class AuthService {
             { salon: { phone: { in: candidateList } } },
           ],
         },
-        include: { salon: true },
+        include: {
+          salon: {
+            include: {
+              whatsappAccount: {
+                select: {
+                  id: true,
+                  mode: true,
+                  phoneNumberId: true,
+                  displayPhoneNumber: true,
+                  isActive: true,
+                },
+              },
+            },
+          },
+        },
       });
     }
 

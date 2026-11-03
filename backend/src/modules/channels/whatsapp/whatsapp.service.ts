@@ -350,17 +350,27 @@ export class WhatsAppService {
     if (!salon) throw new NotFoundException('Salon not found.');
 
     const isConnected = !!salon.whatsappAccount && salon.whatsappAccount.isActive;
-    const cleanPhone = salon.phone ? salon.phone.replace(/[^\d]/g, '') : '';
-    const waChatUrl = isConnected && cleanPhone
-      ? `https://wa.me/${cleanPhone}`
-      : `https://wa.me/15556749314?text=BOOK%20${salon.slug}`;
+    const isShared = (salon.whatsappAccount?.mode as any) === 'SHARED' || (!salon.whatsappAccount && Boolean(salon.salonCode));
+    const masterPhone = process.env.WHATSAPP_DISPLAY_PHONE || '917999817743';
+
+    let waChatUrl: string;
+    if (isShared) {
+      const displayPhone = (salon.whatsappAccount?.displayPhoneNumber || masterPhone).replace(/\D/g, '');
+      const text = salon.salonCode ? `Hi_${salon.salonCode}` : 'Hi';
+      waChatUrl = `https://wa.me/${displayPhone}?text=${encodeURIComponent(text)}`;
+    } else {
+      const cleanPhone = (salon.whatsappAccount?.displayPhoneNumber || salon.phone || '').replace(/\D/g, '');
+      waChatUrl = `https://wa.me/${cleanPhone}?text=Hi`;
+    }
 
     return {
       isConnected,
       salonId: salon.id,
       salonName: salon.name,
       salonSlug: salon.slug,
+      salonCode: salon.salonCode,
       phone: salon.phone,
+      whatsappMode: salon.whatsappAccount?.mode || (salon.salonCode ? 'SHARED' : 'DEDICATED'),
       phoneNumberId: salon.whatsappAccount?.phoneNumberId || null,
       wabaId: salon.whatsappAccount?.wabaId || null,
       waChatUrl,

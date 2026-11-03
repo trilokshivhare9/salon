@@ -49,7 +49,7 @@ export class WhatsAppController {
 
     const linkedSalon = await this.prisma.salon.findFirst({
       where: {
-        whatsappAccount: { phoneNumberId },
+        whatsappAccount: { phoneNumberId, mode: 'DEDICATED' },
       },
     });
 
@@ -202,91 +202,124 @@ export class WhatsAppController {
 
         let salon: any = null;
 
-        // 1. Direct Phone ID Routing: Resolve target salon by WhatsApp Phone ID (<0.001ms In-Memory Cache)
+        // 1. Direct Phone ID Routing: Check if this phone number belongs to a DEDICATED salon
         if (phoneNumberId) {
-          const linkedSalon = await this.getLinkedSalonByPhoneId(phoneNumberId);
+          const dedicatedSalon = await this.getLinkedSalonByPhoneId(phoneNumberId);
 
-          if (!linkedSalon) {
-            this.logger.warn(
-              `[Meta Webhook] ⚠️ Received message for WhatsApp Phone ID "${phoneNumberId}", but no salon is linked to this phone ID in DB. Request dropped to prevent cross-tenant routing.`,
-            );
-            if (messageId) {
+          if (dedicatedSalon) {
+            if (dedicatedSalon.status !== 'ACTIVE') {
+              this.logger.warn(
+                `[Meta Webhook] ⚠️ Message received for WhatsApp Phone ID "${phoneNumberId}", but linked dedicated salon "${dedicatedSalon.name}" is ${dedicatedSalon.status}. Sending inactive warning response.`,
+              );
+
               await this.whatsappService.recordInboundLog(
-                null,
+                dedicatedSalon.id,
                 fromPhone,
                 text,
                 interactiveId,
                 payload,
                 messageId,
               );
+
+              const cleanFrom = fromPhone.replace(/[^\d+]/g, '');
+              const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+              const recentWarning = await this.prisma.whatsAppLog.findFirst({
+                where: {
+                  salonId: dedicatedSalon.id,
+                  phone: { in: [cleanFrom, fromPhone, cleanFrom.replace('+', '')] },
+                  direction: WhatsAppMessageDirection.OUTBOUND,
+                  messageText: { contains: 'Status Update' },
+                  createdAt: { gte: oneDayAgo },
+                },
+              });
+
+              if (!recentWarning) {
+                await this.whatsappService.sendMetaMessage(
+                  fromPhone,
+                  { textBody: `⚠️ *${dedicatedSalon.name} Status Update*\n\nThank you for reaching out! Our salon is currently undergoing maintenance/setup and is temporarily inactive for automated WhatsApp bookings.\n\nPlease contact the salon directly or try again later.` },
+                  phoneNumberId,
+                  dedicatedSalon.id,
+                ).catch((err) => this.logger.error(`Failed to send inactive warning message: ${err.message}`));
+              }
+
+              return res.status(HttpStatus.OK).send('EVENT_RECEIVED');
             }
-            return res.status(HttpStatus.OK).send('EVENT_RECEIVED');
+
+            salon = dedicatedSalon;
           }
+        }
 
-          if (linkedSalon.status !== 'ACTIVE') {
-            this.logger.warn(
-              `[Meta Webhook] ⚠️ Message received for WhatsApp Phone ID "${phoneNumberId}", but linked salon "${linkedSalon.name}" is ${linkedSalon.status}. Sending inactive warning response.`,
-            );
+        // 2. Shared Mode or Fallback Routing (When not routed to a dedicated number)
+        if (!salon) {
+          // A. Strict Salon Code Switch Format: ONLY allow "Hi_<salonCode>"
+          // Strictly checks format (e.g. "Hi_MP0901", "hi_mp0901"). Does NOT allow salon name or slug.
+          const trimmedInput = (text || '').trim();
+          const hiCodeMatch = trimmedInput.match(/^hi[_\s]([a-z0-9_-]+)$/i);
 
-            // 1. Record inbound message log for Meta idempotency / deduplication
-            await this.whatsappService.recordInboundLog(
-              linkedSalon.id,
-              fromPhone,
-              text,
-              interactiveId,
-              payload,
-              messageId,
-            );
-
-            // 2. 24-Hour Cooldown Guard: Prevent spamming customer if they send multiple inquiries while salon is inactive
-            const cleanFrom = fromPhone.replace(/[^\d+]/g, '');
-            const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-            const recentWarning = await this.prisma.whatsAppLog.findFirst({
+          if (hiCodeMatch) {
+            const candidateCode = hiCodeMatch[1].trim().toUpperCase();
+            const matchedSalon = await this.prisma.salon.findFirst({
               where: {
-                salonId: linkedSalon.id,
-                phone: { in: [cleanFrom, fromPhone, cleanFrom.replace('+', '')] },
-                direction: WhatsAppMessageDirection.OUTBOUND,
-                messageText: { contains: 'Status Update' },
-                createdAt: { gte: oneDayAgo },
+                salonCode: { equals: candidateCode, mode: 'insensitive' },
               },
             });
 
-            if (!recentWarning) {
+            if (matchedSalon) {
+              salon = matchedSalon;
+              this.logger.log(`[Meta Webhook] 🔀 Switched customer ${fromPhone} to salon "${salon.name}" by code: "${candidateCode}" (Status: ${salon.status})`);
+
+              // Immediately switch customer's last active salon pointer in database
+              const cleanFrom = fromPhone.replace(/[^\d+]/g, '');
+              await this.prisma.user.upsert({
+                where: { phone: cleanFrom },
+                create: { phone: cleanFrom, name: senderName || 'WhatsApp Customer', lastActiveSalonId: salon.id },
+                update: { lastActiveSalonId: salon.id, ...(senderName ? { name: senderName } : {}) },
+              }).catch(() => {});
+
+              if (salon.status !== 'ACTIVE') {
+                this.logger.warn(`[Meta Webhook] ⚠️ Switched salon "${salon.name}" is currently INACTIVE.`);
+                await this.whatsappService.sendMetaMessage(
+                  fromPhone,
+                  { textBody: `⚠️ *${salon.name} Notice*\n\nThank you for reaching out! Our salon is currently undergoing setup/deactivated and is temporarily inactive for automated WhatsApp bookings.\n\nPlease contact the salon directly or try again later.` },
+                  phoneNumberId,
+                  salon.id,
+                ).catch(() => {});
+                return res.status(HttpStatus.OK).send('EVENT_RECEIVED');
+              }
+            } else {
+              // Code in format Hi_<code was sent but does not exist in DB
+              this.logger.warn(`[Meta Webhook] ❓ Unknown salon code received: "${candidateCode}" from ${fromPhone}`);
               await this.whatsappService.sendMetaMessage(
                 fromPhone,
-                { textBody: `⚠️ *${linkedSalon.name} Status Update*\n\nThank you for reaching out! Our salon is currently undergoing maintenance/setup and is temporarily inactive for automated WhatsApp bookings.\n\nPlease contact the salon directly or try again later.` },
+                { textBody: `❌ *Salon Code Not Found*\n\nWe could not find any salon with code *#${candidateCode}*.\n\nPlease check the QR code or standee at your salon's counter (e.g. *Hi_MP0901*) and try again.` },
                 phoneNumberId,
-                linkedSalon.id,
-              ).catch((err) => this.logger.error(`Failed to send inactive warning message: ${err.message}`));
-            } else {
-              this.logger.log(
-                `[Meta Webhook] ℹ️ Inactive status notice suppressed for ${fromPhone} (already notified within 24h cooldown window).`,
-              );
+              ).catch(() => {});
+              return res.status(HttpStatus.OK).send('EVENT_RECEIVED');
             }
-
-            // 3. Immediately acknowledge Meta with 200 OK so Meta does NOT retry
-            return res.status(HttpStatus.OK).send('EVENT_RECEIVED');
           }
 
-          salon = linkedSalon;
-        } else {
-          // Fallback routing ONLY when phoneNumberId is NOT provided (e.g. simulator/internal test callers)
-
-          // 2. Keyword/Slug Routing: If customer sends "BOOK <slug>" or "Hi <slug>"
-          if (!salon && (normalizedText.startsWith('book ') || normalizedText.startsWith('hi '))) {
-            const requestedSlug = normalizedText.replace(/^(book|hi)\s+/i, '').trim();
-            salon = await this.prisma.salon.findFirst({
+          // B. Returning Customer Memory: If not switching via Hi_<code, route to current active salon
+          if (!salon) {
+            const cleanFrom = fromPhone.replace(/[^\d+]/g, '');
+            const existingUser = await this.prisma.user.findFirst({
               where: {
-                OR: [
-                  { slug: requestedSlug },
-                  { name: { contains: requestedSlug, mode: 'insensitive' } },
-                ],
+                phone: { in: [cleanFrom, fromPhone, cleanFrom.replace('+', ''), `+${cleanFrom.replace('+', '')}`] },
               },
+              select: { lastActiveSalonId: true },
             });
+            if (existingUser?.lastActiveSalonId) {
+              const rememberedSalon = await this.prisma.salon.findUnique({
+                where: { id: existingUser.lastActiveSalonId },
+              });
+              if (rememberedSalon && rememberedSalon.status === 'ACTIVE') {
+                salon = rememberedSalon;
+                this.logger.log(`[Meta Webhook] 🧠 Re-routed customer ${fromPhone} to active salon "${salon.name}"`);
+              }
+            }
           }
 
-          // 3. Ongoing Active Conversation fallback (simulator only)
-          if (!salon || salon.status !== 'ACTIVE') {
+          // C. Active Conversation Memory: Check recent conversation in DB
+          if (!salon) {
             const cleanFrom = fromPhone.replace(/[^\d+]/g, '');
             const existingConv = await this.prisma.conversation.findFirst({
               where: {
@@ -295,16 +328,36 @@ export class WhatsAppController {
               orderBy: { updatedAt: 'desc' },
               include: { salon: true },
             });
-
             if (existingConv && existingConv.salon?.status === 'ACTIVE') {
               salon = existingConv.salon;
             }
           }
 
-          // 4. Default Fallback to active salon (simulator only)
-          if (!salon || salon.status !== 'ACTIVE') {
+          // D. Default Fallback for simulator/internal test callers
+          if (!salon && (!phoneNumberId || phoneNumberId === 'simulator')) {
             salon = await this.prisma.salon.findFirst({ where: { status: 'ACTIVE' } });
           }
+
+          // E. If still unmapped on Shared Number: reply asking for exact Hi_<code format
+          if (!salon && phoneNumberId && phoneNumberId !== 'simulator') {
+            this.logger.warn(`[Meta Webhook] ❓ Inbound message from ${fromPhone} on Shared Number without valid salon code.`);
+            await this.whatsappService.sendMetaMessage(
+              fromPhone,
+              { textBody: `👋 Welcome to *StyleSlot*!\n\nPlease scan the QR code at your salon's counter or send your salon's code in this format:\n👉 *Hi_<SalonCode>* (e.g. *Hi_MP0901*)` },
+              phoneNumberId,
+            ).catch(() => {});
+            return res.status(HttpStatus.OK).send('EVENT_RECEIVED');
+          }
+        }
+
+        // 3. Keep customer's last active salon pointer up to date
+        if (salon) {
+          const cleanFrom = fromPhone.replace(/[^\d+]/g, '');
+          this.prisma.user.upsert({
+            where: { phone: cleanFrom },
+            create: { phone: cleanFrom, name: senderName || 'WhatsApp Customer', lastActiveSalonId: salon.id },
+            update: { lastActiveSalonId: salon.id, ...(senderName ? { name: senderName } : {}) },
+          }).catch(() => {});
         }
 
         // Enqueue to Keyed Actor Queue partitioned by customer's phone number

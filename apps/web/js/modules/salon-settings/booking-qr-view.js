@@ -41,17 +41,82 @@ export class BookingQrView {
     return view;
   }
 
+  /**
+   * Universal Dual-Mode WhatsApp Link Resolver
+   * SHARED mode: Routes to Master WhatsApp Bot with prefilled Salon Code (e.g. ?text=Hi_MP0901)
+   * DEDICATED mode: Routes to Salon's dedicated phone number with simple ?text=Hi
+   */
+  static getWhatsAppBookingData(profile, app = null) {
+    const p = profile || {};
+    const masterPhone = '917999817743'; // StyleSlot Master Bot WhatsApp Number
+
+    // Check WhatsApp mode: SHARED vs DEDICATED
+    // 1. If whatsappAccount.mode === 'SHARED' -> SHARED
+    // 2. If whatsappAccount.mode === 'DEDICATED' -> DEDICATED
+    // 3. Fallback: If salonCode is present -> SHARED; else if phone is present -> DEDICATED
+    const rawMode = p.whatsappAccount?.mode;
+    const isShared = rawMode === 'SHARED' || (!rawMode && Boolean(p.salonCode));
+    const salonCode = (p.salonCode || '').trim().toUpperCase();
+
+    let displayPhone = '';
+    let textParam = '';
+    let whatsappUrl = '';
+
+    if (isShared) {
+      // MODE 1: SHARED STYLESLOT BOT
+      // Routes to Master Number with prefilled Salon Code (e.g. Hi_MP0901)
+      const rawMaster = p.whatsappAccount?.displayPhoneNumber || masterPhone;
+      let digits = rawMaster.replace(/\D/g, '');
+      if (digits.length === 10) digits = '91' + digits;
+      displayPhone = digits || masterPhone;
+      textParam = salonCode ? `Hi_${salonCode}` : 'Hi';
+      whatsappUrl = `https://wa.me/${displayPhone}?text=${encodeURIComponent(textParam)}`;
+    } else {
+      // MODE 2: DEDICATED PRIVATE NUMBER
+      // Routes to Salon's verified private number with simple ?text=Hi
+      const raw = p.whatsappAccount?.displayPhoneNumber || p.phone || app?.currentUser?.phone || '';
+      let digits = raw.replace(/\D/g, '');
+      if (digits.length === 10) digits = '91' + digits;
+      displayPhone = digits || masterPhone;
+      textParam = 'Hi';
+      whatsappUrl = `https://wa.me/${displayPhone}?text=Hi`;
+    }
+
+    const slug = p.slug || 'salon';
+    const fallbackBookingUrl = `${window.location.origin}/#book/${slug}`;
+
+    return {
+      isShared,
+      mode: isShared ? 'SHARED' : 'DEDICATED',
+      displayPhone,
+      textParam,
+      salonCode,
+      targetUrl: whatsappUrl || fallbackBookingUrl,
+      displayLabel: isShared ? `wa.me/+${displayPhone}?text=${textParam}` : `wa.me/+${displayPhone}`,
+      phoneBadge: isShared
+        ? `⚡ Shared Bot (+${displayPhone}) • #${salonCode || 'CODE'}`
+        : `👑 Dedicated (+${displayPhone})`,
+      step2Text: isShared ? `2. SEND "${textParam}"` : `2. SEND "Hi"`,
+      receptionTip: isShared
+        ? `💡 <strong style="color: #e2e8f0;">Reception Tip:</strong> When walk-ins scan this QR code with their mobile camera, WhatsApp opens directly to StyleSlot Bot (<strong style="color: #4ade80;">+${displayPhone}</strong>) with your salon code <strong style="color: #f472b6;">#${salonCode || ''}</strong> to chat and reserve their chair in 30 seconds.`
+        : `💡 <strong style="color: #e2e8f0;">Reception Tip:</strong> When walk-ins scan this QR code with their mobile camera, WhatsApp opens directly to <strong style="color: #4ade80;">+${displayPhone}</strong> to chat and reserve their chair in 30 seconds.`,
+    };
+  }
+
   async loadAndRender() {
-    this.profile = this.app?.salonProfile || {};
+    this.profile = { ...(this.app?.currentUser?.salon || {}), ...(this.app?.salonProfile || {}) };
     this.servicesCount = (this.app?.servicesList || []).length;
     this.staffCount = (this.app?.staffList || []).length;
 
-    // Refresh profile in background if needed
-    if (!this.profile.name || !this.profile.phone) {
+    // Refresh profile if salonCode or whatsappAccount is missing
+    if (!this.profile.salonCode || this.profile.whatsappAccount === undefined) {
       try {
         const fullProfile = await ApiClient.getPersonalProfile(true);
         if (fullProfile?.salon) {
           this.profile = { ...this.profile, ...fullProfile.salon };
+          if (this.app) {
+            this.app.salonProfile = { ...this.app.salonProfile, ...fullProfile.salon };
+          }
         }
       } catch (e) {
         console.warn('[BookingQrView] Profile load fallback:', e);
@@ -82,15 +147,12 @@ export class BookingQrView {
     const profile = this.profile || {};
     const salonName = profile.name || 'Salon Command';
     const slug = profile.slug || 'salon';
-    const salonPhone = this.getFormattedPhone();
-    const hasValidPhone = Boolean(salonPhone && salonPhone.length >= 10);
+    const waData = BookingQrView.getWhatsAppBookingData(profile, this.app);
 
     const bookingUrl = `${window.location.origin}/#book/${slug}`;
-    const whatsappUrl = hasValidPhone ? `https://wa.me/${salonPhone}?text=Hi` : bookingUrl;
+    const whatsappUrl = waData.targetUrl;
     const qrImgUrl = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(whatsappUrl)}`;
-    const whatsappShareUrl = hasValidPhone
-      ? `https://api.whatsapp.com/send?text=${encodeURIComponent(`Book your appointment with ${salonName} on WhatsApp: ${whatsappUrl}`)}`
-      : `https://api.whatsapp.com/send?text=${encodeURIComponent(`Book your appointment with ${salonName} online: ${bookingUrl}`)}`;
+    const whatsappShareUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(`Book your appointment with ${salonName} on WhatsApp: ${whatsappUrl}`)}`;
 
     const cleanLocation = this.getCleanLocation();
     const todayClosure = typeof this.app?.getTodayClosure === 'function' ? this.app.getTodayClosure() : null;
@@ -142,7 +204,7 @@ export class BookingQrView {
                 <span style="font-size: 0.70rem; font-weight: 800; color: #25D366; letter-spacing: 0.04em; text-transform: uppercase; display: flex; align-items: center; gap: 4px;">
                   ${Icons.whatsapp ? Icons.whatsapp({ size: 12 }) : '💬'} Direct WhatsApp Link
                 </span>
-                <span style="font-size: 0.66rem; color: #94a3b8; font-weight: 600;">${hasValidPhone ? `+${salonPhone}` : 'No phone set'}</span>
+                <span style="font-size: 0.66rem; color: #94a3b8; font-weight: 600;">${waData.phoneBadge}</span>
               </div>
               <div style="display: flex; align-items: center; gap: 8px; background: rgba(0, 0, 0, 0.45); border: 1px solid rgba(37, 211, 102, 0.3); border-radius: 8px; padding: 6px 10px; width: 100%; box-sizing: border-box; overflow: hidden;">
                 <span style="color: #25D366; flex-shrink: 0; display: flex; align-items: center;">${Icons.whatsapp ? Icons.whatsapp({ size: 14 }) : '💬'}</span>
@@ -174,10 +236,7 @@ export class BookingQrView {
 
             <!-- Reception Tip Box -->
             <div style="background: rgba(37, 211, 102, 0.05); border: 1px solid rgba(37, 211, 102, 0.18); border-radius: 8px; padding: 8px 10px; font-size: 0.70rem; color: #94a3b8; line-height: 1.45; word-break: break-word;">
-              ${hasValidPhone
-                ? `💡 <strong style="color: #e2e8f0;">Reception Tip:</strong> When walk-ins scan this QR code with their mobile camera, WhatsApp opens directly to <strong style="color: #4ade80;">+${salonPhone}</strong> to chat and reserve their chair in 30 seconds.`
-                : `⚠️ <strong style="color: #f87171;">Phone Required:</strong> Please configure your WhatsApp number in Salon Profile so customers can connect directly.`
-              }
+              ${waData.receptionTip}
             </div>
           </div>
         </div>
@@ -229,7 +288,7 @@ export class BookingQrView {
               </div>
               <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 0.78rem;">
                 <span style="color: #94a3b8;">WhatsApp Phone</span>
-                <span style="color: #4ade80; font-weight: 600;">${hasValidPhone ? `+${salonPhone}` : 'Not configured'}</span>
+                <span style="color: #4ade80; font-weight: 600;">+${waData.displayPhone} ${waData.isShared ? `(Shared Bot #${waData.salonCode || ''})` : '(Dedicated)'}</span>
               </div>
               <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 0; font-size: 0.78rem;">
                 <span style="color: #94a3b8;">Storefront Status</span>
@@ -331,12 +390,8 @@ export class BookingQrView {
 
     const profile = this.profile || {};
     const salonName = profile.name || 'Salon Command';
-    const salonPhone = this.getFormattedPhone();
-    const hasValidPhone = Boolean(salonPhone && salonPhone.length >= 10);
-    const slug = profile.slug || 'salon';
-
-    const bookingUrl = `${window.location.origin}/#book/${slug}`;
-    const targetUrl = hasValidPhone ? `https://wa.me/${salonPhone}?text=Hi` : bookingUrl;
+    const waData = BookingQrView.getWhatsAppBookingData(profile, this.app);
+    const targetUrl = waData.targetUrl;
     const qrImgUrl = `https://api.qrserver.com/v1/create-qr-code/?size=360x360&data=${encodeURIComponent(targetUrl)}`;
     const city = profile.city || (profile.address ? profile.address.split(',')[0].trim() : 'Indore');
 
@@ -379,7 +434,7 @@ export class BookingQrView {
                 <div style="font-size: 0.60rem; color: #64748b;">With phone camera</div>
               </div>
               <div style="background: #f1f5f9; padding: 6px 4px; border-radius: 8px;">
-                <div style="font-size: 0.68rem; font-weight: 800; color: #16a34a;">2. SEND "Hi"</div>
+                <div style="font-size: 0.68rem; font-weight: 800; color: #16a34a;">${waData.step2Text}</div>
                 <div style="font-size: 0.60rem; color: #64748b;">On WhatsApp</div>
               </div>
               <div style="background: #f1f5f9; padding: 6px 4px; border-radius: 8px;">
@@ -389,7 +444,7 @@ export class BookingQrView {
             </div>
 
             <div style="font-family: monospace; font-size: 0.78rem; font-weight: 800; color: #16a34a; word-break: break-all;">
-              ${hasValidPhone ? `💬 wa.me/${salonPhone}` : bookingUrl}
+              💬 ${waData.displayLabel}
             </div>
             <div style="font-size: 0.62rem; color: #94a3b8; margin-top: 4px;">
               Powered by StyleSlot WhatsApp Automation · ${city}
@@ -530,7 +585,7 @@ export class BookingQrView {
                 <div class="step-desc">With Phone Camera</div>
               </div>
               <div class="step-box">
-                <div class="step-num" style="color: #16a34a;">2. SEND "Hi"</div>
+                <div class="step-num" style="color: #16a34a;">${waData.step2Text}</div>
                 <div class="step-desc">On WhatsApp</div>
               </div>
               <div class="step-box">
@@ -538,7 +593,7 @@ export class BookingQrView {
                 <div class="step-desc">Stylist & Service</div>
               </div>
             </div>
-            <div class="url-box">${hasValidPhone ? `wa.me/${salonPhone}` : bookingUrl}</div>
+            <div class="url-box">${waData.displayLabel}</div>
             <div class="footer-note">Powered by StyleSlot WhatsApp Automation · ${city}</div>
           </div>
           <script>
@@ -561,12 +616,8 @@ export class BookingQrView {
     if (!modalContainer) return;
 
     const profile = this.profile || {};
-    const slug = profile.slug || 'salon';
-    const salonPhone = this.getFormattedPhone();
-    const hasValidPhone = Boolean(salonPhone && salonPhone.length >= 10);
-
-    const bookingUrl = `${window.location.origin}/#book/${slug}`;
-    const targetUrl = hasValidPhone ? `https://wa.me/${salonPhone}?text=Hi` : bookingUrl;
+    const waData = BookingQrView.getWhatsAppBookingData(profile, this.app);
+    const targetUrl = waData.targetUrl;
     const qrImgUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(targetUrl)}`;
 
     modalContainer.innerHTML = `
@@ -580,9 +631,9 @@ export class BookingQrView {
           </div>
 
           <p style="font-size: 0.80rem; color: #94a3b8; margin-bottom: 14px;">
-            ${hasValidPhone
-              ? 'Scan this QR code with any phone camera to immediately launch the automated <strong>WhatsApp Booking Chat</strong>.'
-              : 'Scan this QR code to open the online customer booking portal.'
+            ${waData.isShared
+              ? `Scan this QR code with any phone camera to send <strong>"${waData.textParam}"</strong> to the StyleSlot automated booking bot.`
+              : 'Scan this QR code with any phone camera to immediately launch the automated <strong>WhatsApp Booking Chat</strong>.'
             }
           </p>
 
@@ -591,14 +642,17 @@ export class BookingQrView {
           </div>
 
           <div style="background: rgba(37,211,102,0.08); padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(37,211,102,0.25); margin-bottom: 16px; text-align: left; width: 100%; box-sizing: border-box; overflow: hidden;">
-            <div style="font-size: 0.65rem; color: #25D366; font-weight: 800; letter-spacing: 0.04em;">${hasValidPhone ? 'DIRECT WHATSAPP CHAT LINK' : 'ONLINE BOOKING LINK'}</div>
-            <div style="font-size: 0.78rem; font-family: monospace; color: #e2e8f0; word-break: break-all; margin-top: 3px;">${targetUrl}</div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
+              <div style="font-size: 0.65rem; color: #25D366; font-weight: 800; letter-spacing: 0.04em;">DIRECT WHATSAPP CHAT LINK</div>
+              <span style="font-size: 0.62rem; color: #94a3b8; font-weight: 600;">${waData.phoneBadge}</span>
+            </div>
+            <div style="font-size: 0.78rem; font-family: monospace; color: #e2e8f0; word-break: break-all;">${targetUrl}</div>
           </div>
 
           <div style="display: flex; gap: 8px;">
             <button class="btn btn-secondary" style="flex: 1; height: 38px;" id="btn-copy-wa-modal-link">📋 Copy Link</button>
             <a href="${targetUrl}" target="_blank" rel="noopener noreferrer" class="btn btn-primary" style="flex: 1; height: 38px; background: #25D366; border-color: #25D366; color: #ffffff; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; text-decoration: none;">
-              ${hasValidPhone ? 'Open WhatsApp 💬' : 'Open Booking 🌐'}
+              Open WhatsApp 💬
             </a>
           </div>
         </div>

@@ -177,7 +177,12 @@ export class PlatformAdminPortal {
                   <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
                     <div>
                       <h4 style="font-size: 1.1rem; font-weight: 800; color: #fff; margin-bottom: 2px;">${s.name}</h4>
-                      <div style="font-size: 0.78rem; color: var(--text-muted);">📍 ${s.city || 'Location N/A'} • Slug: <code>${s.slug}</code></div>
+                      <div style="font-size: 0.78rem; color: var(--text-muted); display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                        <span>📍 ${s.city || 'Location N/A'}</span>
+                        <span>•</span>
+                        <span>Slug: <code>${s.slug}</code></span>
+                        ${s.salonCode ? `<span>•</span><span>Code: <code style="color: #a855f7; font-weight: 700;">#${s.salonCode}</code></span>` : ''}
+                      </div>
                     </div>
                     <span class="badge" style="background: ${isOperational ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)'}; color: ${isOperational ? '#34d399' : '#f87171'}; border: 1px solid ${isOperational ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'};">
                       ${s.status}
@@ -192,8 +197,12 @@ export class PlatformAdminPortal {
                       📞 Phone: ${s.phone || 'N/A'}
                     </div>
                     ${s.whatsappAccount ? `
-                      <div style="font-size: 0.72rem; color: #34d399; margin-top: 4px; display: flex; align-items: center; gap: 4px;">
-                        <span>💬 WhatsApp Connected:</span> <code>${s.whatsappAccount.displayPhoneNumber || s.whatsappAccount.phoneNumberId}</code>
+                      <div style="font-size: 0.72rem; color: #34d399; margin-top: 4px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                        <span>💬 WhatsApp:</span>
+                        <span class="badge" style="font-size: 0.65rem; background: ${s.whatsappAccount.mode === 'SHARED' ? 'rgba(168,85,247,0.18)' : 'rgba(16,185,129,0.18)'}; color: ${s.whatsappAccount.mode === 'SHARED' ? '#c084fc' : '#34d399'}; border: 1px solid ${s.whatsappAccount.mode === 'SHARED' ? 'rgba(168,85,247,0.4)' : 'rgba(16,185,129,0.4)'};">
+                          ${s.whatsappAccount.mode === 'SHARED' ? '⚡ SHARED BOT' : '👑 DEDICATED'}
+                        </span>
+                        <code>${s.whatsappAccount.displayPhoneNumber || s.whatsappAccount.phoneNumberId}</code>
                       </div>
                     ` : `
                       <div style="font-size: 0.72rem; color: var(--warning); margin-top: 4px;">
@@ -820,32 +829,109 @@ export class PlatformAdminPortal {
               </div>
             </div>
 
-            <!-- Meta WhatsApp Phone Number ID with Live Auto-Fetch -->
-            <div class="form-group" style="margin-bottom: 14px;">
-              <label for="prov-whatsapp-phone-id">Meta WhatsApp Phone Number ID *</label>
-              <div style="display: flex; gap: 8px; align-items: stretch;">
-                <input type="text" class="form-control" id="prov-whatsapp-phone-id" placeholder="Enter 15-17 digit Phone Number ID (e.g. 109876543210987)" style="flex: 1; min-width: 0;" required />
-                <button type="button" id="btn-verify-meta-phone" class="btn btn-secondary btn-sm" style="flex-shrink: 0; white-space: nowrap; font-size: 0.8rem; padding: 8px 14px; background: rgba(139, 61, 255,0.18); border: 1px solid rgba(139, 61, 255,0.4); color: #a5b4fc; cursor: pointer; border-radius: var(--radius-sm); font-weight: 600;">
-                  🔍 Verify & Fetch Phone
-                </button>
-              </div>
-              <div id="prov-wa-verify-result" style="margin-top: 8px; display: none;"></div>
-              <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px;">
-                Enter your Meta Phone ID. Live Meta probe verifies account and auto-fills the phone number below.
+            <!-- WhatsApp Architecture Mode Selector -->
+            <div class="form-group" style="margin-bottom: 16px; background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 12px 14px;">
+              <label style="display: block; font-weight: 700; color: #fff; margin-bottom: 8px; font-size: 0.82rem;">WhatsApp Bot Architecture *</label>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                <label id="label-mode-shared" style="display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border-radius: 8px; border: 1px solid #a855f7; background: rgba(168,85,247,0.12); cursor: pointer; transition: all 0.2s;">
+                  <input type="radio" name="prov-whatsapp-mode" value="SHARED" checked style="margin-top: 2px; accent-color: #a855f7;" />
+                  <div>
+                    <div style="font-weight: 700; color: #fff; font-size: 0.82rem;">⚡ StyleSlot Shared Bot</div>
+                    <div style="font-size: 0.72rem; color: #cbd5e1; margin-top: 2px; line-height: 1.3;">10s setup, zero SIM required, uses StyleSlot Master WhatsApp bot.</div>
+                  </div>
+                </label>
+                <label id="label-mode-dedicated" style="display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border-subtle); background: rgba(255,255,255,0.02); cursor: pointer; transition: all 0.2s;">
+                  <input type="radio" name="prov-whatsapp-mode" value="DEDICATED" style="margin-top: 2px; accent-color: #10b981;" />
+                  <div>
+                    <div style="font-weight: 700; color: #fff; font-size: 0.82rem;">👑 Dedicated Private Number</div>
+                    <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 2px; line-height: 1.3;">Salon's own private WhatsApp number via live Meta OTP verification.</div>
+                  </div>
+                </label>
               </div>
             </div>
 
-            <!-- Mobile / WhatsApp Number (Auto-Filled from Meta - Read Only) -->
+            <!-- CONTAINER A: SHARED BOT CONFIGURATION -->
+            <div id="prov-shared-container" style="display: block; margin-bottom: 14px;">
+              <div class="form-group" style="margin-bottom: 14px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                  <label for="prov-salon-code" style="margin-bottom: 0;">Unique Salon Code (Short Keyword) *</label>
+                  <span id="prov-salon-code-status" style="font-size: 0.72rem; font-weight: 700; color: #10b981;"></span>
+                </div>
+                <div style="display: flex; gap: 8px;">
+                  <div style="position: relative; flex: 1;">
+                    <span style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-weight: 800; color: #a855f7; font-size: 0.88rem;">#</span>
+                    <input type="text" class="form-control" id="prov-salon-code" placeholder="e.g. LUXE01" style="padding-left: 28px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px;" maxlength="12" />
+                  </div>
+                  <button type="button" id="btn-suggest-code" class="btn btn-secondary btn-sm" style="flex-shrink: 0; font-size: 0.8rem; padding: 8px 12px; background: rgba(168,85,247,0.15); border: 1px solid rgba(168,85,247,0.4); color: #c084fc;">
+                    ⚡ Auto-Suggest
+                  </button>
+                </div>
+                <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px;">
+                  Customers type this code or scan the QR code to book directly with this salon on StyleSlot WhatsApp.
+                </div>
+              </div>
+            </div>
+
+            <!-- CONTAINER B: DEDICATED PRIVATE NUMBER (META SMS OTP FLOW) -->
+            <div id="prov-dedicated-container" style="display: none; margin-bottom: 14px; background: rgba(16,185,129,0.04); border: 1px solid rgba(16,185,129,0.25); border-radius: var(--radius-sm); padding: 14px;">
+              <div style="font-size: 0.82rem; font-weight: 700; color: #34d399; margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
+                <span>📱 Meta WhatsApp Number Verification</span>
+                <span class="badge" style="background: rgba(16,185,129,0.2); color: #6ee7b7; font-size: 0.68rem;">LIVE GRAPH API</span>
+              </div>
+
+              <!-- Step B1: Enter Number and Request OTP -->
+              <div id="prov-otp-step-1">
+                <div class="form-group" style="margin-bottom: 10px;">
+                  <label for="prov-dedicated-phone-input" style="font-size: 0.78rem;">Salon WhatsApp Mobile Number (with country code) *</label>
+                  <div style="display: flex; gap: 8px;">
+                    <input type="tel" class="form-control" id="prov-dedicated-phone-input" placeholder="e.g. +91 79998 17743" style="flex: 1;" />
+                    <button type="button" id="btn-send-meta-otp" class="btn btn-primary btn-sm" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); flex-shrink: 0; font-size: 0.8rem; padding: 8px 14px; font-weight: 600;">
+                      📨 Send SMS OTP
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Step B2: Enter 6-Digit OTP and Verify -->
+              <div id="prov-otp-step-2" style="display: none; margin-top: 12px; border-top: 1px dashed rgba(16,185,129,0.3); padding-top: 12px;">
+                <div style="font-size: 0.75rem; color: #6ee7b7; margin-bottom: 8px;" id="prov-otp-sent-status">
+                  📩 6-digit SMS OTP sent to salon owner. Ask them for the code:
+                </div>
+                <div style="display: flex; gap: 8px; margin-bottom: 10px;">
+                  <input type="text" class="form-control" id="prov-dedicated-otp-code" placeholder="6-digit OTP (e.g. 123456)" maxlength="6" style="flex: 1; letter-spacing: 2px; font-weight: 700; text-align: center;" />
+                  <button type="button" id="btn-verify-meta-otp" class="btn btn-primary btn-sm" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); flex-shrink: 0; font-size: 0.8rem; padding: 8px 14px; font-weight: 600;">
+                    ✅ Verify & Activate
+                  </button>
+                </div>
+              </div>
+
+              <!-- Step B3: Result/Badge Display -->
+              <div id="prov-dedicated-verify-result" style="margin-top: 8px; display: none;"></div>
+
+              <!-- Advanced Fallback Accordion for direct Meta Phone Number ID -->
+              <details style="margin-top: 10px; font-size: 0.75rem; color: var(--text-muted); cursor: pointer;">
+                <summary style="outline: none;">🔧 Advanced: Enter existing Meta Phone ID directly</summary>
+                <div style="margin-top: 8px; display: flex; gap: 8px;">
+                  <input type="text" class="form-control" id="prov-whatsapp-phone-id" placeholder="15-17 digit Phone ID (e.g. 1344691785393273)" style="flex: 1; font-size: 0.8rem;" />
+                  <button type="button" id="btn-verify-meta-phone" class="btn btn-secondary btn-sm" style="font-size: 0.78rem; padding: 6px 12px;">
+                    Probe ID
+                  </button>
+                </div>
+                <div id="prov-wa-verify-result" style="margin-top: 6px; display: none;"></div>
+              </details>
+            </div>
+
+            <!-- Mobile / WhatsApp Number (Owner login & alerts) -->
             <div class="form-group" style="margin-bottom: 14px;">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                <label for="prov-phone" style="margin-bottom: 0;">Mobile / WhatsApp Number *</label>
-                <span style="font-size: 0.72rem; color: #a5b4fc; font-weight: 600; display: flex; align-items: center; gap: 3px;">
-                  🔒 Auto-fetched from Meta (Read-only)
+                <label for="prov-phone" style="margin-bottom: 0;">Owner Mobile / WhatsApp Number *</label>
+                <span id="prov-phone-badge" style="font-size: 0.72rem; color: #a5b4fc; font-weight: 600;">
+                  Login & notification number
                 </span>
               </div>
-              <input type="tel" class="form-control" id="prov-phone" placeholder="Auto-filled from Meta once Phone ID is verified" readonly style="background: rgba(255,255,255,0.04); cursor: not-allowed; opacity: 0.9; border: 1px solid var(--border-subtle);" required autocomplete="off" />
+              <input type="tel" class="form-control" id="prov-phone" placeholder="e.g. +91 98260 12345 or 9826012345" required autocomplete="off" />
               <div id="prov-phone-hint" style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px;">
-                🔒 Not editable. Enter Meta Phone ID above & click "Verify & Fetch Phone" to auto-fill this number.
+                The salon owner logs in to their dashboard with this number and receives booking notifications.
               </div>
             </div>
 
@@ -1203,14 +1289,32 @@ export class PlatformAdminPortal {
       const summaryDiv = document.getElementById('prov-review-summary-container');
       if (!summaryDiv) return;
 
+      const name = document.getElementById('prov-name')?.value?.trim() || 'New Salon';
+      const ownerName = document.getElementById('prov-owner-name')?.value?.trim() || 'Owner';
+      const email = document.getElementById('prov-email')?.value?.trim() || 'N/A';
+      const phone = document.getElementById('prov-phone')?.value?.trim() || 'N/A';
+      const city = document.getElementById('prov-city')?.value?.trim() || '';
+      const salonCode = document.getElementById('prov-salon-code')?.value?.trim().toUpperCase() || '';
+      const waId = verifiedDedicatedPhoneId || document.getElementById('prov-whatsapp-phone-id')?.value?.trim() || 'N/A';
+
       const locData = locationPicker ? locationPicker.getValue() : {};
 
       summaryDiv.innerHTML = `
         <div style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.6; margin-bottom: 14px;">
           <div>🏢 Salon Name: <strong style="color: #fff;">${name}</strong> (${city || locData.city || 'City'})</div>
           <div>👤 Owner: <strong style="color: #fff;">${ownerName}</strong> (${email})</div>
-          <div>📞 WhatsApp Phone: <code>${phone}</code></div>
-          <div>📍 Address: <strong style="color: #fff;">${locData.address || 'Standard Address'}</strong></div>
+          <div>📞 Owner Login Phone: <code>${phone}</code></div>
+          <div style="margin-top: 6px; padding: 6px 10px; background: rgba(255,255,255,0.03); border-radius: 6px; border: 1px solid var(--border-subtle);">
+            🤖 WhatsApp Architecture:
+            ${currentMode === 'SHARED' ? `
+              <span style="color: #c084fc; font-weight: 700;">⚡ StyleSlot Shared Bot</span>
+              <span style="color: var(--text-muted); margin-left: 6px;">(Code: <code style="color: #f472b6; font-weight: 800;">#${salonCode || 'AUTO'}</code>)</span>
+            ` : `
+              <span style="color: #34d399; font-weight: 700;">👑 Dedicated Private WhatsApp</span>
+              <span style="color: var(--text-muted); margin-left: 6px;">(Phone ID: <code>${waId}</code>)</span>
+            `}
+          </div>
+          <div style="margin-top: 6px;">📍 Address: <strong style="color: #fff;">${locData.address || 'Standard Address'}</strong></div>
           ${locData.directionsUrl ? `
             <div style="margin-top: 4px;">
               🚗 Navigation Route: <a href="${locData.directionsUrl}" target="_blank" rel="noopener noreferrer" style="color: #a5b4fc; text-decoration: underline;">Test Google Directions ↗</a>
@@ -1343,18 +1447,42 @@ export class PlatformAdminPortal {
       }
     });
 
+    // Step Navigation Handlers
     document.getElementById('btn-next-step-2')?.addEventListener('click', () => {
       // Validate Step 1 basic fields
-      const name = document.getElementById('prov-name').value.trim();
-      const ownerName = document.getElementById('prov-owner-name').value.trim();
-      const email = document.getElementById('prov-email').value.trim();
-      const password = document.getElementById('prov-password').value;
-      const city = document.getElementById('prov-city').value.trim();
+      const name = document.getElementById('prov-name')?.value.trim();
+      const ownerName = document.getElementById('prov-owner-name')?.value.trim();
+      const email = document.getElementById('prov-email')?.value.trim();
+      const password = document.getElementById('prov-password')?.value;
+      const city = document.getElementById('prov-city')?.value.trim();
+      const phone = phoneInput?.value.trim();
 
       if (!name || !ownerName || !email || !password || !city) {
         this.showToast('Please complete all required fields in Step 1.', 'warning');
         return;
       }
+
+      if (currentMode === 'SHARED') {
+        const salonCode = salonCodeInput?.value.trim();
+        if (!salonCode || salonCode.length < 3) {
+          this.showToast('Please enter or generate a unique Salon Code (3-12 characters).', 'warning');
+          return;
+        }
+        if (!phone) {
+          this.showToast('Please enter the owner WhatsApp mobile number.', 'warning');
+          return;
+        }
+      } else {
+        if (!isDedicatedVerified && !isMetaPhoneVerified) {
+          this.showToast('Please complete Meta OTP verification or probe Phone ID before proceeding.', 'warning');
+          return;
+        }
+        if (!phone) {
+          this.showToast('Please verify phone number before proceeding.', 'warning');
+          return;
+        }
+      }
+
       goToStep(2);
     });
 
@@ -1392,98 +1520,339 @@ export class PlatformAdminPortal {
 
     document.getElementById('btn-back-step-2')?.addEventListener('click', () => { goToStep(2); });
 
-    // Live Meta Verification Logic & Auto-Fill Phone Number
+    // Dual-Mode WhatsApp State & Element Bindings
+    let currentMode = 'SHARED';
+    let isDedicatedVerified = false;
+    let verifiedDedicatedPhoneId = null;
+    let activeDedicatedPhoneId = null;
     let isMetaPhoneVerified = false;
     let verifiedMetaData = null;
+    let userHasManuallyEditedCode = false;
+    let codeDebounceTimer = null;
+    let nameDebounceTimer = null;
+
+    const modeRadios = document.querySelectorAll('input[name="prov-whatsapp-mode"]');
+    const labelShared = document.getElementById('label-mode-shared');
+    const labelDedicated = document.getElementById('label-mode-dedicated');
+    const sharedContainer = document.getElementById('prov-shared-container');
+    const dedicatedContainer = document.getElementById('prov-dedicated-container');
+    const phoneInput = document.getElementById('prov-phone');
+    const phoneBadge = document.getElementById('prov-phone-badge');
+    const phoneHint = document.getElementById('prov-phone-hint');
+    const salonCodeInput = document.getElementById('prov-salon-code');
+    const salonCodeStatus = document.getElementById('prov-salon-code-status');
+
+    const triggerAutoSuggestCode = async () => {
+      const name = document.getElementById('prov-name')?.value.trim();
+      if (!name) return;
+      if (salonCodeStatus) salonCodeStatus.innerHTML = '<span style="color: #c084fc;">⏳ Generating...</span>';
+      try {
+        const res = await ApiClient.suggestSalonCode(name);
+        if (res?.suggestedCode && salonCodeInput) {
+          salonCodeInput.value = res.suggestedCode;
+          if (salonCodeStatus) salonCodeStatus.innerHTML = '<span style="color: #10b981;">✅ Available</span>';
+        }
+      } catch (err) {
+        if (salonCodeStatus) salonCodeStatus.innerHTML = '';
+      }
+    };
+
+    modeRadios.forEach((radio) => {
+      radio.addEventListener('change', (e) => {
+        currentMode = e.target.value;
+        if (currentMode === 'SHARED') {
+          if (labelShared) {
+            labelShared.style.borderColor = '#a855f7';
+            labelShared.style.background = 'rgba(168,85,247,0.12)';
+          }
+          if (labelDedicated) {
+            labelDedicated.style.borderColor = 'var(--border-subtle)';
+            labelDedicated.style.background = 'rgba(255,255,255,0.02)';
+          }
+          if (sharedContainer) sharedContainer.style.display = 'block';
+          if (dedicatedContainer) dedicatedContainer.style.display = 'none';
+
+          if (phoneInput) {
+            phoneInput.readOnly = false;
+            phoneInput.style.background = '';
+            phoneInput.style.borderColor = '';
+            phoneInput.style.color = '';
+            phoneInput.style.cursor = 'text';
+          }
+          if (phoneBadge) {
+            phoneBadge.textContent = 'Login & notification number';
+            phoneBadge.style.color = '#a5b4fc';
+          }
+          if (phoneHint) {
+            phoneHint.textContent = 'The salon owner logs in to their dashboard with this number and receives booking notifications.';
+          }
+
+          if (salonCodeInput && !salonCodeInput.value && document.getElementById('prov-name')?.value.trim()) {
+            triggerAutoSuggestCode();
+          }
+        } else {
+          if (labelDedicated) {
+            labelDedicated.style.borderColor = '#10b981';
+            labelDedicated.style.background = 'rgba(16,185,129,0.12)';
+          }
+          if (labelShared) {
+            labelShared.style.borderColor = 'var(--border-subtle)';
+            labelShared.style.background = 'rgba(255,255,255,0.02)';
+          }
+          if (sharedContainer) sharedContainer.style.display = 'none';
+          if (dedicatedContainer) dedicatedContainer.style.display = 'block';
+
+          if (isDedicatedVerified || isMetaPhoneVerified) {
+            if (phoneInput) {
+              phoneInput.readOnly = true;
+              phoneInput.style.background = 'rgba(16,185,129,0.06)';
+              phoneInput.style.borderColor = '#10b981';
+              phoneInput.style.color = '#34d399';
+              phoneInput.style.cursor = 'not-allowed';
+            }
+            if (phoneBadge) {
+              phoneBadge.textContent = '🔒 Verified Meta Phone Number';
+              phoneBadge.style.color = '#34d399';
+            }
+            if (phoneHint) {
+              phoneHint.innerHTML = '🔒 <strong>Locked:</strong> Auto-filled from verified Meta Phone.';
+            }
+          } else {
+            if (phoneBadge) {
+              phoneBadge.textContent = 'Auto-filled upon OTP verification';
+              phoneBadge.style.color = '#94a3b8';
+            }
+            if (phoneHint) {
+              phoneHint.textContent = 'Verify salon WhatsApp number above to auto-fill this login number.';
+            }
+          }
+        }
+      });
+    });
+
+    // Real-time Salon Name auto-suggest
+    document.getElementById('prov-name')?.addEventListener('input', () => {
+      if (currentMode === 'SHARED' && !userHasManuallyEditedCode) {
+        clearTimeout(nameDebounceTimer);
+        nameDebounceTimer = setTimeout(triggerAutoSuggestCode, 400);
+      }
+    });
+
+    document.getElementById('btn-suggest-code')?.addEventListener('click', () => {
+      userHasManuallyEditedCode = false;
+      triggerAutoSuggestCode();
+    });
+
+    // Salon Code manual input validation & uniqueness check
+    salonCodeInput?.addEventListener('input', (e) => {
+      userHasManuallyEditedCode = true;
+      e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const code = e.target.value.trim();
+
+      clearTimeout(codeDebounceTimer);
+      if (code.length < 3) {
+        if (salonCodeStatus) salonCodeStatus.innerHTML = '<span style="color: var(--text-muted);">Min 3 chars</span>';
+        return;
+      }
+
+      if (salonCodeStatus) salonCodeStatus.innerHTML = '<span style="color: #c084fc;">⏳ Checking...</span>';
+      codeDebounceTimer = setTimeout(async () => {
+        try {
+          const res = await ApiClient.checkSalonCodeAvailability(code);
+          if (res?.available) {
+            if (salonCodeStatus) salonCodeStatus.innerHTML = '<span style="color: #10b981;">✅ Available</span>';
+          } else {
+            if (salonCodeStatus) salonCodeStatus.innerHTML = `<span style="color: #f43f5e;">❌ Taken (${res?.reason || 'Already in use'})</span>`;
+          }
+        } catch (err) {
+          if (salonCodeStatus) salonCodeStatus.innerHTML = `<span style="color: #f43f5e;">❌ Check error</span>`;
+        }
+      }, 350);
+    });
+
+    // Meta SMS OTP Request and Verification (Dedicated Mode)
+    const btnSendOtp = document.getElementById('btn-send-meta-otp');
+    const btnVerifyOtp = document.getElementById('btn-verify-meta-otp');
+    const dedicatedPhoneInput = document.getElementById('prov-dedicated-phone-input');
+    const dedicatedOtpInput = document.getElementById('prov-dedicated-otp-code');
+    const otpStep2 = document.getElementById('prov-otp-step-2');
+    const otpSentStatus = document.getElementById('prov-otp-sent-status');
+    const dedicatedVerifyResult = document.getElementById('prov-dedicated-verify-result');
+
+    btnSendOtp?.addEventListener('click', async () => {
+      const rawPhone = dedicatedPhoneInput?.value.trim();
+      const salonName = document.getElementById('prov-name')?.value.trim() || 'StyleSlot Salon';
+      const cleanPhone = (rawPhone || '').replace(/[\s\-()]/g, '');
+
+      if (!cleanPhone || cleanPhone.length < 10) {
+        this.showToast('Please enter a valid salon mobile number with country code (e.g. +91 79998 17743).', 'warning');
+        return;
+      }
+
+      btnSendOtp.textContent = '⏳ Sending OTP...';
+      btnSendOtp.setAttribute('disabled', 'true');
+      if (dedicatedVerifyResult) dedicatedVerifyResult.style.display = 'none';
+
+      try {
+        const res = await ApiClient.requestMetaOtp(cleanPhone, salonName);
+        activeDedicatedPhoneId = res.phoneNumberId;
+        if (otpStep2) otpStep2.style.display = 'block';
+        if (otpSentStatus) {
+          otpSentStatus.innerHTML = `📩 6-digit Meta SMS OTP requested for <strong>${cleanPhone}</strong> (Phone ID: <code>${res.phoneNumberId}</code>). Enter code below:`;
+        }
+        dedicatedOtpInput?.focus();
+        this.showToast('OTP request sent to Meta! Ask owner for code.', 'success');
+      } catch (err) {
+        if (dedicatedVerifyResult) {
+          dedicatedVerifyResult.style.display = 'block';
+          dedicatedVerifyResult.innerHTML = `
+            <div style="padding: 10px 12px; background: rgba(244,63,94,0.12); border: 1px solid #f43f5e; border-radius: 8px; color: #f43f5e; font-size: 0.8rem; line-height: 1.4;">
+              ❌ <strong>Meta API Error:</strong> ${err.message}
+            </div>
+          `;
+        }
+      } finally {
+        btnSendOtp.textContent = '📨 Send SMS OTP';
+        btnSendOtp.removeAttribute('disabled');
+      }
+    });
+
+    btnVerifyOtp?.addEventListener('click', async () => {
+      const otpCode = dedicatedOtpInput?.value.trim();
+      if (!otpCode || otpCode.length !== 6) {
+        this.showToast('Please enter the 6-digit Meta SMS OTP.', 'warning');
+        return;
+      }
+
+      if (!activeDedicatedPhoneId) {
+        this.showToast('Please request an OTP first.', 'warning');
+        return;
+      }
+
+      btnVerifyOtp.textContent = '⏳ Verifying...';
+      btnVerifyOtp.setAttribute('disabled', 'true');
+
+      try {
+        await ApiClient.verifyMetaOtp(activeDedicatedPhoneId, otpCode);
+        isDedicatedVerified = true;
+        verifiedDedicatedPhoneId = activeDedicatedPhoneId;
+
+        const dedicatedPhone = dedicatedPhoneInput?.value.trim() || '';
+        if (phoneInput) {
+          phoneInput.value = dedicatedPhone;
+          phoneInput.readOnly = true;
+          phoneInput.style.background = 'rgba(16,185,129,0.06)';
+          phoneInput.style.borderColor = '#10b981';
+          phoneInput.style.color = '#34d399';
+          phoneInput.style.cursor = 'not-allowed';
+        }
+        if (phoneBadge) {
+          phoneBadge.textContent = '🔒 Verified Meta Phone Number';
+          phoneBadge.style.color = '#34d399';
+        }
+        if (phoneHint) {
+          phoneHint.innerHTML = `🔒 <strong>Locked:</strong> Verified dedicated number (<code>${dedicatedPhone}</code>).`;
+        }
+
+        const waIdInputEl = document.getElementById('prov-whatsapp-phone-id');
+        if (waIdInputEl) waIdInputEl.value = activeDedicatedPhoneId;
+
+        if (dedicatedVerifyResult) {
+          dedicatedVerifyResult.style.display = 'block';
+          dedicatedVerifyResult.innerHTML = `
+            <div style="padding: 10px 12px; background: rgba(16,185,129,0.12); border: 1px solid #10b981; border-radius: 8px; color: #10b981; line-height: 1.5; font-size: 0.8rem;">
+              <strong>✅ Meta Dedicated Number Verified & Registered!</strong><br />
+              Phone Number ID: <code>${activeDedicatedPhoneId}</code><br />
+              <span style="font-size: 0.72rem; color: #6ee7b7;">Cloud API is active and ready for bot bookings.</span>
+            </div>
+          `;
+        }
+        this.showToast('Meta WhatsApp Number Verified & Activated!', 'success');
+      } catch (err) {
+        if (dedicatedVerifyResult) {
+          dedicatedVerifyResult.style.display = 'block';
+          dedicatedVerifyResult.innerHTML = `
+            <div style="padding: 10px 12px; background: rgba(244,63,94,0.12); border: 1px solid #f43f5e; border-radius: 8px; color: #f43f5e; font-size: 0.8rem;">
+              ❌ <strong>Verification Failed:</strong> ${err.message}
+            </div>
+          `;
+        }
+      } finally {
+        btnVerifyOtp.textContent = '✅ Verify & Activate';
+        btnVerifyOtp.removeAttribute('disabled');
+      }
+    });
+
+    // Advanced Direct Meta Phone ID Probe (Collapsible)
     const waIdInput = document.getElementById('prov-whatsapp-phone-id');
     const waVerifyResult = document.getElementById('prov-wa-verify-result');
     const btnVerifyMeta = document.getElementById('btn-verify-meta-phone');
-    const phoneInput = document.getElementById('prov-phone');
-    const phoneHint = document.getElementById('prov-phone-hint');
-
-    waIdInput?.addEventListener('input', () => {
-      isMetaPhoneVerified = false;
-      verifiedMetaData = null;
-      btnVerifyMeta.textContent = '🔍 Verify & Fetch Phone';
-      btnVerifyMeta.style.background = 'rgba(139, 61, 255,0.18)';
-      btnVerifyMeta.style.borderColor = 'rgba(139, 61, 255,0.4)';
-      btnVerifyMeta.style.color = '#a5b4fc';
-      waVerifyResult.style.display = 'none';
-      phoneInput.value = '';
-      phoneInput.style.borderColor = '';
-      phoneInput.style.background = 'rgba(255,255,255,0.04)';
-      phoneInput.style.color = '';
-      phoneInput.style.fontWeight = 'normal';
-      phoneHint.textContent = '🔒 Not editable. Enter Meta Phone ID above & click "Verify & Fetch Phone" to auto-fill this number.';
-      phoneHint.style.color = 'var(--text-muted)';
-    });
 
     const runMetaVerification = async () => {
-      const idVal = waIdInput.value.trim();
+      const idVal = waIdInput?.value.trim();
       if (!idVal || !/^\d{10,20}$/.test(idVal)) {
-        waVerifyResult.style.display = 'block';
-        waVerifyResult.innerHTML = `<div style="padding: 6px 10px; background: rgba(244,63,94,0.12); border: 1px solid #f43f5e; border-radius: 6px; color: #f43f5e;">❌ Phone Number ID must be numeric (10-20 digits).</div>`;
+        if (waVerifyResult) {
+          waVerifyResult.style.display = 'block';
+          waVerifyResult.innerHTML = `<div style="padding: 6px 10px; background: rgba(244,63,94,0.12); border: 1px solid #f43f5e; border-radius: 6px; color: #f43f5e;">❌ Phone Number ID must be numeric (10-20 digits).</div>`;
+        }
         isMetaPhoneVerified = false;
         return false;
       }
 
-      btnVerifyMeta.textContent = '⏳ Probing Meta...';
-      btnVerifyMeta.setAttribute('disabled', 'true');
-      waVerifyResult.style.display = 'block';
-      waVerifyResult.innerHTML = `<div style="padding: 6px 10px; color: var(--text-muted); font-size: 0.8rem;">⏳ Probing Meta Cloud API (v20.0)...</div>`;
+      if (btnVerifyMeta) {
+        btnVerifyMeta.textContent = '⏳ Probing...';
+        btnVerifyMeta.setAttribute('disabled', 'true');
+      }
+      if (waVerifyResult) {
+        waVerifyResult.style.display = 'block';
+        waVerifyResult.innerHTML = `<div style="padding: 6px 10px; color: var(--text-muted); font-size: 0.8rem;">⏳ Probing Meta Cloud API...</div>`;
+      }
 
       try {
         const res = await ApiClient.verifyMetaPhoneId(idVal);
         isMetaPhoneVerified = true;
         verifiedMetaData = res;
+        verifiedDedicatedPhoneId = idVal;
 
-        // Auto-fill phone number from Meta Graph API (Read-only / locked)
-        if (res.displayPhoneNumber) {
+        if (res.displayPhoneNumber && phoneInput) {
           phoneInput.value = res.displayPhoneNumber;
-          phoneHint.innerHTML = `🔒 <strong>Locked:</strong> Auto-filled from Meta (${res.displayPhoneNumber}). Salon owner logs in with this number.`;
-          phoneHint.style.color = '#10b981';
-          phoneInput.style.borderColor = '#10b981';
+          phoneInput.readOnly = true;
           phoneInput.style.background = 'rgba(16,185,129,0.06)';
+          phoneInput.style.borderColor = '#10b981';
           phoneInput.style.color = '#34d399';
-          phoneInput.style.fontWeight = '600';
+          phoneInput.style.cursor = 'not-allowed';
+          if (phoneBadge) {
+            phoneBadge.textContent = '🔒 Verified Meta Phone Number';
+            phoneBadge.style.color = '#34d399';
+          }
+          if (phoneHint) {
+            phoneHint.innerHTML = `🔒 <strong>Locked:</strong> Auto-filled from Meta (${res.displayPhoneNumber}).`;
+          }
         }
 
-        btnVerifyMeta.textContent = '✅ Verified';
-        btnVerifyMeta.style.background = 'rgba(16,185,129,0.18)';
-        btnVerifyMeta.style.borderColor = '#10b981';
-        btnVerifyMeta.style.color = '#10b981';
-
-        waVerifyResult.innerHTML = `
-          <div style="padding: 10px 12px; background: rgba(16,185,129,0.12); border: 1px solid #10b981; border-radius: 8px; color: #10b981; line-height: 1.5; font-size: 0.8rem;">
-            <div style="display: flex; align-items: center; justify-content: space-between;">
-              <strong>✅ Meta WhatsApp Account Verified</strong>
-              <span style="font-size: 0.7rem; background: rgba(16,185,129,0.25); padding: 2px 6px; border-radius: 4px; font-weight: 700;">PASSED</span>
+        if (waVerifyResult) {
+          waVerifyResult.innerHTML = `
+            <div style="padding: 8px 10px; background: rgba(16,185,129,0.12); border: 1px solid #10b981; border-radius: 6px; color: #10b981; font-size: 0.78rem;">
+              ✅ <strong>Verified:</strong> ${res.verifiedName} (<code>${res.displayPhoneNumber}</code>)
             </div>
-            <div style="color: #6ee7b7; font-size: 0.75rem; margin-top: 4px;">
-              Account: <strong>${res.verifiedName}</strong> (<code>${res.displayPhoneNumber}</code>)
-            </div>
-            <div style="color: #a7f3d0; font-size: 0.72rem; margin-top: 2px;">
-              ⚡ Phone Number <code>${res.displayPhoneNumber}</code> auto-filled below!
-            </div>
-          </div>
-        `;
+          `;
+        }
         return true;
       } catch (err) {
         isMetaPhoneVerified = false;
-        verifiedMetaData = null;
-        btnVerifyMeta.textContent = '🔍 Verify & Fetch Phone';
-        btnVerifyMeta.style.background = 'rgba(139, 61, 255,0.18)';
-        btnVerifyMeta.style.borderColor = 'rgba(139, 61, 255,0.4)';
-        btnVerifyMeta.style.color = '#a5b4fc';
-
-        waVerifyResult.innerHTML = `
-          <div style="padding: 10px 12px; background: rgba(244,63,94,0.12); border: 1px solid #f43f5e; border-radius: 8px; color: #f43f5e; line-height: 1.4; font-size: 0.8rem;">
-            ❌ <strong>Meta API Error:</strong> ${err.message}
-          </div>
-        `;
+        if (waVerifyResult) {
+          waVerifyResult.innerHTML = `
+            <div style="padding: 8px 10px; background: rgba(244,63,94,0.12); border: 1px solid #f43f5e; border-radius: 6px; color: #f43f5e; font-size: 0.78rem;">
+              ❌ <strong>Meta Error:</strong> ${err.message}
+            </div>
+          `;
+        }
         return false;
       } finally {
-        btnVerifyMeta.removeAttribute('disabled');
+        if (btnVerifyMeta) {
+          btnVerifyMeta.textContent = 'Probe ID';
+          btnVerifyMeta.removeAttribute('disabled');
+        }
       }
     };
 
@@ -1497,7 +1866,8 @@ export class PlatformAdminPortal {
       for (let i = 0; i < 4; i++) {
         pass += chars.charAt(Math.floor(Math.random() * chars.length));
       }
-      document.getElementById('prov-password').value = pass;
+      const passInput = document.getElementById('prov-password');
+      if (passInput) passInput.value = pass;
     });
 
     // Form Submit
@@ -1509,29 +1879,9 @@ export class PlatformAdminPortal {
       submitBtn.setAttribute('disabled', 'true');
       errorDiv.style.display = 'none';
 
-      const rawWaId = waIdInput.value.trim();
-      if (!rawWaId) {
-        errorDiv.textContent = 'Meta WhatsApp Phone Number ID is required to enable bot bookings.';
-        errorDiv.style.display = 'block';
-        submitBtn.textContent = '⚡ Confirm & Provision Salon Shard →';
-        submitBtn.removeAttribute('disabled');
-        return;
-      }
-
-      if (!isMetaPhoneVerified) {
-        const pass = await runMetaVerification();
-        if (!pass) {
-          errorDiv.textContent = 'Please verify a valid Meta WhatsApp Phone Number ID before creating the salon.';
-          errorDiv.style.display = 'block';
-          submitBtn.textContent = '⚡ Confirm & Provision Salon Shard →';
-          submitBtn.removeAttribute('disabled');
-          return;
-        }
-      }
-
-      const rawPhone = phoneInput.value.trim();
+      const rawPhone = phoneInput?.value.trim();
       if (!rawPhone) {
-        errorDiv.textContent = 'Please verify your Meta WhatsApp Phone ID above to fetch and populate the mobile number.';
+        errorDiv.textContent = 'Salon owner mobile number is required.';
         errorDiv.style.display = 'block';
         submitBtn.textContent = '⚡ Confirm & Provision Salon Shard →';
         submitBtn.removeAttribute('disabled');
@@ -1540,7 +1890,6 @@ export class PlatformAdminPortal {
 
       // Pick general open/close times from Monday or default 09:00 - 19:00
       const monState = provScheduleState.find((d) => d.dayOfWeek === 'MONDAY') || provScheduleState[0];
-
       const locData = locationPicker ? locationPicker.getValue() : {};
 
       const payload = {
@@ -1555,11 +1904,35 @@ export class PlatformAdminPortal {
         longitude: locData.longitude,
         googleMapsUrl: locData.googleMapsUrl,
         locationType: locData.locationType,
-        whatsappPhoneNumberId: rawWaId,
         timezone: 'Asia/Kolkata',
         openTime: monState.isClosed ? '09:00' : monState.startTime,
         closeTime: monState.isClosed ? '19:00' : monState.endTime,
       };
+
+      if (currentMode === 'SHARED') {
+        const salonCode = salonCodeInput?.value.trim().toUpperCase();
+        if (!salonCode || salonCode.length < 3) {
+          errorDiv.textContent = 'Salon Code is required for StyleSlot Shared Bot (minimum 3 characters).';
+          errorDiv.style.display = 'block';
+          submitBtn.textContent = '⚡ Confirm & Provision Salon Shard →';
+          submitBtn.removeAttribute('disabled');
+          return;
+        }
+        payload.whatsappMode = 'SHARED';
+        payload.salonCode = salonCode;
+      } else {
+        const waId = verifiedDedicatedPhoneId || waIdInput?.value.trim();
+        if (!waId) {
+          errorDiv.textContent = 'Verified Meta WhatsApp Phone Number ID is required for Dedicated mode.';
+          errorDiv.style.display = 'block';
+          submitBtn.textContent = '⚡ Confirm & Provision Salon Shard →';
+          submitBtn.removeAttribute('disabled');
+          return;
+        }
+        payload.whatsappMode = 'DEDICATED';
+        payload.whatsappPhoneNumberId = waId;
+        payload.whatsappDisplayPhoneNumber = dedicatedPhoneInput?.value.trim() || rawPhone;
+      }
 
       try {
         // Step A: Prepare custom 7-day schedule to be saved atomically with salon creation
@@ -1736,24 +2109,60 @@ export class PlatformAdminPortal {
   showProvisionSuccessModal(salon, rawPassword) {
     const modalContainer = document.getElementById('superadmin-modal-container');
     const loginUrl = `${window.location.origin}/#login`;
+    const isShared = salon.whatsappAccount?.mode === 'SHARED' || (!salon.whatsappAccount && Boolean(salon.salonCode));
+    const masterDisplayPhone = (salon.whatsappAccount?.displayPhoneNumber || '917999817743').replace(/\D/g, '');
+    let dedicatedPhone = (salon.whatsappAccount?.displayPhoneNumber || salon.phone || '').replace(/\D/g, '');
+    if (dedicatedPhone.length === 10) dedicatedPhone = '91' + dedicatedPhone;
+    const waBookingUrl = isShared
+      ? `https://wa.me/${masterDisplayPhone}?text=Hi_${salon.salonCode || ''}`
+      : `https://wa.me/${dedicatedPhone}?text=Hi`;
 
     modalContainer.innerHTML = `
       <div class="modal-backdrop show">
-        <div class="modal-content" style="text-align: center; max-width: 480px;">
+        <div class="modal-content" style="text-align: center; max-width: 500px;">
           <div style="font-size: 3rem; margin-bottom: 8px;">🎉</div>
           <h2 style="color: var(--success); margin-bottom: 4px;">Salon Created Successfully!</h2>
-          <p style="color: var(--text-secondary); font-size: 0.88rem; margin-bottom: 20px;">
+          <p style="color: var(--text-secondary); font-size: 0.88rem; margin-bottom: 16px;">
             <strong>${salon.name}</strong> created in <span class="badge badge-cancelled" style="font-size: 0.7rem;">DEACTIVATED (Setup Required)</span> state.
           </p>
 
-          <div style="background: var(--bg-input); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 16px; text-align: left; margin-bottom: 20px; font-size: 0.88rem; line-height: 1.8;">
+          <div style="background: var(--bg-input); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 16px; text-align: left; margin-bottom: 18px; font-size: 0.85rem; line-height: 1.8;">
             <div><strong>🏢 Salon Name:</strong> <span style="color: #fff;">${salon.name}</span></div>
             <div><strong>📱 Login Mobile:</strong> <code style="color: #38bdf8; font-weight: 700; font-size: 0.95rem;">${salon.phone}</code></div>
             <div><strong>🔑 Password:</strong> <code style="color: #10b981; font-weight: 700;">${rawPassword}</code></div>
             <div><strong>📧 Owner Email:</strong> <code style="color: #94a3b8;">${salon.email}</code></div>
             <div><strong>🚀 Salon Admin Portal:</strong> <a href="${loginUrl}" target="_blank" style="color: #A855F7;">${loginUrl}</a></div>
-            <div style="margin-top: 10px; padding: 10px 12px; background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.3); border-radius: 8px; font-size: 0.78rem; color: #34d399; line-height: 1.5;">
-              📲 <strong>WhatsApp Notification Sent:</strong> Login mobile, password, and portal link have been sent directly to <strong>${salon.phone}</strong> on WhatsApp!
+
+            <!-- WhatsApp Onboarding & Booking QR Link Card -->
+            <div style="margin-top: 12px; padding: 12px; background: rgba(168,85,247,0.08); border: 1px solid rgba(168,85,247,0.3); border-radius: 8px;">
+              <div style="font-size: 0.8rem; font-weight: 700; color: #c084fc; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between;">
+                <span>💬 WhatsApp Bot Integration</span>
+                <span class="badge" style="font-size: 0.65rem; background: ${isShared ? 'rgba(168,85,247,0.2)' : 'rgba(16,185,129,0.2)'}; color: ${isShared ? '#c084fc' : '#34d399'};">
+                  ${isShared ? '⚡ SHARED BOT' : '👑 DEDICATED'}
+                </span>
+              </div>
+              ${isShared ? `
+                <div style="font-size: 0.76rem; color: #cbd5e1; margin-bottom: 4px;">
+                  Salon Code: <code style="color: #f472b6; font-size: 0.9rem; font-weight: 800;">#${salon.salonCode}</code>
+                </div>
+                <div style="font-size: 0.72rem; color: var(--text-muted); margin-bottom: 8px;">
+                  Customers send <code>Hi_${salon.salonCode}</code> to <strong>+${masterDisplayPhone}</strong> or scan the QR link below.
+                </div>
+              ` : `
+                <div style="font-size: 0.72rem; color: var(--text-muted); margin-bottom: 8px;">
+                  Dedicated WhatsApp Bot active on <strong>${salon.phone}</strong>.
+                </div>
+              `}
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <input type="text" readonly value="${waBookingUrl}" style="flex: 1; font-size: 0.75rem; background: rgba(0,0,0,0.3); border: 1px solid var(--border-subtle); color: #38bdf8; padding: 5px 8px; border-radius: 4px;" />
+                <button type="button" id="btn-copy-wa-url" class="btn btn-secondary btn-sm" style="font-size: 0.75rem; padding: 5px 10px; white-space: nowrap;">
+                  📋 Copy Link
+                </button>
+              </div>
+            </div>
+
+            <div style="margin-top: 10px; padding: 8px 12px; background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.3); border-radius: 6px; font-size: 0.75rem; color: #34d399;">
+              📲 <strong>WhatsApp Notification:</strong> Login mobile, password, and portal link dispatched to <strong>${salon.phone}</strong>.
             </div>
           </div>
 
@@ -1767,8 +2176,13 @@ export class PlatformAdminPortal {
 
     document.getElementById('btn-close-success')?.addEventListener('click', () => { modalContainer.innerHTML = ''; });
 
+    document.getElementById('btn-copy-wa-url')?.addEventListener('click', () => {
+      navigator.clipboard.writeText(waBookingUrl);
+      this.showToast('Copied WhatsApp booking URL to clipboard!', 'success');
+    });
+
     document.getElementById('btn-copy-onboarding')?.addEventListener('click', () => {
-      const msg = `🎉 StyleSlot Salon Portal Ready!\n\n🏢 Salon: ${salon.name}\n📱 Login Mobile: ${salon.phone}\n🔑 Password: ${rawPassword}\n🌐 Login Link: ${window.location.origin}/#login\n\nLogin with your mobile number and password to access your salon operations hub.`;
+      const msg = `🎉 StyleSlot Salon Portal Ready!\n\n🏢 Salon: ${salon.name}\n📱 Login Mobile: ${salon.phone}\n🔑 Password: ${rawPassword}\n🌐 Login Link: ${window.location.origin}/#login\n💬 WhatsApp Booking Link: ${waBookingUrl}\n\nLogin with your mobile number and password to access your salon operations hub.`;
       navigator.clipboard.writeText(msg);
       this.showToast('Copied login details to clipboard!', 'success');
     });

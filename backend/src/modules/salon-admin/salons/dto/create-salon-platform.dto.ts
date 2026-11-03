@@ -11,7 +11,9 @@ import {
   IsBoolean,
   IsIn,
   IsNumber,
+  IsEnum,
 } from 'class-validator';
+import { WhatsAppMode } from '@prisma/client';
 
 export class CreateSalonPlatformDto {
   @IsNotEmpty({ message: 'Salon business name is required' })
@@ -108,10 +110,25 @@ export class CreateSalonPlatformDto {
 
   @IsOptional()
   @IsString()
+  @Matches(/^[A-Z0-9]{3,12}$/, {
+    message: 'Salon code must be 3-12 alphanumeric characters in uppercase (e.g. LUXE01)',
+  })
+  salonCode?: string;
+
+  @IsOptional()
+  @IsEnum(WhatsAppMode, { message: 'WhatsApp mode must be SHARED or DEDICATED' })
+  whatsappMode?: WhatsAppMode;
+
+  @IsOptional()
+  @IsString()
   @Matches(/^\d{10,20}$/, {
     message: 'Meta WhatsApp Phone Number ID must be numeric (typically 15-17 digits, e.g. 1266237649907696)',
   })
   whatsappPhoneNumberId?: string;
+
+  @IsOptional()
+  @IsString()
+  whatsappDisplayPhoneNumber?: string;
 
   @IsOptional()
   @IsBoolean()

@@ -342,6 +342,17 @@ export class WhatsAppSenderService {
           .catch((err) => {
             this.logger.warn(`Failed to write outbound audit log: ${err.message}`);
           });
+
+        if (salonId) {
+          this.prisma.user
+            .updateMany({
+              where: {
+                phone: { in: [cleanTo, cleanTo.replace('+', ''), `+${cleanTo.replace('+', '')}`] },
+              },
+              data: { lastActiveSalonId: salonId },
+            })
+            .catch(() => {});
+        }
       });
 
       return true;

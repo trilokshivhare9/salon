@@ -14,6 +14,17 @@ export class PersonalProfileService {
     const [salon, admin] = await Promise.all([
       this.prisma.salon.findUnique({
         where: { id: salonId },
+        include: {
+          whatsappAccount: {
+            select: {
+              id: true,
+              mode: true,
+              phoneNumberId: true,
+              displayPhoneNumber: true,
+              isActive: true,
+            },
+          },
+        },
       }),
       this.prisma.admin.findUnique({
         where: { id: adminId },
@@ -27,6 +38,19 @@ export class PersonalProfileService {
     if (!admin) {
       throw new NotFoundException('Admin user not found.');
     }
+
+    const masterPhone = process.env.WHATSAPP_DISPLAY_PHONE || '917999817743';
+    const isShared = (salon as any).whatsappAccount?.mode === 'SHARED' || (!(salon as any).whatsappAccount && Boolean(salon.salonCode));
+    let activeDisplayPhone = isShared
+      ? ((salon as any).whatsappAccount?.displayPhoneNumber || masterPhone).replace(/\D/g, '')
+      : ((salon as any).whatsappAccount?.displayPhoneNumber || salon.phone || '').replace(/\D/g, '');
+    if (activeDisplayPhone.length === 10) {
+      activeDisplayPhone = `91${activeDisplayPhone}`;
+    }
+
+    const whatsappBookingUrl = isShared
+      ? `https://wa.me/${activeDisplayPhone}?text=Hi_${salon.salonCode || ''}`
+      : `https://wa.me/${activeDisplayPhone}?text=Hi`;
 
     return {
       owner: {
@@ -42,6 +66,7 @@ export class PersonalProfileService {
         id: salon.id,
         name: salon.name,
         slug: salon.slug,
+        salonCode: salon.salonCode,
         phone: salon.phone,
         email: salon.email,
         address: salon.address,
@@ -53,6 +78,8 @@ export class PersonalProfileService {
         googleMapsUrl: salon.googleMapsUrl,
         locationType: salon.locationType,
         status: salon.status,
+        whatsappAccount: (salon as any).whatsappAccount,
+        whatsappBookingUrl,
         createdAt: salon.createdAt,
         updatedAt: salon.updatedAt,
       },

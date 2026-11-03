@@ -323,7 +323,14 @@ export class WhatsAppActionHandlerService {
     // 6. Global Priority 1: Main Menu, Greetings & Salon Info
     const isGreetingOrReset =
       [WhatsAppButtonId.MENU, WhatsAppButtonId.START, 'hi', 'hello', 'hey', 'start', 'menu', 'restart', 'reset'].includes(normalizedInput) ||
-      ['hi', 'hello', 'hey', 'start', 'menu'].some((kw) => normalizedInput === kw || normalizedInput.startsWith('hi ') || normalizedInput.startsWith('hello '));
+      ['hi', 'hello', 'hey', 'start', 'menu'].some((kw) =>
+        normalizedInput === kw ||
+        normalizedInput.startsWith('hi ') ||
+        normalizedInput.startsWith('hi_') ||
+        normalizedInput.startsWith('hi-') ||
+        normalizedInput.startsWith('hello ')
+      ) ||
+      Boolean(salon?.salonCode && normalizedInput.includes(salon.salonCode.toLowerCase()));
 
     if (isGreetingOrReset) {
       await this.session.updateConversationState(

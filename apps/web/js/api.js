@@ -1196,6 +1196,29 @@ export class ApiClient {
     });
   }
 
+  // Dual-Mode WhatsApp Helpers
+  static async suggestSalonCode(name) {
+    return this.request(`/salons/platform/suggest-code?name=${encodeURIComponent(name)}`);
+  }
+
+  static async checkSalonCodeAvailability(code) {
+    return this.request(`/salons/platform/check-code?code=${encodeURIComponent(code)}`);
+  }
+
+  static async requestMetaOtp(phone, verifiedName) {
+    return this.request('/salons/platform/whatsapp/request-otp', {
+      method: 'POST',
+      body: JSON.stringify({ phone, verifiedName }),
+    });
+  }
+
+  static async verifyMetaOtp(phoneNumberId, code, pin = '123456') {
+    return this.request('/salons/platform/whatsapp/verify-otp', {
+      method: 'POST',
+      body: JSON.stringify({ phoneNumberId, code, pin }),
+    });
+  }
+
   // Super Admin Error Management APIs
   static async getErrorLogs(params = {}) {
     const query = new URLSearchParams();
