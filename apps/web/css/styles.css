@@ -1,5 +1,3 @@
-@import './theme.css';
-
 /* Base Reset & Smooth Rendering */
 * {
   box-sizing: border-box;
@@ -16560,42 +16558,29 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 .service-card-item {
-  background: linear-gradient(145deg, #161b2e 0%, #111524 100%);
-  border: 1px solid #202742;
-  border-radius: 12px;
-  padding: 12px 14px 10px 14px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px 12px 16px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  gap: 6px;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  gap: 8px;
+  transition: var(--transition);
+  box-shadow: var(--shadow-card);
   position: relative;
   overflow: hidden;
   box-sizing: border-box;
 }
 
 .service-card-item::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(168, 85, 247, 0.3), transparent);
-  opacity: 0;
-  transition: opacity 0.25s ease;
+  display: none !important;
 }
 
 .service-card-item:hover {
-  background: linear-gradient(145deg, #1c2238 0%, #141828 100%);
-  border-color: rgba(168, 85, 247, 0.45);
-  transform: translateY(-2px);
-  box-shadow: 0 10px 24px -4px rgba(0, 0, 0, 0.5), 0 0 16px -2px rgba(168, 85, 247, 0.2);
-}
-
-.service-card-item:hover::before {
-  opacity: 1;
+  border-color: var(--primary);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-elevated);
 }
 
 /* Header: Icon + Info & Badges + Actions */
@@ -16615,17 +16600,17 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 .service-card-icon-badge {
-  width: 36px;
-  height: 36px;
-  border-radius: 9px;
-  background: linear-gradient(135deg, rgba(168, 85, 247, 0.22), rgba(99, 102, 241, 0.18));
-  border: 1px solid rgba(168, 85, 247, 0.35);
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--primary-soft);
+  border: 1px solid var(--primary-border);
+  color: var(--primary);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.1rem;
+  font-size: 1.15rem;
   flex-shrink: 0;
-  box-shadow: 0 2px 8px rgba(168, 85, 247, 0.18);
   transition: transform 0.2s ease;
 }
 
@@ -16642,9 +16627,9 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 .service-card-name {
-  font-size: 0.92rem;
+  font-size: 0.95rem;
   font-weight: 700;
-  color: #ffffff;
+  color: var(--text-primary);
   letter-spacing: -0.01em;
   margin: 0;
   line-height: 1.28;
@@ -16654,7 +16639,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .service-card-pills-row {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   flex-wrap: wrap;
   margin-top: 1px;
 }
@@ -16662,13 +16647,13 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .service-card-cat-pill {
   display: inline-flex;
   align-items: center;
-  padding: 2px 7px;
-  border-radius: 5px;
-  background: rgba(168, 85, 247, 0.12);
-  border: 1px solid rgba(168, 85, 247, 0.3);
-  color: #d8b4fe;
-  font-size: 0.67rem;
-  font-weight: 600;
+  padding: 2.5px 8.5px;
+  border-radius: var(--radius-full);
+  background: var(--primary-soft);
+  border: 1px solid var(--primary-border);
+  color: var(--primary);
+  font-size: 0.68rem;
+  font-weight: 700;
   line-height: 1.2;
 }
 
@@ -16676,71 +16661,74 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 7px;
-  border-radius: 5px;
-  font-size: 0.67rem;
+  padding: 2.5px 8px;
+  border-radius: var(--radius-full);
+  font-size: 0.68rem;
   font-weight: 600;
   line-height: 1.2;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
 }
 
 .service-card-gender-pill.gender-male {
-  background: rgba(59, 130, 246, 0.12);
-  border: 1px solid rgba(59, 130, 246, 0.26);
-  color: #93c5fd;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  color: #60A5FA;
 }
 
 .service-card-gender-pill.gender-female {
-  background: rgba(244, 63, 94, 0.12);
-  border: 1px solid rgba(244, 63, 94, 0.26);
-  color: #fda4af;
+  background: rgba(244, 63, 94, 0.1);
+  border: 1px solid rgba(244, 63, 94, 0.25);
+  color: #FB7185;
 }
 
 .service-card-gender-pill.gender-unisex {
-  background: rgba(16, 185, 129, 0.12);
-  border: 1px solid rgba(16, 185, 129, 0.26);
-  color: #6ee7b7;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
 }
 
 .service-card-gender-pill.gender-kids {
-  background: rgba(245, 158, 11, 0.12);
-  border: 1px solid rgba(245, 158, 11, 0.26);
-  color: #fcd34d;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  color: #FBBF24;
 }
 
 /* Actions in top-right */
 .service-card-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   flex-shrink: 0;
 }
 
 .service-action-icon-btn {
-  width: 28px;
-  height: 28px;
-  border-radius: 7px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  color: #94a3b8;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: var(--transition-fast);
   padding: 0;
 }
 
 .service-action-icon-btn:hover {
-  background: rgba(168, 85, 247, 0.22);
-  border-color: rgba(168, 85, 247, 0.5);
-  color: #ffffff;
+  background: var(--primary-soft);
+  border-color: var(--primary);
+  color: var(--primary);
   transform: translateY(-1px);
 }
 
 .service-action-icon-btn.action-del:hover {
-  background: rgba(239, 68, 68, 0.2);
-  border-color: rgba(239, 68, 68, 0.5);
-  color: #f87171;
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+  color: var(--danger);
   transform: translateY(-1px);
 }
 
@@ -16821,10 +16809,13 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding-top: 8px;
-  margin-top: 2px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  gap: 10px;
+  padding: 10px 16px;
+  margin: 10px -16px -12px -16px;
+  border-top: 1px solid var(--border-default);
+  background: var(--bg-surface-elevated);
+  border-bottom-left-radius: var(--radius-lg);
+  border-bottom-right-radius: var(--radius-lg);
 }
 
 .service-card-meta-group {
@@ -16838,46 +16829,46 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 2.5px 8px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  font-size: 0.69rem;
-  color: #cbd5e1;
+  padding: 3px 9px;
+  border-radius: var(--radius-full);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  font-size: 0.70rem;
+  color: var(--text-primary);
   font-weight: 500;
   line-height: 1.2;
 }
 
 .service-meta-pill svg {
-  color: #94a3b8;
+  color: var(--text-secondary);
 }
 
 .service-meta-pill strong {
   font-weight: 700;
-  color: #f1f5f9;
+  color: var(--text-primary);
 }
 
 .service-staff-pill {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 2.5px 8px;
-  border-radius: 6px;
-  font-size: 0.69rem;
+  padding: 3px 9px;
+  border-radius: var(--radius-full);
+  font-size: 0.70rem;
   font-weight: 600;
   line-height: 1.2;
 }
 
 .service-staff-pill.is-assigned {
-  background: rgba(16, 185, 129, 0.1);
-  border: 1px solid rgba(16, 185, 129, 0.28);
-  color: #34d399;
+  background: var(--bg-surface);
+  border: 1px solid var(--primary-border);
+  color: var(--primary);
 }
 
 .service-staff-pill.is-unassigned {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: #94a3b8;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
 }
 
 .staff-dot {
@@ -16887,15 +16878,15 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 .staff-dot.dot-active {
-  background: #34d399;
-  box-shadow: 0 0 6px rgba(52, 211, 153, 0.7);
+  background: var(--primary);
+  box-shadow: 0 0 6px var(--primary-glow);
 }
 
 .staff-dot.dot-unassigned {
-  background: #64748b;
+  background: #9CA3AF;
 }
 
-/* Price Display (Right in Vibrant Green) */
+/* Price Display */
 .service-card-price-wrap {
   display: flex;
   align-items: baseline;
@@ -16904,18 +16895,19 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 .service-card-currency {
-  font-size: 0.88rem;
-  font-weight: 800;
-  color: #00e676;
+  font-size: 0.90rem;
+  font-weight: 700;
+  color: var(--primary);
   margin-right: 1px;
 }
 
 .service-card-amount {
-  font-size: 1.15rem;
+  font-size: 1.25rem;
   font-weight: 800;
-  color: #00e676;
+  color: var(--primary);
   letter-spacing: -0.01em;
   line-height: 1;
+  font-family: var(--font-heading);
   font-variant-numeric: tabular-nums;
 }
 

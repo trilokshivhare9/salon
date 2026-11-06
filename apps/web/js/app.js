@@ -3,6 +3,7 @@ import { StartupOrchestrator } from './network/startup-orchestrator.js';
 import { SalonDashboard } from './dashboard.js';
 import { PwaManager } from './pwa.js';
 import { Icons } from './icons.js';
+import { ThemeManager } from './theme-manager.js';
 
 class App {
   constructor() {
@@ -10,6 +11,7 @@ class App {
   }
 
   async init() {
+    ThemeManager.init();
     PwaManager.init();
     window.addEventListener('hashchange', () => this.handleRoute());
 

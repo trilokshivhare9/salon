@@ -3,6 +3,7 @@ import * as IndianFestivals from '@aryanjsx/indian-festivals';
 import { RealtimeNotifier } from './realtime.js';
 import { QueueSyncManager } from './queue/queue-sync.js';
 import { SoundManager } from './sound.js';
+import { ThemeManager } from './theme-manager.js';
 import { Icons } from './icons.js';
 import { LeaveManagementUI } from './leave-management.js';
 import { LocationPicker } from './location-picker.js';
@@ -74,12 +75,13 @@ window.toggleServiceDesc = function (targetId, btnEl, event) {
 
   const btn = (btnEl instanceof HTMLElement)
     ? btnEl
-    : (event?.target ? event.target.closest('.btn-service-desc-more') : null);
+    : (event?.target ? event.target.closest('.btn-service-desc-more, .btn-service-desc-toggle') : null);
 
   const wrap = btn?.closest('.service-card-desc-wrap');
   const textEl = (typeof targetId === 'string' && targetId ? document.getElementById(targetId) : null)
     || wrap?.querySelector('.service-card-desc-text')
-    || btn?.previousElementSibling;
+    || btn?.previousElementSibling
+    || btn?.nextElementSibling;
 
   if (!textEl) return;
 
@@ -87,27 +89,27 @@ window.toggleServiceDesc = function (targetId, btnEl, event) {
   const serviceId = rawId.replace('svc-desc-', '');
 
   const isCurrentlyExpanded = textEl.classList.contains('is-expanded') || textEl.getAttribute('data-expanded') === 'true';
+  const toggleText = btn?.querySelector('.desc-toggle-text');
+  const chevron = btn?.querySelector('.desc-chevron');
 
   if (isCurrentlyExpanded) {
     if (serviceId) window._expandedServiceDescIds.delete(serviceId);
     textEl.setAttribute('data-expanded', 'false');
     textEl.classList.remove('is-expanded');
-    textEl.classList.add('is-clamped');
-    textEl.style.display = '-webkit-box';
-    textEl.style.webkitLineClamp = '1';
-    textEl.style.webkitBoxOrient = 'vertical';
-    textEl.style.overflow = 'hidden';
-    if (btn) btn.textContent = 'See more';
+    textEl.classList.add('is-collapsed');
+    textEl.style.display = 'none';
+    if (toggleText) toggleText.textContent = 'View description';
+    else if (btn) btn.textContent = 'See more';
+    if (chevron) chevron.classList.remove('is-rotated');
   } else {
     if (serviceId) window._expandedServiceDescIds.add(serviceId);
     textEl.setAttribute('data-expanded', 'true');
-    textEl.classList.remove('is-clamped');
+    textEl.classList.remove('is-collapsed');
     textEl.classList.add('is-expanded');
     textEl.style.display = 'block';
-    textEl.style.webkitLineClamp = 'none';
-    textEl.style.webkitBoxOrient = 'unset';
-    textEl.style.overflow = 'visible';
-    if (btn) btn.textContent = 'See less';
+    if (toggleText) toggleText.textContent = 'Hide description';
+    else if (btn) btn.textContent = 'See less';
+    if (chevron) chevron.classList.add('is-rotated');
   }
 };
 
@@ -115,7 +117,7 @@ window.toggleServiceDesc = function (targetId, btnEl, event) {
 if (typeof document !== 'undefined' && !window._serviceDescListenerRegistered) {
   window._serviceDescListenerRegistered = true;
   document.addEventListener('click', (e) => {
-    const descBtn = e.target.closest('.btn-service-desc-more');
+    const descBtn = e.target.closest('.btn-service-desc-more, .btn-service-desc-toggle');
     if (!descBtn) return;
     const targetId = descBtn.getAttribute('data-target');
     window.toggleServiceDesc(targetId, descBtn, e);
@@ -1771,7 +1773,7 @@ export class SalonDashboard {
         <div class="portal-header-content">
           <div class="header-brand-group">
             <div class="brand-icon-box">
-              ${Icons.scissors({ size: 20, color: '#c7d2fe' })}
+              ${Icons.scissors({ size: 20, color: 'var(--primary)' })}
               <span class="brand-live-indicator ${indicatorState}" title="${indicatorState === 'live' ? 'Real-Time Connected' : indicatorState === 'inactive' ? 'Store Inactive (Setup Required)' : 'Offline'}"></span>
             </div>
             <div class="header-title-block">
@@ -1790,14 +1792,19 @@ export class SalonDashboard {
             </div>
           </div>
           <div class="header-actions-group" style="display: flex; gap: 8px; align-items: center;">
-            <button class="btn btn-secondary btn-sm" id="btn-header-quick-requests" title="View Pending Quick Booking Requests" style="background: ${pendingQuickCount > 0 ? 'rgba(245,158,11,0.25)' : 'rgba(139, 61, 255,0.12)'}; border: 1px solid ${pendingQuickCount > 0 ? 'rgba(245,158,11,0.5)' : 'rgba(139, 61, 255,0.3)'}; color: ${pendingQuickCount > 0 ? '#fbbf24' : '#A855F7'}; font-weight: 700; gap: 6px; display: flex; align-items: center;">
-              ${Icons.sparkles({ size: 14, color: pendingQuickCount > 0 ? '#fbbf24' : '#A855F7' })}
-              <span><span class="desktop-only-inline">Quick Requests </span><strong id="header-quick-requests-val" style="background: ${pendingQuickCount > 0 ? '#f59e0b' : 'rgba(255,255,255,0.15)'}; color: ${pendingQuickCount > 0 ? '#000' : '#fff'}; padding: 1px 7px; border-radius: 10px; font-weight: 800; margin-left: 4px; font-size: 0.8rem;">${pendingQuickCount}</strong></span>
-            </button>
+            ${pendingQuickCount > 0 ? `
+              <button class="btn btn-secondary btn-sm" id="btn-header-quick-requests" title="${pendingQuickCount} Pending Quick Requests" style="background: var(--warning-soft); border: 1px solid var(--warning-border); color: var(--warning); font-weight: 700; gap: 5px; display: inline-flex; align-items: center; padding: 4px 10px; border-radius: var(--radius-full);">
+                ${Icons.zap({ size: 14, color: 'var(--warning)' })}
+                <span><span class="desktop-only-inline">Requests </span><strong id="header-quick-requests-val" style="background: var(--warning); color: #fff; padding: 1px 6px; border-radius: 999px; font-size: 0.72rem;">${pendingQuickCount}</strong></span>
+              </button>
+            ` : `
+              <button class="btn btn-secondary btn-sm" id="btn-header-quick-requests" style="display: none;" title="No pending requests"></button>
+            `}
             <button class="btn btn-secondary btn-sm" id="btn-toggle-sound" title="${SoundManager.isMuted() ? 'Unmute Floor Audio' : 'Mute Floor Audio'}">
-              <span id="sound-icon">${SoundManager.isMuted() ? Icons.volumeX({ size: 16, color: '#94a3b8' }) : Icons.volume2({ size: 16, color: '#34d399' })}</span>
+              <span id="sound-icon">${SoundManager.isMuted() ? Icons.volumeX({ size: 16, color: 'var(--text-muted)' }) : Icons.volume2({ size: 16, color: 'var(--success)' })}</span>
               <span id="sound-text" class="desktop-sound-text">${SoundManager.isMuted() ? 'Muted' : 'Floor Audio ON'}</span>
             </button>
+            ${ThemeManager.renderToggle({ id: 'btn-header-theme-toggle' })}
           </div>
         </div>
       </header>
@@ -1808,7 +1815,7 @@ export class SalonDashboard {
         <!-- Universal Pull-to-Refresh Indicator (Always available on all screens) -->
         <div class="ptr-wrapper" id="ptr-wrapper">
           <div class="ptr-capsule" id="ptr-capsule">
-            <span class="ptr-icon" id="ptr-icon">${Icons.arrowDown({ size: 14, color: '#A855F7' })}</span>
+            <span class="ptr-icon" id="ptr-icon">${Icons.arrowDown({ size: 14, color: 'var(--primary)' })}</span>
             <span id="ptr-text">Pull to refresh</span>
           </div>
         </div>
@@ -7356,15 +7363,14 @@ export class SalonDashboard {
 
       const getCatIcon = (cat, name) => {
         const text = `${cat || ''} ${name || ''}`.toLowerCase();
-        if (text.includes('hair') || text.includes('cut') || text.includes('trim')) return '✂️';
-        if (text.includes('beard') || text.includes('shave') || text.includes('mustache')) return '🪒';
-        if (text.includes('facial') || text.includes('skin') || text.includes('glow') || text.includes('clean')) return '✨';
-        if (text.includes('massage') || text.includes('spa') || text.includes('therapy')) return '💆';
-        if (text.includes('nail') || text.includes('mani') || text.includes('pedi')) return '💅';
-        if (text.includes('color') || text.includes('dye') || text.includes('bleach') || text.includes('highlight')) return '🎨';
-        if (text.includes('wash') || text.includes('shampoo')) return '🧴';
-        if (text.includes('wax') || text.includes('thread')) return '🪄';
-        return '✂️';
+        if (text.includes('facial') || text.includes('skin') || text.includes('glow') || text.includes('clean')) {
+          return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>`;
+        }
+        if (text.includes('massage') || text.includes('spa') || text.includes('therapy')) {
+          return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.93 4.93 4.24 4.24"/><path d="m14.83 9.17 4.24-4.24"/><path d="m14.83 14.83 4.24 4.24"/><path d="m9.17 14.83-4.24 4.24"/></svg>`;
+        }
+        // StyleSlot Emerald - Crisp Vector Scissors
+        return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>`;
       };
 
 
@@ -7586,11 +7592,17 @@ export class SalonDashboard {
         const catName = s.category || 'General';
         const catIcon = getCatIcon(catName, s.name);
         const descText = (s.description || '').trim();
-        const isLongDesc = descText.length > 42;
         const isExpanded = Boolean(window._expandedServiceDescIds && window._expandedServiceDescIds.has(s.id));
+        const isActive = s.status !== 'INACTIVE' && s.isActive !== false;
 
         return `
-                  <div class="service-card-item" data-category="${catName.toUpperCase()}" data-name="${(s.name || '').toLowerCase()}" data-gender="${g}" data-staff-count="${count}">
+                  <div class="service-card-item ${isActive ? 'is-active' : 'is-inactive'}" 
+                       data-id="${s.id}" 
+                       data-category="${catName.toUpperCase()}" 
+                       data-name="${(s.name || '').toLowerCase()}" 
+                       data-gender="${g}" 
+                       data-staff-count="${count}">
+                    
                     <!-- Top: Icon + Headings & Tags (Left) | Action Buttons (Right) -->
                     <div class="service-card-header">
                       <div class="service-card-brand">
@@ -7633,17 +7645,20 @@ export class SalonDashboard {
                       </div>
                     </div>
 
-                    <!-- Middle: Description with See more / See less (Full Width) -->
+                    <!-- Middle: Description with Expandable Trigger -->
                     ${descText ? `
                       <div class="service-card-desc-wrap">
-                        <p class="service-card-desc-text ${isExpanded ? 'is-expanded' : 'is-clamped'}" id="svc-desc-${s.id}" data-expanded="${isExpanded ? 'true' : 'false'}" style="${isExpanded ? 'display:block !important;-webkit-line-clamp:none !important;overflow:visible !important;' : ''}" onclick="window.toggleServiceDesc('svc-desc-${s.id}', null, event)">${descText.replace(/"/g, '&quot;')}</p>
-                        ${isLongDesc ? `
-                          <button type="button" class="btn-service-desc-more" data-target="svc-desc-${s.id}" onclick="window.toggleServiceDesc('svc-desc-${s.id}', this, event)">${isExpanded ? 'See less' : 'See more'}</button>
-                        ` : ''}
+                        <button type="button" class="btn-service-desc-toggle" data-target="svc-desc-${s.id}">
+                          <span class="desc-toggle-text">${isExpanded ? 'Hide description' : 'View description'}</span>
+                          <svg class="desc-chevron ${isExpanded ? 'is-rotated' : ''}" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="6 9 12 15 18 9"></polyline>
+                          </svg>
+                        </button>
+                        <p class="service-card-desc-text ${isExpanded ? 'is-expanded' : 'is-collapsed'}" id="svc-desc-${s.id}">${descText.replace(/"/g, '&quot;')}</p>
                       </div>
                     ` : ''}
 
-                    <!-- Bottom: Duration & Stylist Assignment (Left) | Price (Right) -->
+                    <!-- Bottom: Duration & Stylist (Left) | Price & Status Switch (Right) -->
                     <div class="service-card-footer">
                       <div class="service-card-meta-group">
                         <span class="service-meta-pill" title="Duration">
@@ -7660,8 +7675,14 @@ export class SalonDashboard {
                         </span>
                       </div>
 
-                      <div class="service-card-price-wrap">
-                        <span class="service-card-currency">₹</span><span class="service-card-amount">${s.price || 0}</span>
+                      <div class="service-card-footer-right">
+                        <div class="service-card-price-wrap">
+                          <span class="service-card-currency">₹</span><span class="service-card-amount">${s.price || 0}</span>
+                        </div>
+                        <label class="service-status-toggle" title="${isActive ? 'Service is Active (click to disable)' : 'Service is Inactive (click to enable)'}">
+                          <input type="checkbox" class="service-toggle-input" data-id="${s.id}" ${isActive ? 'checked' : ''} />
+                          <span class="service-toggle-slider"></span>
+                        </label>
                       </div>
                     </div>
                   </div>
@@ -9368,6 +9389,9 @@ export class SalonDashboard {
       }
     });
 
+    // Theme Toggle
+    ThemeManager.bindToggle('#btn-header-theme-toggle');
+
     // Quick Booking Request Triggers
     const openQuickRequestsModal = () => this.openQuickRequestsModal();
     document.getElementById('btn-header-quick-requests')?.addEventListener('click', openQuickRequestsModal);
@@ -10028,6 +10052,31 @@ export class SalonDashboard {
     tabContent.querySelectorAll('.btn-delete-service').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         this.showDeleteServiceModal(e.currentTarget.getAttribute('data-id'), e.currentTarget.getAttribute('data-name'));
+      });
+    });
+    tabContent.querySelectorAll('.service-toggle-input').forEach((input) => {
+      input.addEventListener('change', async (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const card = e.currentTarget.closest('.service-card-item');
+        const isChecked = e.currentTarget.checked;
+        try {
+          if (card) {
+            card.classList.toggle('is-active', isChecked);
+            card.classList.toggle('is-inactive', !isChecked);
+          }
+          await ApiClient.toggleServiceStatus(id);
+          const s = (this.servicesList || []).find((item) => String(item.id) === String(id));
+          if (s) s.status = isChecked ? 'ACTIVE' : 'INACTIVE';
+          this.showToast(isChecked ? 'Service activated' : 'Service deactivated', 'success');
+        } catch (err) {
+          console.error('Failed to toggle service status:', err);
+          e.currentTarget.checked = !isChecked;
+          if (card) {
+            card.classList.toggle('is-active', !isChecked);
+            card.classList.toggle('is-inactive', isChecked);
+          }
+          this.showToast('Failed to update service status', 'error');
+        }
       });
     });
 

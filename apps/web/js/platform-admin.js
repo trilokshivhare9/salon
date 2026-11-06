@@ -2,6 +2,7 @@ import { ApiClient, PlatformAuth } from './api.js';
 import { LocationPicker } from './location-picker.js';
 import { AppSnackbar } from './modules/shared/app-snackbar.js';
 import { CalendarState } from './modules/calendar/index.js';
+import { ThemeManager } from './theme-manager.js';
 
 export class PlatformAdminPortal {
   constructor(containerId, currentUser = null) {
@@ -85,7 +86,8 @@ export class PlatformAdminPortal {
           </div>
 
           <div style="display: flex; gap: 10px; align-items: center;">
-            <button class="btn btn-primary btn-sm" id="btn-open-create-salon" style="background: linear-gradient(135deg, #ec4899 0%, #be185d 100%); border-color: rgba(255,255,255,0.2); box-shadow: 0 4px 16px rgba(236,72,153,0.35);">
+            ${ThemeManager.renderToggle({ id: 'btn-super-theme-toggle' })}
+            <button class="btn btn-primary btn-sm" id="btn-open-create-salon" style="background: linear-gradient(135deg, #059669 0%, #047857 100%); border-color: rgba(255,255,255,0.2); box-shadow: 0 4px 16px rgba(5,150,105,0.35);">
               ⚡ + Create New Salon
             </button>
             <div style="height: 24px; width: 1px; background: var(--border-subtle); margin: 0 4px;"></div>
@@ -100,7 +102,7 @@ export class PlatformAdminPortal {
       <main style="max-width: 1300px; margin: 0 auto; padding: 24px 16px;">
         <!-- Workspace Navigation Tabs -->
         <div style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 12px;">
-          <button class="btn btn-sm ${this.activeTab === 'tenants' ? 'btn-primary' : 'btn-secondary'}" id="tab-btn-tenants" style="font-weight: 700; ${this.activeTab === 'tenants' ? 'background: linear-gradient(135deg, #ec4899 0%, #be185d 100%);' : ''}">
+          <button class="btn btn-sm ${this.activeTab === 'tenants' ? 'btn-primary' : 'btn-secondary'}" id="tab-btn-tenants" style="font-weight: 700; ${this.activeTab === 'tenants' ? 'background: var(--primary); border-color: var(--primary-border);' : ''}">
             🏢 Salon Tenant Shards (${salons.length})
           </button>
           <button class="btn btn-sm ${this.activeTab === 'errors' ? 'btn-primary' : 'btn-secondary'}" id="tab-btn-errors" style="font-weight: 700; ${this.activeTab === 'errors' ? 'background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%); border-color: #ef4444; color: #fff;' : 'background: rgba(239, 68, 68, 0.15); border-color: rgba(239, 68, 68, 0.3); color: #f87171;'}">
@@ -577,6 +579,10 @@ export class PlatformAdminPortal {
       this.render();
     });
 
+    // Theme Toggles
+    ThemeManager.bindToggle('#btn-super-theme-toggle');
+    ThemeManager.bindToggle('#btn-super-theme-toggle-alt');
+
     // Logout
     document.getElementById('btn-super-logout')?.addEventListener('click', async () => {
       await PlatformAuth.logout();
@@ -639,7 +645,8 @@ export class PlatformAdminPortal {
           </div>
 
           <div style="display: flex; gap: 10px; align-items: center;">
-            <button class="btn btn-primary btn-sm" id="btn-open-create-salon" style="background: linear-gradient(135deg, #ec4899 0%, #be185d 100%); border-color: rgba(255,255,255,0.2); box-shadow: 0 4px 16px rgba(236,72,153,0.35);">
+            ${ThemeManager.renderToggle({ id: 'btn-super-theme-toggle' })}
+            <button class="btn btn-primary btn-sm" id="btn-open-create-salon" style="background: linear-gradient(135deg, #059669 0%, #047857 100%); border-color: rgba(255,255,255,0.2); box-shadow: 0 4px 16px rgba(5,150,105,0.35);">
               ⚡ + Create New Salon
             </button>
             <div style="height: 24px; width: 1px; background: var(--border-subtle); margin: 0 4px;"></div>
@@ -1775,6 +1782,9 @@ export class PlatformAdminPortal {
   }
 
   attachEventListeners() {
+    ThemeManager.bindToggle('#btn-super-theme-toggle');
+    ThemeManager.bindToggle('#btn-super-theme-toggle-alt');
+
     document.getElementById('btn-super-logout')?.addEventListener('click', async () => {
       await PlatformAuth.logout();
       window.location.hash = '#superadmin-login';
